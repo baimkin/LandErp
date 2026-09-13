@@ -1,0 +1,39 @@
+# .NET
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+*.suo
+
+# IDE
+.vs/
+.vscode/*.log
+.idea/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+secrets/
+
+# Playwright and browser profiles
+playwright-report/
+blob-report/
+browser-profiles/
+.playwright/
+
+# Live source material and diagnostics
+docs/15-source-materials/private/*
+!docs/15-source-materials/private/.gitkeep
+local-input/
+diagnostics/
+traces/
+screenshots/
+*.har
+
+# OS
+Thumbs.db
+.DS_Store

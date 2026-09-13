@@ -1,0 +1,49 @@
+# Build and IDE
+**/bin/
+**/obj/
+**/.vs/
+**/TestResults/
+**/coverage/
+**/playwright-report/
+
+# Secrets and production configuration
+**/secrets/
+**/*.pfx
+**/*.key
+**/*.pem
+**/*.user
+**/appsettings.Production.json
+**/appsettings.*.local.json
+**/.env
+**/.env.*
+
+# Agent private state
+**/browser-profiles/
+**/cookies/
+**/local-outbox/
+**/*.sqlite-shm
+**/*.sqlite-wal
+
+# Source evidence and personal data
+**/source-evidence/private/
+**/diagnostics/raw/
+**/investor-documents/
+
+# Inactive LandErp plans — remove exact exclusions only when a task activates them
+docs/04-foundation/
+docs/05-collection/
+docs/06-manager/
+docs/07-due-diligence/
+docs/08-projects/
+docs/09-investor/
+docs/10-future/
+docs/11-operations/
+docs/12-task-plans-foundation/
+docs/14-ui-kit/
+docs/15-source-materials/private/
+
+# Packages and generated files
+**/node_modules/
+**/artifacts/
+**/publish/
+**/*.generated.*

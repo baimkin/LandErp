@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LandErp.ParserSpike/LandErp.ParserSpike.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LandErp.ParserSpike.Tests/LandErp.ParserSpike.Tests.csproj" />
+  </Folder>
+</Solution>

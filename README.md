@@ -4,7 +4,32 @@ LandErp — ERP для поиска, оценки и ведения инвест
 
 Исследовательская фаза SPIKE-001 закрыта документационно по ERP-00.
 Collector остаётся самостоятельным локальным Windows-приложением.
-Production ERP ещё не реализована; следующий Gate — ERP-01, подготовлен без разрешения реализации.
+Stage 1 — Procurement Core разрешён владельцем 2026-09-14 и реализуется
+в `codex/stage-1-procurement-core`. Текущий checkpoint — A (Foundation + Database).
+
+## Локальная проверка фундамента
+
+Нужны stable SDK 10.0.112 и локальная PostgreSQL 18 (проверена 18.6), без Docker.
+Runtime secret: `Database__ConnectionString`; migrations: `LANDERP_MIGRATOR_CONNECTION`.
+Для tests настройте `LANDERP_TEST_ADMIN_CONNECTION` в process/user environment:
+локальный admin с правом создания disposable БД и ролей. Значения вне Git/логов.
+
+```powershell
+dotnet tool restore
+./scripts/Test-Foundation.ps1
+./scripts/Invoke-Migrations.ps1 -Action Script
+./scripts/Invoke-Migrations.ps1 -Action Apply
+dotnet run --project src/LandErp.Server -c Release
+dotnet run --project src/LandErp.Worker -c Release
+```
+
+Migration path принимает только `landerp_local` или `landerp_test_*`; runtime не
+создаёт schema. `/health/live` проверяет процесс, `/health/ready` — PostgreSQL/schema.
+Tests удаляют только собственные автоматически сгенерированные БД/роли текущего
+прогона; backup остаётся в ignored artifacts. Для изолированного SDK текущей машины
+можно передать `-DotnetPath ./artifacts/stage1/dotnet/dotnet.exe` в scripts.
+
+Остальные сведения ниже — исходная точка ERP-00, не ограничение Stage 1.
 
 ## Начать отсюда
 

@@ -1,9 +1,14 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/LandErp.Application/LandErp.Application.csproj" />
+    <Project Path="src/LandErp.Infrastructure/LandErp.Infrastructure.csproj" />
+    <Project Path="src/LandErp.Server/LandErp.Server.csproj" />
+    <Project Path="src/LandErp.Worker/LandErp.Worker.csproj" />
     <Project Path="src/LandErp.ParserSpike/LandErp.ParserSpike.csproj" />
     <Project Path="src/LandErp.ParserSpike.Desktop/LandErp.ParserSpike.Desktop.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj" />
     <Project Path="tests/LandErp.ParserSpike.Tests/LandErp.ParserSpike.Tests.csproj" />
   </Folder>
 </Solution>

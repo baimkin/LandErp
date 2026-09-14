@@ -1,5 +1,34 @@
 # Активная задача LandErp
 
+## Текущее разрешение — Stage 1
+
+**Этап:** Stage 1 — Procurement Core.
+**Статус:** In progress; активный checkpoint A — Foundation + Database.
+**Ветка:** `codex/stage-1-procurement-core`.
+
+Прямой запрос владельца 2026-09-14 разрешает весь Stage 1, safe merge Collector/docs
+в implementation-ветке, отдельные commits A–D и push. После успешных обязательных
+проверок продолжать следующий checkpoint без подтверждения. Старые ограничения
+ниже сохранены как история ERP-00 и не ограничивают утверждённый Stage 1.
+Merge в main, force-push, rebase опубликованной истории, удаление веток,
+production apply и Stage 2 не разрешены.
+
+### Required reading Stage 1
+
+Указанный ниже foundation комплект остаётся обязательным. Дополнительно:
+
+- `STAGE-1_CHECKPOINTS.md` и `STAGE-1_DATA_CONVENTIONS.md`;
+- перед B: ADR-004, FP-003, `docs/14-ui-kit/AGENT_UI_INSTRUCTIONS.md`,
+  `ui-kit/tokens.css` и соответствующие примеры index.html/styles.css/app.js;
+- FP-002 и FP-004 полностью для Identity/Organization/Workflow/business срезов.
+
+Collector самостоятельный; Server без browser/WPF/SQLite. Только локальная
+PostgreSQL 18, без Docker и без SQLite/InMemory вместо DB tests. Runtime без DDL,
+startup migrations запрещены. Secrets и local data вне Git. Итог `STAGE-1_REPORT.md`
+с фактическими командами, проверками, ограничениями и SHA; Stage 2 не начинать.
+
+## Исторический указатель ERP-00 (заменён разрешением выше)
+
 **Фаза:** production ERP; документационный переход ERP-00 выполнен 2026-09-14.\
 **Единственный следующий Gate:** [ERP-01 — техническое основание и БД](GATE-ERP-01_Техническое_основание_и_БД.md).\
 **Статус:** Подготовлен; реализация не разрешена текущим запросом.\

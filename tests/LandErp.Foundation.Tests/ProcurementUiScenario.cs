@@ -48,13 +48,24 @@ internal static class ProcurementUiScenario
             await manager.GotoAsync(origin + "/procurement"); await ReadyAsync(manager);
             await manager.GetByText("Объектов в очереди нет", new() { Exact = true }).WaitForAsync();
             await manager.ScreenshotAsync(new() { Path = Path.Combine(images, "empty-mobile.png"), FullPage = true });
+            server.Kill(true); await server.WaitForExitAsync();
+            using var restarted = PostgresTests.StartHost("LandErp.Server", sandbox.RuntimeConnection, port, true);
+            try
+            {
+                for (int attempt = 0; attempt < 50; attempt++)
+                { Assert.IsFalse(restarted.HasExited, "Restarted Server exited; private output suppressed."); try { await head.GotoAsync(origin + "/health/live"); break; } catch (PlaywrightException) { await Task.Delay(100); } }
+                await head.GotoAsync(origin + $"/procurement/listings/{listingId}"); await ReadyAsync(head);
+                await head.GetByText("Одобрен", new() { Exact = true }).WaitForAsync();
+                await head.GetByText("Получить сведения о дороге", new() { Exact = false }).First.WaitForAsync();
+            }
+            finally { if (!restarted.HasExited) { restarted.Kill(true); await restarted.WaitForExitAsync(); } }
             await using var db = sandbox.Context(true); Assert.AreEqual("approved", (await db.PropertyCases.SingleAsync()).StageId);
             Assert.IsTrue(await db.BusinessTimeline.AnyAsync(item => item.Body.Contains("Получить сведения о дороге")));
         }
         finally { if (!server.HasExited) { server.Kill(true); await server.WaitForExitAsync(); } }
     }
     private static async Task LoginAsync(IPage page, string origin, string email)
-    { await page.GotoAsync(origin + "/account/login"); await page.GetByLabel("Электронная почта", new() { Exact = true }).FillAsync(email); await page.GetByLabel("Пароль", new() { Exact = true }).FillAsync("Synthetic1!PasswordForTests"); await page.GetByRole(AriaRole.Button, new() { Name = "Войти", Exact = true }).ClickAsync(); await page.WaitForURLAsync(origin + "/"); await ReadyAsync(page); }
+    { await page.GotoAsync(origin + "/account/login"); await page.GetByLabel("Электронная почта", new() { Exact = true }).FillAsync(email); await page.GetByLabel("Пароль", new() { Exact = true }).FillAsync("Synthetic1!PasswordForTests"); await page.GetByRole(AriaRole.Button, new() { Name = "Войти", Exact = true }).ClickAsync(); await ReadyAsync(page); Assert.AreEqual(origin + "/", page.Url); }
     private static async Task<ILocator> StableDialogAsync(IPage page) { ILocator latest = page.Locator("dialog.erp-modal.dialog").Last; await latest.WaitForAsync(); string? heading = await latest.GetAttributeAsync("aria-labelledby"); return page.Locator("dialog[aria-labelledby=\"" + heading + "\"]"); }
     private static Task ReadyAsync(IPage page) => page.Locator(".app-shell[data-interactive-ready=true]").WaitForAsync();
     private static async Task DecisionAsync(IPage page, string button, string reason = "Начат анализ", string? targetLabel = null, string? targetName = null)

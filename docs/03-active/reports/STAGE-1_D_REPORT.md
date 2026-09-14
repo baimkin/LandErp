@@ -77,3 +77,9 @@ Live Avito/Cian smoke в этом срезе не выполнялся; конт
 публичные поля; diagnostics остаются в Collector. Роли/permissions системные,
 назначения/scopes изменяемые; нет workflow designer или полноценного Due Diligence.
 Stage 2 не начат. Известных blocker/critical defects в реализованном scope нет.
+
+После D commit `50b9aba` добавлена явная проверка process stop/start Server:
+одобренный кейс и прежняя timeline открылись после restart. Выявленное flaky
+ожидание navigation load-state в UI test заменено конкретным DOM/URL assertion.
+Окончательная полная ERP suite — 10/10, 2m42s; Release solution — 0 warnings/errors.
+Детали Stage 1 и ограничения — в корневом STAGE-1_REPORT.md.

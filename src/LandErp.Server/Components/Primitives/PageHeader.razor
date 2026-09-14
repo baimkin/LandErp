@@ -1,0 +1,10 @@
+<header class="page-header">
+    <div><span class="breadcrumb">@Breadcrumb</span><h1>@Title</h1><p>@Description</p></div>
+    @ChildContent
+</header>
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string Description { get; set; } = "";
+    [Parameter] public string Breadcrumb { get; set; } = "LandErp";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

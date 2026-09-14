@@ -1,0 +1,46 @@
+@page "/organization"
+@attribute [Authorize(Policy = "organization.manage")]
+@inherits WorkspaceComponent
+@inject IOrganizationWorkspace Workspace
+<PageTitle>Оргструктура · LandErp</PageTitle>
+<PageHeader Title="Оргструктура" Breadcrumb="Администрирование / Организация" Description="Подразделения и должности задают ответственность. Permissions назначаются отдельно." />
+@if (Loading) { <PageState Kind="loading" Title="Загружаем оргструктуру…" /> }
+else if (Forbidden) { <PageState Kind="forbidden" Title="Нет доступа к оргструктуре" /> }
+else
+{
+    @if (Error != null) { <PageState Kind="error" Title="@Error"><ActionButton Label="Повторить" OnClick="ReloadAsync" /></PageState> }
+    @if (Success != null) { <PageState Kind="success" Title="@Success" /> }
+    @if (view != null)
+    {
+        <div class="content-grid">
+            <article class="surface"><span class="kicker">@view.Name</span><h2>Подразделения</h2>
+                @if (view.Departments.Count == 0) { <p class="subtle">Добавьте первый отдел, чтобы назначить рабочую ответственность.</p> }
+                <ul>@foreach (NamedItem item in view.Departments) { <li>@item.Name</li> }</ul>
+                <EditForm Model="department" FormName="department" OnValidSubmit="AddDepartmentAsync"><DataAnnotationsValidator />
+                    <label class="field"><span>Название отдела</span><InputText @bind-Value="department.Name" /><ValidationMessage For="() => department.Name" /></label>
+                    <ActionButton Type="submit" Label="Добавить отдел" Busy="Busy" /></EditForm>
+            </article>
+            <article class="surface"><span class="kicker">Справочник</span><h2>Должности</h2>
+                <ul>@foreach (NamedItem item in view.Positions) { <li>@item.Name</li> }</ul>
+                <EditForm Model="position" FormName="position" OnValidSubmit="AddPositionAsync"><DataAnnotationsValidator />
+                    <label class="field"><span>Название должности</span><InputText @bind-Value="position.Name" /><ValidationMessage For="() => position.Name" /></label>
+                    <ActionButton Type="submit" Label="Добавить должность" Busy="Busy" /></EditForm>
+            </article>
+            <article class="surface"><span class="kicker">Видимость</span><h2>Рабочие команды</h2><ul>@foreach (NamedItem item in view.Teams) { <li>@item.Name</li> }</ul>
+                <EditForm Model="team" FormName="team" OnValidSubmit="AddTeamAsync"><DataAnnotationsValidator />
+                    <label class="field"><span>Подразделение команды</span><InputSelect @bind-Value="team.DepartmentId"><option value="">Выберите отдел</option>@foreach (NamedItem item in view.Departments) { <option value="@item.Id">@item.Name</option> }</InputSelect></label>
+                    <label class="field"><span>Название команды</span><InputText @bind-Value="team.Name" /></label><ActionButton Type="submit" Label="Добавить команду" Busy="Busy" /></EditForm>
+            </article>
+        </div>
+    }
+}
+@code {
+    private OrganizationView? view;
+    private NamedInput department = new(); private NamedInput position = new(); private TeamInput team = new();
+    protected override async Task ReadAsync() => view = await Workspace.ReadAsync(CurrentSubject, CancellationToken.None);
+    private Task AddDepartmentAsync() => ExecuteAsync(async () => { await Workspace.CreateDepartmentAsync(CurrentSubject, department.Name, Guid.CreateVersion7().ToString(), CancellationToken.None); department = new(); });
+    private Task AddPositionAsync() => ExecuteAsync(async () => { await Workspace.CreatePositionAsync(CurrentSubject, position.Name, Guid.CreateVersion7().ToString(), CancellationToken.None); position = new(); });
+    private Task AddTeamAsync() => ExecuteAsync(async () => { await Workspace.CreateTeamAsync(CurrentSubject, team.DepartmentId ?? throw new ArgumentException("Выберите отдел"), team.Name, Guid.CreateVersion7().ToString(), CancellationToken.None); team = new(); });
+    private class NamedInput { [Required(ErrorMessage = "Укажите название"), MaxLength(200)] public string Name { get; set; } = ""; }
+    private sealed class TeamInput : NamedInput { [Required] public Guid? DepartmentId { get; set; } }
+}

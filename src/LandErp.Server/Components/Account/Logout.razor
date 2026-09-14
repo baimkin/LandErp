@@ -1,0 +1,10 @@
+@page "/account/logout"
+@layout AccountLayout
+@attribute [Microsoft.AspNetCore.Components.ExcludeFromInteractiveRouting]
+@using Microsoft.AspNetCore.Identity
+@using LandErp.Infrastructure.Modules.IdentityAccess
+@inject SignInManager<LandErpUser> SignIn
+@inject NavigationManager Navigation
+<h1>Завершить работу?</h1>
+<EditForm Model="this" method="post" FormName="logout" OnValidSubmit="LogoutAsync"><ActionButton Type="submit" Label="Выйти" /></EditForm>
+@code { private async Task LogoutAsync() { await SignIn.SignOutAsync(); Navigation.NavigateTo("/account/login", forceLoad: true); } }

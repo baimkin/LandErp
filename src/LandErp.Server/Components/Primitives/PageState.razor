@@ -1,0 +1,10 @@
+<section class="page-state @Kind" role="@(Kind == "error" || Kind == "forbidden" ? "alert" : "status")">
+    <span class="state-icon" aria-hidden="true">@(Kind == "loading" ? "◌" : Kind == "forbidden" ? "⊘" : "◇")</span>
+    <h2>@Title</h2><p>@Description</p>@ChildContent
+</section>
+@code {
+    [Parameter] public string Kind { get; set; } = "empty";
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string Description { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -1,0 +1,11 @@
+@page "/audit"
+@attribute [Authorize(Policy = "audit.read")]
+@inherits WorkspaceComponent
+@inject IOrganizationWorkspace Workspace
+<PageTitle>Аудит · LandErp</PageTitle><PageHeader Title="Аудит действий" Breadcrumb="Администрирование / История" Description="Последние 100 значимых действий вашей организации. События не редактируются." />
+@if (Loading) { <PageState Kind="loading" Title="Загружаем историю…" /> }
+else if (Forbidden) { <PageState Kind="forbidden" Title="Нет доступа к аудиту" /> }
+else if (Error != null) { <PageState Kind="error" Title="@Error"><ActionButton Label="Повторить" OnClick="ReloadAsync" /></PageState> }
+else if (events.Count == 0) { <PageState Title="История пока пуста" /> }
+else { <article class="surface table-surface"><div class="table-wrap"><table class="data-table"><thead><tr><th>Время (UTC)</th><th>Действие</th><th>Объект</th><th>Автор / изменения</th></tr></thead><tbody>@foreach(AuditView item in events) { <tr><td>@item.RecordedAt.ToString("dd.MM.yyyy HH:mm:ss")</td><td>@item.Action</td><td>@item.ObjectType<small>@item.ObjectId</small></td><td><small>@item.ActorId</small><details><summary>Изменения</summary><pre>@item.Changes</pre></details></td></tr> }</tbody></table></div></article> }
+@code { private IReadOnlyList<AuditView> events = []; protected override async Task ReadAsync() => events = await Workspace.ReadAuditAsync(CurrentSubject,CancellationToken.None); }

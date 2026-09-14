@@ -7,6 +7,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" PrivateAssets="all" />
     <PackageReference Include="MSTest.TestFramework" PrivateAssets="all" />
     <PackageReference Include="MSTest.TestAdapter" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Playwright" PrivateAssets="all" />
     <ProjectReference Include="../../src/LandErp.Application/LandErp.Application.csproj" />
     <ProjectReference Include="../../src/LandErp.Infrastructure/LandErp.Infrastructure.csproj" />
     <ProjectReference Include="../../src/LandErp.Server/LandErp.Server.csproj" />

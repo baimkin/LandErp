@@ -1,5 +1,24 @@
 # LandErp
 
+Локальный запуск Stage 1 (Windows, PostgreSQL 18, без Docker):
+
+1. Используйте SDK из `global.json`; выполните `dotnet restore --locked-mode`
+   и `dotnet build LandErp.slnx -c Release --no-restore`.
+2. Настройте `LANDERP_TEST_ADMIN_CONNECTION` локально вне Git. Для первоначальной
+   настройки выполните `scripts/Initialize-Local.ps1`. Этот отдельный инструмент
+   создаёт `landerp_local`, migration/runtime роли и применяет migrations.
+   Если неизвестная БД с таким именем уже существует, инструмент останавливается.
+3. Первоначальные данные Owner находятся только в `local-data/stage1/owner-access.txt`.
+   Запустите `scripts/Start-Local.ps1`, откройте `https://localhost:7240` и настройте
+   MFA при первом входе. При необходимости доверьте локальный development HTTPS
+   certificate штатной командой `dotnet dev-certs https --trust`.
+4. Worker запускается отдельно: `scripts/Start-Local.ps1 -Service Worker`.
+5. Проверки: `scripts/Test-Foundation.ps1`. Они используют настоящую PostgreSQL
+   и автоматически создают/удаляют только собственные disposable test databases.
+
+У scripts есть `-DotnetPath` для явного пути к SDK. Startup Server/Worker не
+изменяет schema; последующие migrations применяются через отдельный setup/tooling.
+
 LandErp — ERP для поиска, оценки и ведения инвестиционных проектов с земельными участками.
 
 Исследовательская фаза SPIKE-001 закрыта документационно по ERP-00.

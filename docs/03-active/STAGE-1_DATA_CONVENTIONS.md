@@ -29,8 +29,10 @@
   более новым observation; idempotency delivery и observation раздельны.
 - Runtime без ownership/CREATE/DDL; migrator connection отдельно из env.
   Startup schema не меняет. Applied migrations immutable; исправления новой.
-- Test cluster: отдельный каталог и loopback порт из локальных PG18 binaries;
-  disposable test databases автоматически именованы. Существующая БД не меняется.
+- Test: локальная PostgreSQL 18 по явно разрешённому admin connection из среды;
+  disposable databases `landerp_test_<random>` и отдельные migrator/runtime роли.
+  Cleanup проверяет точные имена созданных этим запуском БД; пользовательская БД
+  не удаляется. Значения подключения не выводятся и не сохраняются в отчётах.
 - Clean/repeat apply, metadata, rollback/reapply только Test, backup/restore и outage
   checks обязательны. Production apply требует отдельного разрешения.
 

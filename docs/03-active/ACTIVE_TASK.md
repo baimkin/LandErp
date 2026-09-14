@@ -3,7 +3,7 @@
 ## Текущее разрешение — Stage 1
 
 **Этап:** Stage 1 — Procurement Core.
-**Статус:** In progress; активный checkpoint A — Foundation + Database.
+**Статус:** In progress; A завершён (`03d940e`), B проверен; следующий checkpoint C — Collector/API/catalog.
 **Ветка:** `codex/stage-1-procurement-core`.
 
 Прямой запрос владельца 2026-09-14 разрешает весь Stage 1, safe merge Collector/docs

@@ -71,7 +71,12 @@ internal sealed class PostgresSandbox : IAsyncDisposable
             + $"REVOKE ALL ON SCHEMA foundation FROM PUBLIC; "
             + $"GRANT CONNECT ON DATABASE \"{DatabaseName}\" TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON SCHEMA foundation TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT ON ALL TABLES IN SCHEMA foundation TO \"{RuntimeRole}\";", DatabaseName);
+            + $"GRANT SELECT ON ALL TABLES IN SCHEMA foundation TO \"{RuntimeRole}\"; "
+            + $"GRANT INSERT ON foundation.audit_events TO \"{RuntimeRole}\"; "
+            + $"GRANT USAGE ON SCHEMA identity,organization TO \"{RuntimeRole}\"; "
+            + $"GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA identity,organization TO \"{RuntimeRole}\"; "
+            + $"GRANT DELETE ON identity.user_roles TO \"{RuntimeRole}\"; "
+            + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA identity,organization TO \"{RuntimeRole}\";", DatabaseName);
     }
 
     public async Task BackupRestoreAsync()
@@ -87,7 +92,7 @@ internal sealed class PostgresSandbox : IAsyncDisposable
         await using NpgsqlConnection connection = new(Connection(restored, MigratorRole));
         await connection.OpenAsync();
         await using NpgsqlCommand command = new("SELECT count(*) FROM foundation.migration_history", connection);
-        if (await command.ExecuteScalarAsync() is not long count || count != 1)
+        if (await command.ExecuteScalarAsync() is not long count || count != 2)
         {
             throw new InvalidOperationException("Restored schema history mismatch.");
         }

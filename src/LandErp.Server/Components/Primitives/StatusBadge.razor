@@ -1,0 +1,5 @@
+<span class="badge @Tone">@Label</span>
+@code {
+    [Parameter] public string Tone { get; set; } = "neutral";
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+}

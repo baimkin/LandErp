@@ -4,9 +4,9 @@
 
 | Checkpoint | Результат | Обязательные проверки |
 |---|---|---|
-| A (активный) | Server/Application/Infrastructure/Worker, EF/PostgreSQL, design-time migration, health/error/config, tooling | Locked restore, Release 0 warnings, format, architecture, isolated real PostgreSQL clean/repeat apply, metadata comments, runtime no DDL, backup/restore, independent hosts, outage readiness |
-| B | Identity/Organization/permissions/scopes, UI Kit Razor shell и admin | Real authentication/negative permissions/visibility, PostgreSQL persistence, audit, critical UI states, responsive inspection |
-| C | Тонкий Collector server adapter + registration/heartbeat/work/lease/result; catalog | Existing Collector regressions, idempotency/duplicates/retry/lease fencing/presence/order/provenance, local usability, admin state |
+| A (проверен) | Server/Application/Infrastructure/Worker, EF/PostgreSQL, design-time migration, health/error/config, tooling | Locked restore, Release 0 warnings, format, architecture, isolated real PostgreSQL clean/repeat apply, metadata comments, runtime no DDL, backup/restore, independent hosts, outage readiness |
+| B (проверен) | Identity/Organization/permissions/scopes, UI Kit Razor shell и admin | Real authentication/negative permissions/visibility, PostgreSQL persistence, audit, critical UI states, responsive inspection |
+| C (следующий) | Тонкий Collector server adapter + registration/heartbeat/work/lease/result; catalog | Existing Collector regressions, idempotency/duplicates/retry/lease fencing/presence/order/provenance, local usability, admin state |
 | D | Listing → PropertyCase, очередь/карточка, manager/head decisions, общие task/assignment/approval/timeline/notification | Forward/Return and authorization, concurrency, history/audit, restart persistence, full local control scenario, UI states |
 
 ## Файлы checkpoint A

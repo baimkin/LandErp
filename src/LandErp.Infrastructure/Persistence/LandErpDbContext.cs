@@ -1,10 +1,26 @@
 using Microsoft.EntityFrameworkCore;
+using LandErp.Application.Modules.IdentityAccess.Domain;
+using LandErp.Application.Modules.Organization.Domain;
+using LandErp.Infrastructure.Modules.IdentityAccess;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 
 namespace LandErp.Infrastructure.Persistence;
 
 /// <summary>One migration stream; mappings belong to the module owning each schema.</summary>
-public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options) : DbContext(options)
+public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
+    : IdentityDbContext<LandErpUser, IdentityRole<Guid>, Guid>(options)
 {
+    public DbSet<Organization> Organizations => Set<Organization>();
+    public DbSet<OrgUnit> OrgUnits => Set<OrgUnit>();
+    public DbSet<Position> Positions => Set<Position>();
+    public DbSet<Team> Teams => Set<Team>();
+    public DbSet<Employee> Employees => Set<Employee>();
+    public DbSet<EmployeeAssignment> EmployeeAssignments => Set<EmployeeAssignment>();
+    public DbSet<PermissionDefinition> Permissions => Set<PermissionDefinition>();
+    public DbSet<RolePermissionGrant> RolePermissions => Set<RolePermissionGrant>();
+    public DbSet<EmployeeInvitation> EmployeeInvitations => Set<EmployeeInvitation>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public const string FoundationSchema = "foundation";
     public const string HistoryTable = "migration_history";
 
@@ -12,4 +28,82 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
         options.UseNpgsql(connectionString, postgres => postgres
             .MigrationsHistoryTable(HistoryTable, FoundationSchema)
             .CommandTimeout(10));
+
+    protected override void OnModelCreating(ModelBuilder builder)
+    {
+        base.OnModelCreating(builder);
+        // Password + authenticator MFA is the approved first login path; passkeys are not exposed.
+        builder.Ignore<IdentityUserPasskey<Guid>>();
+        builder.Ignore<IdentityPasskeyData>();
+        builder.Entity<LandErpUser>().ToTable("users", "identity");
+        builder.Entity<IdentityRole<Guid>>().ToTable("roles", "identity");
+        builder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles", "identity");
+        builder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claims", "identity");
+        builder.Entity<IdentityUserLogin<Guid>>().ToTable("user_logins", "identity");
+        builder.Entity<IdentityUserToken<Guid>>().ToTable("user_tokens", "identity");
+        builder.Entity<IdentityRoleClaim<Guid>>().ToTable("role_claims", "identity");
+        builder.Entity<PermissionDefinition>().ToTable("permissions", "identity").HasKey(item => item.Id);
+        builder.Entity<RolePermissionGrant>().ToTable("role_permissions", "identity")
+            .HasKey(item => new { item.RoleId, item.PermissionId });
+        builder.Entity<RolePermissionGrant>().HasOne<IdentityRole<Guid>>().WithMany().HasForeignKey(item => item.RoleId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<RolePermissionGrant>().HasOne<PermissionDefinition>().WithMany().HasForeignKey(item => item.PermissionId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<EmployeeInvitation>().ToTable("employee_invitations", "identity");
+        builder.Entity<EmployeeInvitation>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<AuditEvent>().ToTable("audit_events", "foundation");
+        builder.Entity<AuditEvent>().Property(item => item.Changes).HasColumnType("jsonb");
+        builder.Entity<Organization>().ToTable("organizations", "organization");
+        builder.Entity<OrgUnit>().ToTable("org_units", "organization");
+        builder.Entity<Position>().ToTable("positions", "organization");
+        builder.Entity<Team>().ToTable("teams", "organization");
+        builder.Entity<Employee>().ToTable("employees", "organization");
+        builder.Entity<EmployeeAssignment>().ToTable("employee_assignments", "organization");
+        builder.Entity<EmployeeAssignment>().Property(item => item.Scope).HasConversion<string>();
+        builder.Entity<EmployeeAssignment>().HasIndex(item => item.EmployeeId).IsUnique();
+        builder.Entity<EmployeeAssignment>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<EmployeeAssignment>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ManagerEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<EmployeeAssignment>().HasOne<OrgUnit>().WithMany().HasForeignKey(item => item.OrgUnitId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<EmployeeAssignment>().HasOne<Position>().WithMany().HasForeignKey(item => item.PositionId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<EmployeeAssignment>().HasOne<Team>().WithMany().HasForeignKey(item => item.TeamId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<EmployeeAssignment>().HasOne<IdentityRole<Guid>>().WithMany().HasForeignKey(item => item.RoleId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<Employee>().HasOne<LandErpUser>().WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<Employee>().HasIndex(item => item.UserId).IsUnique();
+        builder.Entity<OrgUnit>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<Position>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<Team>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<Team>().HasOne<OrgUnit>().WithMany().HasForeignKey(item => item.OrgUnitId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<Employee>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<OrgUnit>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
+        builder.Entity<Position>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
+        builder.Entity<Team>().HasIndex(item => new { item.OrgUnitId, item.Name }).IsUnique();
+        ModelConventions.Apply(builder);
+    }
+
+    private void EnforceInvariants()
+    {
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.Entity is AuditEvent && entry.State is EntityState.Modified or EntityState.Deleted)
+            {
+                throw new InvalidOperationException("Audit facts are append-only.");
+            }
+
+            if (entry.State == EntityState.Modified && entry.Metadata.FindProperty("Version") != null)
+            {
+                entry.Property("Version").CurrentValue = (long)entry.Property("Version").OriginalValue! + 1;
+            }
+        }
+
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        EnforceInvariants();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        EnforceInvariants();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
 }

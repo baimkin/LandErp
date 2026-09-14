@@ -4,6 +4,7 @@
     <Project Path="src/LandErp.Infrastructure/LandErp.Infrastructure.csproj" />
     <Project Path="src/LandErp.Server/LandErp.Server.csproj" />
     <Project Path="src/LandErp.Worker/LandErp.Worker.csproj" />
+    <Project Path="src/LandErp.LocalSetup/LandErp.LocalSetup.csproj" />
     <Project Path="src/LandErp.ParserSpike/LandErp.ParserSpike.csproj" />
     <Project Path="src/LandErp.ParserSpike.Desktop/LandErp.ParserSpike.Desktop.csproj" />
   </Folder>

@@ -28,7 +28,7 @@ public sealed class PostgresTests
         Assert.IsFalse(sql.Contains("CREATE TABLE listing", StringComparison.OrdinalIgnoreCase));
         await context.Database.MigrateAsync();
         await context.Database.MigrateAsync();
-        Assert.AreEqual(1, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.AreEqual(2, (await context.Database.GetAppliedMigrationsAsync()).Count());
         Assert.AreEqual(0, (await context.Database.GetPendingMigrationsAsync()).Count());
 
         await using NpgsqlConnection connection = new(sandbox.MigratorConnection);
@@ -51,6 +51,29 @@ public sealed class PostgresTests
             }
 
             Assert.AreEqual(2, count);
+        }
+
+        await using NpgsqlCommand missingTableComments = new("""
+            SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname IN ('foundation','identity','organization') AND c.relkind='r'
+              AND (obj_description(c.oid,'pg_class') IS NULL OR obj_description(c.oid,'pg_class') !~ '[А-Яа-я]')
+            """, connection);
+        Assert.AreEqual(0L, await missingTableComments.ExecuteScalarAsync());
+        foreach (var entity in context.GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>().Model.GetEntityTypes())
+        {
+            foreach (var property in entity.GetProperties().Where(item => item.GetComment() != null))
+            {
+                await using NpgsqlCommand metadata = new("""
+                    SELECT col_description(c.oid,a.attnum) FROM pg_class c
+                    JOIN pg_namespace n ON n.oid=c.relnamespace
+                    JOIN pg_attribute a ON a.attrelid=c.oid
+                    WHERE n.nspname=@schema AND c.relname=@table AND a.attname=@column
+                    """, connection);
+                metadata.Parameters.AddWithValue("schema", entity.GetSchema()!);
+                metadata.Parameters.AddWithValue("table", entity.GetTableName()!);
+                metadata.Parameters.AddWithValue("column", property.GetColumnName());
+                Assert.AreEqual(property.GetComment(), await metadata.ExecuteScalarAsync());
+            }
         }
 
         await sandbox.GrantRuntimeAsync();
@@ -82,7 +105,7 @@ public sealed class PostgresTests
         await context.GetService<IMigrator>().MigrateAsync("0");
         Assert.AreEqual(0, (await context.Database.GetAppliedMigrationsAsync()).Count());
         await context.Database.MigrateAsync();
-        Assert.AreEqual(1, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.AreEqual(2, (await context.Database.GetAppliedMigrationsAsync()).Count());
     }
 
     [TestMethod]
@@ -139,7 +162,7 @@ public sealed class PostgresTests
         }
     }
 
-    private static Process StartHost(string project, string connection, int? port = null)
+    internal static Process StartHost(string project, string connection, int? port = null, bool https = false)
     {
         string root = FoundationTests.RepositoryRoot();
         string executable = Environment.GetEnvironmentVariable("LANDERP_DOTNET")
@@ -157,7 +180,7 @@ public sealed class PostgresTests
         start.Environment["DOTNET_ENVIRONMENT"] = "Test";
         if (port.HasValue)
         {
-            start.Environment["ASPNETCORE_URLS"] = $"http://127.0.0.1:{port}";
+            start.Environment["ASPNETCORE_URLS"] = $"{(https ? "https" : "http")}://127.0.0.1:{port}";
         }
 
         Process process = Process.Start(start) ?? throw new InvalidOperationException("Host failed to start.");
@@ -194,7 +217,7 @@ public sealed class PostgresTests
         Assert.Fail("Host liveness timeout.");
     }
 
-    private static async Task StopAsync(Process process)
+    internal static async Task StopAsync(Process process)
     {
         if (!process.HasExited)
         {
@@ -203,7 +226,7 @@ public sealed class PostgresTests
         }
     }
 
-    private static int FreePort()
+    internal static int FreePort()
     {
         using TcpListener listener = new(IPAddress.Loopback, 0);
         listener.Start();

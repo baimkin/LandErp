@@ -1,0 +1,43 @@
+@page "/account/activate"
+@layout AccountLayout
+@attribute [Microsoft.AspNetCore.Components.ExcludeFromInteractiveRouting]
+@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("account")]
+@using LandErp.Infrastructure.Modules.IdentityAccess
+@inject AccountActivation Activation
+<PageTitle>Активация · LandErp</PageTitle><h1>Активация сотрудника</h1>
+@if (complete) { <PageState Kind="success" Title="Учётная запись активирована" /><a class="btn primary" href="/account/login">Войти</a> }
+else
+{
+    @if (error != null) { <PageState Kind="error" Title="@error" /> }
+    <EditForm Model="Input" method="post" FormName="activate" OnValidSubmit="ActivateAsync">
+        <DataAnnotationsValidator /><ValidationSummary />
+        <label class="field"><span>ID приглашения</span><InputText @bind-Value="Input.InvitationId" /></label>
+        <label class="field"><span>Одноразовый код</span><InputText @bind-Value="Input.Token" autocomplete="off" /></label>
+        <label class="field"><span>Новый пароль</span><InputText aria-label="Новый пароль" @bind-Value="Input.Password" type="password" autocomplete="new-password" /><small>От 12 символов, заглавные и строчные буквы, цифра и знак.</small></label>
+        <label class="field"><span>Повторите пароль</span><InputText aria-label="Повторите пароль" @bind-Value="Input.Confirmation" type="password" autocomplete="new-password" /><ValidationMessage For="() => Input.Confirmation" /></label>
+        <ActionButton Type="submit" Label="Активировать" />
+    </EditForm>
+}
+@code {
+    [SupplyParameterFromForm] private ActivationInput Input { get; set; } = default!;
+    private string? error; private bool complete;
+    protected override void OnInitialized() => Input ??= new();
+    private async Task ActivateAsync()
+    {
+        try
+        {
+            if (!Guid.TryParse(Input.InvitationId, out Guid id)) throw new ArgumentException("Проверьте ID приглашения.");
+            await Activation.ActivateAsync(id, Input.Token, Input.Password, CancellationToken.None);
+            complete = true; Input.Password = ""; Input.Token = "";
+        }
+        catch (ArgumentException exception) { error = exception.Message; Input.Password = ""; Input.Confirmation = ""; }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException) { error = "Приглашение уже использовано."; }
+    }
+    private sealed class ActivationInput
+    {
+        [Required] public string InvitationId { get; set; } = "";
+        [Required] public string Token { get; set; } = "";
+        [Required, MinLength(12)] public string Password { get; set; } = "";
+        [Compare(nameof(Password), ErrorMessage = "Пароли не совпадают")] public string Confirmation { get; set; } = "";
+    }
+}

@@ -1,0 +1,81 @@
+@page "/account/login"
+@layout AccountLayout
+@attribute [Microsoft.AspNetCore.Components.ExcludeFromInteractiveRouting]
+@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("account")]
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Identity
+@using System.Security.Claims
+@using LandErp.Infrastructure.Modules.IdentityAccess
+@using LandErp.Infrastructure.Persistence
+@using Microsoft.EntityFrameworkCore
+@inject UserManager<LandErpUser> Users
+@inject SignInManager<LandErpUser> SignIn
+@inject LandErpDbContext Db
+@inject NavigationManager Navigation
+<PageTitle>Вход · LandErp</PageTitle>
+<span class="kicker">Добро пожаловать</span><h1>Вход в LandErp</h1><p class="subtle">Войдите с учётной записью сотрудника.</p>
+@if (error != null) { <PageState Kind="error" Title="Не удалось войти" Description="@error" /> }
+<EditForm Model="Input" method="post" FormName="login" OnValidSubmit="LoginAsync">
+    <DataAnnotationsValidator /><ValidationSummary />
+    <label class="field"><span>Электронная почта</span><InputText @bind-Value="Input.Login" autocomplete="username" /><ValidationMessage For="() => Input.Login" /></label>
+    <label class="field"><span>Пароль</span><InputText @bind-Value="Input.Password" type="password" autocomplete="current-password" /><ValidationMessage For="() => Input.Password" /></label>
+    <label class="field"><span>Код MFA / резервный код</span><InputText @bind-Value="Input.Code" autocomplete="one-time-code" /><small>Если MFA ещё не настроена, оставьте пустым.</small></label>
+    <ActionButton Type="submit" Label="Войти" />
+</EditForm>
+<p class="account-help">Учётную запись создаёт администратор. Публичной регистрации нет.</p>
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromForm] private LoginInput Input { get; set; } = default!;
+    private string? error;
+    protected override void OnInitialized() => Input ??= new();
+
+    private async Task LoginAsync()
+    {
+        LandErpUser? user = await Users.FindByEmailAsync(Input.Login);
+        if (user == null || !await Db.Employees.AnyAsync(item => item.UserId == user.Id && item.Active)
+            || !(await SignIn.CheckPasswordSignInAsync(user, Input.Password, true)).Succeeded)
+        {
+            Input.Password = "";
+            error = "Проверьте данные входа, активацию и блокировку учётной записи.";
+            return;
+        }
+
+        bool privileged = await Users.IsInRoleAsync(user, "Owner") || await Users.IsInRoleAsync(user, "Administrator");
+        if (privileged && !user.TwoFactorEnabled)
+        {
+            await HttpContext.SignInAsync(IdentityConstants.TwoFactorUserIdScheme,
+                new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], IdentityConstants.TwoFactorUserIdScheme)),
+                new AuthenticationProperties { IsPersistent = false, ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(5) });
+            Navigation.NavigateTo("/account/mfa", forceLoad: true);
+            return;
+        }
+
+        bool mfa = false;
+        if (user.TwoFactorEnabled)
+        {
+            string code = Input.Code.Replace(" ", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal);
+            mfa = code.Length == 6
+                ? await Users.VerifyTwoFactorTokenAsync(user, TokenOptions.DefaultAuthenticatorProvider, code)
+                : (await Users.RedeemTwoFactorRecoveryCodeAsync(user, Input.Code)).Succeeded;
+            if (!mfa)
+            {
+                await Users.AccessFailedAsync(user);
+                Input.Password = "";
+                error = "Код MFA недействителен.";
+                return;
+            }
+        }
+
+        await Users.ResetAccessFailedCountAsync(user);
+        await SignIn.SignInWithClaimsAsync(user, false, [new Claim("amr", mfa ? "mfa" : "pwd")]);
+        await AccountAudit.RecordAsync(Db, user.Id, "LoginSucceeded");
+        Navigation.NavigateTo("/", forceLoad: true);
+    }
+
+    private sealed class LoginInput
+    {
+        [Required(ErrorMessage = "Укажите адрес"), EmailAddress] public string Login { get; set; } = "";
+        [Required(ErrorMessage = "Укажите пароль")] public string Password { get; set; } = "";
+        public string Code { get; set; } = "";
+    }
+}

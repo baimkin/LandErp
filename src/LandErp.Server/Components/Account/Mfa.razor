@@ -1,0 +1,70 @@
+@page "/account/mfa"
+@layout AccountLayout
+@attribute [Microsoft.AspNetCore.Components.ExcludeFromInteractiveRouting]
+@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("account")]
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Identity
+@using System.Security.Claims
+@using LandErp.Infrastructure.Modules.IdentityAccess
+@using LandErp.Infrastructure.Persistence
+@inject UserManager<LandErpUser> Users
+@inject SignInManager<LandErpUser> SignIn
+@inject LandErpDbContext Db
+@inject NavigationManager Navigation
+<PageTitle>Настройка MFA · LandErp</PageTitle>
+<span class="kicker">Защита владельца и администратора</span><h1>Настройте MFA</h1>
+@if (user == null) { <PageState Kind="forbidden" Title="Сначала подтвердите пароль" /><a class="btn primary" href="/account/login">Войти</a> }
+else if (recoveryCodes != null)
+{
+    <PageState Kind="success" Title="MFA включена" Description="Сохраните резервные коды в безопасном месте. Они показаны один раз." />
+    <ul class="recovery-codes">@foreach (string recoveryCode in recoveryCodes) { <li><code>@recoveryCode</code></li> }</ul>
+    <a class="btn primary" href="/">Продолжить работу</a>
+}
+else
+{
+    <p>Добавьте ключ в приложение-аутентификатор. Затем введите текущий шестизначный код.</p>
+    <label class="field"><span>Ключ настройки</span><input value="@key" readonly aria-label="Ключ настройки MFA" /></label>
+    @if (error != null) { <PageState Kind="error" Title="@error" /> }
+    <EditForm Model="Input" method="post" FormName="mfa" OnValidSubmit="EnableAsync">
+        <DataAnnotationsValidator /><label class="field"><span>Код из приложения</span><InputText @bind-Value="Input.Code" autocomplete="one-time-code" /><ValidationMessage For="() => Input.Code" /></label>
+        <ActionButton Type="submit" Label="Включить MFA" />
+    </EditForm>
+}
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromForm] private MfaInput Input { get; set; } = default!;
+    private LandErpUser? user;
+    private string? key;
+    private string? error;
+    private IEnumerable<string>? recoveryCodes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        var temporary = await HttpContext.AuthenticateAsync(IdentityConstants.TwoFactorUserIdScheme);
+        string? id = temporary.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+        user = id == null ? null : await Users.FindByIdAsync(id);
+        if (user == null || user.TwoFactorEnabled) { user = null; return; }
+        key = await Users.GetAuthenticatorKeyAsync(user);
+        if (key == null) { await Users.ResetAuthenticatorKeyAsync(user); key = await Users.GetAuthenticatorKeyAsync(user); }
+    }
+
+    private async Task EnableAsync()
+    {
+        if (user == null) return;
+        if (!await Users.VerifyTwoFactorTokenAsync(user, TokenOptions.DefaultAuthenticatorProvider, Input.Code))
+        {
+            await Users.AccessFailedAsync(user);
+            if (await Users.IsLockedOutAsync(user)) { await HttpContext.SignOutAsync(IdentityConstants.TwoFactorUserIdScheme); user = null; }
+            error = "Код недействителен. Проверьте время в приложении.";
+            return;
+        }
+
+        await Users.SetTwoFactorEnabledAsync(user, true);
+        recoveryCodes = await Users.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+        await HttpContext.SignOutAsync(IdentityConstants.TwoFactorUserIdScheme);
+        await SignIn.SignInWithClaimsAsync(user, false, [new Claim("amr", "mfa")]);
+        await AccountAudit.RecordAsync(Db, user.Id, "MfaEnabled");
+    }
+    private sealed class MfaInput { [Required, RegularExpression("^[0-9]{6}$", ErrorMessage = "Введите 6 цифр")] public string Code { get; set; } = ""; }
+}

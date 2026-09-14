@@ -78,6 +78,7 @@ public sealed class ServerOutbox
     }
     public async Task FlushAsync(ServerAdapter adapter, CancellationToken token)
     {
+        RecoverRejectedPhotoPayloads();
         foreach (PendingDelivery delivery in Pending())
         {
             try
@@ -89,9 +90,54 @@ public sealed class ServerOutbox
             catch (ServerDeliveryException exception)
             {
                 RecordAttempt(delivery, exception.Code, false);
+                if (exception.Code == "RESULT_INVALID" && delivery.Result.Observations.Any(item => item.Data.PhotoUrls.Length > 100))
+                {
+                    RecoverRejectedPhotoPayloads();
+                    await FlushAsync(adapter, token).ConfigureAwait(false);
+                    return;
+                }
                 throw; // Retry later with exactly the same immutable delivery, never silently discard.
             }
         }
+    }
+    private void RecoverRejectedPhotoPayloads()
+    {
+        using SqliteConnection db = Open();
+        using SqliteTransaction transaction = db.BeginTransaction();
+        using SqliteCommand read = db.CreateCommand(); read.Transaction = transaction;
+        // Only HTTP 400 proves this payload was rejected. Never rewrite an ambiguous delivery.
+        read.CommandText = "SELECT sequence,json FROM server_outbox WHERE acked=0 AND last_code='RESULT_INVALID'";
+        List<(long Sequence, string Json)> rejected = [];
+        using (SqliteDataReader reader = read.ExecuteReader())
+            while (reader.Read()) rejected.Add((reader.GetInt64(0), reader.GetString(1)));
+        foreach (var item in rejected)
+        {
+            CollectionResult original = JsonSerializer.Deserialize<CollectionResult>(item.Json, CollectionJson.Options)!;
+            if (!original.Observations.Any(observation => observation.Data.PhotoUrls.Length > 100)) continue;
+            // Preserve original payload and IDs; the repaired payload is a new idempotent delivery.
+            using SqliteCommand archive = db.CreateCommand(); archive.Transaction = transaction;
+            archive.CommandText = "CREATE TABLE IF NOT EXISTS server_outbox_recovery(sequence INTEGER PRIMARY KEY,json TEXT NOT NULL)";
+            archive.ExecuteNonQuery();
+            archive.CommandText = "INSERT OR IGNORE INTO server_outbox_recovery VALUES($sequence,$json)";
+            archive.Parameters.AddWithValue("$sequence", item.Sequence); archive.Parameters.AddWithValue("$json", item.Json);
+            archive.ExecuteNonQuery();
+            CollectionResult repaired = original with
+            {
+                ResultId = Guid.CreateVersion7(),
+                Observations = original.Observations.Select(observation => observation.Data.PhotoUrls.Length <= 100
+                    ? observation : observation with
+                    {
+                        ObservationKey = Guid.CreateVersion7().ToString(),
+                        Data = observation.Data with { PhotoUrls = observation.Data.PhotoUrls.Distinct(StringComparer.Ordinal).Take(100).ToArray() }
+                    }).ToArray()
+            };
+            using SqliteCommand update = db.CreateCommand(); update.Transaction = transaction;
+            update.CommandText = "UPDATE server_outbox SET result_id=$id,json=$json,attempts=0,last_code='Pending' WHERE sequence=$sequence";
+            update.Parameters.AddWithValue("$id", repaired.ResultId.ToString());
+            update.Parameters.AddWithValue("$json", JsonSerializer.Serialize(repaired, CollectionJson.Options));
+            update.Parameters.AddWithValue("$sequence", item.Sequence); update.ExecuteNonQuery();
+        }
+        transaction.Commit();
     }
     private SqliteConnection Open() { SqliteConnection db = new(connection); db.Open(); return db; }
 }

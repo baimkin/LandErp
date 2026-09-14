@@ -1,0 +1,22 @@
+<Window x:Class="LandErp.ParserSpike.Desktop.ServerConnectionWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="Подключение к серверу LandErp" Width="620" SizeToContent="Height"
+ ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#f3f6fa">
+ <StackPanel Margin="24">
+  <TextBlock Text="Подключение к серверу" FontSize="22" FontWeight="SemiBold" Foreground="#10223a"/>
+  <TextBlock Margin="0,8,0,18" TextWrapping="Wrap" Text="Введите данные сборщика, созданного в ERP. После успешного подключения настройки сохранятся на этом компьютере."/>
+  <Label Target="{Binding ElementName=AddressBox}" Content="Адрес сервера"/>
+  <TextBox x:Name="AddressBox" AutomationProperties.Name="Адрес сервера" Padding="8" Text="https://localhost:7240/"/>
+  <Label Target="{Binding ElementName=AgentBox}" Content="ID сборщика" Margin="0,8,0,0"/>
+  <TextBox x:Name="AgentBox" AutomationProperties.Name="ID сборщика" Padding="8"/>
+  <Label Target="{Binding ElementName=KeyBox}" Content="Ключ доступа" Margin="0,8,0,0"/>
+  <PasswordBox x:Name="KeyBox" AutomationProperties.Name="Ключ доступа" Padding="8"/>
+  <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Foreground="#63758b" Text="Ключ сохраняется в защищённом виде для текущего пользователя Windows. После перевыпуска ключа в ERP введите новый здесь."/>
+  <TextBlock x:Name="ErrorText" Margin="0,12,0,0" TextWrapping="Wrap" Foreground="#b42318"/>
+  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+   <Button x:Name="CancelButton" Content="Отмена" IsCancel="True" Padding="16,8" Margin="0,0,8,0"/>
+   <Button x:Name="ConnectButton" Content="Подключиться" IsDefault="True" Padding="16,8" Click="ConnectClick"/>
+  </StackPanel>
+ </StackPanel>
+</Window>

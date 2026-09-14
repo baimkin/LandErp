@@ -22,7 +22,7 @@ public sealed class AvitoMapTests
         id = 12345678, urlPath = "/korolev/uchastok_12345678", title = "Участок 10 сот. (ИЖС)", description = "Площадь: 10 соток. Газ.",
         priceDetailed = new { fullString = price.ToString(CultureInfo.InvariantCulture) + " ₽", value = price },
         geo = new { formattedAddress = "Королёв" }, coords = new { lat, lng = "38", precision = 0 },
-        images = new[] { new Dictionary<string,string> { ["640x480"] = "https://00.img.avito.st/image/a", ["evil"] = "https://evil.test/picture" } },
+        images = new[] { new Dictionary<string,string> { ["640x480"] = "https://00.img.avito.st/image/a", ["320x240"] = "https://00.img.avito.st/image/small", ["evil"] = "https://evil.test/picture" } },
         iva = new { DateInfoStep = new[] { new { payload = new { relative = "3 дня назад" } } } }, token = "private-test-secret" } } });
     private static AvitoMapData Data(int count = 1)
     {
@@ -35,6 +35,7 @@ public sealed class AvitoMapTests
     public void ParsesFieldsCoordinatesAndSafePolygonWithoutSecrets()
     {
         PageObservation page = Data().Read(Url, false); ListingObservation item = page.Listings.Single();
+        Assert.AreEqual(1, item.PhotoUrls.Length); Assert.AreEqual("https://00.img.avito.st/image/a", item.PhotoUrls[0]);
         Assert.IsTrue(page.Map!.ZoneConfirmed); Assert.AreEqual(5, page.Map.Rings.Single().Length);
         Assert.AreEqual(56m, item.Latitude.Parsed); Assert.AreEqual(38m, item.Longitude.Parsed);
         Assert.AreEqual(0m, item.CoordinatePrecision.Parsed); Assert.AreEqual(100m, item.Price.Parsed);

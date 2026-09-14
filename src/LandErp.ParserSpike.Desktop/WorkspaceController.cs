@@ -52,11 +52,31 @@ public sealed class WorkspaceController : IAsyncDisposable
     public async Task ConnectServerAsync()
     {
         if (Server != null) return;
-        ServerConnection connection = ServerConnection.FromEnvironment();
-        serverHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        ServerAdapter adapter = new(serverHttp, connection);
-        await adapter.RegisterAsync(CancellationToken.None);
-        Server = new(Store, Runner, new ServerOutbox(Path.Combine(Path.GetDirectoryName(Store.Path)!, "collector-server-outbox.sqlite")), adapter);
+        ServerConnection connection = SavedServerConnection() ?? throw new InvalidOperationException("Нажмите «Подключить сервер» и заполните настройки.");
+        await ConnectServerAsync(connection);
+    }
+    private string ServerSettingsPath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "server-connection.json");
+    internal ServerConnection? SavedServerConnection() => ServerConnectionSettings.Load(ServerSettingsPath);
+    public async Task ConnectServerAsync(ServerConnection connection)
+    {
+        if (Runner.IsRunning) throw new InvalidOperationException("Сначала остановите или завершите текущий сбор.");
+        ServerConnection? previous = SavedServerConnection();
+        ServerOutbox outbox = new(Path.Combine(Path.GetDirectoryName(Store.Path)!, "collector-server-outbox.sqlite"));
+        if (previous != null && (previous.AgentId != connection.AgentId || previous.Origin != connection.Origin)
+            && (outbox.ReadWork() != null || outbox.Pending().Length > 0))
+            throw new InvalidOperationException("Есть незавершённое задание или результаты для прежнего сервера. Сначала завершите их доставку.");
+        HttpClient candidate = new() { Timeout = TimeSpan.FromSeconds(20) };
+        try
+        {
+            ServerAdapter adapter = new(candidate, connection);
+            await adapter.RegisterAsync(CancellationToken.None);
+            ServerConnectionSettings.Save(ServerSettingsPath, connection);
+            if (Server != null) await Server.DisposeAsync();
+            serverHttp?.Dispose();
+            Server = new(Store, Runner, outbox, adapter);
+            serverHttp = candidate;
+        }
+        catch { candidate.Dispose(); throw; }
     }
     public async ValueTask DisposeAsync() { try { await CloseManualAsync(); await Runner.DisposeAsync(); if (Server != null) await Server.DisposeAsync(); serverHttp?.Dispose(); await JsonResponses.DisposeAsync(); } finally { guard.Dispose(); } }
 }

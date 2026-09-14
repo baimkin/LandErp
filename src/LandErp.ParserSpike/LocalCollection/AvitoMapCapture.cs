@@ -56,7 +56,7 @@ public sealed class AvitoMapData
                 { batchIds.Add(id); if (receivedIds.Add(id)) newIds++; else repeats++; }
                 if (True(Get(item, "isSimilarToSearch")) || True(Get(item, "isOutGeo"))) { recommendations++; continue; }
                 if (!points.TryGetValue(id, out MapListingPoint? point)) { invalid++; errors.Add("INVALID_MAP_ID_OR_URL"); continue; }
-                string[] photos = Strings(Get(item, "images")).Concat(Strings(Get(item, "gallery"))).Distinct(StringComparer.Ordinal).ToArray();
+                string[] photos = Photos(Get(item, "images")).Concat(Photos(Get(item, "gallery"))).Distinct(StringComparer.Ordinal).ToArray();
                 string? date = Get(Get(item, "iva"), "DateInfoStep").ValueKind == JsonValueKind.Array
                     ? Get(Get(item, "iva"), "DateInfoStep").EnumerateArray().Select(x => Text(Get(Get(x, "payload"), "relative"))).FirstOrDefault(x => x is not null) : null;
                 JsonElement price = Get(item, "priceDetailed");
@@ -174,6 +174,37 @@ public sealed class AvitoMapData
     private static string? Text(JsonElement value) => value.ValueKind == JsonValueKind.String ? value.GetString() : value.ValueKind == JsonValueKind.Number ? value.GetRawText() : null;
     private static bool True(JsonElement value) => value.ValueKind == JsonValueKind.True;
     // Traverse only public picture containers, never the response's user/auth fields.
+    // A size dictionary describes one photograph, not several independent photographs.
+    private static IEnumerable<string> Photos(JsonElement value, int depth = 0)
+    {
+        if (depth > 8) yield break;
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            var sizes = value.EnumerateObject().Select(property =>
+            {
+                string[] dimensions = property.Name.Split('x');
+                long area = dimensions.Length == 2 && int.TryParse(dimensions[0], out int width)
+                    && int.TryParse(dimensions[1], out int height) && width > 0 && height > 0
+                    ? (long)width * height : 0;
+                return (Area: area, Value: property.Value);
+            }).Where(item => item.Area > 0 && item.Value.ValueKind == JsonValueKind.String)
+                .OrderByDescending(item => item.Area).ToArray();
+            if (sizes.Length > 0)
+            {
+                foreach (string url in Strings(sizes[0].Value)) yield return url;
+                yield break;
+            }
+            foreach (JsonProperty child in value.EnumerateObject().Take(500))
+                foreach (string url in Photos(child.Value, depth + 1)) yield return url;
+        }
+        else if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement child in value.EnumerateArray().Take(500))
+                foreach (string url in Photos(child, depth + 1)) yield return url;
+        }
+        else foreach (string url in Strings(value, depth)) yield return url;
+    }
+
     private static IEnumerable<string> Strings(JsonElement value, int depth = 0)
     {
         if (depth > 8) yield break;

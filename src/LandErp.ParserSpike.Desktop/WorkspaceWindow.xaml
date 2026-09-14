@@ -70,10 +70,10 @@
    </TabItem>
    <TabItem Header="LandErp Server">
     <StackPanel Margin="16">
-     <TextBlock Text="Server mode — самостоятельный Collector" FontSize="20" FontWeight="SemiBold"/>
-     <TextBlock Margin="0,12" TextWrapping="Wrap" Text="Создайте Collector и поиск в LandErp. Настройте локально LANDERP_COLLECTOR_SERVER_URL (HTTPS), LANDERP_COLLECTOR_AGENT_ID и LANDERP_COLLECTOR_TOKEN. Credentials не записываются в очередь и не выводятся. Local mode работает независимо."/>
-     <WrapPanel><Button Content="Подключить Server" Click="ConnectServerClick"/><Button Content="Получить и собрать разрешённую работу" Click="StartServerClick"/><Button Content="Повторить доставку" Click="DeliverServerClick"/></WrapPanel>
-     <TextBlock x:Name="ServerStatusText" Margin="0,12" TextWrapping="Wrap" Text="Local mode. Подключение к Server выполняется только по кнопке."/>
+     <TextBlock Text="Подключение к LandErp" FontSize="20" FontWeight="SemiBold"/>
+     <TextBlock Margin="0,12" TextWrapping="Wrap" Text="Нажмите «Подключить сервер», введите адрес сервера, ID сборщика и ключ доступа из ERP. Настройки сохранятся локально. Самостоятельный сбор доступен независимо от сервера."/>
+     <WrapPanel><Button Content="Подключить сервер" Click="ConnectServerClick"/><Button Content="Получить задание и начать сбор" Click="StartServerClick"/><Button Content="Повторить доставку" Click="DeliverServerClick"/></WrapPanel>
+     <TextBlock x:Name="ServerStatusText" Margin="0,12" TextWrapping="Wrap" Text="Сервер не подключён. Нажмите «Подключить сервер» для настройки."/>
     </StackPanel>
    </TabItem>
   </TabControl>

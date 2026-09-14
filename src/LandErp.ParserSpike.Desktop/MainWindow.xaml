@@ -1,0 +1,95 @@
+<Window x:Class="LandErp.ParserSpike.Desktop.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="LandErp — проверка парсинга Avito" Width="1280" Height="800" MinWidth="1050" MinHeight="600"
+ Background="#F3F5F7" FontFamily="Segoe UI" FontSize="14">
+ <Grid Margin="24">
+  <Grid.RowDefinitions>
+   <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+   <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+  </Grid.RowDefinitions>
+  <StackPanel>
+   <TextBlock Text="Проверка выдачи Avito" FontSize="26" FontWeight="SemiBold"/>
+   <TextBlock Text="Откройте ссылку, затем нажмите «Спарсить». При запуске сбор не выполняется." Margin="0,6,0,18"/>
+  </StackPanel>
+  <Grid Grid.Row="1">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="130"/></Grid.ColumnDefinitions>
+   <TextBox x:Name="UrlInput" AutomationProperties.AutomationId="UrlInput" Padding="10" ToolTip="Поисковая ссылка https://www.avito.ru/..."/>
+   <ComboBox x:Name="BrowserChoice" Grid.Column="1" SelectedIndex="0" Margin="12,0,0,0" Padding="8">
+    <ComboBoxItem Content="Chrome"/><ComboBoxItem Content="Edge"/>
+   </ComboBox>
+  </Grid>
+  <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,14">
+   <Button x:Name="OpenButton" AutomationProperties.AutomationId="OpenButton" Content="Открыть страницу" Click="OpenClick" Padding="16,9"/>
+   <Button x:Name="ParseButton" AutomationProperties.AutomationId="ParseButton" Content="Спарсить" Click="ParseClick" Padding="16,9" Margin="12,0" IsEnabled="False"/>
+   <Button x:Name="SaveButton" Content="Сохранить JSON" Click="SaveClick" Padding="16,9" IsEnabled="False"/>
+   <TextBlock Text="Страниц:" VerticalAlignment="Center" Margin="18,0,8,0"/>
+   <TextBox x:Name="PageCountInput" Text="1" Width="44" VerticalContentAlignment="Center" Padding="6" ToolTip="От 1 до 10 страниц"/>
+   <Button x:Name="ContinueButton" Content="Продолжить" Click="ContinueClick" Padding="14,9" Margin="12,0,0,0" IsEnabled="False"/>
+   <Button x:Name="StopButton" Content="Остановить" Click="StopClick" Padding="14,9" Margin="12,0,0,0" IsEnabled="False"/>
+  </StackPanel>
+  <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText" Grid.Row="3" Text="Готово. Введите поисковую ссылку Avito." TextWrapping="Wrap" Margin="0,0,0,12"/>
+  <Border x:Name="NoticePanel" Grid.Row="4" Background="#FFF0CA" BorderBrush="#C88A1C" BorderThickness="1" Padding="12" Margin="0,0,0,12" Visibility="Collapsed">
+   <TextBlock x:Name="NoticeText" TextWrapping="Wrap" FontWeight="SemiBold"/>
+  </Border>
+  <TabControl Grid.Row="5">
+   <TabItem Header="Текущий сбор">
+  <DataGrid x:Name="ResultsGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" Background="White">
+   <DataGrid.Columns>
+    <DataGridTextColumn Header="ID" Binding="{Binding ExternalId}" Width="95"/>
+    <DataGridTextColumn Header="Заголовок" Binding="{Binding Title}" Width="230"/>
+    <DataGridTextColumn Header="Цена" Binding="{Binding PriceText}" Width="110"/>
+    <DataGridTextColumn Header="Площадь" Binding="{Binding AreaText}" Width="95"/>
+    <DataGridTextColumn Header="Место" Binding="{Binding Location}" Width="160"/>
+    <DataGridTextColumn Header="Дата" Binding="{Binding DateText}" Width="100"/>
+    <DataGridTextColumn Header="Цена за сотку" Binding="{Binding UnitPriceText}" Width="120"/>
+    <DataGridTextColumn Header="Продавец" Binding="{Binding SellerName}" Width="140"/>
+    <DataGridTextColumn Header="Отметки" Binding="{Binding Badges}" Width="160"/>
+    <DataGridTextColumn Header="Описание" Binding="{Binding PreviewDescription}" Width="240"/>
+    <DataGridTextColumn Header="Предупреждения" Binding="{Binding WarningText}" Width="220"/>
+    <DataGridTextColumn Header="Ссылка" Binding="{Binding Url}" Width="220"/>
+   </DataGrid.Columns>
+  </DataGrid>
+   </TabItem>
+   <TabItem Header="Сохранённые объявления">
+    <Grid Margin="10">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <DockPanel Margin="0,0,0,10">
+      <Button DockPanel.Dock="Right" Content="Обновить" Click="RefreshClick" Padding="12,6" Margin="12,0,0,0"/>
+      <TextBox x:Name="DatabaseSearch" TextChanged="SearchChanged" Padding="8" ToolTip="Поиск по ID, заголовку, месту или продавцу"/>
+     </DockPanel>
+     <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="5"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
+      <DataGrid x:Name="SavedGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionChanged="SavedSelectionChanged">
+       <DataGrid.Columns>
+        <DataGridTextColumn Header="ID" Binding="{Binding ExternalId}" Width="95"/>
+        <DataGridTextColumn Header="Заголовок" Binding="{Binding Title}" Width="210"/>
+        <DataGridTextColumn Header="Цена" Binding="{Binding PriceText}" SortMemberPath="Price" Width="110"/>
+        <DataGridTextColumn Header="Площадь, м²" Binding="{Binding Area}" Width="105"/>
+        <DataGridTextColumn Header="Место" Binding="{Binding Location}" Width="160"/>
+        <DataGridTextColumn Header="Продавец" Binding="{Binding Seller}" Width="140"/>
+        <DataGridTextColumn Header="Впервые" Binding="{Binding FirstSeen, StringFormat=dd.MM.yyyy HH:mm}" Width="140"/>
+        <DataGridTextColumn Header="Последний сбор" Binding="{Binding LastSeen, StringFormat=dd.MM.yyyy HH:mm}" Width="140"/>
+       </DataGrid.Columns>
+      </DataGrid>
+      <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch"/>
+      <TextBox x:Name="ListingDetails" Grid.Column="2" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="12" Text="Выберите объявление: здесь появятся поля и история наблюдений."/>
+     </Grid>
+    </Grid>
+   </TabItem>
+   <TabItem Header="Журнал запусков">
+    <DataGrid x:Name="RunsGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+     <DataGrid.Columns>
+      <DataGridTextColumn Header="Начало (UTC)" Binding="{Binding Started}" Width="190"/>
+      <DataGridTextColumn Header="Страниц задано" Binding="{Binding Limit}" Width="120"/>
+      <DataGridTextColumn Header="Текущая страница" Binding="{Binding Page}" Width="130"/>
+      <DataGridTextColumn Header="Объявлений" Binding="{Binding Count}" Width="100"/>
+      <DataGridTextColumn Header="Состояние / причина остановки" Binding="{Binding StateLabel}" Width="260"/>
+      <DataGridTextColumn Header="Поисковая ссылка" Binding="{Binding Url}" Width="*"/>
+     </DataGrid.Columns>
+    </DataGrid>
+   </TabItem>
+  </TabControl>
+  <TextBlock Grid.Row="6" Text="1–10 страниц · сохранение по мере сбора · CAPTCHA и вход — вручную · подробные карточки не открываются" Margin="0,12,0,0" Foreground="#526173"/>
+ </Grid>
+</Window>

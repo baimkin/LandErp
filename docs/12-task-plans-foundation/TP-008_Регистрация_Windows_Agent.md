@@ -1,6 +1,11 @@
 # TP-008 — Регистрация одного Windows Agent
 
-**Статус:** На согласовании  
+**Статус:** Требует адаптации под самостоятельный Collector/ERP-04; не активен\
+
+> Ревизия 2026-09-14: Reuse machine identity/revoke, registration/heartbeat через server adapter; рабочий Collector не пересоздавать.
+> [ERP-00 report](../03-active/reports/ERP-00_REPORT.md) — итоговая ревизия.
+> Примеры ниже — исторический материал, не approved implementation. Текущий
+> scope задаёт ACTIVE_TASK; ни этот TP, ни старые зависимости не разрешают код.
 **Зависимости:** TP-003–TP-005, ADR-004, FP-011, OP-010  
 **Результат:** администратор выдаёт одноразовый код, а Windows x64 Agent получает отдельную отзываемую identity.
 

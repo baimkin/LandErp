@@ -1,6 +1,11 @@
 # TP-004 — Quality gates и базовая наблюдаемость
 
-**Статус:** На согласовании  
+**Статус:** Пересмотрен ERP-00: reuse/adapt для ERP-01; старый scope не активен\
+
+> Ревизия 2026-09-14: Reuse health/logs/Problem Details/boundary checks; Worker только host skeleton, без jobs.
+> [ERP-00 report](../03-active/reports/ERP-00_REPORT.md) — итоговая ревизия.
+> Примеры ниже — исторический материал, не approved implementation. Текущий
+> scope задаёт ACTIVE_TASK; ни этот TP, ни старые зависимости не разрешают код.
 **Зависимости:** TP-001–TP-003, FP-001  
 **Результат:** архитектурные ошибки и неработоспособность hosts обнаруживаются до продуктовой разработки.
 

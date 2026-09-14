@@ -29,6 +29,7 @@ browser-profiles/
 docs/15-source-materials/private/*
 !docs/15-source-materials/private/.gitkeep
 local-input/
+local-data/
 diagnostics/
 traces/
 screenshots/

@@ -1,6 +1,11 @@
 # TP-003 — PostgreSQL и миграционный каркас
 
-**Статус:** На согласовании  
+**Статус:** Пересмотрен ERP-00: adapt для ERP-01; старый scope не активен\
+
+> Ревизия 2026-09-14: Reuse persistence/design-time/Local-Test checks; до первой migration финальный review conventions и schema-only DDL, без business tables.
+> [ERP-00 report](../03-active/reports/ERP-00_REPORT.md) — итоговая ревизия.
+> Примеры ниже — исторический материал, не approved implementation. Текущий
+> scope задаёт ACTIVE_TASK; ни этот TP, ни старые зависимости не разрешают код.
 **Зависимости:** TP-002, ADR-001, ADR-002, FP-001  
 **Результат:** Server и Worker используют один проверяемый DbContext PostgreSQL 18 без автоматической production-миграции.
 
@@ -41,7 +46,7 @@ public static class PersistenceRegistration
 - миграция не запускается из `Program.cs`;
 - пароли не хранятся в `appsettings.json` репозитория;
 - PostGIS/NTS не добавляются;
-- schema/table naming фиксируется до первой бизнес-миграции.
+- schema/table naming и data conventions фиксируются до первой production-миграции, включая техническую foundation migration.
 
 ## Проверки
 

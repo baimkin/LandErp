@@ -1,0 +1,4 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+@if(Items.Count==0) { <PageState Title="Рабочая история пока пуста" Description="Решения, заметки и контакты появятся здесь." /> }
+else { <ol class="business-timeline">@foreach(TimelineItem item in Items) { <li><span class="timeline-dot" aria-hidden="true"></span><div><strong>@item.Title</strong><small>@item.Actor · @ProcurementLabels.Time(item.RecordedAt)</small><p class="preserve-lines">@item.Body</p>@if(item.Target!=null) { <small>Исполнитель: @item.Target</small> }@if(item.DueAt!=null) { <small>Срок: @ProcurementLabels.Time(item.DueAt)</small> }@if(item.EffectiveAt!=null) { <small>Фактическое действие: @ProcurementLabels.Time(item.EffectiveAt)</small> }</div></li> }</ol> }
+@code { [Parameter] public IReadOnlyList<TimelineItem> Items { get; set; }=[]; }

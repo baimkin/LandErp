@@ -26,10 +26,16 @@ public sealed class PostgresTests
         string sql = context.GetService<IMigrator>().GenerateScript();
         Assert.IsTrue(sql.Contains("COMMENT ON TABLE", StringComparison.Ordinal));
         Assert.IsFalse(sql.Contains("CREATE TABLE listing", StringComparison.OrdinalIgnoreCase));
+        await using ServiceProvider readinessServices = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
+        IDatabaseStatus readiness = readinessServices.GetRequiredService<IDatabaseStatus>();
+        Assert.IsFalse(await readiness.IsReadyAsync(CancellationToken.None));
+        await context.GetService<IMigrator>().MigrateAsync("20260914160628_IdentityOrganization");
+        Assert.IsFalse(await readiness.IsReadyAsync(CancellationToken.None), "Partial schema must not report ready.");
         await context.Database.MigrateAsync();
         await context.Database.MigrateAsync();
-        Assert.AreEqual(4, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.AreEqual(6, (await context.Database.GetAppliedMigrationsAsync()).Count());
         Assert.AreEqual(0, (await context.Database.GetPendingMigrationsAsync()).Count());
+        Assert.IsTrue(await readiness.IsReadyAsync(CancellationToken.None));
 
         await using NpgsqlConnection connection = new(sandbox.MigratorConnection);
         await connection.OpenAsync();
@@ -55,7 +61,7 @@ public sealed class PostgresTests
 
         await using NpgsqlCommand missingTableComments = new("""
             SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname IN ('foundation','identity','organization','collection','catalog') AND c.relkind='r'
+            WHERE n.nspname IN ('foundation','identity','organization','collection','catalog','workflow','procurement') AND c.relkind='r'
               AND (obj_description(c.oid,'pg_class') IS NULL OR obj_description(c.oid,'pg_class') !~ '[А-Яа-я]')
             """, connection);
         Assert.AreEqual(0L, await missingTableComments.ExecuteScalarAsync());
@@ -105,7 +111,7 @@ public sealed class PostgresTests
         await context.GetService<IMigrator>().MigrateAsync("0");
         Assert.AreEqual(0, (await context.Database.GetAppliedMigrationsAsync()).Count());
         await context.Database.MigrateAsync();
-        Assert.AreEqual(4, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.AreEqual(6, (await context.Database.GetAppliedMigrationsAsync()).Count());
     }
 
     [TestMethod]

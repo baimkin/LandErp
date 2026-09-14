@@ -3,7 +3,7 @@
 ## Текущее разрешение — Stage 1
 
 **Этап:** Stage 1 — Procurement Core.
-**Статус:** In progress; A `03d940e`, B `699db19` завершены; C проверен; следующий D — Procurement.
+**Статус:** In progress; A `03d940e`, B `699db19`, C `719a1c6` завершены; активный D — Procurement.
 **Ветка:** `codex/stage-1-procurement-core`.
 
 Прямой запрос владельца 2026-09-14 разрешает весь Stage 1, safe merge Collector/docs

@@ -7,6 +7,9 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using LandErp.Application.Modules.Collection.Domain;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Infrastructure.Modules.Collection;
+using LandErp.Application.Modules.Procurement.Domain;
+using LandErp.Application.Modules.Workflow.Domain;
+using LandErp.Infrastructure.Modules.Procurement;
 
 namespace LandErp.Infrastructure.Persistence;
 
@@ -30,6 +33,13 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CollectionDelivery> CollectionDeliveries => Set<CollectionDelivery>();
     public DbSet<Listing> Listings => Set<Listing>();
     public DbSet<CatalogObservation> ListingObservations => Set<CatalogObservation>();
+    public DbSet<PropertyCase> PropertyCases => Set<PropertyCase>();
+    public DbSet<Assignment> WorkAssignments => Set<Assignment>();
+    public DbSet<WorkTask> WorkTasks => Set<WorkTask>();
+    public DbSet<WorkflowTransition> WorkflowTransitions => Set<WorkflowTransition>();
+    public DbSet<Approval> Approvals => Set<Approval>();
+    public DbSet<BusinessTimelineEntry> BusinessTimeline => Set<BusinessTimelineEntry>();
+    public DbSet<InternalNotification> Notifications => Set<InternalNotification>();
     public const string FoundationSchema = "foundation";
     public const string HistoryTable = "migration_history";
 
@@ -85,14 +95,17 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
         builder.Entity<Position>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
         builder.Entity<Team>().HasIndex(item => new { item.OrgUnitId, item.Name }).IsUnique();
         CollectionMappings.Apply(builder);
+        ProcurementMappings.Apply(builder);
         ModelConventions.Apply(builder);
+        builder.Entity<PropertyCase>().Property(item => item.ManagerEmployeeId)
+            .HasComment("Менеджер, ответственный за первичный анализ объекта; получатель возврата руководителя по умолчанию.");
     }
 
     private void EnforceInvariants()
     {
         foreach (var entry in ChangeTracker.Entries())
         {
-            if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation && entry.State is EntityState.Modified or EntityState.Deleted)
+            if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation or WorkflowTransition or Approval or BusinessTimelineEntry && entry.State is EntityState.Modified or EntityState.Deleted)
             {
                 throw new InvalidOperationException("Audit facts are append-only.");
             }

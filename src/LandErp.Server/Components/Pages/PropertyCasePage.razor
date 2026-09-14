@@ -1,0 +1,7 @@
+@page "/procurement/listings/{ListingId:guid}"
+@attribute [Authorize(Policy = "manager_queue.read")]
+@using LandErp.Server.Components.Procurement
+<PageTitle>Объект закупки · LandErp</PageTitle>
+<PageHeader Title="Объект закупки" Breadcrumb="Закупка / Карточка" /><a href="/procurement" class="btn secondary">Вернуться в очередь</a>
+<CaseWorkspace ListingId="ListingId" />
+@code { [Parameter] public Guid ListingId { get; set; } }

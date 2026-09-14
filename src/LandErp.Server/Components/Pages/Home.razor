@@ -1,8 +1,12 @@
 @page "/"
 @attribute [Authorize]
 <PageTitle>LandErp</PageTitle>
-<PageHeader Title="Рабочий контур" Description="Сотрудники, ответственность и доступ — основа закупки." />
+<PageHeader Title="Рабочий контур" Description="Объекты закупки, решения и ответственность команды." />
 <div class="content-grid">
+    <AuthorizeView Policy="@Permissions.QueueRead" Context="procurement"><article class="surface"><span class="kicker">Закупка</span><h2>Очередь объектов</h2><p>Проверьте новые объявления, изменения и возвраты руководителя.</p><a class="btn primary" href="/procurement">Открыть очередь закупки</a></article></AuthorizeView>
+    <AuthorizeView Policy="@Permissions.UsersRead" Context="employees">
     <article class="surface"><span class="kicker">Администрирование</span><h2>Команда и оргструктура</h2><p>Создайте отдел закупки, должности и пригласите сотрудников. Назначения определяют ответственность и видимость.</p><a class="btn primary" href="/employees">Открыть сотрудников</a></article>
-    <article class="surface"><span class="kicker">История</span><h2>Действия сохраняются</h2><p>Критичные изменения имеют автора и время. Права проверяются сервером для каждой операции.</p><a class="btn secondary" href="/audit">Посмотреть аудит</a></article>
+    </AuthorizeView>
+    <AuthorizeView Policy="@Permissions.AuditRead" Context="audit"><article class="surface"><span class="kicker">История</span><h2>Действия сохраняются</h2><p>Критичные изменения имеют автора и время.</p><a class="btn secondary" href="/audit">Посмотреть аудит</a></article></AuthorizeView>
 </div>
+<AuthorizeView Policy="@Permissions.QueueRead" Context="notifications"><LandErp.Server.Components.Procurement.Notifications /></AuthorizeView>

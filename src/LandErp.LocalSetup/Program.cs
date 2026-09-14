@@ -16,6 +16,9 @@ try
         ?? throw new InvalidOperationException("Repository root is required.");
     string directory = Path.Combine(root, "local-data", "stage1");
     string settingsFile = Path.Combine(directory, "settings.json");
+    bool inspect = args is ["--inspect"];
+    if (args.Length > 0 && !inspect || inspect && !File.Exists(settingsFile))
+        throw new InvalidOperationException("Inspection requires an initialized Local database.");
     LocalSettings settings;
     if (File.Exists(settingsFile))
     {
@@ -54,6 +57,11 @@ try
         await JsonSerializer.SerializeAsync(stream, settings);
     }
 
+    if (inspect)
+    {
+        await InspectAsync(settings.RuntimeConnection);
+        return;
+    }
     HostApplicationBuilder builder = Host.CreateApplicationBuilder([]);
     builder.Logging.ClearProviders();
     builder.Configuration["Database:ConnectionString"] = settings.MigratorConnection;
@@ -88,6 +96,11 @@ try
         + $"GRANT USAGE ON SCHEMA collection,catalog TO \"{runtimeRole}\"; "
         + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_configurations,collection.jobs,catalog.listings TO \"{runtimeRole}\"; "
         + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations TO \"{runtimeRole}\"; "
+        + $"GRANT USAGE ON SCHEMA workflow,procurement TO \"{runtimeRole}\"; "
+        + $"GRANT SELECT ON workflow.stages TO \"{runtimeRole}\"; "
+        + $"GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,foundation.notifications TO \"{runtimeRole}\"; "
+        + $"GRANT SELECT,INSERT ON workflow.transitions,workflow.approvals,foundation.business_timeline TO \"{runtimeRole}\"; "
+        + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA procurement TO \"{runtimeRole}\"; "
         + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA identity,organization TO \"{runtimeRole}\"; "
         + $"GRANT SELECT ON ALL TABLES IN SCHEMA foundation TO \"{runtimeRole}\"; "
         + $"GRANT INSERT ON foundation.audit_events TO \"{runtimeRole}\";", migratorConnection);
@@ -98,6 +111,40 @@ catch
 {
     Console.Error.WriteLine("Local setup failed. Check approved admin environment, local database ownership and permissions. Private exception suppressed.");
     Environment.ExitCode = 1;
+}
+
+static async Task InspectAsync(string runtimeConnection)
+{
+    PersistenceServices.ValidateConnection(runtimeConnection);
+    NpgsqlConnectionStringBuilder target = new(runtimeConnection);
+    if (target.Database != "landerp_local" || target.Host is not ("127.0.0.1" or "localhost" or "::1"))
+        throw new InvalidOperationException("Only this Local database may be inspected.");
+    await using NpgsqlConnection connection = new(runtimeConnection);
+    await connection.OpenAsync();
+    await using NpgsqlCommand metadata = new("""
+        SELECT current_setting('server_version'),
+            (SELECT count(*) FROM foundation.migration_history), count(*),
+            count(obj_description(c.oid,'pg_class'))
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE c.relkind='r' AND n.nspname IN
+            ('foundation','identity','organization','collection','catalog','workflow','procurement')
+        """, connection);
+    await using (NpgsqlDataReader reader = await metadata.ExecuteReaderAsync())
+    {
+        await reader.ReadAsync();
+        if (reader.GetInt64(2) != reader.GetInt64(3)) throw new InvalidOperationException("Missing table comments.");
+        Console.WriteLine($"PostgreSQL {reader.GetString(0)}; migrations {reader.GetInt64(1)}; tables/comments {reader.GetInt64(2)}/{reader.GetInt64(3)}.");
+    }
+    // Even an unexpected grant cannot leave schema changes behind: probe always rolls back.
+    await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync();
+    try
+    {
+        await using NpgsqlCommand ddl = new("CREATE SCHEMA stage1_runtime_permission_probe", connection, transaction);
+        try { await ddl.ExecuteNonQueryAsync(); throw new InvalidOperationException("Runtime DDL must be denied."); }
+        catch (PostgresException exception) when (exception.SqlState == "42501")
+        { Console.WriteLine("Runtime DDL denied (42501)."); }
+    }
+    finally { await transaction.RollbackAsync(); }
 }
 
 static string ForRole(NpgsqlConnectionStringBuilder admin, string role, string password)

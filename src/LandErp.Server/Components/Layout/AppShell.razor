@@ -2,20 +2,22 @@
 <div class="app-shell" data-density="@(compact ? "compact" : "comfortable")" data-interactive-ready="@(interactiveReady ? "true" : "false")" inert="@(!interactiveReady)">
     <aside class="sidebar @(menuOpen ? "open" : "")" aria-label="Навигация LandErp">
         <a class="brand" href="/"><span class="brand-symbol" aria-hidden="true">▥</span><div><strong>LandErp</strong><small>Рабочий контур закупки</small></div></a>
+        <button class="icon-button mobile-menu" aria-label="Закрыть меню" @onclick="() => menuOpen=false">×</button>
         <nav class="side-nav">
             <p class="nav-label">Рабочее место</p>
             <NavLink class="nav-item" href="/" Match="NavLinkMatch.All">◫ Обзор</NavLink>
+            <AuthorizeView Policy="manager_queue.read"><NavLink class="nav-item" href="/procurement" @onclick="() => menuOpen=false">◫ Закупка</NavLink></AuthorizeView>
             <AuthorizeView Policy="users.read"><NavLink class="nav-item" href="/employees">♙ Сотрудники</NavLink></AuthorizeView>
             <AuthorizeView Policy="organization.manage"><NavLink class="nav-item" href="/organization">▦ Оргструктура</NavLink></AuthorizeView>
             <AuthorizeView Policy="audit.read"><NavLink class="nav-item" href="/audit">≡ Аудит</NavLink></AuthorizeView>
             <AuthorizeView Policy="agents.manage"><NavLink class="nav-item" href="/collectors">⇅ Collector</NavLink></AuthorizeView>
         </nav>
-        <div class="sidebar-footer"><small>Локальный контур · Stage 1</small></div>
+        <div class="sidebar-footer"><small>Локальный контур</small></div>
     </aside>
     <div class="workspace">
         <header class="topbar">
             <button class="icon-button mobile-menu" aria-label="Открыть меню" aria-expanded="@menuOpen" @onclick="() => menuOpen = !menuOpen">☰</button>
-            <div><span class="eyebrow">Procurement Core</span><strong>Земля. Данные. Решения.</strong></div>
+            <div><span class="eyebrow">Закупка</span><strong>Земля. Данные. Решения.</strong></div>
             <div class="top-actions">
                 <button class="btn quiet density-control" aria-pressed="@compact" @onclick="() => compact = !compact">@(compact ? "Обычно" : "Компактно")</button>
                 <AuthorizeView><Authorized Context="auth"><span class="user-chip">@auth.User.Identity?.Name</span><a class="btn secondary" href="/account/logout">Выход</a></Authorized>

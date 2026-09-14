@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 using LandErp.Infrastructure.Modules.Collection;
+using LandErp.Infrastructure.Modules.Procurement;
 using System.Text.Json.Serialization;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -23,6 +24,7 @@ builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogL
 builder.Services.AddLandErpPersistence(builder.Configuration);
 builder.Services.AddLandErpIdentity();
 builder.Services.AddLandErpCollection();
+builder.Services.AddLandErpProcurement();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 8 * 1024 * 1024);
 builder.Services.AddScoped<AccountActivation>();
@@ -114,6 +116,7 @@ app.UseRateLimiter();
 app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapCollectorEndpoints();
+app.MapProcurementEndpoints();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", async (IDatabaseStatus database, CancellationToken cancellationToken) =>

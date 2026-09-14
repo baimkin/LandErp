@@ -3,6 +3,7 @@ using System;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace LandErp.Infrastructure.Migrations
 {
     [DbContext(typeof(LandErpDbContext))]
-    partial class LandErpDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260914200643_ProcurementCore")]
+    partial class ProcurementCore
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -963,7 +966,7 @@ namespace LandErp.Infrastructure.Migrations
                     b.Property<Guid>("ManagerEmployeeId")
                         .HasColumnType("uuid")
                         .HasColumnName("manager_employee_id")
-                        .HasComment("Менеджер, ответственный за первичный анализ объекта; получатель возврата руководителя по умолчанию.");
+                        .HasComment("Руководитель сотрудника, которому можно передать рабочую ответственность.");
 
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")

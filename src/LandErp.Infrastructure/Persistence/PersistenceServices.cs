@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Microsoft.EntityFrameworkCore;
 
 namespace LandErp.Infrastructure.Persistence;
 
@@ -38,7 +39,7 @@ public static class PersistenceServices
         }
     }
 
-    private sealed class PostgresDatabaseStatus(NpgsqlDataSource dataSource,
+    private sealed class PostgresDatabaseStatus(NpgsqlDataSource dataSource, IDbContextFactory<LandErpDbContext> factory,
         ILogger<PostgresDatabaseStatus> logger) : IDatabaseStatus
     {
         private static readonly Action<ILogger, Exception?> LogUnavailable = LoggerMessage.Define(
@@ -47,10 +48,13 @@ public static class PersistenceServices
         {
             try
             {
+                await using LandErpDbContext context = await factory.CreateDbContextAsync(cancellationToken);
+                string[] required = context.Database.GetMigrations().Order(StringComparer.Ordinal).ToArray();
                 await using NpgsqlCommand command = dataSource.CreateCommand(
                     "SELECT current_setting('server_version_num')::integer >= 180000 "
                     + "AND current_setting('server_version_num')::integer < 190000 "
-                    + "AND to_regclass('foundation.migration_history') IS NOT NULL");
+                    + "AND (SELECT array_agg(\"MigrationId\"::text ORDER BY \"MigrationId\") FROM foundation.migration_history) = @required");
+                command.Parameters.AddWithValue("required", required);
                 command.CommandTimeout = 2;
                 return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is true;
             }

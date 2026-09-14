@@ -1,0 +1,14 @@
+@inject Microsoft.JSInterop.IJSRuntime JS
+<dialog @ref="dialog" class="erp-modal @Kind" aria-labelledby="@headingId" @onkeydown="KeyDownAsync" @onkeydown:stopPropagation="true">
+    <header class="modal-header"><h2 id="@headingId">@Title</h2><button class="icon-button" aria-label="Закрыть" @onclick="OnClose">×</button></header>
+    <div class="modal-body">@ChildContent</div>
+</dialog>
+@code {
+    [Parameter,EditorRequired] public string Title { get; set; }="";
+    [Parameter] public string Kind { get; set; }="dialog";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    private ElementReference dialog; private readonly string headingId="dialog-"+Guid.CreateVersion7().ToString("N");
+    protected override async Task OnAfterRenderAsync(bool firstRender) { if(firstRender) await Microsoft.JSInterop.JSRuntimeExtensions.InvokeVoidAsync(JS,"LandErpUi.open",dialog); }
+    private Task KeyDownAsync(KeyboardEventArgs args)=>args.Key=="Escape" ? OnClose.InvokeAsync() : Task.CompletedTask;
+}

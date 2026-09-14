@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
+using LandErp.Infrastructure.Modules.Collection;
+using System.Text.Json.Serialization;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 if (builder.Environment.IsEnvironment("Local") || builder.Environment.IsEnvironment("Test"))
@@ -20,6 +22,9 @@ builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.None);
 builder.Services.AddLandErpPersistence(builder.Configuration);
 builder.Services.AddLandErpIdentity();
+builder.Services.AddLandErpCollection();
+builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 8 * 1024 * 1024);
 builder.Services.AddScoped<AccountActivation>();
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
@@ -70,6 +75,9 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = 429;
+    options.AddPolicy("collector", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
+        { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("account", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
         { PermitLimit = 15, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -105,6 +113,7 @@ app.UseAuthorization();
 app.UseRateLimiter();
 app.UseAntiforgery();
 app.MapStaticAssets();
+app.MapCollectorEndpoints();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", async (IDatabaseStatus database, CancellationToken cancellationToken) =>

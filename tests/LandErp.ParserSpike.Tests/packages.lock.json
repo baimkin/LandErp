@@ -128,9 +128,13 @@
         "resolved": "5.0.0",
         "contentHash": "dMkqfy2el8A8/I76n2Hi1oBFEbG1SfxD2l5nhwXV3XjlnOmwxJlQbYpJH4W51odnU9sARCSAgv7S3CyAFMkpYg=="
       },
+      "landerp.collector.contracts": {
+        "type": "Project"
+      },
       "landerp.parserspike": {
         "type": "Project",
         "dependencies": {
+          "LandErp.Collector.Contracts": "[1.0.0, )",
           "Microsoft.Data.Sqlite": "[10.0.0, )",
           "Microsoft.Playwright": "[1.62.0, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[2.1.13, )"

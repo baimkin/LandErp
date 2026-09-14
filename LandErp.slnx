@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/LandErp.Application/LandErp.Application.csproj" />
+    <Project Path="src/LandErp.Collector.Contracts/LandErp.Collector.Contracts.csproj" />
     <Project Path="src/LandErp.Infrastructure/LandErp.Infrastructure.csproj" />
     <Project Path="src/LandErp.Server/LandErp.Server.csproj" />
     <Project Path="src/LandErp.Worker/LandErp.Worker.csproj" />

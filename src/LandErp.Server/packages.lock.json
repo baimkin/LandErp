@@ -19,6 +19,12 @@
         "contentHash": "Kd4o2oO1A6dfKxjz5LS16QyLtpCFTUiFWwmBABETAXRsSImBdRdWeKjSgbbRhAMiV3a3/nWr95ZtzClT4uaADQ=="
       },
       "landerp.application": {
+        "type": "Project",
+        "dependencies": {
+          "LandErp.Collector.Contracts": "[1.0.0, )"
+        }
+      },
+      "landerp.collector.contracts": {
         "type": "Project"
       },
       "landerp.infrastructure": {

@@ -1,5 +1,7 @@
 using System.IO;
+using System.Net.Http;
 using LandErp.ParserSpike.LocalCollection;
+using LandErp.ParserSpike.ServerIntegration;
 
 namespace LandErp.ParserSpike.Desktop;
 
@@ -9,6 +11,8 @@ public sealed class WorkspaceController : IAsyncDisposable
     private readonly InstanceGuard guard;
     private readonly ISourceSessions sessions;
     private ISourcePage? manualPage;
+    private HttpClient? serverHttp;
+    public ServerCoordinator? Server { get; private set; }
     public LocalStore Store { get; }
     public QueueRunner Runner { get; }
     public DiagnosticJournal Diagnostics { get; }
@@ -45,5 +49,14 @@ public sealed class WorkspaceController : IAsyncDisposable
     }
     public async Task CloseManualAsync()
     { if (manualPage is not null) { await manualPage.DisposeAsync(); manualPage = null; } }
-    public async ValueTask DisposeAsync() { try { await CloseManualAsync(); await Runner.DisposeAsync(); await JsonResponses.DisposeAsync(); } finally { guard.Dispose(); } }
+    public async Task ConnectServerAsync()
+    {
+        if (Server != null) return;
+        ServerConnection connection = ServerConnection.FromEnvironment();
+        serverHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        ServerAdapter adapter = new(serverHttp, connection);
+        await adapter.RegisterAsync(CancellationToken.None);
+        Server = new(Store, Runner, new ServerOutbox(Path.Combine(Path.GetDirectoryName(Store.Path)!, "collector-server-outbox.sqlite")), adapter);
+    }
+    public async ValueTask DisposeAsync() { try { await CloseManualAsync(); await Runner.DisposeAsync(); if (Server != null) await Server.DisposeAsync(); serverHttp?.Dispose(); await JsonResponses.DisposeAsync(); } finally { guard.Dispose(); } }
 }

@@ -4,6 +4,9 @@ using LandErp.Application.Modules.Organization.Domain;
 using LandErp.Infrastructure.Modules.IdentityAccess;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using LandErp.Application.Modules.Collection.Domain;
+using LandErp.Application.Modules.Catalog.Domain;
+using LandErp.Infrastructure.Modules.Collection;
 
 namespace LandErp.Infrastructure.Persistence;
 
@@ -21,6 +24,12 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<RolePermissionGrant> RolePermissions => Set<RolePermissionGrant>();
     public DbSet<EmployeeInvitation> EmployeeInvitations => Set<EmployeeInvitation>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<CollectorAgent> CollectorAgents => Set<CollectorAgent>();
+    public DbSet<SearchConfiguration> SearchConfigurations => Set<SearchConfiguration>();
+    public DbSet<ServerCollectionJob> CollectionJobs => Set<ServerCollectionJob>();
+    public DbSet<CollectionDelivery> CollectionDeliveries => Set<CollectionDelivery>();
+    public DbSet<Listing> Listings => Set<Listing>();
+    public DbSet<CatalogObservation> ListingObservations => Set<CatalogObservation>();
     public const string FoundationSchema = "foundation";
     public const string HistoryTable = "migration_history";
 
@@ -75,6 +84,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
         builder.Entity<OrgUnit>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
         builder.Entity<Position>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
         builder.Entity<Team>().HasIndex(item => new { item.OrgUnitId, item.Name }).IsUnique();
+        CollectionMappings.Apply(builder);
         ModelConventions.Apply(builder);
     }
 
@@ -82,7 +92,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     {
         foreach (var entry in ChangeTracker.Entries())
         {
-            if (entry.Entity is AuditEvent && entry.State is EntityState.Modified or EntityState.Deleted)
+            if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation && entry.State is EntityState.Modified or EntityState.Deleted)
             {
                 throw new InvalidOperationException("Audit facts are append-only.");
             }

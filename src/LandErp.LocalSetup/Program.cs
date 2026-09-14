@@ -85,6 +85,9 @@ try
         + $"GRANT USAGE ON SCHEMA identity,organization,foundation TO \"{runtimeRole}\"; "
         + $"GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA identity,organization TO \"{runtimeRole}\"; "
         + $"GRANT DELETE ON identity.user_roles TO \"{runtimeRole}\"; "
+        + $"GRANT USAGE ON SCHEMA collection,catalog TO \"{runtimeRole}\"; "
+        + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_configurations,collection.jobs,catalog.listings TO \"{runtimeRole}\"; "
+        + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations TO \"{runtimeRole}\"; "
         + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA identity,organization TO \"{runtimeRole}\"; "
         + $"GRANT SELECT ON ALL TABLES IN SCHEMA foundation TO \"{runtimeRole}\"; "
         + $"GRANT INSERT ON foundation.audit_events TO \"{runtimeRole}\";", migratorConnection);

@@ -2,6 +2,7 @@ using LandErp.Application.Modules.IdentityAccess.Contracts;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using LandErp.Application.Modules.Collection.Contracts;
 
 namespace LandErp.Server.Foundation;
 
@@ -14,6 +15,7 @@ public sealed class SafeExceptionHandler(IProblemDetailsService problems, ILogge
         Failure(logger, exception.GetType().Name, httpContext.TraceIdentifier, null);
         (int status, string code, string title) = exception switch
         {
+            CollectorProtocolException protocol => (protocol.Code == "AGENT_UNAUTHORIZED" ? 401 : protocol.Code == "WORK_NOT_ALLOWED" ? 403 : 409, protocol.Code, "Collector request rejected"),
             AccessDeniedException => (403, "FORBIDDEN", "Нет доступа"),
             DbUpdateConcurrencyException => (409, "CONFLICT", "Данные уже изменены"),
             ArgumentException => (400, "VALIDATION_FAILED", "Проверьте введённые данные"),

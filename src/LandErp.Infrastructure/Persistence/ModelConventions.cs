@@ -8,6 +8,12 @@ internal static class ModelConventions
 {
     private static readonly Dictionary<string, string> TableComments = new(StringComparer.Ordinal)
     {
+        ["agents"] = "Зарегистрированные локальные Collector. Сервер хранит только verifier credential; отзыв немедленно запрещает новые обращения.",
+        ["search_configurations"] = "Разрешённые поиски организации с конкретным Collector и областью закупки. Browser settings и cookies остаются локально.",
+        ["jobs"] = "Одна работа сбора: Pending ожидает; Leased закреплена до срока; Completed/LimitReached завершена; AwaitingManualAction требует ручного действия; Failed/Interrupted не считаются пустым успехом.",
+        ["deliveries"] = "Неизменяемые квитанции доставки Collector. Повтор ResultId с тем же payload возвращает прежний ответ; другой payload запрещён.",
+        ["listings"] = "Текущее известное состояние объявления, не идентичность земельного участка. Отсутствие поля не стирает ранее полученное значение.",
+        ["observations"] = "Неизменяемые наблюдения публичных объявлений: Source/ExternalId, Raw/Parsed/Presence, provenance и версия адаптера. Browser state и raw HTML здесь не хранятся.",
         ["users"] = "Учётные записи сотрудников. Пароли хранятся только как Identity verifier; доступ к бизнес-данным задаётся назначениями и permissions.",
         ["roles"] = "Именованные наборы разрешений. Роль не заменяет проверку области данных.",
         ["user_roles"] = "Технические роли Identity для требований MFA и управления сессией. Бизнес-доступ проверяется по актуальному назначению сотрудника.",
@@ -29,6 +35,30 @@ internal static class ModelConventions
 
     private static readonly Dictionary<string, string> ColumnComments = new(StringComparer.Ordinal)
     {
+        ["State"] = "Состояние работы: Pending ожидает выдачи; Leased действует до LeaseExpiresAt; Completed/LimitReached завершены; ручная проверка/ошибка/прерывание не являются успешной пустой выдачей.",
+        ["CredentialHash"] = "SHA-256 verifier высокоэнтропийного credential Collector. Открытый token показывается только при создании.",
+        ["Capabilities"] = "Источники, которые поддерживает установленная версия Collector; неподдерживаемая работа не выдаётся.",
+        ["VersionText"] = "Версия установленного приложения Collector; не concurrency token.",
+        ["LastHeartbeatAt"] = "Последний принятый heartbeat UTC; online означает enabled и связь не старше трёх минут.",
+        ["AgentId"] = "Локальное приложение Collector, которому разрешена работа или которое доставило наблюдение.",
+        ["DepartmentId"] = "Подразделение закупки, ограничивающее Department visibility объекта.",
+        ["LeaseId"] = "Случайный fencing token конкретной выдачи работы; прежний token после перевыдачи отклоняется.",
+        ["LeaseExpiresAt"] = "UTC срок действия reservation; heartbeat продлевает только действующий lease.",
+        ["PayloadHash"] = "SHA-256 принятого contract payload для проверки неизменности повторной доставки.",
+        ["ReceiptJson"] = "Прежний результат при idempotent retry, включая фактические accepted/duplicate counters.",
+        ["ObservationKey"] = "Стабильный ID локального наблюдения Collector; не ExternalId объявления.",
+        ["ContentHash"] = "SHA-256 typed observation для deduplication; не идентификатор объекта недвижимости.",
+        ["PayloadJson"] = "Typed public source observation: Raw/Parsed/Presence, provenance, adapter version. Не raw browser response.",
+        ["ChangesJson"] = "Поля, изменившие известное состояние; отсутствие поля не обозначает очистку.",
+        ["ObservedAt"] = "UTC момент наблюдения источника; поздняя доставка не делает старые значения новыми.",
+        ["FirstObservedAt"] = "Самый ранний известный UTC момент наблюдения этого объявления.",
+        ["LastObservedAt"] = "Самый новый принятый UTC момент наблюдения для обновления current state.",
+        ["ChangedAt"] = "UTC момент регистрации изменения бизнес-данных; используется для очереди новых/изменившихся объектов.",
+        ["DataRevision"] = "Версия существенных данных объявления. Не увеличивается от неизменного повторного наблюдения.",
+        ["QueueReason"] = "Объяснение появления в очереди: новое объявление или реально изменённые поля.",
+        ["Price"] = "Последняя известная публичная цена предложения, decimal; не подтверждённый факт сделки. Валюта отдельно.",
+        ["Currency"] = "ISO 4217 валюта денежного значения; Stage 1 принимает RUB.",
+        ["AreaSquareMeters"] = "Последняя известная площадь в м², decimal. Отсутствие не равно нулю.",
         ["OrganizationId"] = "Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.",
         ["UserId"] = "Связь с технической учётной записью; не является внешним ID или бизнес-номером.",
         ["EmployeeId"] = "Сотрудник, к которому относится назначение или приглашение.",

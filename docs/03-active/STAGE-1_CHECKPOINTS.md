@@ -19,3 +19,14 @@
 
 Проверки не зависят от live Avito/Cian; live verification дополнительна.
 Следующий checkpoint активируется только после успешных проверок предыдущего.
+
+## Файлы checkpoint C
+
+`src/LandErp.Collector.Contracts/` (только wire DTO/validation), public/domain
+Collection/Catalog Application, owning Infrastructure mappings/services/migration,
+Server Collector endpoints/admin Razor screen, Collector `ServerIntegration/`,
+минимальная выборка одного local link для QueueRunner и отдельная вкладка WPF.
+Tests: contract/idempotency/observation dedup/presence/order/lease/retry/outages,
+полная существующая Collector regression suite, PG metadata и backup/restore.
+Runtime grants только mutable current state и INSERT/SELECT history. Парсеры не
+переносятся и не переписываются. Report/README/locks обновляются вместе с кодом.

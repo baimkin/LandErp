@@ -45,7 +45,8 @@ public sealed class FoundationTests
         string root = RepositoryRoot();
         Dictionary<string, string[]> allowed = new(StringComparer.Ordinal)
         {
-            ["LandErp.Application"] = [],
+            ["LandErp.Application"] = ["LandErp.Collector.Contracts"],
+            ["LandErp.Collector.Contracts"] = [],
             ["LandErp.Infrastructure"] = ["LandErp.Application"],
             ["LandErp.Server"] = ["LandErp.Application", "LandErp.Infrastructure"],
             ["LandErp.Worker"] = ["LandErp.Application", "LandErp.Infrastructure"]
@@ -78,6 +79,9 @@ public sealed class FoundationTests
         Assert.IsFalse(typeof(IDatabaseStatus).Assembly.GetReferencedAssemblies().Any(assembly =>
             assembly.Name!.Contains("EntityFramework", StringComparison.Ordinal)
             || assembly.Name.Contains("Infrastructure", StringComparison.Ordinal)));
+        Assert.IsFalse(typeof(LandErp.ParserSpike.ServerIntegration.ServerAdapter).Assembly.GetReferencedAssemblies().Any(assembly =>
+            assembly.Name!.Contains("Npgsql",StringComparison.Ordinal) || assembly.Name.Contains("EntityFramework",StringComparison.Ordinal)
+            || assembly.Name.Contains("LandErp.Infrastructure",StringComparison.Ordinal) || assembly.Name.Contains("LandErp.Application",StringComparison.Ordinal)));
     }
 
     internal static string RepositoryRoot()

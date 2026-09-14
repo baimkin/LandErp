@@ -1,1 +1,3 @@
-<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup><ProjectReference Include="../LandErp.Collector.Contracts/LandErp.Collector.Contracts.csproj" /></ItemGroup>
+</Project>

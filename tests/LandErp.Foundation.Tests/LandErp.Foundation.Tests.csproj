@@ -4,6 +4,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/LandErp.ParserSpike/LandErp.ParserSpike.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" PrivateAssets="all" />
     <PackageReference Include="MSTest.TestFramework" PrivateAssets="all" />
     <PackageReference Include="MSTest.TestAdapter" PrivateAssets="all" />

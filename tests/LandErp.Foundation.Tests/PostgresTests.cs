@@ -28,7 +28,7 @@ public sealed class PostgresTests
         Assert.IsFalse(sql.Contains("CREATE TABLE listing", StringComparison.OrdinalIgnoreCase));
         await context.Database.MigrateAsync();
         await context.Database.MigrateAsync();
-        Assert.AreEqual(2, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.AreEqual(4, (await context.Database.GetAppliedMigrationsAsync()).Count());
         Assert.AreEqual(0, (await context.Database.GetPendingMigrationsAsync()).Count());
 
         await using NpgsqlConnection connection = new(sandbox.MigratorConnection);
@@ -55,7 +55,7 @@ public sealed class PostgresTests
 
         await using NpgsqlCommand missingTableComments = new("""
             SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname IN ('foundation','identity','organization') AND c.relkind='r'
+            WHERE n.nspname IN ('foundation','identity','organization','collection','catalog') AND c.relkind='r'
               AND (obj_description(c.oid,'pg_class') IS NULL OR obj_description(c.oid,'pg_class') !~ '[А-Яа-я]')
             """, connection);
         Assert.AreEqual(0L, await missingTableComments.ExecuteScalarAsync());
@@ -105,7 +105,7 @@ public sealed class PostgresTests
         await context.GetService<IMigrator>().MigrateAsync("0");
         Assert.AreEqual(0, (await context.Database.GetAppliedMigrationsAsync()).Count());
         await context.Database.MigrateAsync();
-        Assert.AreEqual(2, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.AreEqual(4, (await context.Database.GetAppliedMigrationsAsync()).Count());
     }
 
     [TestMethod]

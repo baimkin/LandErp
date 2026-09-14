@@ -30,13 +30,14 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
     public event EventHandler? Changed;
     public event EventHandler<CollectionNotice>? ManualActionRequired;
     public Task? Completion { get; private set; }
+    public string? BatchId => batch;
     private static TaskCompletionSource Signal(bool ready)
     { TaskCompletionSource signal = new(TaskCreationOptions.RunContinuationsAsynchronously); if (ready) signal.SetResult(); return signal; }
 
-    public Task StartAsync(CollectionSettings settings, bool force = false)
+    public Task StartAsync(CollectionSettings settings, bool force = false, string? onlyLinkId = null)
     {
         if (IsRunning) throw new InvalidOperationException("Сбор уже выполняется.");
-        settings.Validate(); batch = store.StartBatch(settings, force); cancellation?.Dispose(); cancellation = new(); IsRunning = true;
+        settings.Validate(); batch = store.StartBatch(settings, force, onlyLinkId: onlyLinkId); cancellation?.Dispose(); cancellation = new(); IsRunning = true;
         lock (sync) { userPaused = false; userReady = Signal(true); foreach (SourceControl source in sources.Values) { source.Blocked = false; source.VerificationJobs.Clear(); source.Ready = Signal(true); } }
         Completion = RunAsync(batch, settings, cancellation.Token);
         return Completion;

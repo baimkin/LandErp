@@ -20,6 +20,7 @@
    <TextBlock x:Name="StatusText" Text="Сбор запускается только по кнопке. Авторизация и CAPTCHA — вручную в браузере." TextWrapping="Wrap" Margin="3,7"/>
   </StackPanel>
   <TabControl>
+
    <TabItem Header="Ссылки и очередь">
     <Grid Margin="10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -66,6 +67,14 @@
      <WrapPanel><Button x:Name="SaveSettingsButton" Content="Сохранить настройки" Click="SaveSettingsClick"/><Button Content="Вернуть значения по умолчанию" Click="DefaultsClick"/></WrapPanel>
      <WrapPanel Margin="3,8"><TextBlock Text="Браузер" VerticalAlignment="Center"/><ComboBox x:Name="BrowserInput" Width="120" Margin="8"><ComboBoxItem Content="Chrome"/><ComboBoxItem Content="Edge"/></ComboBox><TextBlock Text="Обычная ошибка источника" VerticalAlignment="Center"/><ComboBox x:Name="ErrorInput" Width="240" Margin="8"><ComboBoxItem Content="Продолжать другие поиски"/><ComboBoxItem Content="Приостановить источник"/></ComboBox></WrapPanel>
     </StackPanel><DataGrid x:Name="SettingsGrid" IsReadOnly="False" CanUserSortColumns="False"><DataGrid.Columns><DataGridTextColumn Header="Параметр" Binding="{Binding Label}" IsReadOnly="True" Width="*"/><DataGridTextColumn Header="Значение" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="150"/><DataGridTextColumn Header="Допустимые значения" Binding="{Binding Bounds}" IsReadOnly="True" Width="200"/></DataGrid.Columns></DataGrid></DockPanel>
+   </TabItem>
+   <TabItem Header="LandErp Server">
+    <StackPanel Margin="16">
+     <TextBlock Text="Server mode — самостоятельный Collector" FontSize="20" FontWeight="SemiBold"/>
+     <TextBlock Margin="0,12" TextWrapping="Wrap" Text="Создайте Collector и поиск в LandErp. Настройте локально LANDERP_COLLECTOR_SERVER_URL (HTTPS), LANDERP_COLLECTOR_AGENT_ID и LANDERP_COLLECTOR_TOKEN. Credentials не записываются в очередь и не выводятся. Local mode работает независимо."/>
+     <WrapPanel><Button Content="Подключить Server" Click="ConnectServerClick"/><Button Content="Получить и собрать разрешённую работу" Click="StartServerClick"/><Button Content="Повторить доставку" Click="DeliverServerClick"/></WrapPanel>
+     <TextBlock x:Name="ServerStatusText" Margin="0,12" TextWrapping="Wrap" Text="Local mode. Подключение к Server выполняется только по кнопке."/>
+    </StackPanel>
    </TabItem>
   </TabControl>
  </DockPanel>

@@ -202,10 +202,11 @@ public sealed class LocalStore : IJobSource, IResultSink
         using SqliteConnection db = Open(); Exec(db, null, "UPDATE local_links SET archived=1 WHERE id=$id", ("$id", id));
     }
 
-    public string StartBatch(CollectionSettings settings, bool force = false, DateTimeOffset? now = null)
+    public string StartBatch(CollectionSettings settings, bool force = false, DateTimeOffset? now = null, string? onlyLinkId = null)
     {
         settings.Validate(); DateTimeOffset time = now ?? DateTimeOffset.UtcNow;
-        SearchLink[] links = Links().Where(x => x.Selected && x.Enabled).ToArray();
+        // Server mode targets one permitted search without changing Local mode selection/settings.
+        SearchLink[] links = Links().Where(x => x.Enabled && (onlyLinkId == null ? x.Selected : x.Id == onlyLinkId)).ToArray();
         if (links.Length == 0) throw new InvalidOperationException("Отметьте хотя бы одну ссылку.");
         string batch = Guid.NewGuid().ToString("D");
         using SqliteConnection db = Open(); using SqliteTransaction tx = db.BeginTransaction();

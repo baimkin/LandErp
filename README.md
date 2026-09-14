@@ -19,6 +19,18 @@
 У scripts есть `-DotnetPath` для явного пути к SDK. Startup Server/Worker не
 изменяет schema; последующие migrations применяются через отдельный setup/tooling.
 
+Server mode Collector: Owner/Admin создаёт Collector на `/collectors` и сохраняет
+показанные один раз ID/token в локальные переменные `LANDERP_COLLECTOR_AGENT_ID`,
+`LANDERP_COLLECTOR_TOKEN`, `LANDERP_COLLECTOR_SERVER_URL=https://localhost:7240/`.
+Пароль/token не вводите в команды, сохраняемые в истории терминала. Откройте
+существующий WPF Collector, вкладку «LandErp Server», подключите Server и получите
+разрешённую работу. В ERP заранее создайте поиск для этого Collector и поставьте
+сбор. CAPTCHA/авторизация выполняются вручную. Heartbeat/доставка работают при
+открытом Collector; Local mode доступен независимо от Server. При обрыве связи
+результаты остаются в локальной очереди, кнопка «Повторить доставку» отправляет
+те же ResultId. После истечения lease «Получить…» обновляет fencing token и
+доставляет сохранённый результат. Отзыв/перевыпуск token выполняются в ERP.
+
 LandErp — ERP для поиска, оценки и ведения инвестиционных проектов с земельными участками.
 
 Исследовательская фаза SPIKE-001 закрыта документационно по ERP-00.

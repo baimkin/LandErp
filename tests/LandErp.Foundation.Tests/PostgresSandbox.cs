@@ -76,11 +76,20 @@ internal sealed class PostgresSandbox : IAsyncDisposable
             + $"GRANT USAGE ON SCHEMA identity,organization TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA identity,organization TO \"{RuntimeRole}\"; "
             + $"GRANT DELETE ON identity.user_roles TO \"{RuntimeRole}\"; "
+            + $"GRANT USAGE ON SCHEMA collection,catalog TO \"{RuntimeRole}\"; "
+            + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_configurations,collection.jobs,catalog.listings TO \"{RuntimeRole}\"; "
+            + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA identity,organization TO \"{RuntimeRole}\";", DatabaseName);
     }
 
     public async Task BackupRestoreAsync()
     {
+        await using NpgsqlConnection source = new(MigratorConnection);
+        await source.OpenAsync();
+        await using NpgsqlCommand sourceHistory = new("SELECT count(*) FROM foundation.migration_history",source);
+        long expected = (long)(await sourceHistory.ExecuteScalarAsync())!;
+        await using NpgsqlCommand sourceRows = new("SELECT (SELECT count(*) FROM catalog.listings)+(SELECT count(*) FROM catalog.observations)+(SELECT count(*) FROM foundation.audit_events)",source);
+        long expectedRows = (long)(await sourceRows.ExecuteScalarAsync())!;
         string restored = DatabaseName + "_restore";
         await CreateDatabaseAsync(restored);
         string directory = Path.Combine(FoundationTests.RepositoryRoot(), "artifacts", "stage1", DatabaseName);
@@ -92,10 +101,12 @@ internal sealed class PostgresSandbox : IAsyncDisposable
         await using NpgsqlConnection connection = new(Connection(restored, MigratorRole));
         await connection.OpenAsync();
         await using NpgsqlCommand command = new("SELECT count(*) FROM foundation.migration_history", connection);
-        if (await command.ExecuteScalarAsync() is not long count || count != 2)
+        if (await command.ExecuteScalarAsync() is not long count || count != expected)
         {
             throw new InvalidOperationException("Restored schema history mismatch.");
         }
+        await using NpgsqlCommand restoredRows = new("SELECT (SELECT count(*) FROM catalog.listings)+(SELECT count(*) FROM catalog.observations)+(SELECT count(*) FROM foundation.audit_events)",connection);
+        if ((long)(await restoredRows.ExecuteScalarAsync())! != expectedRows) throw new InvalidOperationException("Restored business rows mismatch.");
     }
 
     private static async Task RunPgToolAsync(string tool, string connection, string[] arguments)

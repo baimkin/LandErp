@@ -116,6 +116,26 @@ public sealed class IdentityUiTests
             Assert.AreEqual(403, (await employeeContext.APIRequest.GetAsync(origin + "/api/audit")).Status);
             await employeePage.GotoAsync(origin + "/organization");
             await employeePage.GetByRole(AriaRole.Heading, new() { Name = "Нет доступа", Exact = true }).WaitForAsync();
+            await page.GotoAsync(origin + "/collectors");
+            await page.Locator(".app-shell[data-interactive-ready='true']").WaitForAsync();
+            await page.GetByLabel("Имя Collector", new() { Exact = true }).FillAsync("Collector UI");
+            await page.GetByRole(AriaRole.Button,new() { Name="Создать Collector",Exact=true }).ClickAsync();
+            await page.GetByRole(AriaRole.Heading,new() { Name="Collector создан",Exact=true }).WaitForAsync();
+            await page.GetByRole(AriaRole.Button,new() { Name="Скрыть token",Exact=true }).ClickAsync();
+            await page.GetByLabel("Название поиска",new() { Exact=true }).FillAsync("Поиск UI");
+            await page.WaitForTimeoutAsync(200);
+            await page.GetByLabel("Ссылка поиска",new() { Exact=true }).FillAsync("https://www.avito.ru/moskva/zemelnye_uchastki");
+            await page.WaitForTimeoutAsync(200);
+            await page.GetByLabel("Исполняющий Collector",new() { Exact=true }).SelectOptionAsync(new SelectOptionValue { Label="Collector UI" });
+            await page.GetByRole(AriaRole.Button,new() { Name="Сохранить поиск",Exact=true }).ClickAsync();
+            await page.GetByText("Поиск UI",new() { Exact=true }).WaitForAsync();
+            await page.GetByRole(AriaRole.Button,new() { Name="Поставить сбор",Exact=true }).ClickAsync();
+            await page.GetByText("Ожидает",new() { Exact=true }).WaitForAsync();
+            Assert.AreEqual(1,await db.CollectionJobs.CountAsync());
+            string collectorImages=Path.Combine(FoundationTests.RepositoryRoot(),"artifacts","stage1","ui-c");
+            Directory.CreateDirectory(collectorImages);
+            await page.EvaluateAsync("window.scrollTo(0,0)");
+            await page.ScreenshotAsync(new() { Path=Path.Combine(collectorImages,"admin.png"),FullPage=true });
         }
         finally { await PostgresTests.StopAsync(server); }
     }

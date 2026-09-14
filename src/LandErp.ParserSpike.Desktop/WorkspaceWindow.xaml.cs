@@ -21,6 +21,18 @@ public partial class WorkspaceWindow : Window
     private string? selectedJob;
     private Task selectionUpdate = Task.CompletedTask;
     private bool starting;
+    private bool serverCommand;
+    private async Task ServerActionAsync(Func<Task> action)
+    {
+        if (controller == null || serverCommand) return;
+        serverCommand = true;
+        try { await action(); ServerStatusText.Text = controller.Server?.Status ?? "Server подключён"; }
+        catch (Exception) { ServerStatusText.Text = "Server действие не выполнено. Проверьте локальные настройки/HTTPS и повторите. Local mode и данные сохранены."; }
+        finally { serverCommand = false; }
+    }
+    private async void ConnectServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(() => controller!.ConnectServerAsync());
+    private async void StartServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () => { await controller!.ConnectServerAsync(); await controller.Server!.StartWorkAsync(CancellationToken.None); await RefreshAsync(); });
+    private async void DeliverServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () => { await controller!.ConnectServerAsync(); await controller.Server!.DeliverAsync(CancellationToken.None); });
     public WorkspaceWindow() : this(null) { }
     public WorkspaceWindow(WorkspaceController? controller)
     {
@@ -38,7 +50,7 @@ public partial class WorkspaceWindow : Window
             catch (Exception ex) when (ex is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
             { StatusText.Text = ex.Message; StartButton.IsEnabled = false; }
         };
-        refresh.Tick += async (_, _) => await RefreshAsync(false);
+        refresh.Tick += async (_, _) => { await RefreshAsync(false); if (this.controller?.Server is { } server) { await server.TickAsync(CancellationToken.None); ServerStatusText.Text = server.Status; } };
         Closing += async (_, e) =>
         {
             if (closing) return;

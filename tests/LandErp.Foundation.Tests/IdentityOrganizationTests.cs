@@ -113,7 +113,7 @@ public sealed class IdentityOrganizationTests
             scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>(), login, TestPassword, name);
     }
 
-    private static async Task EnableMfaAsync(ServiceProvider services, Guid userId)
+    internal static async Task EnableMfaAsync(ServiceProvider services, Guid userId)
     {
         await using AsyncServiceScope scope = services.CreateAsyncScope();
         UserManager<LandErpUser> users = scope.ServiceProvider.GetRequiredService<UserManager<LandErpUser>>();

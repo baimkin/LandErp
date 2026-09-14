@@ -1,0 +1,49 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace LandErp.Collector.Contracts.V1;
+
+public enum ListingSource { Avito, Cian }
+public enum FieldPresence { NotInspected, Absent, Empty, Present, ParseFailed }
+public enum CollectionOutcome { Unknown, Success, Captcha, AuthenticationRequired, RateLimited, SourceError, Interrupted, LimitReached }
+public sealed record TextField(FieldPresence Presence, string? Raw);
+public sealed record DecimalField(FieldPresence Presence, string? Raw, decimal? Parsed);
+public sealed record AgentRegistration(int ContractVersion, string Version, ListingSource[] Capabilities);
+public sealed record AgentHeartbeat(Guid? JobId = null, Guid? LeaseId = null, CollectionOutcome? SourceStatus = null);
+public sealed record CollectionWork(Guid JobId, Guid LeaseId, DateTimeOffset LeaseExpiresAt,
+    ListingSource Source, string SearchUrl, int MaxPages, string Label);
+public sealed record ObservationEnvelope(string ObservationKey, ListingData Data);
+public sealed record CollectionResult(Guid ResultId, Guid JobId, Guid LeaseId, CollectionOutcome Outcome,
+    ObservationEnvelope[] Observations, bool Final);
+public sealed record CollectionReceipt(Guid ResultId, string Status, int Accepted, int Duplicates);
+
+/// <summary>Public listing fields only. Browser state, cookies and raw HTTP/HTML are outside the contract.</summary>
+public sealed record ListingData
+{
+    public required ListingSource Source { get; init; }
+    public required string ExternalId { get; init; }
+    public required string Url { get; init; }
+    public required DateTimeOffset ObservedAt { get; init; }
+    public required string AdapterVersion { get; init; }
+    public required string Provenance { get; init; }
+    public TextField Title { get; init; } = new(FieldPresence.NotInspected, null);
+    public TextField Location { get; init; } = new(FieldPresence.NotInspected, null);
+    public TextField Description { get; init; } = new(FieldPresence.NotInspected, null);
+    public TextField SellerName { get; init; } = new(FieldPresence.NotInspected, null);
+    public DecimalField Price { get; init; } = new(FieldPresence.NotInspected, null, null);
+    public DecimalField AreaSquareMeters { get; init; } = new(FieldPresence.NotInspected, null, null);
+    public string Currency { get; init; } = "RUB";
+    public string[] PhotoUrls { get; init; } = [];
+    public string[] Warnings { get; init; } = [];
+}
+
+public static class CollectionJson
+{
+    public static JsonSerializerOptions Options { get; } = Create();
+    private static JsonSerializerOptions Create()
+    {
+        JsonSerializerOptions options = new(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
+}

@@ -1,16 +1,18 @@
 # Stage 1 — Completion Master Plan
 
-**Статус:** canonical execution plan  
+**Статус:** canonical execution plan — review corrections applied  
 **Дата ревизии:** 2026-09-15  
 **Рабочая ветка:** `codex/stage-1-procurement-core`  
-**Аудитируемый baseline:** `b6d64e6258bf23d7263695080ff588afe3c04eae`  
-**Назначение:** единая точка входа для завершения Stage 1 без повторного архитектурного исследования.
+**Baseline master-plan:** `733b7e49fb878fd4d633942ececf4272f177509a`  
+**Independent review:** `docs/03-active/STAGE1_COMPLETION_MASTER_PLAN_REVIEW.md` @ `298cb4c28ac2df1cd929f171c5c84e988e3fc35a`  
+**Production baseline для уже выполненного Stage 1:** `b6d64e6258bf23d7263695080ff588afe3c04eae`  
+**Назначение:** единственный execution-документ для последовательного завершения Stage 1 без повторного архитектурного исследования.
 
 ---
 
 ## 1. Как пользоваться этим документом
 
-Этот документ заменяет роль разрозненных task notes как **главный execution-документ завершения Stage 1**. Следующий агент должен начинать с **Phase 1** и не возвращаться к повторному проектированию уже принятых границ.
+Этот документ заменяет роль разрозненных task notes как **главный execution-документ завершения Stage 1**. Следующий implementation-agent начинает с **Phase 1** и не возвращается к повторному проектированию уже принятых границ.
 
 При конфликте источников использовать такой приоритет:
 
@@ -21,343 +23,307 @@
 
 HTML prototypes в `docs/14-ui-kit/prototypes/` задают композицию и UX-reference. Их demo data, JS и технические названия не являются production contract. Реализация остаётся на существующем Blazor/component/token stack.
 
-### 1.1. Жёсткие границы этой программы работ
+### 1.1. Жёсткие границы программы работ
 
-- **не трогать локальный Parser/Collector Agent** (`LandErp.ParserSpike*`) до отдельной фазы после завершения серверного Stage 1;
-- сервер можно менять так, чтобы старый V1 Collector продолжал работать через compatibility path;
+- **не читать глубоко и не менять локальный Parser/Collector Agent** (`LandErp.ParserSpike*`) в Stage 1 completion;
+- Phase 2 меняет серверный claim/routing mechanism и сохраняет V1 wire contract/endpoints настолько, насколько это возможно без изменения локального Parser Agent;
 - не реализовывать `Owned Assets`, `LandAsset`, Investor cabinet и полноценный post-purchase contour;
 - Stage 1 заканчивается подтверждённым `Acquired` внутри `PropertyCase`: фактическая цена + дата + комментарий; дальнейший `LandAsset` — только будущая точка передачи;
 - не создавать отдельный большой модуль/экран «Сделка»;
-- старые migrations не переписывать: только новые additive/transform migrations;
-- не делать глобальный UI rewrite отдельно от нужного business flow.
+- старые migrations не переписывать: только новые additive/transform/cleanup migrations;
+- не делать глобальный UI rewrite отдельно от нужного business flow;
+- не строить generic workflow engine, generic media/document platform, distributed offline sync framework или event-sourcing rewrite ради Stage 1.
+
+### 1.2. Сквозное правило scope / permissions
+
+**Security correctness не откладывается до Phase 6.** Каждый новый read model, command, endpoint и UI action в каждой фазе обязан в той же фазе получить server-side permission/access predicate и соответствующие positive/negative tests на текущем `AccessContext`.
+
+Канонические Stage 1 semantics:
+
+- **Catalog / Incoming** — общий organization-shared intake pool; Search/Agent/Department/Team не определяют ownership входящего элемента;
+- **Procurement** — `Own / AssignedObjects / Team / Department / Organization` вычисляются через `PropertyCase` responsibility/assignment и текущие employee organization assignments, **никогда через Listing metadata**;
+- **Collection management** — organization-admin surface; более узкие scopes не получают частично отфильтрованный административный экран;
+- **Organization administration** — mutations требуют organization-admin capability; read views соблюдают разрешённый scope;
+- **Audit** — `audit.read` + organization-level visibility по approved screen;
+- **Overview** — использует те же scope-aware predicates/query services, что Catalog/Procurement/Collection; не изобретает собственную трактовку scope.
+
+Phase 6 остаётся фазой Organization/Identity UX и финальной cross-module permission-matrix проверки, а не первой фазой, где access становится корректным.
 
 ---
 
-## 2. Результат ревизии: что реально есть сейчас
+## 2. Канонические доменные границы
 
 ### 2.1. Catalog / incoming
 
 **CURRENT**
 
-- серверная сущность `Catalog.Domain.Listing` фактически является marketplace listing;
-- источник типизирован через `LandErp.Collector.Contracts.V1.ListingSource`, то есть Catalog зависит от бинарного Collector contract;
+- `Catalog.Domain.Listing` фактически является marketplace listing;
+- source classification зависит от `LandErp.Collector.Contracts.V1.ListingSource`;
 - `ExternalId` и `Url` обязательны;
-- `DepartmentId`/`TeamId` приходят из `SearchConfiguration` и сохраняются в Listing;
-- ручной/Telegram/referral ingestion без fake Agent/Job отсутствует;
-- отдельного production-экрана «Входящие объявления» нет: текущий `/procurement` начинает выборку от Listings.
+- `DepartmentId`/`TeamId` приходят из `SearchConfiguration`;
+- manual/Telegram/referral ingestion без fake Agent/Job отсутствует;
+- `/procurement` начинает выборку от Listings.
 
 **TARGET**
 
 - нейтральный `CatalogItem` concept для Avito/Cian/Telegram/manual/referral/agent/other;
-- server-owned source code, не зависящий от Collector enum;
-- `ExternalId?`, `Url?` optional;
-- автоматические observations остаются историей Collector, ручные записи имеют нормальный provenance без fake job;
-- отдельный incoming read model/UI;
-- действия входящего слоя: отклонить, наблюдать, связать с существующим case, `Взять в работу`.
+- server-owned source code; Collector enum маппится только на ingestion boundary;
+- `ExternalId?`, `Url?` optional; `null` означает отсутствие external identity, пустая строка не используется как fake id;
+- uniqueness внешней identity применяется только когда external identity существует;
+- automatic observations остаются историей Collector; manual/Telegram-like записи имеют нормальный provenance без fake Job/Observation;
+- Catalog — общий входящий pool организации;
+- действия входящего слоя: отклонить, наблюдать/мониторить, связать с существующим case, `Взять в работу`.
 
-**MIGRATION**
+Физическое переименование таблицы/класса `Listing` можно отложить, если это снижает migration risk. Архитектурную независимость Catalog от Collector enum и Procurement от Listing откладывать нельзя.
 
-Физическое переименование `Listing` не обязательно в первой миграции. Можно сохранить таблицу/класс как transitional storage, но снять доменную зависимость Catalog от Collector enum, разрешить non-marketplace entries и ввести отдельный source-link к Procurement.
-
-### 2.2. Procurement / PropertyCase
-
-**CURRENT**
-
-- `PropertyCase.ListingId` обязателен;
-- в EF стоит unique index + required FK `PropertyCase -> Listing`;
-- `ProcurementWorkspace` начинает queue от `Listings` и создаёт case через `EnsureCaseAsync(listingId)`;
-- публичные contracts, commands, Razor route и card работают по `ListingId`;
-- один case технически равен одному listing;
-- рабочие факты case в основном читаются из актуального Listing;
-- существующий manager/head workflow, assignment, task, approvals, notifications, business timeline, optimistic concurrency и append-only history — полезная база и должна быть сохранена.
+### 2.2. PropertyCase / Procurement
 
 **TARGET**
 
-- `PropertyCase` — aggregate/root Procurement;
-- `0..N` связанных Catalog items через отдельную подтверждённую связь (`PropertyCaseCatalogItem` / `PropertyCaseSourceLink`);
-- после `Взять в работу` все Procurement read/write operations адресуются `CaseId`;
+- `PropertyCase` — самостоятельный Procurement aggregate/root;
+- `0..N` связанных Catalog items через подтверждённую source-link relation;
+- один PropertyCase может иметь много источников;
+- **один подтверждённый Catalog item не может одновременно принадлежать двум PropertyCase**;
+- possible match / duplicate candidate не является второй confirmed link;
+- после boundary command вся Procurement работа адресуется `CaseId`;
 - queue начинается с `PropertyCases`;
-- case содержит собственные подтверждённые/рабочие факты, а source data остаются provenance;
-- удаление/закрытие/изменение внешнего объявления не разрушает case;
+- case содержит собственные verified/working facts; source data остаются provenance;
+- удаление, закрытие или изменение внешнего объявления не удаляет source history и не разрушает case;
 - Telegram + Avito + Cian могут относиться к одному case.
 
-**MIGRATION**
+Hard DB invariant для confirmed source links:
 
-Добавить source-link, backfill существующего `ListingId`, перенести минимальные case-owned facts, перевести contracts/workspace/routes на `CaseId`, затем снять обязательный FK/unique coupling. Existing business number, assignment, task, approvals, timeline и audit не пересоздавать.
+- unique constraint/index гарантирует `CatalogItemId -> at most one confirmed PropertyCase`;
+- `TakeToWork`/confirmed linking выполняются transactionally;
+- конкурентные запросы двух менеджеров не могут создать два confirmed case для одного item;
+- если confirmed link уже существует, повторная/проигравшая команда возвращает/open существующий Case, а не создаёт второй.
 
 ### 2.3. Collection server
 
-**CURRENT**
+Целевая цепочка:
 
-- `SearchConfiguration` содержит обязательные `AgentId`, `DepartmentId`, `TeamId`;
-- `ServerCollectionJob` заранее содержит `AgentId`;
-- `ClaimAsync` выбирает только `jobs.agent_id = current agent`;
-- ingestion маршрутизирует Listing в department/team выбранного search;
-- production UI заставляет администратора выбрать конкретный Agent/Department/Team;
-- расписания, группы поисков и полноценная история запусков ещё не доведены до approved UX.
+`Search -> Schedule -> Pending Job -> shared pool -> compatible free Agent -> Claim/Lease -> Catalog`.
 
-**TARGET**
-
-`Search -> Schedule -> Pending Job -> shared pool -> compatible free Agent claims`.
-
-- Search не содержит обязательный Agent/Department/Team;
-- группа поисков — только организационная группировка;
-- job получает actual executor при claim/lease, а не при enqueue;
-- capability/source compatibility проверяется на сервере;
-- все результаты организации идут в общий incoming Catalog;
-- server schedule создаёт jobs; manual run остаётся доступен;
-- UI показывает поиски, группы, расписания, общий пул, историю и состояние парсеров.
-
-**Compatibility**
-
-Текущий V1 Collector уже вызывает серверный `claim` и получает `CollectionWork`; он не обязан знать, к какому Agent search был привязан в БД. Поэтому shared-pool routing можно реализовать серверно, сохранив V1 wire shape и endpoints. Это обязательный способ не заставлять немедленно переделывать работающий локальный Parser Agent.
+- Search не содержит обязательный Agent/Department/Team routing;
+- SearchGroup — тонкая организационная группировка, не новый generic reference-data framework;
+- job получает actual executor при claim/lease, не при enqueue;
+- capability/source compatibility проверяется сервером;
+- results идут в organization-wide Catalog;
+- V1 Collector claim/heartbeat/result contract сохраняется совместимым настолько, насколько это возможно;
+- локальный Parser Agent не читается глубоко и не изменяется.
 
 ### 2.4. Procurement business flow
 
-**CURRENT**
+Целевая цепочка:
 
-Работают базовые действия manager/head: take work, clarify, monitor, forward, return, approve/reject, notes/contact, assignment/task, notification, timeline и change signal от listing revision. Но это короткий Listing-centric workflow, а не полный Stage 1 dossier.
+`входящий item -> первичный отбор -> взять в работу / связать -> PropertyCase -> первичный анализ -> manager/head handoff -> переговоры -> quick/deep checks -> site inspection -> решение -> Acquired`.
 
-**TARGET**
+Карточка case: `Основное / Переговоры / Проверки / Осмотр / Документы / История / Источники`.
 
-Один PropertyCase проходит:
+### 2.5. Lifecycle reactivation
 
-`входящий item -> взять в работу -> первичный анализ -> manager/head handoff -> переговоры -> quick/deep checks -> site inspection -> решение -> подтверждение покупки -> Acquired`.
+Канонический сценарий:
 
-Карточка case должна иметь утверждённые рабочие поверхности: `Основное / Переговоры / Проверки / Осмотр / Документы / История / Источники`.
+`отклонили -> поставили на мониторинг -> условие выполнено -> снова интересно`.
 
-### 2.5. Negotiations / checks / inspection / purchase
+Правило идентичности:
 
-**CURRENT**
+- если источник ещё не был связан с case — новый интерес может привести к обычному `TakeToWork`;
+- если для этого реального объекта уже существует PropertyCase и источник/confirmed match указывает на него — система выполняет **resume/reopen существующего Case**, а не создаёт второй;
+- head return -> manager rework -> resubmit всегда остаётся тем же PropertyCase;
+- предотвращение дублей опирается на confirmed-link unique DB invariant + transactionally idempotent commands + явный link/resume path; possible matches сами по себе не создают confirmed ownership.
 
-- полноценной доменной модели Negotiation/PriceStatement нет;
-- quick/deep checks представлены workflow-текстом, а не структурированными результатами;
-- Site Inspection отсутствует как production module/read-write model;
-- purchase completion отсутствует.
+### 2.6. Attachments / storage boundary Stage 1
 
-**TARGET**
+Phases 4–5 используют минимальную общую boundary, а не отдельный большой media framework.
 
-- переговоры различают ask / seller offer / buyer offer / agreed price и сохраняют события/условия/next step;
-- quick checks и deep/legal checks хранят структурированные результаты, статус, автора, время, комментарий и blockers;
-- site inspection — mobile-first checklist с server-configurable template, прогрессом, notes/media и итогом;
-- `Отметить как куплено` фиксирует фактическую цену, дату, комментарий, ставит `Acquired`, пишет timeline/audit и закрывает procurement work;
-- **не создавать InvestmentProject в Stage 1**. Старое FP-041 в этой части superseded approved product boundary.
+Attachment должен поддерживать:
 
-### 2.6. Organization / Identity
+- фото;
+- документы;
+- видео;
+- аудио, когда это требуется approved flow;
+- внешние ссылки/metadata;
+- ownership к `Case`, `Inspection`, `InspectionItem`, `Negotiation` и/или `Check`;
+- Organization ownership и authorization через owning business object;
+- stable reference + upload/read metadata; raw storage identifiers/secrets не показываются staff UI;
+- retry/not-yet-synchronized state для media при временном сетевом сбое.
 
-**CURRENT**
+### 2.7. Organization / Identity, Audit, Overview
 
-- domain уже содержит Organization, OrgUnit, Team, Position, Employee, EmployeeAssignment и AccessScope;
-- Team принадлежит Department — подходящая основа;
-- UI разделён на `/organization` и `/employees`;
-- управление в основном create-oriented;
-- primary onboarding — invitation/email activation;
-- employee/assignment UI местами показывает технические scope/role identifiers.
+Сохраняются принятые границы:
 
-**TARGET**
-
-Один раздел `Организация` с tabs:
-
-`Структура / Сотрудники / Должности`.
-
-- Department -> Team -> Employees;
-- rename/archive/restore вместо физического удаления;
-- сотрудники физически не удаляются;
-- position не определяет permissions автоматически;
-- администратор может создать login/password account; временный пароль показывается один раз;
-- invitation-flow остаётся secondary;
-- права и scope применяются сервером, UI показывает human-readable labels.
-
-### 2.7. Audit
-
-**CURRENT**
-
-`/audit` напрямую выводит raw `Action`, `EntityType`, `EntityId`, user id и `Changes` JSON. Нет semantic formatting, нормального paging/filtering и безопасного технического disclosure.
-
-**TARGET**
-
-Основной журнал:
-
-`кто -> что сделал -> с чем -> когда -> что изменилось`.
-
-Нужен отдельный server read model: semantic event type/title, actor display name, target display identity, human-readable change set, server-side filters + paging. Raw action code, GUID, correlation id и JSON — только в раскрываемом `Технические детали`.
-
-### 2.8. Overview
-
-**CURRENT**
-
-Home — welcome page с несколькими link cards.
-
-**TARGET**
-
-Операционный dashboard с server-side aggregates:
-
-- Новые входящие;
-- В закупке;
-- Требуют внимания;
-- Ждут решения;
-- `Требует внимания`;
-- `Закупка сейчас`;
-- `Моя работа`;
-- `Сбор данных`;
-- быстрые действия;
-- команда закупки только в допустимом scope.
-
-Не добавлять BI/финансы/графики для заполнения пустого места.
-
-### 2.9. Navigation / permissions / technical vocabulary
-
-**CURRENT**
-
-Sidebar содержит отдельные `Сотрудники`, `Оргструктура`, техническое `Collector`; incoming Catalog отсутствует. Domain permissions уже существуют, но screens/read models не везде scope-aware на целевом уровне.
-
-**TARGET**
-
-Навигация следует пользовательским областям: `Обзор`, `Входящие`, `Закупка`, `Сбор данных`, `Организация`, `Аудит` по permissions. В staff UI запрещены raw class/enum identifiers.
-
-Обязательные display mappings, среди прочих:
-
-- `PropertyCase` -> `объект закупки` / business name;
-- `CollectionJob` -> `задание на сбор данных`;
-- `CollectorAgent` -> `сборщик` / `парсер`;
-- `AwaitingManualAction` -> `требует ручного действия`;
-- `AccessScope.Organization` -> `Вся организация`;
-- `DD` -> `глубокая проверка` / `юридическая проверка`;
-- GUID/raw enum/class/correlation id -> только technical details.
+- `Организация`: `Структура / Сотрудники / Должности`, rename/archive/restore, direct login/password creation primary, invitation secondary, position != permissions;
+- Audit — immutable current store + semantic read projection/formatters; не event-sourcing rewrite;
+- Overview — query-time aggregates/read models first; materialization только после измеренной необходимости.
 
 ---
 
 ## 3. Superseded assumptions register
 
-Следующие старые предположения **не должны возвращаться** в реализацию:
-
 | Старое предположение | Канонический target |
 |---|---|
 | Search закреплён за конкретным Agent | shared pool + capability-based claim |
-| Search маршрутизирует данные через Department/Team | результаты организации идут в общий Catalog |
+| Search маршрутизирует данные через Department/Team | results организации идут в общий Catalog |
 | `/procurement` одновременно входящие и закупка | отдельные Incoming Catalog и PropertyCase queue |
 | PropertyCase существует только из Listing | PropertyCase независим, `0..N` source links |
 | Procurement commands адресуются ListingId | после take-work только CaseId |
 | Catalog source enum принадлежит Collector contract | server-owned Catalog source code |
 | ручные данные имитируют Collector result | отдельный manual ingestion/provenance path |
+| monitored/rejected source всегда создаёт новый case при повторном интересе | существующий case resume/reopen, если это тот же объект |
+| scope Procurement выводится из Listing Department/Team | scope выводится из Case responsibility/assignment |
 | Employees и Org structure — разные top-level разделы | один `Организация` с tabs |
 | invitation — единственный/главный employee flow | direct login/password creation primary, invitation secondary |
 | Audit показывает raw storage fields | semantic audit read model + hidden technical details |
 | Home — набор ссылок | operational Overview |
 | покупка автоматически создаёт InvestmentProject | Stage 1 заканчивается Acquired; LandAsset/Projects позже |
 
-`README.md` / `START_HERE.md` и старые FP могут содержать эти предположения. Их править после стабилизации соответствующей implementation phase, а не использовать как target.
-
 ---
 
-## 4. Target server contracts, которые должны стабилизироваться
+## 4. Target server contracts
 
 ### 4.1. Catalog
 
-Минимально нужны application contracts/use cases:
+Минимально нужны:
 
-- `ListIncomingCatalog(...)` — server filtering/paging;
+- `ListIncomingCatalog(...)`;
 - `GetCatalogItem(id)`;
 - `CreateManualCatalogItem(...)`;
-- `Dismiss/Monitor CatalogItem`;
+- `DismissCatalogItem(...)`;
+- `SetCatalogMonitoring(...)`;
 - `TakeCatalogItemToWork(catalogItemId, createNewCase | existingCaseId)`;
 - `LinkCatalogItemToCase(catalogItemId, caseId, relationType)`;
+- `ResumeExistingCaseFromCatalogItem(...)`;
 - source/provenance read model.
-
-Source classification принадлежит Server/Application, Collector source enum маппится на неё на ingestion boundary.
 
 ### 4.2. Procurement
 
-После создания case:
-
 - `ListPropertyCases(...)`;
 - `GetPropertyCase(caseId)`;
-- workflow decisions / transfer / notes / negotiation / checks / inspection / purchase — по `CaseId`;
-- source changes создают signal/attention, но не перезаписывают case-owned verified facts автоматически.
+- workflow / transfer / notes / negotiations / checks / inspection / purchase — по `CaseId`;
+- source changes создают attention/discrepancy signal и не перезаписывают case facts автоматически.
 
-### 4.3. Collection
+### 4.3. Temporary ListingId -> CaseId compatibility
 
-- Search definition + revision/config;
-- Search group;
-- server schedule;
+Новый canonical route — CaseId-based, например `/procurement/{caseId:guid}`.
+
+Текущий route `/procurement/listings/{ListingId}` временно сохраняется как server-side compatibility adapter:
+
+1. найти confirmed связь `Listing/CatalogItem -> PropertyCase`;
+2. redirect/forward на canonical Case route;
+3. **не создавать PropertyCase неявно**, если link отсутствует;
+4. ListingId не используется как primary identity новых business operations;
+5. legacy contracts/routes удаляются только в **Phase 9** после доказанного cutover всех server UI/tests/known consumers.
+
+### 4.4. Collection
+
+- Search definition/revision/config;
+- SearchGroup;
+- schedule;
 - enqueue/manual run;
 - pending shared jobs;
-- claim compatible work;
-- actual AgentId появляется на lease/execution;
+- compatible claim/lease;
+- actual AgentId как executor после claim;
 - job/history read model;
-- V1 collector endpoints сохраняются совместимыми до отдельного Parser Agent phase.
-
-### 4.4. Organization / Identity
-
-- list/read Organization workspace;
-- create/rename/archive/restore Department/Team/Position;
-- create employee account with login + generated temporary password;
-- password returned **ровно один раз** в command result, не сохраняется как retrievable plaintext;
-- disable/archive employee without physical delete;
-- assignment/scope/permissions managed separately from position;
-- invitation remains explicit secondary action.
+- V1 Collector endpoints compatible до отдельной Parser Agent phase.
 
 ---
 
 # 5. Implementation phases
 
-Всего: **9 phases**. Phase 1 и Phase 2 — P0 и должны быть завершены до косметического расширения остальных страниц.
+Всего: **9 phases**. Число фаз review не меняет. Phase 2 остаётся одной numbered phase, но имеет обязательные checkpoint **2A** и **2B**.
 
 ---
 
-## Phase 1 — P0: разорвать обязательную Catalog -> PropertyCase связь
+## Phase 1 — P0: полностью закрыть Catalog / Procurement boundary
 
 **Цель**  
-Сделать PropertyCase самостоятельным Procurement aggregate и сохранить все существующие Stage 1 данные.
+Полностью выполнить утверждённый `P0_CATALOG_PROCUREMENT_BOUNDARY.md`: доказать, что Catalog универсален, PropertyCase самостоятельный, Procurement case-centric, а manual/Telegram-like ingress работает без Collector сущностей.
 
-**Почему сейчас**  
-Пока case обязан иметь ListingId, невозможно корректно реализовать manual/Telegram flow, несколько источников, case-owned facts, отдельную procurement queue и устойчивость к исчезновению внешнего объявления.
+### Обязательный scope Phase 1
 
-**Затрагиваемые модули/сущности**  
-Catalog `Listing`/future `CatalogItem`, `PropertyCase`, source links, EF mappings, Procurement contracts/workspace, routes, scope evaluation, existing tests.
+1. **Independent PropertyCase**
+   - убрать business dependency от обязательного `PropertyCase.ListingId`;
+   - case может существовать/read при `0..N` source links;
+   - добавить минимальные case-owned verified/working facts, не копируя весь source payload.
 
-**Конкретные изменения**
+2. **Confirmed source links + hard uniqueness**
+   - ввести `PropertyCaseCatalogItem` / `PropertyCaseSourceLink`;
+   - confirmed `CatalogItemId` имеет DB uniqueness: at most one PropertyCase;
+   - possible duplicate/match хранится отдельно/неподтверждённо и не нарушает invariant.
 
-1. Сначала добавить failing/characterization tests целевых инвариантов из `P0_CATALOG_PROCUREMENT_BOUNDARY.md`.
-2. Ввести neutral relation `PropertyCaseCatalogItem` / `PropertyCaseSourceLink` с `CaseId`, `CatalogItemId`, relation kind/status, provenance/audit fields и подтверждённой uniqueness policy.
-3. Добавить в PropertyCase минимальные case-owned рабочие факты, которые сейчас читаются только из Listing: display name/location/cadastral or other confirmed identifiers, working area/price fields — только реально нужные Procurement данные, без копирования всего source payload.
-4. Убрать business dependency от `PropertyCase.ListingId`; transitional nullable legacy column допустим на одну миграцию.
-5. Перевести `ProcurementWorkspace` на case-root reads и `CaseId` после boundary command.
-6. Queue query начинает с `PropertyCases`; linked Catalog data подмешивается как source summary/signal.
-7. Перевести card/decision/note/forward/return/approval contracts с ListingId на CaseId.
-8. Route карточки сделать case-based, например `/procurement/{caseId:guid}`; Listing/Catalog id остаётся только у incoming actions.
-9. Access checks case не вычислять через Listing.DepartmentId/TeamId; использовать organization + assignment/responsibility + AccessScope.
+3. **Server-owned Catalog source model**
+   - server-owned source code abstraction;
+   - Collector `ListingSource` маппится на boundary;
+   - `ExternalId?`, `Url?` nullable для non-marketplace;
+   - никакого `""` как fake external id; conditional uniqueness только для реальной external identity.
 
-**Миграции**
+4. **Minimal manual / Telegram-like ingestion**
+   - server command `CreateManualCatalogItem` с source/provenance actor/time/comment;
+   - минимальный UI/server path `+ Добавить объявление / предложение`;
+   - manual/Telegram-like item не создаёт fake Agent/Job/Observation.
 
-- новая additive migration создаёт source-link table и case-owned columns;
-- для каждого существующего `PropertyCase.ListingId` создать confirmed source link;
-- backfill case-owned snapshot/facts, не теряя Listing/Observations;
-- сохранить BusinessNumber, assignment/task, transitions, approvals, timeline, audit;
-- после перевода reads/writes отдельной migration снять required FK/unique Listing coupling; старую колонку удалить только когда compatibility consumer отсутствует.
+5. **Idempotent/concurrent-safe `TakeToWork`**
+   - command работает по CatalogItemId;
+   - create new Case или explicit link to existing Case;
+   - transaction + DB uniqueness защищают от двух конкурентных менеджеров;
+   - повтор возвращает/open existing Case;
+   - assignment/task + business timeline + audit создаются по действующим правилам без дублей.
 
-**Compatibility concerns**
+6. **CaseId cutover Procurement**
+   - `ProcurementWorkspace` и queue начинаются с PropertyCases;
+   - card/decision/note/forward/return/approval contracts — `CaseId`;
+   - Listing/CatalogItem id остаётся только у incoming/source-link actions.
 
-- существующие Avito/Cian Listing IDs и observations остаются неизменными;
-- на переходе можно иметь adapter, который по legacy ListingId находит единственный linked CaseId только для старого server UI/test path; новый contract не должен распространять legacy дальше.
+7. **Scope-safe Procurement**
+   - Department/Team visibility не вычисляется через Listing;
+   - access predicate использует organization + Case responsibility/assignment + employee organization assignment + `AccessContext`;
+   - новые queries/commands получают positive + negative scope tests в этой фазе.
 
-**UI**  
-Только минимальная адаптация route/card/queue, без полного редизайна screen 01–03 в этой фазе.
+8. **Temporary legacy compatibility**
+   - `/procurement/listings/{ListingId}` resolves existing confirmed link и redirects/forwards на Case route;
+   - no linked Case => no implicit creation;
+   - старые ListingId contracts не расширяются и остаются deprecated compatibility-only до Phase 9.
 
-**API/application services**  
-Case-centric public contracts; explicit `TakeToWork` boundary command готовится/вводится здесь или в Phase 3, но внутренний case уже не зависит от Listing.
+### Миграции Phase 1
 
-**Tests**
+Порядок обязателен:
 
-- source-less PropertyCase может существовать/read;
-- один case имеет 3 sources;
-- source listing исчез/changed -> case жив;
-- queue root = PropertyCase;
-- all case commands = CaseId;
-- existing manager/head concurrency, scope, restart, append-only tests сохранены в case-centric форме;
-- migration backfill test на legacy dataset.
+1. **Expand** — source-link table, nullable/new case-owned columns, server source classification support, optional external identity support;
+2. **Backfill** — для каждого legacy `PropertyCase.ListingId` создать confirmed source link;
+3. backfill минимальных case-owned facts из source snapshot с **migration/system provenance**, не создавая fake human confirmation;
+4. сохранить BusinessNumber, assignment, task, approvals, transitions, timeline, audit, Listing/Observation history;
+5. **Cutover** reads/writes/routes на CaseId;
+6. снять required FK/unique `PropertyCase.ListingId` coupling после green verification; сам legacy field/adapter может остаться до Phase 9;
+7. source removal не hard-delete: сохранять last known snapshot/observations/link provenance и unavailable/removed-at-source classification.
 
-**Executable verification**
+### UI Phase 1
+
+Минимальная адаптация, достаточная для P0 acceptance:
+
+- manual/Telegram-like create;
+- минимальный incoming action `Взять в работу` / link existing;
+- case-based queue/card route;
+- без полного Incoming screen/filter/monitoring UX — это Phase 3.
+
+### Tests / executable verification Phase 1
+
+Обязательные automated scenarios:
+
+- PropertyCase read/write без Listing;
+- one Case -> 3 confirmed sources;
+- one Catalog item -> second confirmed Case link rejected;
+- concurrent `TakeToWork` двух менеджеров -> ровно один Case/confirmed link;
+- repeated `TakeToWork` -> existing Case;
+- manual item без URL/ExternalId создаётся без fake Collector entities;
+- manual/Telegram-like -> take to work -> CaseId flow;
+- existing Avito flow остаётся green;
+- source disappearance/change не ломает Case и не overwrite verified facts;
+- scope Team/Department/Own/Assigned/Organization идёт через Case responsibility, не Listing metadata;
+- legacy ListingId route redirects existing link и не creates Case;
+- migration from legacy Stage 1 dataset сохраняет business history и migration provenance.
+
+Executable baseline:
 
 ```powershell
 dotnet restore LandErp.slnx --locked-mode
@@ -365,148 +331,162 @@ dotnet build LandErp.slnx --no-restore
 dotnet test tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj --no-build
 ```
 
-Для PostgreSQL tests использовать существующий sandbox/локальную БД проекта. Проверить `Database.HasPendingModelChanges() == false`.
+PostgreSQL migration tests: clean DB + legacy Stage 1 DB; `Database.HasPendingModelChanges() == false`.
 
-**Acceptance criteria**
+### Exit gate Phase 1
 
-- обязательного `PropertyCase.ListingId` в business model больше нет;
-- существующий Avito case мигрирован без потери истории;
-- Procurement read/write path работает по CaseId;
-- case может жить при 0..N sources.
+Перед Phase 2 **обязательно истинно**:
 
-**Не входит**  
-Полный incoming UI, negotiations, inspection, Collection redesign, Organization redesign.
+- весь P0 Catalog/Procurement boundary закрыт, включая manual/Telegram-like ingress;
+- PropertyCase независим и поддерживает `0..N` sources;
+- confirmed source uniqueness обеспечена DB + transaction;
+- Procurement reads/commands/route canonical = CaseId;
+- legacy ListingId route compatibility доказана;
+- Avito и manual/Telegram-like acceptance scenarios green;
+- scope-safe Procurement доказан без Listing Department/Team;
+- migrations воспроизводимы и не теряют history/provenance.
 
-**Перед Phase 2 должно быть истинно**  
-Все P0 Catalog/Procurement domain tests green; миграция воспроизводима на clean DB и legacy Stage 1 DB.
+**Phase 1 READY TO IMPLEMENT**
 
 ---
 
 ## Phase 2 — P0: Collection shared pool и server-owned routing
 
 **Цель**  
-Вернуть Collection к модели общего пула и убрать скрытую маршрутизацию Catalog через конкретный Agent/Department/Team.
+Перевести Collection с preassigned Agent/Search routing на shared server pool, не меняя локальный Parser Agent и не ломая V1 wire contract.
 
-**Почему сейчас**  
-Текущая модель генерирует новые Catalog данные с неправильной ownership semantics. Её нужно исправить до расширения incoming UI и server schedules.
+Phase 2 остаётся **одной фазой**, но выполнять её строго в порядке 2A -> 2B.
 
-**Затрагиваемые модули/сущности**  
-`SearchConfiguration`, search groups/schedules, `ServerCollectionJob`, CollectorGateway, CollectionAdministration, Collection mappings/read models/UI, Catalog ingestion boundary.
+### Phase 2A — shared pool migration / cutover
 
-**Конкретные изменения**
+**Сначала только migration-critical foundation. 2B не начинать до green 2A.**
 
-1. Search больше не требует `AgentId`, `DepartmentId`, `TeamId`.
-2. Ввести SearchGroup как организационную группировку и server schedule model.
-3. Job создаётся `Pending` без executor; хранит required source/capability/priority/search revision/config snapshot.
-4. `ClaimAsync` атомарно выбирает любой совместимый pending job организации с `FOR UPDATE SKIP LOCKED`; actual AgentId/lease фиксируется при claim.
-5. Expired lease возвращается в pool по действующей retry policy.
-6. Ingestion создаёт/обновляет organization-wide Catalog item; department/team из search не копируются в incoming ownership.
-7. Состояния jobs переводятся в human-readable read model; raw enum не идёт напрямую в UI.
-8. Добавить server-side groups/schedules/history; manual run остаётся.
+Конкретно:
 
-**Миграции**
+1. Search перестаёт требовать AgentId/DepartmentId/TeamId для новых writes;
+2. Pending job может иметь `AgentId = null`; executor устанавливается атомарно при Claim;
+3. `ClaimAsync` выбирает compatible pending job организации (`FOR UPDATE SKIP LOCKED` или эквивалентно безопасный mechanism);
+4. heartbeat/result paths после claim продолжают валидировать `JobId + Agent + LeaseId`;
+5. ingestion больше не копирует Search Department/Team в Catalog ownership;
+6. server maps Collector V1 source -> server-owned Catalog source code;
+7. Parser Agent internals не читать глубоко и не менять.
 
-- nullable/remove preassigned `agent_id` from jobs после переноса executor semantics в lease/job execution fields;
-- remove search routing fields после backfill/compat period;
-- существующие searches перевести в default group; текущие schedules/manual configs сохранить насколько возможно;
-- existing pending assigned jobs либо мигрировать в shared pending pool, либо завершить drain до cutover — выбрать безопасный вариант по данным окружения.
+#### Deterministic migration старых jobs
 
-**Compatibility concerns**
+- **Pending** -> legacy preassignment освобождается; job входит в shared pool;
+- **Leased с валидным незавершённым lease** -> не отбирать и не reassign; дождаться completion/expiry;
+- **expired unfinished lease** -> reclaim может выполнить другой compatible Agent;
+- **Completed** -> навсегда сохранить фактического Agent как historical executor;
+- terminal `LimitReached`, `AwaitingManualAction`, `Failed`, `Interrupted` -> сохранить текущего Agent как historical executor, если он отражает фактическое выполнение;
+- job executor nullable только для unclaimed work; claim заполняет его атомарно;
+- legacy Search `AgentId/DepartmentId/TeamId` columns физически не удалять, пока новый код и compatibility path их больше не читают.
 
-- V1 Collector wire endpoints/`CollectionWork` сохранить;
-- локальный Parser Agent не читать и не менять;
-- server adapter маппит старый Collector `ListingSource` -> server-owned Catalog source code;
-- новый server Search creation API не требует изменения старого Agent claim loop.
+#### Tests 2A
 
-**UI**  
-Довести `/collectors`/replacement screen до approved `Сбор данных`: группы, поиски, расписания, shared queue, история, parsers. Термин `Collector` не использовать в основной staff navigation.
+- old Pending освобождается в pool;
+- active Leased не steals;
+- expired lease reclaimable другим compatible Agent;
+- Completed сохраняет historical Agent;
+- two Agents cannot lease same Job;
+- incompatible Agent не получает Job;
+- V1 registration/heartbeat/claim/result remains green;
+- Catalog ingestion organization-wide и не получает Search Department/Team ownership.
 
-**API/application services**  
-Search CRUD/archive/pause, group management, schedule, RunNow, history/paging, shared Claim.
+**2A exit gate:** deterministic migration + shared claim + V1 compatibility + concurrency tests green.
 
-**Tests**
+### Phase 2B — SearchGroup + schedules + management UI
 
-- Search создаётся без Agent/Department/Team;
-- два совместимых Agent конкурируют и получают разные jobs;
-- несовместимый Agent job не получает;
-- expired lease claimable другим Agent;
-- results from any Agent land in same organization Catalog;
-- current V1 registration/heartbeat/claim/accept remains green;
-- schedule creates one idempotent job per due run.
+Только после green 2A:
 
-**Executable verification**  
-Foundation PostgreSQL tests + минимум один integration scenario с двумя registered Agent identities и одним shared queue.
+- SearchGroup — минимальная thin grouping model для 30–50+ searches; не generic dictionary framework;
+- typed server schedules;
+- scheduler создаёт idempotent jobs per due run;
+- manual `Run now` остаётся;
+- history/counters/read model;
+- approved `Сбор данных` UI: groups, searches, schedules, shared queue, history, parsers;
+- human-readable statuses; raw technical enum/class names не являются staff vocabulary.
 
-**Acceptance criteria**
+Scope: Collection management — organization-admin surface; server-side authorization и negative tests входят в Phase 2.
 
-- Search не закреплён за машиной;
-- job executor определяется при claim;
-- UI больше не требует выбрать Agent/Department/Team для поиска;
-- текущий локальный Parser Agent не потребовал code change.
+### Exit gate Phase 2
 
-**Не входит**  
-Audit Parser desktop UX, CAPTCHA/session/browser behavior, parser refactor.
+Перед Phase 3:
 
-**Перед Phase 3 должно быть истинно**  
-Новый incoming поток не получает routing ownership от search/agent; shared pool стабилен и покрыт concurrency tests.
+- Search не закреплён за машиной/Department/Team;
+- Pending jobs работают через shared pool;
+- active leases/history мигрированы безопасно;
+- compatible Agent определяется при claim;
+- schedules/group/UI строятся уже поверх 2A model;
+- V1 Collector wire path green без code change локального Parser Agent;
+- новый incoming поток не получает routing ownership от search/agent.
 
 ---
 
-## Phase 3 — P1: Incoming Catalog + отдельная Procurement queue
+## Phase 3 — P1: полный Incoming Catalog + отдельная Procurement queue
 
 **Цель**  
-Развести пользовательские поверхности `Входящие` и `Закупка` и реализовать единый вход для автоматических и ручных предложений.
+Довести полный approved Incoming UX/read model поверх уже готовых Phase 1 boundary commands и Phase 2 ingestion.
 
-**Почему сейчас**  
-После Phase 1–2 доменные границы и ingestion корректны; теперь approved screens можно строить без закрепления неправильной модели.
+### Конкретные изменения
 
-**Затрагиваемые модули**  
-Catalog application/read models, Procurement boundary service, incoming Razor page, procurement queue, navigation.
+- полноценный incoming list/detail drawer: server paging/filter/search/source/status/age/price/area;
+- statuses/actions без generic workflow engine;
+- `CreateManualCatalogItem`, `TakeToWork`, link-existing из Phase 1 **переиспользуются**, не дублируются;
+- Procurement queue показывает только PropertyCases и case-specific next action/responsibility/source summary;
+- navigation: отдельные `Входящие` и `Закупка`.
 
-**Конкретные изменения**
+### Мониторинг цены
 
-- server-owned Catalog source codes: Avito, Cian, Telegram, Manual/Referral/Agent/Other с extensible representation;
-- разрешить `ExternalId?`/`Url?` для non-collector items;
-- command `CreateManualCatalogItem` с provenance actor/time/comment;
-- incoming statuses/actions: new/reviewed/monitoring/dismissed/linked/in-work согласно screen spec, без лишней универсальной state machine;
-- `TakeToWork` создаёт новый PropertyCase или связывает item с существующим; операция идемпотентна;
-- manual item не создаёт CollectionJob/Observation;
-- incoming list: server paging/filter/search/source/status/age/price/area + detail drawer;
-- procurement queue показывает только PropertyCases и case-specific next action/responsibility/sources summary;
-- navigation получает отдельные `Входящие` и `Закупка`.
+Для monitoring хранить независимо:
 
-**Миграции**  
-Additive Catalog columns/status/source/provenance; безопасная конверсия current ListingSource -> server source code; external id/url constraints ослабить для manual paths, сохранив uniqueness policy для marketplace identity.
+- целевую общую цену;
+- целевую цену за сотку;
+- правило OR/AND только если это явно требуется approved screen; без лишней rule-engine абстракции;
+- текущие observed/source values и время последней оценки.
 
-**Compatibility concerns**  
-Collector ingestion продолжает писать observations для automatic sources; manual rows обходят observation table.
+Когда заданное условие выполнено:
 
-**UI**  
-Следовать `01-incoming-listings.md` и `02-procurement-queue.md`; prototype используется только как composition reference.
+- item автоматически возвращается в активные входящие/attention;
+- создаётся понятный attention signal/event;
+- verified Case facts не меняются автоматически.
 
-**API/application services**  
-Paged incoming query, item detail, manual create, dismiss/monitor, link/take-work; separate paged case queue.
+Классификации **не смешивать** в один общий rejected-status:
 
-**Tests**
+- `Duplicate`;
+- `Fake`;
+- `Removed` / unavailable-at-source;
+- `Sold`;
+- обычное business dismissal/rejection;
+- monitoring.
 
-- Telegram item без URL/external id виден во входящих;
-- dismiss/monitor manual = same semantics as Avito;
-- take-work создаёт ровно один case;
-- link to existing case не создаёт duplicate;
-- Avito + Telegram + Cian -> one case;
-- source price update не перезаписывает verified case facts.
+Source removal сохраняет provenance/snapshots/observations, а не hard-deletes history.
 
-**Executable verification**  
-Integration tests + интерактивный smoke: создать manual Telegram item -> увидеть `/incoming` -> взять в работу -> увидеть `/procurement` -> открыть case.
+### Reactivation / duplicate prevention
 
-**Acceptance criteria**  
-Incoming и Procurement физически/логически разделены; оба работают с реальными server data и permissions.
+Lifecycle:
 
-**Не входит**  
-Полный dossier tabs, inspection, purchase completion.
+`отклонили -> мониторинг -> условие выполнено -> снова интересно`.
 
-**Перед Phase 4 должно быть истинно**  
-Все четыре входа (Avito, manual, Telegram-like, multi-source) приводят к одному и тому же case-centric procurement flow.
+- если source связан с существующим rejected/paused Case, пользователь выполняет explicit **resume/reopen existing Case**;
+- система не создаёт второй Case для того же confirmed source/real object;
+- unique confirmed-link constraint + transactional `TakeToWork`/resume command являются последней защитой от дубля;
+- source revision может вернуть item в attention, но не переписать verified facts.
+
+Scope: Incoming — organization-shared pool с permission predicate; Procurement queue использует Case scope rules из Phase 1.
+
+### Tests / exit gate Phase 3
+
+- manual item без URL/ExternalId проходит full Incoming UX;
+- target total price triggers reactivation;
+- target price-per-sotka triggers reactivation;
+- Duplicate/Fake/Removed/Sold остаются различимыми;
+- monitored source -> condition met -> active attention;
+- linked rejected/paused Case -> resume same Case;
+- source change -> attention, no verified overwrite;
+- Avito + Telegram + Cian -> one Case;
+- no cross-organization data leakage.
+
+Перед Phase 4 все approved incoming paths приводят к единому case-centric Procurement flow.
 
 ---
 
@@ -515,57 +495,43 @@ Incoming и Procurement физически/логически разделены
 **Цель**  
 Довести карточку объекта закупки до рабочего инструмента менеджера и руководителя.
 
-**Почему сейчас**  
-Case identity, sources и queue уже стабилизированы; можно добавлять бизнес-функции без повторной миграции корня aggregate.
+### Attachment foundation в начале Phase 4
 
-**Затрагиваемые модули**  
-Procurement, Workflow, Negotiations, checks/DD read-write models, documents references, timeline, notifications.
+До Negotiations/Checks/Documents создать минимальную attachment/storage boundary из §2.6:
 
-**Конкретные изменения**
+- stable attachment reference + metadata;
+- Organization + owning business object authorization;
+- фото/документы/видео/аудио/ссылки;
+- ownership к Case/Negotiation/Check (Inspection подключится в Phase 5);
+- никакой отдельной универсальной document-management/media platform.
 
-- реализовать approved tabs: `Основное / Переговоры / Проверки / Осмотр / Документы / История / Источники`;
-- сохранить существующие manager/head transitions, но привести stage/next-action vocabulary к бизнес-процессу;
-- явно поддержать manager -> head -> return -> rework -> decision;
-- в `Основное` хранить/edit case-owned verified facts и отдельно показывать discrepancies sources;
-- Negotiation: events + PriceStatement Ask/SellerOffer/BuyerOffer/Agreed, conditions, contact/channel, next step;
-- Quick checks как структурированные простые проверки первичного отбора;
-- Deep/legal checks как структурированные check records/blockers/results, без вывода аббревиатуры DD пользователю;
-- documents references связывать с case/check/inspection where applicable;
-- history/timeline объединяет business events, но не подменяет system audit;
-- source changes создают attention item, а решение применить новое значение к case — явное действие пользователя.
+### Business scope
 
-**Миграции**  
-Новые tables/columns для Negotiation/PriceStatement/check results; indexes по CaseId/status/next action; существующую timeline не переписывать.
+- tabs `Основное / Переговоры / Проверки / Осмотр / Документы / История / Источники`;
+- manager -> head -> return -> rework -> resubmit -> decision в одном Case;
+- rejected/paused Case может быть explicit resume/reopen по lifecycle Phase 3, с сохранением prior decisions/history;
+- case-owned verified facts + source discrepancies отдельно;
+- Negotiation: Ask / SellerOffer / BuyerOffer / Agreed, conditions, contact/channel, next step;
+- Quick checks — structured primary screening;
+- Deep/legal checks — structured records/blockers/results, без technical `DD` в staff UI;
+- documents/attachments привязаны к owning Case/Negotiation/Check;
+- history/timeline — business events, не замена system audit;
+- source values применяются к verified case fields только explicit user action.
 
-**Compatibility concerns**  
-Старые stage IDs можно временно сохранить как storage codes при наличии display mapping; migration state machine делать только если новые переходы реально требуют новых canonical codes.
+Scope/permissions реализуются вместе с каждым command/read model этой фазы.
 
-**UI**  
-`03-property-case.md` — canonical. Raw class/enum names запрещены.
+### Tests / exit gate Phase 4
 
-**API/application services**  
-Case summary/details, verified facts update with concurrency, negotiation commands, check commands, source discrepancy actions, workflow transitions.
-
-**Tests**
-
-- negotiation price types never overwrite each other;
+- negotiation price types не overwrite друг друга;
 - agreed != acquired;
-- return/rework preserves history/tasks;
-- blockers visible and permission-protected;
-- source discrepancy does not mutate verified field implicitly;
-- scope rules for manager/head/organization remain enforced.
+- return/rework/resubmit сохраняет history/tasks;
+- reopen существующего Case не создаёт duplicate;
+- attachment access следует owning Case permissions;
+- blockers permission-protected;
+- source discrepancy не mutate verified field implicit;
+- manager/head/team/department/organization scope green.
 
-**Executable verification**  
-E2E integration: manager takes item -> fills primary facts/checks -> contacts seller -> forwards -> head returns -> manager fixes -> head approves deeper work.
-
-**Acceptance criteria**  
-PropertyCase can be managed through approved dossier without falling back to Listing-centric fields or raw DB concepts.
-
-**Не входит**  
-Field inspection implementation and final Acquired transition — Phase 5.
-
-**Перед Phase 5 должно быть истинно**  
-Case has enough structured business state to make and explain a purchase decision.
+Перед Phase 5 Case содержит достаточно структурированного состояния для объяснимого purchase decision.
 
 ---
 
@@ -574,373 +540,241 @@ Case has enough structured business state to make and explain a purchase decisio
 **Цель**  
 Закрыть последний business gap полного Stage 1 procurement cycle.
 
-**Почему сейчас**  
-Осмотр и покупка должны опираться на уже готовые case/check/negotiation данные.
+### Site Inspection
 
-**Затрагиваемые модули**  
-Procurement/Inspection, files/doc references, Workflow, timeline/audit.
+- server-configurable/versioned inspection template/checklist;
+- template designer / universal rules engine в Stage 1 не нужен;
+- inspection instance per Case: item result/status/note/media, progress, overall conclusion;
+- attachment boundary Phase 4 расширяется ownership к Inspection/InspectionItem;
+- mobile-first screen по `04-site-inspection.md`.
 
-**Конкретные изменения**
+### Минимальное offline-draft поведение
 
-- server-configurable inspection template/checklist; не hard-code список только в Razor;
-- inspection instance per case with item result/status/note/media, progress, overall conclusion;
-- mobile-first screen по `04-site-inspection.md`;
-- offline-first не требуется, но UX должен терпеть медленную мобильную сеть и частичные сохранения;
-- action `Отметить как куплено`: actual price, acquisition date, comment обязательной/разумной валидации;
-- transition to `Acquired`, completion of active procurement task/assignment state по согласованному правилу;
+Полноценный distributed sync/conflict framework **не строить**.
+
+Stage 1 обязан обеспечить:
+
+- пользователь может продолжить заполнять **уже начатый** осмотр при кратком отсутствии связи;
+- локальный draft answers/notes сохраняется и переживает временный disconnect/reload в рамках выбранной client storage strategy;
+- после восстановления связи выполняется безопасное сохранение с concurrency/version check;
+- при конфликте данные не молча перезаписываются: пользователь получает recoverable error/merge-by-retry path;
+- media может иметь явное состояние `not yet synchronized / retry upload`; full offline media sync не требуется.
+
+### Acquired
+
+- `Отметить как куплено`: actual price, acquisition date, comment + разумная validation;
+- command idempotent/terminal: Acquired нельзя выполнить дважды;
+- закрывает active procurement work по согласованному правилу;
 - timeline + audit event;
-- future handoff contract: после Stage 1 этот факт сможет создать/активировать LandAsset отдельной последующей задачей, но сейчас LandAsset не создаётся.
+- PropertyCase остаётся readable;
+- LandAsset/InvestmentProject не создаются.
 
-**Миграции**  
-Inspection template/instance/results + acquisition facts on case or dedicated Procurement-owned purchase record; никаких InvestmentProject/LandAsset tables в этой phase.
+Scope/permissions для inspection/media/acquisition реализуются в Phase 5.
 
-**Compatibility concerns**  
-FP-041 `InvestmentProject` creation считается superseded для Stage 1. Сохранить только полезную семантику `Approved` vs confirmed `Acquired`.
+### Exit gate Phase 5
 
-**UI**  
-`04-site-inspection.md` + purchase modal/reference из approved PropertyCase set. Нет отдельного top-level `Сделка`.
-
-**API/application services**  
-Get/start/save/complete inspection; mark acquired; read purchase summary.
-
-**Tests**
-
-- checklist progress/reload/concurrency;
-- completed result preserves notes/media references;
-- cannot acquire twice;
-- actual price/date/comment persisted;
-- Acquired appears in timeline/audit and leaves active procurement queue;
-- PropertyCase remains readable after acquired.
-
-**Executable verification**  
-Mobile viewport smoke + PostgreSQL restart test + complete E2E `incoming -> case -> inspection -> acquired`.
-
-**Acceptance criteria**  
-Полный Stage 1 procurement business flow проходит от входящего предложения до `Acquired` без future modules.
-
-**Не входит**  
-Owned Assets, LandAsset detail, works, lots, investors, project finance.
-
-**Перед Phase 6 должно быть истинно**  
-Business core Stage 1 закончен; дальнейшие phases доводят administration/read models/production UX.
+- mobile inspection works online и выдерживает краткий disconnect через local draft;
+- safe reconnect save доказан;
+- media retry state не теряет references;
+- `incoming -> case -> checks/negotiation -> inspection -> acquired` green;
+- Acquired terminal/idempotent;
+- полный Stage 1 business core закончен без post-purchase modules.
 
 ---
 
 ## Phase 6 — P2: Organization, employee creation, permissions и scope UX
 
 **Цель**  
-Сделать организационную модель реально администрируемой без технических обходов.
+Довести административный UX и подтвердить общую permission matrix. Эта фаза **не вводит впервые** security semantics предыдущих модулей.
 
-**Почему сейчас**  
-Business flow уже работает; теперь его нужно безопасно отдавать реальным сотрудникам с понятными account/scope controls.
+### Конкретные изменения
 
-**Затрагиваемые модули**  
-Organization, IdentityAccess, AppShell/navigation, employee onboarding UI.
+- объединить `/organization` и `/employees` в `Организация` с tabs `Структура / Сотрудники / Должности`;
+- Department -> Team -> Employees;
+- rename/archive/restore Department/Team/Position; employee disable/archive/restore; hard delete не предоставлять;
+- direct account creation: login + generated temporary password, one-time display;
+- first login requires password change по Identity policy;
+- invitation остаётся secondary action;
+- position != permission role;
+- scope editor: `Свои`, `Назначенные объекты`, `Команда`, `Отдел`, `Вся организация`;
+- navigation visibility соответствует capability, но не заменяет server authorization;
+- финально проверить permission matrix Catalog/Procurement/Inspection/Collection/Overview/Audit.
 
-**Конкретные изменения**
+### Exit gate Phase 6
 
-- объединить `/organization` и `/employees` в один `Организация` с tabs;
-- Structure = Department -> Team -> Employees; Team не показывать как «подотдел»;
-- rename/archive/restore для Department/Team/Position; employee disable/archive/restore; hard delete не предоставлять;
-- direct account creation: login + generated temporary password; one-time display/copy screen;
-- при первом входе потребовать смену temporary password по безопасной Identity policy;
-- invitation flow оставить secondary explicit action;
-- position и permission role не связывать автоматически;
-- scope editor human-readable: `Свои`, `Назначенные объекты`, `Команда`, `Отдел`, `Вся организация`;
-- navigation visibility и server authorization должны совпадать по capability, но скрытие ссылки не заменяет server authorization;
-- проверить case/catalog/overview scope queries на Department/Team/Own/Assigned/Organization.
-
-**Миграции**  
-Только если нужен explicit temporary-password/change-required marker или archival metadata; plaintext password не хранить.
-
-**Compatibility concerns**  
-Existing invited users/assignments сохраняются. Invitation activation endpoints не ломать.
-
-**UI**  
-`08-organization.md` canonical.
-
-**API/application services**  
-DirectCreateEmployeeAccount, reset temporary credential if approved, rename/archive/restore admin commands, scoped read models.
-
-**Tests**
-
-- create employee -> password returned once -> login -> forced change -> work in scope;
-- no API returns temporary password later;
-- archived employee cannot work but history remains;
-- position change does not silently change permission role;
-- all scope modes constrain Catalog/Procurement/Overview correctly.
-
-**Executable verification**  
-Identity integration + browser login smoke under owner/head/manager accounts.
-
-**Acceptance criteria**  
-Administrator can create and place a new employee into real workflow without email invitation or raw GUID/role handling.
-
-**Не входит**  
-Enterprise SSO, external HR integration.
-
-**Перед Phase 7 должно быть истинно**  
-All primary Stage 1 screens are permission/scope correct for multiple users.
+- employee create -> login -> forced change -> work in permitted scope;
+- archived employee не работает, history сохраняется;
+- position change не меняет permissions скрыто;
+- каждая предыдущая фаза имеет собственные scope tests; Phase 6 cross-check не обнаруживает module-specific bypasses.
 
 ---
 
-## Phase 7 — P2: semantic Audit + системная очистка технических имён
+## Phase 7 — P2: semantic Audit + очистка technical vocabulary
 
 **Цель**  
-Сделать аудит пригодным для руководителя/администратора и убрать технические утечки из staff UI.
+Сделать аудит понятным руководителю/администратору без перестройки audit storage.
 
-**Почему сейчас**  
-После стабилизации business/admin actions известен реальный набор событий и можно строить устойчивое semantic formatting.
+- immutable current audit store сохраняется;
+- server paged/filterable semantic read model;
+- formatters per action family;
+- actor/target display identity + human-readable before/after;
+- technical details drawer: raw action/entity/GUID/correlation/JSON только разрешённым пользователям;
+- archived entities остаются понятными за счёт достаточного non-secret display snapshot metadata для новых events;
+- unknown legacy action имеет safe fallback;
+- UI grep/pass по raw enum/class/GUID leakage.
 
-**Затрагиваемые модули**  
-Audit read services, Organization actor lookup, entity display identities, Razor pages/components, labels.
+Scope: `audit.read` + organization-level visibility enforced server-side.
 
-**Конкретные изменения**
-
-- server-side paged/filterable audit query: date, actor, event category, object, search;
-- semantic formatter per action family (Catalog, Procurement, Collection, Organization, Identity);
-- human-readable before -> after fields;
-- business object title/business number instead of GUID in primary row;
-- technical drawer contains action code, entity type/id, correlation id, raw JSON;
-- grep/audit всех production Razor/read models на raw enum/class/GUID leakage;
-- centralized display maps where values cross multiple screens; не прятать бизнес-semantics в случайных Razor ternaries.
-
-**Миграции**  
-Обычно не нужны; при необходимости добавить normalized metadata только новой migration, не переписывать historical audit rows.
-
-**Compatibility concerns**  
-Old audit events без semantic metadata должны форматироваться best-effort и всегда иметь technical fallback.
-
-**UI**  
-`09-audit.md` canonical.
-
-**API/application services**  
-AuditQuery + SemanticAuditRow/Change DTO + technical details endpoint/field gated by permission.
-
-**Tests**
-
-- representative events format deterministically;
-- unknown legacy action falls back safely;
-- server paging/filtering isolation by organization;
-- no raw GUID/action JSON in primary audit row;
-- technical details available only to allowed users.
-
-**Executable verification**  
-Seed actions from all Stage 1 modules -> open audit -> filter -> expand technical details -> verify no N+1 explosion on page query.
-
-**Acceptance criteria**  
-Пользователь может понять «кто что сделал» без знания class/enum/storage names.
-
-**Не входит**  
-SIEM/export pipeline unless already trivial.
-
-**Перед Phase 8 должно быть истинно**  
-Cross-cutting UI vocabulary is human-readable and audit can explain all important Stage 1 actions.
+**Exit gate:** audit paging/filtering/tenant isolation/technical-details authorization green; event-sourcing rewrite отсутствует.
 
 ---
 
 ## Phase 8 — P2: operational Overview
 
 **Цель**  
-Сделать `/` ежедневной рабочей точкой входа, а не каталогом ссылок.
+Сделать `/` ежедневной рабочей точкой входа.
 
-**Почему сейчас**  
-Dashboard должен агрегировать уже стабилизированные Catalog, Procurement, Collection, tasks and scopes.
-
-**Затрагиваемые модули**  
-Overview/read models, Catalog, Procurement, Workflow tasks, Collection health, Organization scope.
-
-**Конкретные изменения**
-
-- один server Overview query/read service вместо N независимых UI-запросов;
+- один bounded server Overview query/read service;
 - metrics: new incoming, in procurement, attention, waiting decision;
-- attention feed с actionable reason/age/link;
-- procurement now by stage/next action in компактной форме;
+- attention feed + reason/age/link;
+- procurement now by stage/next action;
 - `Моя работа` из assignments/tasks/notifications;
-- Collection health: searches due/failing/manual action + parser availability без raw status names;
-- quick actions permission-aware;
-- team procurement block только когда scope позволяет;
-- counts и rows используют одинаковые scope/filter semantics с исходными модулями.
+- Collection health без raw statuses;
+- permission-aware quick actions;
+- team block только при разрешённом scope;
+- counts/rows переиспользуют module predicates/query services и не реализуют scope заново;
+- materialized projections только при измеренной необходимости.
 
-**Миграции**  
-Не требуются, если aggregates эффективны; materialized/read table вводить только при доказанной необходимости.
-
-**Compatibility concerns**  
-Не дублировать business rules внутри dashboard; вызывать/переиспользовать query predicates/services модулей.
-
-**UI**  
-`10-overview.md` canonical. Без декоративных графиков/финансов.
-
-**API/application services**  
-`GetOperationalOverview(subject, ...)` или эквивалентный server-side read model.
-
-**Tests**
-
-- counts equal module queries under same scope;
-- manager sees own/team-permitted work; foreign organization invisible;
-- head sees waiting decisions;
-- collection attention links to correct management item;
-- empty states useful.
-
-**Executable verification**  
-Seed representative data for manager/head/owner -> compare overview counters with source lists -> browser smoke.
-
-**Acceptance criteria**  
-После входа пользователь сразу видит проблемы, ожидающие решения и следующий шаг.
-
-**Не входит**  
-BI trends, ROI dashboards, project finance.
-
-**Перед Phase 9 должно быть истинно**  
-Все approved Stage 1 user surfaces 01–04, 07–10 работают на реальных server data.
+**Exit gate:** Overview counts совпадают с source module queries при том же `AccessContext`; foreign organization data invisible.
 
 ---
 
 ## Phase 9 — P2/P3: Stage 1 hardening, migration cleanup и completion gate
 
 **Цель**  
-Удалить переходные хвосты, доказать сквозную работоспособность и сделать документацию соответствующей production.
+Удалить только доказанно ненужные compatibility хвосты и завершить Stage 1.
 
-**Почему сейчас**  
-Compatibility paths нельзя удалять до завершения всех потребителей; документацию нельзя объявлять актуальной раньше кода.
+### Destructive cleanup gates
 
-**Затрагиваемые области**  
-All Stage 1 modules, migrations, tests, docs, observability, navigation.
+Удалять legacy элементы можно только если доказано всё соответствующее:
 
-**Конкретные изменения**
+1. все server UI/tests/known Procurement consumers используют CaseId;
+2. `/procurement/listings/{ListingId}` нужен только как tested deprecated adapter либо уже не имеет known consumers;
+3. no remaining application read/write зависит от `PropertyCase.ListingId`;
+4. no remaining Collection logic читает/пишет legacy Search Agent/Department/Team routing;
+5. deterministic migration verification green на clean + legacy datasets;
+6. V1 Collector server compatibility green;
+7. completed/terminal Job executor history сохранена;
+8. no pending model changes.
 
-- удалить только доказанно неиспользуемые legacy ListingId Procurement adapters/fields;
-- удалить Agent/Department/Team binding из Search schema после compatibility window;
-- cleanup obsolete routes/components и дублирующие read models;
-- обновить `ACTIVE_TASK.md`, `README.md`, `START_HERE.md`, relevant FP status/notes так, чтобы они больше не учили старой модели;
-- проверить indexes/query plans для incoming, case queue, audit paging, overview;
-- проверить safe exception/error states, concurrency messages, empty/loading/error states;
-- проверить accessibility/responsive behavior approved screens;
-- сформировать final Stage 1 report с migration/verification evidence.
+Только после этого:
 
-**Миграции**  
-Только cleanup migration после доказанного backfill/cutover. Existing history migrations не редактировать.
+- удалить obsolete ListingId Procurement adapters/contracts/field;
+- удалить legacy Search routing columns;
+- cleanup obsolete routes/components/read models;
+- обновить `ACTIVE_TASK.md`, `README.md`, `START_HERE.md`, relevant FP status/notes;
+- проверить indexes/query plans incoming/case queue/audit/overview;
+- error/concurrency/empty/loading states;
+- accessibility/responsive pass;
+- final Stage 1 report с migration/verification evidence.
 
-**Compatibility concerns**  
-Перед удалением V1 server compatibility убедиться, что текущий локальный Parser Agent всё ещё подключается. Сам Agent по-прежнему не рефакторить: отдельная следующая задача.
+**Parser Agent:** локальный Agent по-прежнему не рефакторить. V1 server compatibility не удалять до отдельной Parser phase, если реальный Agent всё ещё её использует.
 
-**UI**  
-Final vocabulary/nav/responsive pass; никаких новых функций ради polish.
+### Exit gate Stage 1
 
-**API/application services**  
-Remove deprecated aliases only after tests prove no production caller in server; Collector V1 retained until dedicated Parser phase.
-
-**Tests**
-
-- full Foundation test suite;
-- migration from clean DB;
-- migration from captured Stage 1 legacy shape/data;
-- backup/restore if existing sandbox supports it;
+- clean build/tests;
+- clean + legacy migration tests;
 - restart persistence;
 - authorization negative tests;
 - idempotency/concurrency tests;
-- all E2E scenarios below.
-
-**Executable verification**
-
-```powershell
-dotnet restore LandErp.slnx --locked-mode
-dotnet build LandErp.slnx --no-restore
-dotnet test tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj --no-build
-```
-
-Дополнительно выполнить существующий project foundation script, если локальная среда настроена:
-
-```powershell
-pwsh ./scripts/Test-Foundation.ps1
-```
-
-Запустить server и выполнить browser smoke на desktop + mobile inspection viewport.
-
-**Acceptance criteria**
-
-- no pending model changes;
-- clean build/tests;
 - all E2E scenarios green;
-- docs match current implementation;
-- production code не содержит обязательных legacy couplings, перечисленных в superseded register;
-- Stage 1 можно использовать реальными сотрудниками без ручного DB вмешательства.
-
-**Не входит / P3 optional**  
-Дополнительная визуальная полировка, редкие admin conveniences, analytics, parser desktop improvements, post-purchase modules.
-
-**Stage 1 complete when**  
-Все обязательные P0/P1/P2 criteria выполнены; P3 не блокирует релиз, если явно отложен и не влияет на безопасность/целостность/рабочий бизнес-процесс.
+- docs match implementation;
+- no mandatory legacy couplings from superseded register;
+- Stage 1 usable by real staff without manual DB intervention.
 
 ---
 
 # 6. Сквозная verification matrix
 
-Каждый сценарий обязан иметь automated integration coverage там, где это разумно, плюс минимум один executable/browser smoke для пользовательского пути.
+Каждый scenario получает automated integration coverage, где разумно, плюс executable/browser smoke для critical user paths.
 
-| Scenario | Где закрывается |
+| Scenario / invariant | Фаза |
 |---|---|
-| Avito -> Входящие -> Взять в работу -> полный PropertyCase -> Куплено | P1–P5 |
-| Ручное предложение -> Входящие -> тот же полный цикл | P1, P3–P5 |
-| Telegram item -> Catalog -> PropertyCase | P1/P3 |
-| Telegram + Avito + Cian -> один объект закупки | P1/P3/P4 |
-| Внешнее объявление удалено -> внутренний case продолжает жить | P1 |
-| Менеджер -> руководитель -> возврат -> доработка -> решение | P4 |
-| Осмотр с мобильного checklist | P5 |
-| Создание сотрудника -> login + temp password -> вход -> работа в scope | P6 |
-| Создание поиска -> расписание -> общий Job -> claim свободным compatible Agent -> результаты во входящие | P2/P3 |
-| Audit event -> нормальное описание -> technical details отдельно | P7 |
-| Главная -> пользователь сразу видит свои проблемы/следующие действия | P8 |
-
-Дополнительные обязательные integrity scenarios:
-
-- повтор `TakeToWork` не создаёт второй case;
-- concurrent decisions дают понятный optimistic concurrency conflict;
-- old/foreign organization cannot read case/catalog/audit;
-- external source change сохраняет source history и не silently overwrites verified case fact;
-- archived employee/unit/position остаются в исторических ссылках;
-- duplicate collector delivery остаётся idempotent;
-- two agents cannot lease same job simultaneously;
-- Acquired cannot happen twice;
-- audit/timeline/observations остаются append-only там, где это уже заявлено моделью.
+| Avito -> Incoming -> TakeToWork -> PropertyCase -> Acquired | 1–5 |
+| Manual/Telegram item без URL/ExternalId -> same flow | 1, 3–5 |
+| one Case -> Telegram + Avito + Cian sources | 1/3/4 |
+| one Catalog item -> at most one confirmed Case | 1 |
+| concurrent TakeToWork -> one Case/link | 1 |
+| repeated TakeToWork -> existing Case | 1 |
+| legacy ListingId route -> existing Case redirect, no implicit create | 1/9 |
+| external source removed -> provenance/history retained, Case alive | 1/3 |
+| source changed -> attention, no verified overwrite | 1/3/4 |
+| migration backfill preserves history + system provenance | 1 |
+| rejected -> monitoring -> threshold met -> active incoming | 3 |
+| target total price trigger | 3 |
+| target price-per-sotka trigger | 3 |
+| Duplicate/Fake/Removed/Sold distinct | 3 |
+| existing rejected/paused Case -> resume/reopen same Case | 3/4 |
+| head return -> manager rework -> resubmit same Case | 4 |
+| attachment access follows owning Case/Negotiation/Check | 4 |
+| Site Inspection local draft survives short disconnect | 5 |
+| reconnect saves draft safely; conflict not silent | 5 |
+| media retry state preserves reference | 5 |
+| Acquired cannot happen twice | 5 |
+| create employee -> temp password -> forced change -> scoped work | 6 |
+| Pending legacy Job released to shared pool | 2A |
+| active Leased Job not stolen | 2A |
+| expired lease reclaimable by different compatible Agent | 2A |
+| Completed/terminal Job preserves historical Agent | 2A |
+| two Agents cannot lease same Job | 2A |
+| schedule -> shared Job -> compatible claim -> Catalog | 2B/3 |
+| current V1 Collector registration/heartbeat/claim/result green | 2A/9 |
+| Audit semantic row + technical details permission | 7 |
+| Overview counters equal module queries under same scope | 8 |
+| old/foreign organization cannot read case/catalog/audit/overview | every relevant phase |
+| archived employee/unit/position historical references remain | 6/7 |
+| duplicate Collector delivery remains idempotent | 2/3 |
+| audit/timeline/observations remain append-only where declared | all relevant |
 
 ---
 
 # 7. Migration strategy как единая программа
 
-Миграции выполнять **эволюционно**, не одним destructive refactor:
+Каждая breaking boundary проходит одинаковую последовательность:
 
-1. **Expand** — добавить source links, nullable/new columns, new read/write structures;
-2. **Backfill** — deterministic server/data migration существующих cases/searches;
-3. **Dual compatibility** — старые данные читаются, новые commands уже пишут target model;
-4. **Cutover** — routes/contracts/queries переходят на CaseId/shared pool/server source code;
-5. **Verify** — clean + legacy migration tests, data counts/invariants;
-6. **Contract** — удалить legacy required FKs/columns/adapters только отдельной последующей migration.
+1. **Expand** — new tables/nullable columns/read-write structures;
+2. **Backfill** — deterministic data migration + provenance;
+3. **Dual compatibility** — legacy reads/adapters работают, новые commands уже target-centric;
+4. **Cutover** — CaseId/shared pool/server source code;
+5. **Verify** — clean + legacy migration tests, counts/invariants/concurrency;
+6. **Contract** — destructive cleanup только в доказанно безопасной последующей migration, главным образом Phase 9.
 
 Нельзя:
 
 - редактировать старые migration files;
 - пересоздавать Listing/Observation history;
-- менять BusinessNumber существующих cases;
-- «лечить» миграцию удалением тестовой/production-like БД;
-- создавать fake Agent/Job для ручных Catalog items.
+- менять BusinessNumber существующих Cases;
+- лечить миграцию удалением production-like DB;
+- создавать fake Agent/Job/Observation для manual Catalog items;
+- hard-delete исчезнувший source provenance;
+- очищать active lease/executor history ради новой shared-pool модели.
 
 ---
 
 # 8. Test architecture после cutover
 
-Существующий `ProcurementTests.ManagerHeadForwardReturnScopesRevisionsHistoryAuditAndRestart` полезен по охвату, но сейчас цементирует старую модель. Его нужно разложить/переписать так, чтобы сохранить сильные проверки и убрать ложные assumptions.
-
 Минимальные server integration suites:
 
-1. **CatalogBoundaryTests** — manual/Telegram, source ownership, take/link, multi-source, source changes;
-2. **ProcurementWorkflowTests** — case-centric transitions, assignments, approvals, concurrency, restart;
-3. **CollectionPoolTests** — group/schedule/shared claim/capability/lease/idempotent delivery;
-4. **InspectionAcquisitionTests** — checklist + Acquired;
-5. **OrganizationIdentityTests** — direct account + temporary password + archive/scope;
-6. **AuditReadModelTests** — semantic formatting/filter/paging/tenant isolation;
-7. **OverviewTests** — aggregate consistency and scope;
-8. browser/UI scenarios для critical flows без snapshot-only confidence.
+1. **CatalogBoundaryTests** — manual/Telegram, source ownership, confirmed uniqueness, concurrent take/link, multi-source, source changes, compatibility route;
+2. **ProcurementWorkflowTests** — CaseId transitions, assignments, approvals, scope, concurrency, restart, reopen/resume;
+3. **CollectionPoolTests** — old-job migration states, shared claim/capability/lease/idempotent delivery/V1 compatibility;
+4. **IncomingMonitoringTests** — threshold monitoring/reactivation/classifications;
+5. **NegotiationAttachmentTests** — price statements, checks, attachment authorization;
+6. **InspectionAcquisitionTests** — local draft/reconnect/media retry + Acquired;
+7. **OrganizationIdentityTests** — direct account + temporary password + archive/scope;
+8. **AuditReadModelTests** — semantic formatting/filter/paging/tenant isolation;
+9. **OverviewTests** — aggregate consistency and scope;
+10. browser/UI scenarios для critical flows без snapshot-only confidence.
 
 ParserSpike test projects не расширять в рамках этого master plan.
 
@@ -948,38 +782,79 @@ ParserSpike test projects не расширять в рамках этого mas
 
 # 9. Production readiness / Definition of Done Stage 1
 
-Stage 1 нельзя считать завершённым только потому, что страницы визуально похожи на prototypes.
-
-Обязательный DoD:
+Stage 1 завершён только когда:
 
 - Catalog и Procurement архитектурно независимы;
 - PropertyCase не требует Listing и адресуется CaseId;
-- incoming поддерживает automatic + manual/Telegram-like sources;
-- one case поддерживает multiple sources;
-- Collection работает как shared server pool и schedules не закрепляют search за машиной;
-- manager/head workflow, negotiations, checks, inspection и Acquired работают сквозно;
-- Organization позволяет создать сотрудника и управлять lifecycle без hard delete;
-- permissions/scope применяются server-side;
+- one Case supports `0..N` sources; one confirmed Catalog item cannot belong to two Cases;
+- automatic + manual/Telegram-like ingress работают без fake Collector entities;
+- monitoring/reactivation и distinct source classifications работают;
+- existing real object resumes/reopens existing Case вместо duplicate Case;
+- Procurement scope не зависит от Listing Department/Team;
+- Collection работает как shared server pool; old jobs migrated safely; V1 Collector compatible;
+- local Parser Agent не изменён;
+- negotiations/checks/attachments/inspection/offline-draft/Acquired работают сквозно;
+- Organization управляет employee lifecycle без hard delete;
+- permissions/scope применяются server-side в каждой фазе;
 - Audit human-readable и paged;
-- Overview использует реальные aggregates;
+- Overview использует реальные scope-safe aggregates;
 - raw technical vocabulary отсутствует на staff surfaces;
-- migrations safe и tested from legacy Stage 1;
+- migrations safe/tested from legacy Stage 1;
+- legacy ListingId/Search-routing cleanup выполнен только после Phase 9 gates;
 - automated + executable verification green;
-- локальный Parser Agent остаётся работоспособным, но его внутренности не были переделаны;
-- Owned Assets/LandAsset/Investor remain explicitly out of Stage 1.
+- Owned Assets/LandAsset/Investor остаются out of Stage 1.
 
 ---
 
-# 10. Что должен сделать следующий агент первым
+# 10. Dependency / exit-gate consistency check после independent review
+
+Проверка выполнена только на четыре требуемых аспекта — без нового architecture audit.
+
+### Dependency order
+
+- Phase 1 сначала стабилизирует Catalog/Procurement identity, source model, manual ingress и CaseId contracts;
+- Phase 2 затем исправляет server Collection ownership/claim и только после 2A строит schedules/UI в 2B;
+- Phase 3 использует готовые boundary commands и stable ingestion для полного Incoming UX/monitoring;
+- Phase 4 строит dossier/negotiations/checks и attachment foundation только после stable Case identity;
+- Phase 5 использует Case + attachments для Inspection/Acquired;
+- Phases 6–8 не меняют фундаментальную domain identity, а доводят administration/audit/overview;
+- Phase 9 единственный выполняет destructive cleanup.
+
+Противоречий dependency order после поправок нет.
+
+### Exit gates
+
+Каждая фаза имеет самостоятельный deployable exit gate; security/scope tests входят в ту же фазу, которая вводит read/write surface. Phase 2B не начинается до green 2A; Phase 9 cleanup не начинается без доказанного cutover.
+
+### Migration safety
+
+Все breaking changes идут через expand -> backfill -> compatibility -> cutover -> verify -> contract. Active Collection leases не steal, completed executor history не теряется, legacy Procurement history не пересоздаётся, source provenance не hard-delete.
+
+### Межфазные противоречия
+
+- минимальный manual/TakeToWork slice находится в Phase 1; Phase 3 только расширяет Incoming UX и monitoring;
+- scope correctness не откладывается в Phase 6;
+- attachment foundation начинается в Phase 4 и переиспользуется Phase 5;
+- temporary ListingId compatibility живёт до Phase 9;
+- Parser Agent остаётся вне изменений всех девяти фаз.
+
+**Оставшихся open architecture questions, блокирующих Phase 1, нет.** Новый redesign перед implementation не требуется.
+
+---
+
+# 11. Что должен сделать следующий implementation-agent первым
 
 Начать **только с Phase 1**:
 
-1. перечитать `P0_CATALOG_PROCUREMENT_BOUNDARY.md` и эту Phase 1;
-2. зафиксировать target invariants тестами;
-3. спроектировать конкретную additive EF migration `PropertyCase <-> CatalogItem source links + case-owned facts` в рамках уже принятого target;
-4. выполнить migration/backfill;
-5. перевести server contracts/workspace на CaseId;
-6. доказать green migration + regression suite;
-7. не начинать Phase 2, пока Phase 1 acceptance criteria не подтверждены executable evidence.
+1. перечитать `P0_CATALOG_PROCUREMENT_BOUNDARY.md`, Phase 1 этого master-plan и relevant current tests;
+2. зафиксировать target invariants failing/characterization tests;
+3. выполнить additive migration source links + case-owned facts + server source/optional identity support;
+4. backfill legacy data с migration provenance;
+5. реализовать minimal manual/Telegram-like ingestion;
+6. реализовать DB-enforced/idempotent/concurrent-safe `TakeToWork`;
+7. перевести Procurement contracts/workspace/queue/canonical route на CaseId;
+8. оставить tested ListingId compatibility redirect;
+9. доказать current Avito + manual/Telegram-like + scope + migration scenarios;
+10. не начинать Phase 2 до executable evidence Phase 1 exit gate.
 
-Повторный общий архитектурный аудит Stage 1 перед Phase 1 **не нужен**. Если код успел измениться после baseline этого документа — проверить только diff относительно `b6d64e6258bf23d7263695080ff588afe3c04eae` и скорректировать affected steps, не пересобирая roadmap заново.
+Повторный общий архитектурный аудит Stage 1 перед Phase 1 **не нужен**. Реализацию локального Parser Agent не начинать.

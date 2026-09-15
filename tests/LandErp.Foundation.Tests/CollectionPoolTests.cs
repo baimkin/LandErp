@@ -105,6 +105,10 @@ public sealed class CollectionPoolTests
             Assert.AreEqual(CatalogSource.Avito, listing.Source);
             Assert.AreEqual(2, await db.CollectionJobs.CountAsync());
             Assert.AreEqual(2, await db.CollectionJobs.Where(item => item.State == CollectionJobState.Completed && item.AgentId != null).CountAsync());
+            ServerCollectionJob counted = await db.CollectionJobs.SingleAsync(item => item.Id == winner.JobId);
+            Assert.AreEqual(1, counted.ProcessedCount);
+            Assert.AreEqual(1, counted.NewListingsCount);
+            Assert.AreEqual(0, counted.ChangedListingsCount);
         }
     }
 

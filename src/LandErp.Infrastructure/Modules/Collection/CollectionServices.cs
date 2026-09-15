@@ -10,6 +10,7 @@ public static class CollectionServices
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<ICollectionAdministration, CollectionAdministration>();
         services.AddScoped<ICollectorGateway, CollectorGateway>();
+        services.AddScoped<ICollectionScheduler, CollectionScheduler>();
         return services;
     }
 }

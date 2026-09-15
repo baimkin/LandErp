@@ -23,9 +23,25 @@ public sealed class SearchConfiguration
     public CatalogSource Source { get; set; }
     public string Url { get; set; } = "";
     public int MaxPages { get; set; } = 10;
+    public Guid? SearchGroupId { get; set; }
+    public CollectionScheduleKind ScheduleKind { get; set; } = CollectionScheduleKind.Manual;
+    public int? IntervalMinutes { get; set; }
+    public string FixedTimesJson { get; set; } = "[]";
+    public DateTimeOffset? NextRunAt { get; set; }
     public bool Enabled { get; set; } = true;
     public long Version { get; set; } = 1;
 }
+public sealed class SearchGroup
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public string Name { get; set; } = "";
+    public int SortOrder { get; set; }
+    public bool Active { get; set; } = true;
+    public DateTimeOffset RecordedAt { get; set; }
+    public long Version { get; set; } = 1;
+}
+public enum CollectionScheduleKind { Manual, Interval, FixedTimes }
 public enum CollectionJobState { Pending, Leased, Completed, LimitReached, AwaitingManualAction, Failed, Interrupted }
 public sealed class ServerCollectionJob
 {
@@ -38,9 +54,13 @@ public sealed class ServerCollectionJob
     public Guid? LeaseId { get; set; }
     public DateTimeOffset? LeaseExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? ScheduledFor { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public string ResultCode { get; set; } = "";
     public int AcceptedCount { get; set; }
+    public int ProcessedCount { get; set; }
+    public int NewListingsCount { get; set; }
+    public int ChangedListingsCount { get; set; }
     public long Version { get; set; } = 1;
 }
 public sealed class CollectionDelivery

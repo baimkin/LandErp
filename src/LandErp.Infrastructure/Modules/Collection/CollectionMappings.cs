@@ -13,16 +13,24 @@ internal static class CollectionMappings
         builder.Entity<CollectorAgent>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<SearchConfiguration>().ToTable("search_configurations", "collection");
         builder.Entity<SearchConfiguration>().Property(item => item.Source).HasConversion<string>();
+        builder.Entity<SearchConfiguration>().Property(item => item.ScheduleKind).HasConversion<string>();
+        builder.Entity<SearchConfiguration>().Property(item => item.FixedTimesJson).HasColumnType("jsonb");
         builder.Entity<SearchConfiguration>().Property(item => item.Url).HasMaxLength(2000);
         // Compatibility-only columns remain physically present until final cleanup; runtime routing never reads them.
         builder.Entity<SearchConfiguration>().Property<Guid?>("AgentId");
         builder.Entity<SearchConfiguration>().Property<Guid?>("DepartmentId");
         builder.Entity<SearchConfiguration>().Property<Guid?>("TeamId");
+        builder.Entity<SearchConfiguration>().HasOne<SearchGroup>().WithMany().HasForeignKey(item => item.SearchGroupId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<SearchConfiguration>().HasIndex(item => new { item.OrganizationId, item.NextRunAt });
+        builder.Entity<SearchGroup>().ToTable("search_groups", "collection");
+        builder.Entity<SearchGroup>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<SearchGroup>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
         builder.Entity<ServerCollectionJob>().ToTable("jobs", "collection");
         builder.Entity<ServerCollectionJob>().Property(item => item.State).HasConversion<string>();
         builder.Entity<ServerCollectionJob>().HasOne<CollectorAgent>().WithMany().HasForeignKey(item => item.AgentId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<ServerCollectionJob>().HasOne<SearchConfiguration>().WithMany().HasForeignKey(item => item.SearchId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<ServerCollectionJob>().HasIndex(item => new { item.SearchId, item.State });
+        builder.Entity<ServerCollectionJob>().HasIndex(item => new { item.SearchId, item.ScheduledFor }).IsUnique().HasFilter("scheduled_for IS NOT NULL");
         builder.Entity<CollectionDelivery>().ToTable("deliveries", "collection");
         builder.Entity<CollectionDelivery>().Property(item => item.ReceiptJson).HasColumnType("jsonb");
         builder.Entity<CollectionDelivery>().HasOne<ServerCollectionJob>().WithMany().HasForeignKey(item => item.JobId).OnDelete(DeleteBehavior.Restrict);

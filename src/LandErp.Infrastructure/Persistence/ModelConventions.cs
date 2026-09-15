@@ -19,6 +19,7 @@ internal static class ModelConventions
         ["notifications"] = "Внутренние уведомления исполнителю о передаче/возврате/решении. ReadAt отмечает просмотр; внешняя доставка не включена.",
         ["agents"] = "Зарегистрированные локальные Collector. Сервер хранит только verifier credential; отзыв немедленно запрещает новые обращения.",
         ["search_configurations"] = "Поисковые ссылки организации без назначения конкретного Collector или области закупки. Browser settings и cookies остаются локально.",
+        ["search_groups"] = "Тонкая организационная группировка поисков без владения маршрутизацией, исполнителем или бизнес-процессом.",
         ["jobs"] = "Работа общего пула: Pending без исполнителя; Agent назначается при claim. Lease fencing и terminal executor сохраняют фактическую историю.",
         ["deliveries"] = "Неизменяемые квитанции доставки Collector. Повтор ResultId с тем же payload возвращает прежний ответ; другой payload запрещён.",
         ["listings"] = "Универсальные входящие предложения Catalog из автоматических и ручных источников; не идентичность земельного участка.",
@@ -153,6 +154,8 @@ internal static class ModelConventions
                 {
                     property.SetComment("Фактический исполнитель работы; отсутствует у Pending и устанавливается атомарно при claim.");
                 }
+                else if (table == "search_configurations" && property.Name == "NextRunAt") property.SetComment("Следующий расчётный запуск UTC; отсутствует у ручного или приостановленного поиска.");
+                else if (table == "jobs" && property.Name == "ScheduledFor") property.SetComment("Расчётный момент запуска UTC; обеспечивает идемпотентность планировщика.");
                 else if (ColumnComments.TryGetValue(property.Name, out string? comment))
                 {
                     property.SetComment(comment);

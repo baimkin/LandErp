@@ -29,6 +29,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<CollectorAgent> CollectorAgents => Set<CollectorAgent>();
     public DbSet<SearchConfiguration> SearchConfigurations => Set<SearchConfiguration>();
+    public DbSet<SearchGroup> SearchGroups => Set<SearchGroup>();
     public DbSet<ServerCollectionJob> CollectionJobs => Set<ServerCollectionJob>();
     public DbSet<CollectionDelivery> CollectionDeliveries => Set<CollectionDelivery>();
     public DbSet<Listing> Listings => Set<Listing>();

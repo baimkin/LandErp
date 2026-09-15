@@ -100,7 +100,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         // Global ordering of natural identity locks avoids two overlapping search batches deadlocking.
         foreach (string identity in result.Observations.Select(item => $"{agent.OrganizationId}:{item.Data.Source}:{item.Data.ExternalId}").Distinct().Order(StringComparer.Ordinal))
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({identity},0))", cancellationToken);
-        int accepted = 0; int duplicates = 0;
+        int accepted = 0; int duplicates = 0; int newListings = 0; int changedListings = 0;
         foreach (ObservationEnvelope envelope in result.Observations)
         {
             ListingData data = envelope.Data;
@@ -147,6 +147,8 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             }
             if (data.ObservedAt < listing.FirstObservedAt) listing.FirstObservedAt = data.ObservedAt;
             if (isNew) db.Listings.Add(listing);
+            if (isNew) newListings++;
+            else if (changes.Count > 0) changedListings++;
             db.ListingObservations.Add(new()
             {
                 Id = DataConventions.NewId(),
@@ -162,7 +164,8 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             });
             accepted++;
         }
-        job.AcceptedCount += accepted; agent.LastHeartbeatAt = time.GetUtcNow();
+        job.ProcessedCount += result.Observations.Length; job.AcceptedCount += accepted;
+        job.NewListingsCount += newListings; job.ChangedListingsCount += changedListings; agent.LastHeartbeatAt = time.GetUtcNow();
         job.LeaseExpiresAt = time.GetUtcNow().AddMinutes(3);
         if (result.Final)
         {

@@ -57,6 +57,10 @@ button { cursor: pointer; }
 .field .invalid { border-color: var(--danger); }
 .validation-message,.validation-errors { color: var(--danger); font-size: .78rem; }
 .form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 var(--space-4); }
+.metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:var(--space-3); margin-bottom:var(--space-5); }
+.metric { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:var(--space-4); }
+.metric strong { display:block; font-size:1.5rem; }
+.metric span { color:var(--text-muted); font-size:.8rem; }
 .form-actions { grid-column: 1/-1; justify-content: flex-end; margin-top: var(--space-3); }
 .badge { display: inline-flex; align-items: center; gap: var(--space-1); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); font-size: .69rem; font-weight: 650; }
 .badge.neutral { color: var(--text-muted); background: var(--surface-subtle); }
@@ -88,7 +92,8 @@ button { cursor: pointer; }
 .recovery-codes { columns: 2; }
 #blazor-error-ui { display: none; position: fixed; inset: auto 0 0; padding: var(--space-4); background: var(--warning-soft); z-index: 100; }
 @media(max-width:900px) { .app-shell { grid-template-columns: 1fr; } .workspace { grid-column:1; } .sidebar { transform: translateX(-105%); } .sidebar.open { transform: none; } .mobile-menu { display: inline-grid; } .content-grid { grid-template-columns: 1fr; } .topbar { padding: var(--space-3) var(--space-4); } .user-chip { display:none; } }
-@media(max-width:600px) { .main-content { padding:var(--space-4); } .form-grid { grid-template-columns:1fr; } .page-header { align-items:flex-start; flex-direction:column; } .density-control { display:none; } .topbar strong { font-size:.8rem; } }
+@media(max-width:800px) { .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:600px) { .main-content { padding:var(--space-4); } .form-grid,.metric-grid { grid-template-columns:1fr; } .page-header { align-items:flex-start; flex-direction:column; } .density-control { display:none; } .topbar strong { font-size:.8rem; } }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; } }
 .queue-filters { display:flex; align-items:end; flex-wrap:wrap; gap:var(--space-3); width:100%; }
 .filter-bar > form { width:100%; }

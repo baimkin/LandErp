@@ -1,16 +1,19 @@
 # Активная задача LandErp
 
-> **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). Следующий implementation-agent начинает с **Phase 1** этого плана. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
+> **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phase 1 завершена 2026-09-15**; evidence: [`STAGE1_PHASE1_REPORT.md`](reports/STAGE1_PHASE1_REPORT.md). Phase 2 не начата и текущей задачей не активирована. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
 
 ## P0 — обязательная следующая задача перед дальнейшим развитием
 
-**Текущий приоритет:** исправить архитектурную границу `Catalog → Procurement` по документу [`P0_CATALOG_PROCUREMENT_BOUNDARY.md`](P0_CATALOG_PROCUREMENT_BOUNDARY.md).
+**Выполненный приоритет:** архитектурная граница `Catalog → Procurement` по документу [`P0_CATALOG_PROCUREMENT_BOUNDARY.md`](P0_CATALOG_PROCUREMENT_BOUNDARY.md).
 
 Решение владельца от 2026-09-15: внешний `Listing`/объявление не является корнем закупочного процесса. Catalog — единый входящий список предложений из любых источников (`Avito`, `Cian`, `Telegram`, ручной ввод, знакомые, агенты и будущие интеграции). После `Взять в работу` создаётся самостоятельный `PropertyCase`, а входящий элемент сохраняется только как связанный источник данных.
 
-**До выполнения этого P0 не наращивать текущую зависимость Procurement от `ListingId`, не начинать кабинет инвестора и не развивать пост-покупочные модули поверх текущей модели.**
+P0 закрыт: Catalog является organization-shared входящим слоем, Procurement
+case-centric, а `ListingId` сохранён только как deprecated compatibility adapter
+до Phase 9. Кабинет инвестора и пост-покупочные модули не начинались.
 
-Следующая implementation-задача должна начинаться с этого P0: тесты целевых инвариантов → безопасная миграция → PropertyCase-root Procurement API/queue/card → server-side ручное создание входящего Catalog item → проверка Avito и manual/Telegram-like сценариев. Внутренний Parser Agent в рамках этой задачи не переделывать.
+Следующая фаза master plan здесь не активируется. Локальный Parser Agent не изучался
+и не менялся.
 
 ## Текущее разрешение — Stage 1
 

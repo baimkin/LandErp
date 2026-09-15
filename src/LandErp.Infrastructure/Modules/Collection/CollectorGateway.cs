@@ -116,11 +116,23 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             Listing? listing = db.Listings.Local.FirstOrDefault(item => item.OrganizationId == agent.OrganizationId && item.Source == source && item.ExternalId == data.ExternalId)
                 ?? await db.Listings.SingleOrDefaultAsync(item => item.OrganizationId == agent.OrganizationId && item.Source == source && item.ExternalId == data.ExternalId, cancellationToken);
             bool isNew = listing == null;
-            listing ??= new() { Id = DataConventions.NewId(), OrganizationId = agent.OrganizationId,
-                DepartmentId = search.DepartmentId, TeamId = search.TeamId, Source = source, ExternalId = data.ExternalId,
-                Url = data.Url, FirstObservedAt = data.ObservedAt, LastObservedAt = data.ObservedAt,
-                IngestionKind = CatalogIngestionKind.Collector, Provenance = "Collector V1", ReceivedAt = time.GetUtcNow(),
-                RecordedAt = time.GetUtcNow(), ChangedAt = time.GetUtcNow() };
+            listing ??= new()
+            {
+                Id = DataConventions.NewId(),
+                OrganizationId = agent.OrganizationId,
+                DepartmentId = search.DepartmentId,
+                TeamId = search.TeamId,
+                Source = source,
+                ExternalId = data.ExternalId,
+                Url = data.Url,
+                FirstObservedAt = data.ObservedAt,
+                LastObservedAt = data.ObservedAt,
+                IngestionKind = CatalogIngestionKind.Collector,
+                Provenance = "Collector V1",
+                ReceivedAt = time.GetUtcNow(),
+                RecordedAt = time.GetUtcNow(),
+                ChangedAt = time.GetUtcNow()
+            };
             if (await db.ListingObservations.AnyAsync(item => item.ListingId == listing.Id && item.ObservedAt == data.ObservedAt && item.ContentHash == hash, cancellationToken)
                 || db.ListingObservations.Local.Any(item => item.ListingId == listing.Id && item.ObservedAt == data.ObservedAt && item.ContentHash == hash))
             { duplicates++; continue; }
@@ -137,9 +149,19 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             }
             if (data.ObservedAt < listing.FirstObservedAt) listing.FirstObservedAt = data.ObservedAt;
             if (isNew) db.Listings.Add(listing);
-            db.ListingObservations.Add(new() { Id = DataConventions.NewId(), ListingId = listing.Id, AgentId = agent.Id,
-                JobId = job.Id, ObservationKey = envelope.ObservationKey, ContentHash = hash, PayloadJson = json,
-                ChangesJson = JsonSerializer.Serialize(changes), ObservedAt = data.ObservedAt, RecordedAt = time.GetUtcNow() });
+            db.ListingObservations.Add(new()
+            {
+                Id = DataConventions.NewId(),
+                ListingId = listing.Id,
+                AgentId = agent.Id,
+                JobId = job.Id,
+                ObservationKey = envelope.ObservationKey,
+                ContentHash = hash,
+                PayloadJson = json,
+                ChangesJson = JsonSerializer.Serialize(changes),
+                ObservedAt = data.ObservedAt,
+                RecordedAt = time.GetUtcNow()
+            });
             accepted++;
         }
         job.AcceptedCount += accepted; agent.LastHeartbeatAt = time.GetUtcNow();
@@ -157,8 +179,15 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             job.ResultCode = result.Outcome.ToString(); job.CompletedAt = time.GetUtcNow();
         }
         CollectionReceipt receipt = new(result.ResultId, result.Final ? job.State.ToString() : "Accepted", accepted, duplicates);
-        db.CollectionDeliveries.Add(new() { Id = result.ResultId, AgentId = agent.Id, JobId = job.Id, PayloadHash = payloadHash,
-            ReceiptJson = JsonSerializer.Serialize(receipt, CollectionJson.Options), RecordedAt = time.GetUtcNow() });
+        db.CollectionDeliveries.Add(new()
+        {
+            Id = result.ResultId,
+            AgentId = agent.Id,
+            JobId = job.Id,
+            PayloadHash = payloadHash,
+            ReceiptJson = JsonSerializer.Serialize(receipt, CollectionJson.Options),
+            RecordedAt = time.GetUtcNow()
+        });
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return receipt;
     }
@@ -198,7 +227,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         if (data.Description.Presence == FieldPresence.Present && listing.Description != data.Description.Raw) { listing.Description = data.Description.Raw; changes.Add("описание"); }
         if (data.SellerName.Presence == FieldPresence.Present && listing.SellerName != data.SellerName.Raw) { listing.SellerName = data.SellerName.Raw; changes.Add("продавец"); }
         if (data.Price.Presence == FieldPresence.Present && listing.Price != DataConventions.RoundRubles(data.Price.Parsed!.Value)) { listing.Price = DataConventions.RoundRubles(data.Price.Parsed!.Value); changes.Add("цена"); }
-        if (data.AreaSquareMeters.Presence == FieldPresence.Present && listing.AreaSquareMeters != decimal.Round(data.AreaSquareMeters.Parsed!.Value,4,MidpointRounding.ToEven)) { listing.AreaSquareMeters = decimal.Round(data.AreaSquareMeters.Parsed!.Value,4,MidpointRounding.ToEven); changes.Add("площадь"); }
+        if (data.AreaSquareMeters.Presence == FieldPresence.Present && listing.AreaSquareMeters != decimal.Round(data.AreaSquareMeters.Parsed!.Value, 4, MidpointRounding.ToEven)) { listing.AreaSquareMeters = decimal.Round(data.AreaSquareMeters.Parsed!.Value, 4, MidpointRounding.ToEven); changes.Add("площадь"); }
         string photos = JsonSerializer.Serialize(data.PhotoUrls.Distinct());
         if (data.PhotoUrls.Length > 0 && listing.PhotosJson != photos) { listing.PhotosJson = photos; changes.Add("фотографии"); }
         listing.Url = data.Url;

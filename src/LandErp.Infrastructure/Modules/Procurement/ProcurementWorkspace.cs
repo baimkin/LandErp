@@ -85,14 +85,27 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         DateTimeOffset now = time.GetUtcNow();
         Listing item = new()
         {
-            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, Source = command.Source,
-            ExternalId = externalId, Url = url, Title = title, Location = Optional(command.Location, 20000),
-            Price = command.Price == null ? null : DataConventions.RoundRubles(command.Price.Value), Currency = "RUB",
+            Id = DataConventions.NewId(),
+            OrganizationId = context.OrganizationId,
+            Source = command.Source,
+            ExternalId = externalId,
+            Url = url,
+            Title = title,
+            Location = Optional(command.Location, 20000),
+            Price = command.Price == null ? null : DataConventions.RoundRubles(command.Price.Value),
+            Currency = "RUB",
             AreaSquareMeters = command.AreaSquareMeters == null ? null : decimal.Round(command.AreaSquareMeters.Value, 4, MidpointRounding.ToEven),
-            CadastralNumber = Optional(command.CadastralNumber, 128), Description = Optional(command.Description, 20000),
-            IngestionKind = CatalogIngestionKind.Employee, CreatedByEmployeeId = context.EmployeeId,
-            Provenance = "Добавлено сотрудником", IngressComment = comment, Disposition = CatalogDisposition.Incoming,
-            ReceivedAt = now, RecordedAt = now, ChangedAt = now, QueueReason = "Добавлено вручную"
+            CadastralNumber = Optional(command.CadastralNumber, 128),
+            Description = Optional(command.Description, 20000),
+            IngestionKind = CatalogIngestionKind.Employee,
+            CreatedByEmployeeId = context.EmployeeId,
+            Provenance = "Добавлено сотрудником",
+            IngressComment = comment,
+            Disposition = CatalogDisposition.Incoming,
+            ReceivedAt = now,
+            RecordedAt = now,
+            ChangedAt = now,
+            QueueReason = "Добавлено вручную"
         };
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         db.Listings.Add(item);
@@ -158,13 +171,22 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             WorkTask task = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = caseId, EmployeeId = context.EmployeeId, Title = "Первичный анализ", RecordedAt = time.GetUtcNow() };
             propertyCase = new()
             {
-                Id = caseId, OrganizationId = context.OrganizationId,
+                Id = caseId,
+                OrganizationId = context.OrganizationId,
                 BusinessNumber = "PC-" + businessNumber.ToString("D6", System.Globalization.CultureInfo.InvariantCulture),
-                WorkingTitle = catalogItem.Title ?? "Объект без названия", WorkingPrice = catalogItem.Price, Currency = catalogItem.Currency,
-                WorkingAreaSquareMeters = catalogItem.AreaSquareMeters, WorkingLocation = catalogItem.Location,
-                CadastralNumber = catalogItem.CadastralNumber, FactsProvenance = "Catalog snapshot at case creation",
-                DepartmentId = context.DepartmentId, TeamId = context.TeamId, ManagerEmployeeId = context.EmployeeId,
-                AssignmentId = assignment.Id, WorkTaskId = task.Id, ReviewedDataRevision = catalogItem.DataRevision,
+                WorkingTitle = catalogItem.Title ?? "Объект без названия",
+                WorkingPrice = catalogItem.Price,
+                Currency = catalogItem.Currency,
+                WorkingAreaSquareMeters = catalogItem.AreaSquareMeters,
+                WorkingLocation = catalogItem.Location,
+                CadastralNumber = catalogItem.CadastralNumber,
+                FactsProvenance = "Catalog snapshot at case creation",
+                DepartmentId = context.DepartmentId,
+                TeamId = context.TeamId,
+                ManagerEmployeeId = context.EmployeeId,
+                AssignmentId = assignment.Id,
+                WorkTaskId = task.Id,
+                ReviewedDataRevision = catalogItem.DataRevision,
                 RecordedAt = time.GetUtcNow()
             };
             db.WorkAssignments.Add(assignment); db.WorkTasks.Add(task); db.PropertyCases.Add(propertyCase);
@@ -179,18 +201,31 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
         db.PropertyCaseSourceLinks.Add(new()
         {
-            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, PropertyCaseId = propertyCase.Id,
-            CatalogItemId = catalogItem.Id, Confirmed = true, RelationType = "Source", ActorEmployeeId = context.EmployeeId,
-            Provenance = "User confirmed", ReviewedDataRevision = catalogItem.DataRevision, RecordedAt = time.GetUtcNow()
+            Id = DataConventions.NewId(),
+            OrganizationId = context.OrganizationId,
+            PropertyCaseId = propertyCase.Id,
+            CatalogItemId = catalogItem.Id,
+            Confirmed = true,
+            RelationType = "Source",
+            ActorEmployeeId = context.EmployeeId,
+            Provenance = "User confirmed",
+            ReviewedDataRevision = catalogItem.DataRevision,
+            RecordedAt = time.GetUtcNow()
         });
         catalogItem.Disposition = CatalogDisposition.InWork;
         db.Entry(catalogItem).Property(value => value.Version).IsModified = true;
         string title = created ? "Взят в работу" : "Добавлен источник";
         db.BusinessTimeline.Add(new()
         {
-            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = propertyCase.Id,
-            ActorEmployeeId = context.EmployeeId, Kind = created ? "Decision" : "SourceLinked", Title = title,
-            Body = $"{catalogItem.Source}: {catalogItem.Title ?? "источник"}", RecordedAt = time.GetUtcNow()
+            Id = DataConventions.NewId(),
+            OrganizationId = context.OrganizationId,
+            ObjectType = "PropertyCase",
+            ObjectId = propertyCase.Id,
+            ActorEmployeeId = context.EmployeeId,
+            Kind = created ? "Decision" : "SourceLinked",
+            Title = title,
+            Body = $"{catalogItem.Source}: {catalogItem.Title ?? "источник"}",
+            RecordedAt = time.GetUtcNow()
         });
         OrganizationWorkspace.AddAudit(db, context, subject, created ? "CatalogItemTakenToWork" : "CatalogItemLinkedToCase",
             "PropertyCase", propertyCase.Id, new { CatalogItemId = catalogItem.Id, propertyCase.BusinessNumber }, correlationId);
@@ -308,10 +343,20 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             if (command.Action == ProcurementAction.Approve && SourcesChanged(sources)) throw new ArgumentException("Источники изменились после передачи. Верните объект менеджеру для обновления анализа.");
             target = command.Action == ProcurementAction.Return ? command.TargetEmployeeId ?? propertyCase.ManagerEmployeeId : propertyCase.ManagerEmployeeId;
             if (!(await TargetsAsync(db, propertyCase, Permissions.ManagerDecide, cancellationToken)).Any(value => value.EmployeeId == target)) throw new AccessDeniedException();
-            db.Approvals.Add(new() { Id = propertyCase.PendingApprovalId ?? throw new AccessDeniedException(), OrganizationId = context.OrganizationId,
-                ObjectType = "PropertyCase", ObjectId = propertyCase.Id, RequesterEmployeeId = propertyCase.ManagerEmployeeId,
-                ApproverEmployeeId = context.EmployeeId, Outcome = command.Action.ToString(), Reason = reason,
-                ConsideredDataRevision = sourceRevision, ObjectVersion = propertyCase.Version, RecordedAt = time.GetUtcNow() });
+            db.Approvals.Add(new()
+            {
+                Id = propertyCase.PendingApprovalId ?? throw new AccessDeniedException(),
+                OrganizationId = context.OrganizationId,
+                ObjectType = "PropertyCase",
+                ObjectId = propertyCase.Id,
+                RequesterEmployeeId = propertyCase.ManagerEmployeeId,
+                ApproverEmployeeId = context.EmployeeId,
+                Outcome = command.Action.ToString(),
+                Reason = reason,
+                ConsideredDataRevision = sourceRevision,
+                ObjectVersion = propertyCase.Version,
+                RecordedAt = time.GetUtcNow()
+            });
             propertyCase.PendingApprovalId = null;
             if (command.Action == ProcurementAction.Return) propertyCase.ManagerEmployeeId = target;
         }
@@ -322,14 +367,43 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         row.Task.Completed = stage is "approved" or "rejected";
         row.Task.Title = stage switch { "pending_head" => "Рассмотреть первичный анализ", "returned" => "Исправить / уточнить первичный анализ", "clarify" => "Уточнить данные объекта", "monitor" => "Наблюдать за объектом", "approved" => "Дальнейшая работа одобрена", "rejected" => "Объект отклонён", _ => "Первичный анализ" };
         string title = ActionLabel(command.Action, headAction);
-        db.WorkflowTransitions.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = propertyCase.Id,
-            FromStageId = from, ToStageId = stage, Action = command.Action.ToString(), ActorEmployeeId = context.EmployeeId,
-            ObjectVersion = propertyCase.Version + 1, RecordedAt = time.GetUtcNow() });
-        db.BusinessTimeline.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = propertyCase.Id,
-            ActorEmployeeId = context.EmployeeId, Kind = "Decision", Title = title, Body = reason + (clarification.Length == 0 ? "" : "\nУточнить: " + clarification),
-            TargetEmployeeId = target, DueAt = command.DueAt, RecordedAt = time.GetUtcNow() });
-        if (target != context.EmployeeId) db.Notifications.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, EmployeeId = target,
-            ObjectType = "PropertyCase", ObjectId = propertyCase.Id, Title = propertyCase.BusinessNumber + ": " + title, RecordedAt = time.GetUtcNow() });
+        db.WorkflowTransitions.Add(new()
+        {
+            Id = DataConventions.NewId(),
+            OrganizationId = context.OrganizationId,
+            ObjectType = "PropertyCase",
+            ObjectId = propertyCase.Id,
+            FromStageId = from,
+            ToStageId = stage,
+            Action = command.Action.ToString(),
+            ActorEmployeeId = context.EmployeeId,
+            ObjectVersion = propertyCase.Version + 1,
+            RecordedAt = time.GetUtcNow()
+        });
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(),
+            OrganizationId = context.OrganizationId,
+            ObjectType = "PropertyCase",
+            ObjectId = propertyCase.Id,
+            ActorEmployeeId = context.EmployeeId,
+            Kind = "Decision",
+            Title = title,
+            Body = reason + (clarification.Length == 0 ? "" : "\nУточнить: " + clarification),
+            TargetEmployeeId = target,
+            DueAt = command.DueAt,
+            RecordedAt = time.GetUtcNow()
+        });
+        if (target != context.EmployeeId) db.Notifications.Add(new()
+        {
+            Id = DataConventions.NewId(),
+            OrganizationId = context.OrganizationId,
+            EmployeeId = target,
+            ObjectType = "PropertyCase",
+            ObjectId = propertyCase.Id,
+            Title = propertyCase.BusinessNumber + ": " + title,
+            RecordedAt = time.GetUtcNow()
+        });
         OrganizationWorkspace.AddAudit(db, context, subject, "Procurement" + command.Action, "PropertyCase", propertyCase.Id,
             new { From = from, To = stage, Target = target, command.DueAt, Reason = reason, Clarification = clarification, SourceRevision = sourceRevision }, correlationId);
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
@@ -349,9 +423,19 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         string text = Required(command.Text, 3, 4000, "Укажите заметку.");
         string result = command.Contact ? Required(command.ContactResult, 3, 4000, "Укажите результат контакта.") : "";
         db.Entry(row.Case).Property(item => item.Version).IsModified = true;
-        db.BusinessTimeline.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
-            ActorEmployeeId = context.EmployeeId, Kind = command.Contact ? "Contact" : "Note", Title = command.Contact ? "Контакт с продавцом" : "Рабочая заметка",
-            Body = text + (command.Contact ? "\nРезультат: " + result : ""), EffectiveAt = command.EffectiveAt, RecordedAt = time.GetUtcNow() });
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(),
+            OrganizationId = context.OrganizationId,
+            ObjectType = "PropertyCase",
+            ObjectId = row.Case.Id,
+            ActorEmployeeId = context.EmployeeId,
+            Kind = command.Contact ? "Contact" : "Note",
+            Title = command.Contact ? "Контакт с продавцом" : "Рабочая заметка",
+            Body = text + (command.Contact ? "\nРезультат: " + result : ""),
+            EffectiveAt = command.EffectiveAt,
+            RecordedAt = time.GetUtcNow()
+        });
         OrganizationWorkspace.AddAudit(db, context, subject, command.Contact ? "SellerContactRecorded" : "CaseNoteAdded", "PropertyCase", row.Case.Id,
             new { command.Contact, command.EffectiveAt }, correlationId);
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
@@ -418,7 +502,12 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     private static string? Optional(string? value, int max)
     { string? result = string.IsNullOrWhiteSpace(value) ? null : value.Trim(); return result?.Length > max ? throw new ArgumentException("Значение слишком длинное.") : result; }
     public static string ActionLabel(ProcurementAction action, bool head) => action switch
-    { ProcurementAction.Monitor => head ? "Руководитель: наблюдать" : "Наблюдать", ProcurementAction.Clarify => "Уточнить",
-        ProcurementAction.Reject => head ? "Руководитель отклонил" : "Отклонить", ProcurementAction.Forward => "Передан руководителю",
-        ProcurementAction.Return => "Возвращён менеджеру", _ => "Дальнейшая работа одобрена" };
+    {
+        ProcurementAction.Monitor => head ? "Руководитель: наблюдать" : "Наблюдать",
+        ProcurementAction.Clarify => "Уточнить",
+        ProcurementAction.Reject => head ? "Руководитель отклонил" : "Отклонить",
+        ProcurementAction.Forward => "Передан руководителю",
+        ProcurementAction.Return => "Возвращён менеджеру",
+        _ => "Дальнейшая работа одобрена"
+    };
 }

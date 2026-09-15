@@ -94,9 +94,17 @@ public sealed class ProcurementTests
         await Assert.ThrowsExactlyAsync<DbUpdateException>(async () =>
         {
             await using LandErpDbContext db = await fixture.Factory.CreateDbContextAsync();
-            db.PropertyCaseSourceLinks.Add(new() { Id = DataConventions.NewId(), OrganizationId = fixture.OrganizationId,
-                PropertyCaseId = otherCaseId, CatalogItemId = manualId, Confirmed = true, Provenance = "test",
-                ReviewedDataRevision = 1, RecordedAt = DateTimeOffset.UtcNow });
+            db.PropertyCaseSourceLinks.Add(new()
+            {
+                Id = DataConventions.NewId(),
+                OrganizationId = fixture.OrganizationId,
+                PropertyCaseId = otherCaseId,
+                CatalogItemId = manualId,
+                Confirmed = true,
+                Provenance = "test",
+                ReviewedDataRevision = 1,
+                RecordedAt = DateTimeOffset.UtcNow
+            });
             await db.SaveChangesAsync();
         });
         await fixture.Sandbox.BackupRestoreAsync();
@@ -273,10 +281,21 @@ public sealed class ProcurementTests
             IAccessControl access = scope.ServiceProvider.GetRequiredService<IAccessControl>();
             return new()
             {
-                Sandbox = sandbox, Services = services, Scope = scope, Organization = scope.ServiceProvider.GetRequiredService<IOrganizationWorkspace>(),
-                Access = access, Factory = factory, Workspace = new(factory, access, TimeProvider.System), Owner = owner,
-                ForeignOwner = new(foreignId, true), Manager = new(manager, false), SecondManager = new(second, false), Head = new(head, false),
-                OrganizationId = organizationId, DepartmentA = departmentA, DepartmentB = departmentB,
+                Sandbox = sandbox,
+                Services = services,
+                Scope = scope,
+                Organization = scope.ServiceProvider.GetRequiredService<IOrganizationWorkspace>(),
+                Access = access,
+                Factory = factory,
+                Workspace = new(factory, access, TimeProvider.System),
+                Owner = owner,
+                ForeignOwner = new(foreignId, true),
+                Manager = new(manager, false),
+                SecondManager = new(second, false),
+                Head = new(head, false),
+                OrganizationId = organizationId,
+                DepartmentA = departmentA,
+                DepartmentB = departmentB,
                 TeamA = includeTeams ? structure.Teams.Single(item => item.Name == "Команда А").Id : null,
                 TeamB = includeTeams ? structure.Teams.Single(item => item.Name == "Команда Б").Id : null
             };
@@ -326,9 +345,19 @@ public sealed class ProcurementTests
             await using LandErpDbContext db = await Factory.CreateDbContextAsync();
             db.WorkAssignments.Add(new() { Id = assignmentId, OrganizationId = OrganizationId, ObjectType = "PropertyCase", ObjectId = id, EmployeeId = ManagerEmployeeId });
             db.WorkTasks.Add(new() { Id = taskId, OrganizationId = OrganizationId, ObjectType = "PropertyCase", ObjectId = id, EmployeeId = ManagerEmployeeId, Title = "Первичный анализ", RecordedAt = DateTimeOffset.UtcNow });
-            db.PropertyCases.Add(new() { Id = id, OrganizationId = OrganizationId, BusinessNumber = "PC-INDEPENDENT", WorkingTitle = title,
-                FactsProvenance = "Direct import", DepartmentId = DepartmentA, ManagerEmployeeId = ManagerEmployeeId, AssignmentId = assignmentId,
-                WorkTaskId = taskId, RecordedAt = DateTimeOffset.UtcNow });
+            db.PropertyCases.Add(new()
+            {
+                Id = id,
+                OrganizationId = OrganizationId,
+                BusinessNumber = "PC-INDEPENDENT",
+                WorkingTitle = title,
+                FactsProvenance = "Direct import",
+                DepartmentId = DepartmentA,
+                ManagerEmployeeId = ManagerEmployeeId,
+                AssignmentId = assignmentId,
+                WorkTaskId = taskId,
+                RecordedAt = DateTimeOffset.UtcNow
+            });
             await db.SaveChangesAsync(); return id;
         }
 
@@ -341,11 +370,16 @@ public sealed class ProcurementTests
 
         private static ListingData Data(ListingSource source, string id, decimal price, DateTimeOffset? observed = null) => new()
         {
-            Source = source, ExternalId = id,
+            Source = source,
+            ExternalId = id,
             Url = source == ListingSource.Avito ? $"https://www.avito.ru/moskva/zemelnye_uchastki/{id}" : $"https://www.cian.ru/sale/suburban/{id}/",
-            ObservedAt = observed ?? DateTimeOffset.UtcNow, AdapterVersion = "phase1", Provenance = "Phase1 test",
-            Title = new(FieldPresence.Present, source + " источник"), Price = new(FieldPresence.Present, price + " ₽", price),
-            AreaSquareMeters = new(FieldPresence.Present, "1500 м²", 1500m), Location = new(FieldPresence.Present, "Химки")
+            ObservedAt = observed ?? DateTimeOffset.UtcNow,
+            AdapterVersion = "phase1",
+            Provenance = "Phase1 test",
+            Title = new(FieldPresence.Present, source + " источник"),
+            Price = new(FieldPresence.Present, price + " ₽", price),
+            AreaSquareMeters = new(FieldPresence.Present, "1500 м²", 1500m),
+            Location = new(FieldPresence.Present, "Химки")
         };
 
         public async ValueTask DisposeAsync() { await Scope.DisposeAsync(); await Services.DisposeAsync(); await Sandbox.DisposeAsync(); }

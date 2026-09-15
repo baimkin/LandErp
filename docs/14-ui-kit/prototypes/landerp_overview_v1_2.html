@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LandErp — Обзор v1.2</title>
+<style>
+:root{
+  --nav:#10223A; --nav-active:#1C4163; --action:#2268B5;
+  --bg:#F4F7FA; --card:#FFFFFF; --line:#DCE4EC; --line2:#EDF2F6;
+  --text:#1B2B3D; --muted:#6C7F92; --ok:#14734B; --warn:#9A6200; --risk:#B4232D;
+  --ok-bg:#EAF7F0; --warn-bg:#FFF5DF; --risk-bg:#FCEAEC; --info-bg:#EAF2FB;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px "Segoe UI",Arial,sans-serif}
+button{font:inherit}
+.app{display:grid;grid-template-columns:210px 1fr;min-height:100vh}
+.side{background:var(--nav);color:#DCE8F5;padding:12px 8px;display:flex;flex-direction:column}
+.brand{padding:5px 10px 18px;font-weight:700;font-size:16px}
+.brand small{display:block;color:#98ABC0;font-size:9px;font-weight:400;margin-top:3px}
+.cap{font-size:9px;color:#7F95AB;font-weight:700;padding:10px 8px 6px}
+.nav{padding:8px 10px;border-radius:7px;margin:2px 0;font-size:12px}
+.nav.active{background:var(--nav-active);color:#fff}
+.sidefoot{margin-top:auto;padding:14px 10px 4px;color:#8AA0B5;font-size:9.5px}
+
+.main{min-width:0}
+.top{height:54px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px}
+.top small{font-size:9px;color:#72879A}
+.top b{display:block;font-size:12px;margin-top:2px}
+.user{font-size:10px;color:var(--muted)}
+.page{max-width:1320px;margin:auto;padding:24px 28px 60px}
+.crumb{font-size:10px;color:#6285A9;margin-bottom:8px}
+.head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:16px}
+.head h1{font-size:28px;margin:0 0 6px}
+.head p{margin:0;color:var(--muted);font-size:12px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{height:34px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:0 12px;color:#334B61;font-size:10.5px;font-weight:600;cursor:pointer}
+.btn.primary{background:var(--action);border-color:var(--action);color:#fff}
+.btn.small{height:29px;font-size:10px;padding:0 9px}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;position:relative}
+.stat label{display:block;font-size:9px;color:#7A8C9D;text-transform:uppercase}
+.stat strong{display:block;font-size:22px;margin-top:6px}
+.stat span{display:block;font-size:10px;color:var(--muted);margin-top:4px}
+.stat.attn{box-shadow:inset -4px 0 0 var(--risk)}
+.stat.wait{box-shadow:inset -4px 0 0 var(--warn)}
+
+.layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(350px,.95fr);gap:14px}
+.column{display:grid;gap:14px;align-content:start}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.cardHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:15px 16px;border-bottom:1px solid var(--line2)}
+.cardHead h2{margin:0;font-size:14px}
+.cardHead p{margin:4px 0 0;color:var(--muted);font-size:10px;line-height:1.45}
+.cardHead .meta{font-size:10px;color:var(--muted)}
+
+.rows{padding:0 14px}
+.row{display:grid;grid-template-columns:30px minmax(0,1fr) 132px 20px;gap:10px;align-items:center;min-height:62px;border-bottom:1px solid var(--line2)}
+.row:last-child{border-bottom:0}
+.icon{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:700}
+.icon.risk{background:var(--risk-bg);color:var(--risk)}
+.icon.warn{background:var(--warn-bg);color:var(--warn)}
+.icon.info{background:var(--info-bg);color:var(--action)}
+.mainText b{display:block;font-size:11.5px;line-height:1.3}
+.mainText small{display:block;font-size:9.5px;color:var(--muted);margin-top:4px;line-height:1.35}
+.sideText{font-size:9.5px;color:#546A7D;line-height:1.35}
+.sideText strong{display:block;font-size:10px}
+.arrow{color:#7A90A3;text-align:right;font-size:16px}
+
+.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:16px}
+.stage{border:1px solid var(--line);border-radius:10px;padding:12px}
+.stage label{display:block;font-size:8.5px;color:#7A8C9D;text-transform:uppercase}
+.stage strong{display:block;font-size:20px;margin-top:6px}
+.stage span{display:block;font-size:9px;color:var(--muted);margin-top:4px;line-height:1.35}
+.bar{height:4px;background:#E8EEF4;border-radius:999px;margin-top:10px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--action);border-radius:999px}
+
+.workRows{padding:0 14px}
+.work{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) 110px 20px;gap:12px;align-items:center;min-height:58px;border-bottom:1px solid var(--line2)}
+.work:last-child{border-bottom:0}
+.obj b,.task b{display:block;font-size:11px;line-height:1.3}
+.obj small,.task small{display:block;font-size:9.5px;color:var(--muted);margin-top:4px;line-height:1.35}
+.deadline{font-size:10px}
+.deadline.today{color:var(--warn);font-weight:700}
+.deadline.over{color:var(--risk);font-weight:700}
+
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:16px 16px 8px}
+.mini{border:1px solid var(--line);border-radius:10px;padding:12px}
+.mini label{display:block;font-size:8.5px;color:#7A8C9D;text-transform:uppercase}
+.mini b{display:block;font-size:16px;margin-top:5px}
+.mini small{display:block;font-size:9px;color:var(--muted);margin-top:3px}
+
+.statusList{padding:0 16px 14px}
+.status{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:38px;border-top:1px solid var(--line2)}
+.status:first-child{border-top:0}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.dot.warn{background:var(--warn)}
+.dot.risk{background:var(--risk)}
+.status b{font-size:10.5px}
+.status span{font-size:9.5px;color:var(--muted)}
+
+.quick{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:16px}
+.quick .btn{text-align:left;height:38px}
+.note{padding:0 16px 16px;color:var(--muted);font-size:9.5px;line-height:1.45}
+
+.teamList{padding:4px 16px 16px}
+.teamRow{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:40px;border-top:1px solid var(--line2)}
+.teamRow:first-child{border-top:0}
+.teamRow b{font-size:10.5px}
+.teamRow span{font-size:9.5px;color:var(--muted)}
+
+@media (max-width:1100px){
+  .app{grid-template-columns:72px 1fr}
+  .brand,.cap,.nav{font-size:0}
+  .sidefoot{display:none}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .layout{grid-template-columns:1fr}
+}
+@media (max-width:800px){
+  .stats{grid-template-columns:1fr}
+  .flow{grid-template-columns:repeat(2,1fr)}
+  .quick{grid-template-columns:1fr}
+  .row,.work{grid-template-columns:30px 1fr}
+  .row .sideText,.row .arrow,.work .deadline,.work .arrow{display:none}
+  .metrics{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">LandErp<small>Рабочий контур закупки</small></div>
+    <div class="cap">РАБОЧЕЕ МЕСТО</div>
+    <div class="nav active">▣ Обзор</div>
+    <div class="nav">▣ Закупка</div>
+    <div class="nav">▦ Организация</div>
+    <div class="nav">≡ Аудит</div>
+    <div class="nav">↕ Сбор данных</div>
+    <div class="sidefoot">Локальный контур</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div><small>ЗАКУПКА</small><b>Земля. Данные. Решения.</b></div>
+      <div class="user">owner@landerp.local &nbsp; <button class="btn small">Выход</button></div>
+    </div>
+
+    <div class="page">
+      <div class="crumb">LandErp / Обзор</div>
+
+      <div class="head">
+        <div>
+          <h1>Обзор</h1>
+          <p>Что происходит в закупке прямо сейчас и где требуется ваше внимание.</p>
+        </div>
+        <div class="actions">
+          <button class="btn">Открыть входящие</button>
+          <button class="btn">Очередь закупки</button>
+          <button class="btn primary">+ Добавить предложение</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><label>Новые входящие</label><strong>17</strong><span>+6 со вчера</span></div>
+        <div class="stat"><label>В закупке</label><strong>12</strong><span>5 на глубокой проверке</span></div>
+        <div class="stat attn"><label>Требуют внимания</label><strong>4</strong><span>2 просрочены</span></div>
+        <div class="stat wait"><label>Ждут решения</label><strong>2</strong><span>руководителя закупок</span></div>
+      </div>
+
+      <div class="layout">
+        <div class="column">
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Требует внимания</h2>
+                <p>Сначала то, что может задержать закупку или потерять объект.</p>
+              </div>
+              <div class="meta">4 события</div>
+            </div>
+            <div class="rows">
+              <div class="row">
+                <div class="icon risk">!</div>
+                <div class="mainText"><b>Химки, Фирсановка · №0248</b><small>Нет следующего действия уже 4 дня</small></div>
+                <div class="sideText"><strong>Просрочено</strong>назначить следующий шаг</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="row">
+                <div class="icon warn">↩</div>
+                <div class="mainText"><b>Королёв · №0261</b><small>Руководитель вернул объект на уточнение цены</small></div>
+                <div class="sideText"><strong>Сегодня</strong>связаться с продавцом</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="row">
+                <div class="icon warn">⚙</div>
+                <div class="mainText"><b>Поиск «Королёв · ИЖС до 15 млн»</b><small>Сбор данных требует ручного действия</small></div>
+                <div class="sideText"><strong>Сейчас</strong>проверить парсер</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="row">
+                <div class="icon info">+</div>
+                <div class="mainText"><b>7 новых предложений с высоким приоритетом</b><small>Цена и локация проходят базовые фильтры</small></div>
+                <div class="sideText"><strong>Новые</strong>посмотреть входящие</div>
+                <div class="arrow">›</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Закупка сейчас</h2>
+                <p>Состояние текущего потока от входящих до покупки.</p>
+              </div>
+              <button class="btn small">Открыть очередь</button>
+            </div>
+            <div class="flow">
+              <div class="stage"><label>Входящие</label><strong>17</strong><span>новых предложений</span><div class="bar"><i style="width:100%"></i></div></div>
+              <div class="stage"><label>В работе</label><strong>12</strong><span>объектов в работе</span><div class="bar"><i style="width:71%"></i></div></div>
+              <div class="stage"><label>Глубокая проверка</label><strong>5</strong><span>юридическая проверка</span><div class="bar"><i style="width:42%"></i></div></div>
+              <div class="stage"><label>Решение</label><strong>2</strong><span>ждут руководителя</span><div class="bar"><i style="width:17%"></i></div></div>
+              <div class="stage"><label>Куплено</label><strong>3</strong><span>за последние 30 дней</span><div class="bar"><i style="width:25%"></i></div></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Моя работа</h2>
+                <p>Ближайшие действия по объектам, за которые вы отвечаете.</p>
+              </div>
+              <button class="btn small">Все мои объекты</button>
+            </div>
+            <div class="workRows">
+              <div class="work">
+                <div class="obj"><b>Солнечногорск · №0254</b><small>Переговоры · продавец на связи</small></div>
+                <div class="task"><b>Позвонить продавцу</b><small>Уточнить возможность снижения до 11,8 млн</small></div>
+                <div class="deadline today">Сегодня · 17:00</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="work">
+                <div class="obj"><b>Истра · №0260</b><small>Первичная проверка</small></div>
+                <div class="task"><b>Проверить Росреестр</b><small>Кадастровый номер уже найден</small></div>
+                <div class="deadline">Завтра</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="work">
+                <div class="obj"><b>Химки · №0248</b><small>Глубокая проверка</small></div>
+                <div class="task"><b>Назначить следующее действие</b><small>Объект без движения</small></div>
+                <div class="deadline over">Просрочено</div>
+                <div class="arrow">›</div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="column">
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Сбор данных</h2>
+                <p>Коротко о состоянии поисков и сбора данных.</p>
+              </div>
+              <button class="btn small">Управление</button>
+            </div>
+            <div class="metrics">
+              <div class="mini"><label>Сборщики</label><b>3 / 3</b><small>работают</small></div>
+              <div class="mini"><label>Поиски</label><b>28</b><small>активны</small></div>
+              <div class="mini"><label>Сегодня</label><b>642</b><small>обработано</small></div>
+            </div>
+            <div class="statusList">
+              <div class="status"><span class="dot"></span><b>Avito</b><span>успешно · 14:32</span></div>
+              <div class="status"><span class="dot warn"></span><b>Королёв · ИЖС до 15 млн</b><span>требует внимания</span></div>
+              <div class="status"><span class="dot"></span><b>Последний новый объект</b><span>14:28</span></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Быстрые действия</h2>
+                <p>То, что используется чаще всего.</p>
+              </div>
+            </div>
+            <div class="quick">
+              <button class="btn">+ Добавить предложение</button>
+              <button class="btn">Открыть входящие</button>
+              <button class="btn">Очередь закупки</button>
+              <button class="btn">Мои объекты</button>
+            </div>
+            <div class="note">Организация, аудит и техническое управление сбором данных остаются в левом меню и не дублируются здесь отдельными карточками.</div>
+          </section>
+
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Команда закупки</h2>
+                <p>Только то, что помогает понять загрузку прямо сейчас.</p>
+              </div>
+            </div>
+            <div class="teamList">
+              <div class="teamRow"><span class="dot"></span><b>Алексей Морозов</b><span>4 объекта</span></div>
+              <div class="teamRow"><span class="dot"></span><b>Анна Крылова</b><span>3 объекта</span></div>
+              <div class="teamRow"><span class="dot warn"></span><b>Дмитрий Соколов</b><span>5 объектов · 1 просрочен</span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

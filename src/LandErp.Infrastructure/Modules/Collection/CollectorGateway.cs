@@ -112,12 +112,14 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
                 if (keyed.ContentHash != hash) throw new CollectorProtocolException("OBSERVATION_KEY_CONFLICT");
                 duplicates++; continue;
             }
-            Listing? listing = db.Listings.Local.FirstOrDefault(item => item.OrganizationId == agent.OrganizationId && item.Source == data.Source && item.ExternalId == data.ExternalId)
-                ?? await db.Listings.SingleOrDefaultAsync(item => item.OrganizationId == agent.OrganizationId && item.Source == data.Source && item.ExternalId == data.ExternalId, cancellationToken);
+            CatalogSource source = MapSource(data.Source);
+            Listing? listing = db.Listings.Local.FirstOrDefault(item => item.OrganizationId == agent.OrganizationId && item.Source == source && item.ExternalId == data.ExternalId)
+                ?? await db.Listings.SingleOrDefaultAsync(item => item.OrganizationId == agent.OrganizationId && item.Source == source && item.ExternalId == data.ExternalId, cancellationToken);
             bool isNew = listing == null;
             listing ??= new() { Id = DataConventions.NewId(), OrganizationId = agent.OrganizationId,
-                DepartmentId = search.DepartmentId, TeamId = search.TeamId, Source = data.Source, ExternalId = data.ExternalId,
+                DepartmentId = search.DepartmentId, TeamId = search.TeamId, Source = source, ExternalId = data.ExternalId,
                 Url = data.Url, FirstObservedAt = data.ObservedAt, LastObservedAt = data.ObservedAt,
+                IngestionKind = CatalogIngestionKind.Collector, Provenance = "Collector V1", ReceivedAt = time.GetUtcNow(),
                 RecordedAt = time.GetUtcNow(), ChangedAt = time.GetUtcNow() };
             if (await db.ListingObservations.AnyAsync(item => item.ListingId == listing.Id && item.ObservedAt == data.ObservedAt && item.ContentHash == hash, cancellationToken)
                 || db.ListingObservations.Local.Any(item => item.ListingId == listing.Id && item.ObservedAt == data.ObservedAt && item.ContentHash == hash))
@@ -181,6 +183,13 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         return agent;
     }
     internal static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+    private static CatalogSource MapSource(ListingSource source) => source switch
+    {
+        ListingSource.Avito => CatalogSource.Avito,
+        ListingSource.Cian => CatalogSource.Cian,
+        _ => throw new CollectorProtocolException("SOURCE_UNSUPPORTED")
+    };
 
     private static void ApplyKnown(Listing listing, ListingData data, List<string> changes)
     {

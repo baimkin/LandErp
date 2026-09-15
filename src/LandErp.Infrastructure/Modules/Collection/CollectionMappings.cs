@@ -27,16 +27,23 @@ internal static class CollectionMappings
         builder.Entity<CollectionDelivery>().HasOne<ServerCollectionJob>().WithMany().HasForeignKey(item => item.JobId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Listing>().ToTable("listings", "catalog");
         builder.Entity<Listing>().Property(item => item.Source).HasConversion<string>();
-        builder.Entity<Listing>().HasIndex(item => new { item.OrganizationId, item.Source, item.ExternalId }).IsUnique();
+        builder.Entity<Listing>().Property(item => item.IngestionKind).HasConversion<string>();
+        builder.Entity<Listing>().Property(item => item.Disposition).HasConversion<string>();
+        builder.Entity<Listing>().HasIndex(item => new { item.OrganizationId, item.Source, item.ExternalId }).IsUnique()
+            .HasFilter("external_id IS NOT NULL");
         builder.Entity<Listing>().HasIndex(item => new { item.OrganizationId, item.ChangedAt });
         builder.Entity<Listing>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Listing>().HasOne<OrgUnit>().WithMany().HasForeignKey(item => item.DepartmentId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Listing>().HasOne<Team>().WithMany().HasForeignKey(item => item.TeamId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<Listing>().HasOne<Employee>().WithMany().HasForeignKey(item => item.CreatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Listing>().Property(item => item.Url).HasMaxLength(2000);
         builder.Entity<Listing>().Property(item => item.Title).HasMaxLength(20000);
         builder.Entity<Listing>().Property(item => item.Location).HasMaxLength(20000);
         builder.Entity<Listing>().Property(item => item.Description).HasMaxLength(20000);
         builder.Entity<Listing>().Property(item => item.SellerName).HasMaxLength(20000);
+        builder.Entity<Listing>().Property(item => item.Provenance).HasMaxLength(2000);
+        builder.Entity<Listing>().Property(item => item.IngressComment).HasMaxLength(4000);
+        builder.Entity<Listing>().Property(item => item.CadastralNumber).HasMaxLength(128);
         builder.Entity<Listing>().Property(item => item.Price).HasPrecision(19, 4);
         builder.Entity<Listing>().Property(item => item.AreaSquareMeters).HasPrecision(19, 4);
         builder.Entity<Listing>().Property(item => item.Currency).HasMaxLength(3);

@@ -1,0 +1,19 @@
+@page "/procurement/listings/{ListingId:guid}"
+@attribute [Authorize(Policy = "manager_queue.read")]
+@using LandErp.Application.Modules.Procurement.Contracts
+@inherits WorkspaceComponent
+@inject IProcurementWorkspace Workspace
+@inject NavigationManager Navigation
+<PageTitle>Переход к объекту · LandErp</PageTitle>
+@if(Loading) { <PageState Kind="loading" Title="Ищем связанный PropertyCase…" /> }
+else if(Forbidden) { <PageState Kind="forbidden" Title="Нет доступа к объекту" /> }
+else if(notLinked) { <PageState Kind="error" Title="PropertyCase ещё не создан" Description="Совместимый маршрут не создаёт объект неявно. Откройте входящие и используйте «Взять в работу»." /><a class="btn primary" href="/incoming">Открыть входящие</a> }
+@code {
+    [Parameter] public Guid ListingId { get; set; }
+    private bool notLinked;
+    protected override async Task ReadAsync()
+    {
+        Guid? caseId = await Workspace.ResolveLegacyListingAsync(CurrentSubject, ListingId, CancellationToken.None);
+        if(caseId==null) notLinked=true; else Navigation.NavigateTo($"/procurement/{caseId}", replace:true);
+    }
+}

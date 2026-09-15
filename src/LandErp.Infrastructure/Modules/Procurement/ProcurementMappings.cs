@@ -39,12 +39,27 @@ internal static class ProcurementMappings
         builder.Entity<InternalNotification>().HasIndex(item => new { item.EmployeeId, item.ReadAt });
         builder.Entity<InternalNotification>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCase>().ToTable("property_cases", "procurement");
-        builder.Entity<PropertyCase>().HasIndex(item => item.ListingId).IsUnique();
+        builder.Entity<PropertyCase>().HasIndex(item => item.ListingId).IsUnique().HasFilter("listing_id IS NOT NULL");
         builder.Entity<PropertyCase>().HasIndex(item => item.BusinessNumber).IsUnique();
         builder.Entity<PropertyCase>().HasOne<Listing>().WithMany().HasForeignKey(item => item.ListingId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<PropertyCase>().HasOne<OrgUnit>().WithMany().HasForeignKey(item => item.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<PropertyCase>().HasOne<Team>().WithMany().HasForeignKey(item => item.TeamId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCase>().HasOne<WorkflowStage>().WithMany().HasForeignKey(item => item.StageId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCase>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ManagerEmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCase>().HasOne<Assignment>().WithMany().HasForeignKey(item => item.AssignmentId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCase>().HasOne<WorkTask>().WithMany().HasForeignKey(item => item.WorkTaskId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<PropertyCase>().Property(item => item.WorkingTitle).HasMaxLength(20000);
+        builder.Entity<PropertyCase>().Property(item => item.WorkingLocation).HasMaxLength(20000);
+        builder.Entity<PropertyCase>().Property(item => item.CadastralNumber).HasMaxLength(128);
+        builder.Entity<PropertyCase>().Property(item => item.WorkingPrice).HasPrecision(19, 4);
+        builder.Entity<PropertyCase>().Property(item => item.WorkingAreaSquareMeters).HasPrecision(19, 4);
+        builder.Entity<PropertyCase>().Property(item => item.Currency).HasMaxLength(3);
+        builder.Entity<PropertyCase>().Property(item => item.FactsProvenance).HasMaxLength(1000);
+        builder.Entity<PropertyCaseSourceLink>().ToTable("property_case_source_links", "procurement");
+        builder.Entity<PropertyCaseSourceLink>().HasIndex(item => item.CatalogItemId).IsUnique().HasFilter("confirmed");
+        builder.Entity<PropertyCaseSourceLink>().HasIndex(item => new { item.PropertyCaseId, item.CatalogItemId }).IsUnique();
+        builder.Entity<PropertyCaseSourceLink>().HasOne<PropertyCase>().WithMany().HasForeignKey(item => item.PropertyCaseId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<PropertyCaseSourceLink>().HasOne<Listing>().WithMany().HasForeignKey(item => item.CatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<PropertyCaseSourceLink>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ActorEmployeeId).OnDelete(DeleteBehavior.Restrict);
     }
 }

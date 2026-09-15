@@ -34,6 +34,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<Listing> Listings => Set<Listing>();
     public DbSet<CatalogObservation> ListingObservations => Set<CatalogObservation>();
     public DbSet<PropertyCase> PropertyCases => Set<PropertyCase>();
+    public DbSet<PropertyCaseSourceLink> PropertyCaseSourceLinks => Set<PropertyCaseSourceLink>();
     public DbSet<Assignment> WorkAssignments => Set<Assignment>();
     public DbSet<WorkTask> WorkTasks => Set<WorkTask>();
     public DbSet<WorkflowTransition> WorkflowTransitions => Set<WorkflowTransition>();

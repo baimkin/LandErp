@@ -1,30 +1,61 @@
 @page "/procurement"
 @attribute [Authorize(Policy = "manager_queue.read")]
+@using LandErp.Application.Modules.Catalog.Domain
 @using LandErp.Application.Modules.Procurement.Contracts
-@using LandErp.Collector.Contracts.V1
 @using LandErp.Server.Components.Procurement
 @inherits WorkspaceComponent
 @inject IProcurementWorkspace Workspace
 <PageTitle>Очередь закупки · LandErp</PageTitle>
-<PageHeader Title="Очередь закупки" Breadcrumb="Закупка / Объекты" Description="Новые объявления, изменения и объекты, требующие вашего решения." />
-<FilterBar><EditForm Model="filter" FormName="queue-filter" OnValidSubmit="ApplyFilterAsync"><div class="queue-filters"><label class="field"><span>Поиск объекта</span><input @bind="filter.Text" @bind:event="oninput" placeholder="Адрес, название или ID источника" /></label><label class="field"><span>Стадия</span><InputSelect aria-label="Стадия" @bind-Value="filter.Stage"><option value="">Требуют работы</option>@foreach(string stage in stages) { <option value="@stage">@ProcurementLabels.Stage(stage)</option> }</InputSelect></label><label class="field"><span>Источник</span><InputSelect aria-label="Источник" @bind-Value="filter.Source"><option value="">Все</option><option value="Avito">Avito</option><option value="Cian">Cian</option></InputSelect></label><label class="check-field"><InputCheckbox @bind-Value="filter.Changed" /> Только изменившиеся</label><ActionButton Label="Применить" Type="submit" /><ActionButton Label="Обновить" Tone="secondary" OnClick="ReloadAsync" /></div></EditForm></FilterBar>
+<PageHeader Title="Очередь закупки" Breadcrumb="Закупка / Объекты" Description="Самостоятельные PropertyCase, требующие вашего решения." />
+<FilterBar>
+    <EditForm Model="filter" FormName="queue-filter" OnValidSubmit="ApplyFilterAsync">
+        <div class="queue-filters">
+            <label class="field"><span>Поиск объекта</span><input @bind="filter.Text" @bind:event="oninput" placeholder="Адрес, номер PropertyCase или ID источника" /></label>
+            <label class="field"><span>Стадия</span><InputSelect aria-label="Стадия" @bind-Value="filter.Stage"><option value="">Требуют работы</option>@foreach(string stage in stages) { <option value="@stage">@ProcurementLabels.Stage(stage)</option> }</InputSelect></label>
+            <label class="field"><span>Источник</span><InputSelect aria-label="Источник" @bind-Value="filter.Source"><option value="">Все</option>@foreach(CatalogSource source in Enum.GetValues<CatalogSource>()) { <option value="@source">@source</option> }</InputSelect></label>
+            <label class="check-field"><InputCheckbox @bind-Value="filter.Changed" /> Только с изменившимися источниками</label>
+            <ActionButton Label="Применить" Type="submit" /><ActionButton Label="Обновить" Tone="secondary" OnClick="ReloadAsync" />
+        </div>
+    </EditForm>
+</FilterBar>
 @if(Loading) { <PageState Kind="loading" Title="Загружаем очередь…" /> }
 else if(Forbidden) { <PageState Kind="forbidden" Title="Нет доступа к очереди" /> }
 else if(Error!=null) { <PageState Kind="error" Title="@Error"><ActionButton Label="Повторить" OnClick="ReloadAsync" /></PageState> }
 else if(queue!=null)
 {
-    <div class="queue-summary"><strong>@queue.Total объектов</strong><small>Данные и действия ограничены вашей областью доступа</small></div>
-    @if(queue.Items.Count==0) { <PageState Title="Объектов в очереди нет" Description="Измените фильтр или дождитесь нового сбора Collector. Для вашей области доступа могут потребоваться назначенные объекты." /> }
-    else { <div class="procurement-queue">@foreach(QueueItem item in queue.Items) { <article class="queue-card surface"><div class="queue-main"><div class="queue-meta"><SourceBadge Source="item.Source" /><StatusBadge Label="@ProcurementLabels.Stage(item.Stage)" Tone="@(item.Stage=="returned" ? "warning" : "neutral")" /><small>@(item.BusinessNumber??"Новое объявление")</small></div><a class="queue-title" href="@($"/procurement/listings/{item.ListingId}")" @onclick="() => Open(item.ListingId)" @onclick:preventDefault>@item.Title</a><p>@(item.Location??"Местоположение неизвестно")</p><span class="event-reason">@item.Reason</span>@if(item.Changed) { <StatusBadge Label="Данные изменились после решения" Tone="warning" /> }@if(item.UnknownFields.Length>0) { <small class="warning-text">Неизвестно: @string.Join(", ",item.UnknownFields)</small> }</div><div class="queue-side"><strong>@ProcurementLabels.Money(item.Price)</strong><span>@ProcurementLabels.Area(item.Area)</span><small>@(item.Assignee??"Первичный анализ не назначен")</small>@if(item.DueAt!=null) { <small class="warning-text">До @ProcurementLabels.Time(item.DueAt)</small> }<ActionButton Label="Открыть объект" Tone="secondary" OnClick="() => Open(item.ListingId)" /></div></article> }</div> }
+    <div class="queue-summary"><strong>@queue.Total объектов</strong><small>Видимость определяется ответственностью PropertyCase, а не метаданными источника</small></div>
+    @if(queue.Items.Count==0) { <PageState Title="Объектов в очереди нет" Description="Измените фильтр или возьмите предложение в работу из входящих." /> }
+    else
+    {
+        <div class="procurement-queue">
+        @foreach(QueueItem item in queue.Items)
+        {
+            <article class="queue-card surface">
+                <div class="queue-main">
+                    <div class="queue-meta">
+                        @foreach(CatalogSource source in item.Sources) { <SourceBadge Source="source" /> }
+                        @if(item.Sources.Length==0) { <StatusBadge Label="Без внешнего источника" Tone="neutral" /> }
+                        <StatusBadge Label="@ProcurementLabels.Stage(item.Stage)" Tone="@(item.Stage=="returned" ? "warning" : "neutral")" /><small>@item.BusinessNumber</small>
+                    </div>
+                    <a class="queue-title" href="@($"/procurement/{item.CaseId}")" @onclick="() => Open(item.CaseId)" @onclick:preventDefault>@item.Title</a>
+                    <p>@(item.Location??"Местоположение неизвестно")</p><span class="event-reason">@item.Reason</span>
+                    @if(item.Changed) { <StatusBadge Label="Источник изменился; рабочие факты сохранены" Tone="warning" /> }
+                    @if(item.UnknownFields.Length>0) { <small class="warning-text">Неизвестно: @string.Join(", ",item.UnknownFields)</small> }
+                </div>
+                <div class="queue-side"><strong>@ProcurementLabels.Money(item.Price)</strong><span>@ProcurementLabels.Area(item.Area)</span><small>@(item.Assignee??"Не назначен")</small>@if(item.DueAt!=null) { <small class="warning-text">До @ProcurementLabels.Time(item.DueAt)</small> }<ActionButton Label="Открыть объект" Tone="secondary" OnClick="() => Open(item.CaseId)" /></div>
+            </article>
+        }
+        </div>
+    }
     <div class="table-footer"><span>Страница @(page+1)</span><div><ActionButton Label="Назад" Disabled="@(page==0)" Tone="quiet" OnClick="PreviousAsync" /><ActionButton Label="Далее" Disabled="@((page+1)*40>=queue.Total)" Tone="quiet" OnClick="NextAsync" /></div></div>
 }
-@if(selected!=null) { <Modal Title="Карточка объекта" Kind="drawer" OnClose="() => selected=null"><CaseWorkspace ListingId="@selected.Value" OnChanged="ReloadAsync" /></Modal> }
+@if(selected!=null) { <Modal Title="Карточка объекта" Kind="drawer" OnClose="() => selected=null"><CaseWorkspace CaseId="@selected.Value" OnChanged="ReloadAsync" /></Modal> }
 @code {
     private ProcurementQueuePage? queue; private readonly FilterInput filter=new(); private int page; private Guid? selected;
-    private static readonly string[] stages=["new","analysis","clarify","pending_head","returned","monitor","rejected","approved"];
+    private static readonly string[] stages=["analysis","clarify","pending_head","returned","monitor","rejected","approved"];
     protected override async Task ReadAsync()=>queue=await Workspace.ReadQueueAsync(CurrentSubject,new(filter.Text,filter.Stage,filter.Source,filter.Changed,page*40,40),CancellationToken.None);
     private Task ApplyFilterAsync() { page=0; return ReloadAsync(); }
     private Task PreviousAsync() { page--; return ReloadAsync(); } private Task NextAsync() { page++; return ReloadAsync(); }
     private void Open(Guid id)=>selected=id;
-    private sealed class FilterInput { public string Text { get; set; }=""; public string Stage { get; set; }=""; public ListingSource? Source { get; set; } public bool Changed { get; set; } }
+    private sealed class FilterInput { public string Text { get; set; }=""; public string Stage { get; set; }=""; public CatalogSource? Source { get; set; } public bool Changed { get; set; } }
 }

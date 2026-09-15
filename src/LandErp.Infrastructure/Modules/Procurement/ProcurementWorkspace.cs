@@ -1,4 +1,5 @@
 using LandErp.Application.Foundation;
+using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
@@ -13,231 +14,411 @@ using System.Text.Json;
 
 namespace LandErp.Infrastructure.Modules.Procurement;
 
-/// <summary>One transaction owns current responsibility, decision facts and history. No client-supplied organization/scope.</summary>
-public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> factory, IAccessControl access, TimeProvider time) : IProcurementWorkspace
+/// <summary>Catalog is organization-shared; procurement access is derived only from case responsibility.</summary>
+public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> factory, IAccessControl access, TimeProvider time)
+    : IProcurementWorkspace, ICatalogWorkspace
 {
     private sealed class Row
     {
-        public Listing Listing { get; init; } = default!;
-        public PropertyCase? Case { get; init; }
-        public Assignment? Assignment { get; init; }
-        public WorkTask? Task { get; init; }
+        public PropertyCase Case { get; init; } = default!;
+        public Assignment Assignment { get; init; } = default!;
+        public WorkTask Task { get; init; } = default!;
     }
-    private static IQueryable<Row> Visible(LandErpDbContext db, AccessContext context)
+
+    private static IQueryable<Row> VisibleCases(LandErpDbContext db, AccessContext context)
     {
-        var rows = from listing in db.Listings
-                   join item in db.PropertyCases on listing.Id equals item.ListingId into cases
-                   from item in cases.DefaultIfEmpty()
-                   join assignment in db.WorkAssignments on (item == null ? Guid.Empty : item.AssignmentId) equals assignment.Id into assignments
-                   from assignment in assignments.DefaultIfEmpty()
-                   join task in db.WorkTasks on (item == null ? Guid.Empty : item.WorkTaskId) equals task.Id into tasks
-                   from task in tasks.DefaultIfEmpty()
-                   where listing.OrganizationId == context.OrganizationId
-                   select new Row { Listing = listing, Case = item, Assignment = assignment, Task = task };
+        var rows = from item in db.PropertyCases
+                   join assignment in db.WorkAssignments on item.AssignmentId equals assignment.Id
+                   join task in db.WorkTasks on item.WorkTaskId equals task.Id
+                   where item.OrganizationId == context.OrganizationId
+                   select new Row { Case = item, Assignment = assignment, Task = task };
         return context.Scope switch
         {
             AccessScope.Organization => rows,
-            AccessScope.Department => rows.Where(row => context.DepartmentId != null && row.Listing.DepartmentId == context.DepartmentId),
-            AccessScope.Team => rows.Where(row => context.TeamId != null && row.Listing.TeamId == context.TeamId),
-            AccessScope.AssignedObjects => rows.Where(row => row.Assignment != null && row.Assignment.EmployeeId == context.EmployeeId),
-            _ => rows.Where(row => row.Case != null && (row.Case.ManagerEmployeeId == context.EmployeeId || row.Assignment != null && row.Assignment.EmployeeId == context.EmployeeId))
+            AccessScope.Department => rows.Where(row => context.DepartmentId != null && row.Case.DepartmentId == context.DepartmentId),
+            AccessScope.Team => rows.Where(row => context.TeamId != null && row.Case.TeamId == context.TeamId),
+            AccessScope.AssignedObjects => rows.Where(row => row.Assignment.EmployeeId == context.EmployeeId),
+            _ => rows.Where(row => row.Case.ManagerEmployeeId == context.EmployeeId)
         };
     }
+
+    public async Task<IncomingCatalogPage> ReadIncomingAsync(Subject subject, IncomingCatalogFilter filter, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        ValidatePage(filter.Text, filter.Offset, filter.Size);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        IQueryable<Listing> query = db.Listings.Where(item => item.OrganizationId == context.OrganizationId);
+        if (filter.Text.Length > 0)
+            query = query.Where(item => (item.Title ?? "").Contains(filter.Text) || (item.Location ?? "").Contains(filter.Text)
+                || (item.ExternalId ?? "").Contains(filter.Text) || (item.CadastralNumber ?? "").Contains(filter.Text));
+        if (filter.Source != null) query = query.Where(item => item.Source == filter.Source);
+        if (filter.Disposition != null) query = query.Where(item => item.Disposition == filter.Disposition);
+        int total = await query.CountAsync(cancellationToken);
+        Listing[] items = await query.OrderByDescending(item => item.ChangedAt).ThenBy(item => item.Id)
+            .Skip(filter.Offset).Take(filter.Size).ToArrayAsync(cancellationToken);
+        Guid[] ids = items.Select(item => item.Id).ToArray();
+        var linked = await (from link in db.PropertyCaseSourceLinks
+                            join propertyCase in db.PropertyCases on link.PropertyCaseId equals propertyCase.Id
+                            where ids.Contains(link.CatalogItemId) && link.Confirmed
+                            select new { link.CatalogItemId, propertyCase.Id, propertyCase.BusinessNumber }).ToArrayAsync(cancellationToken);
+        var byItem = linked.ToDictionary(item => item.CatalogItemId);
+        return new(items.Select(item =>
+        {
+            byItem.TryGetValue(item.Id, out var link);
+            return new CatalogItemView(item.Id, item.Source, item.ExternalId, item.Url, item.Title ?? "Название неизвестно",
+                item.Price, item.Currency, item.AreaSquareMeters, item.Location, item.CadastralNumber, item.Description,
+                item.Provenance, item.IngestionKind, item.Disposition, item.ReceivedAt, link?.Id, link?.BusinessNumber, item.Version);
+        }).ToArray(), total);
+    }
+
+    public async Task<Guid> CreateManualAsync(Subject subject, CreateManualCatalogItem command, string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        if (command.Source is CatalogSource.Avito or CatalogSource.Cian)
+            throw new ArgumentException("Автоматические marketplace-источники поступают через Collector.");
+        string title = Required(command.Title, 3, 20000, "Укажите название предложения.");
+        string comment = Required(command.Comment, 3, 4000, "Укажите происхождение или комментарий.");
+        string? url = Optional(command.Url, 2000);
+        if (url != null && (!Uri.TryCreate(url, UriKind.Absolute, out Uri? parsed) || parsed.Scheme != Uri.UriSchemeHttps))
+            throw new ArgumentException("Ссылка должна использовать HTTPS.");
+        string? externalId = Optional(command.ExternalId, 512);
+        DateTimeOffset now = time.GetUtcNow();
+        Listing item = new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, Source = command.Source,
+            ExternalId = externalId, Url = url, Title = title, Location = Optional(command.Location, 20000),
+            Price = command.Price == null ? null : DataConventions.RoundRubles(command.Price.Value), Currency = "RUB",
+            AreaSquareMeters = command.AreaSquareMeters == null ? null : decimal.Round(command.AreaSquareMeters.Value, 4, MidpointRounding.ToEven),
+            CadastralNumber = Optional(command.CadastralNumber, 128), Description = Optional(command.Description, 20000),
+            IngestionKind = CatalogIngestionKind.Employee, CreatedByEmployeeId = context.EmployeeId,
+            Provenance = "Добавлено сотрудником", IngressComment = comment, Disposition = CatalogDisposition.Incoming,
+            ReceivedAt = now, RecordedAt = now, ChangedAt = now, QueueReason = "Добавлено вручную"
+        };
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        db.Listings.Add(item);
+        OrganizationWorkspace.AddAudit(db, context, subject, "CatalogItemCreatedManually", "CatalogItem", item.Id,
+            new { item.Source, item.ExternalId, HasUrl = item.Url != null }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        return item.Id;
+    }
+
+    public async Task SetDispositionAsync(Subject subject, SetCatalogDisposition command, string correlationId, CancellationToken cancellationToken)
+    {
+        if (command.Disposition is CatalogDisposition.InWork) throw new ArgumentException("Используйте команду «Взять в работу».");
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        Listing item = await db.Listings.SingleOrDefaultAsync(value => value.Id == command.CatalogItemId && value.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
+        if (item.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException();
+        string reason = Required(command.Reason, 3, 4000, "Укажите причину решения.");
+        item.Disposition = command.Disposition;
+        item.QueueReason = reason;
+        db.Entry(item).Property(value => value.Version).IsModified = true;
+        OrganizationWorkspace.AddAudit(db, context, subject, "CatalogDispositionChanged", "CatalogItem", item.Id,
+            new { command.Disposition, Reason = reason }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CaseLinkTarget>> ReadLinkTargetsAsync(Subject subject, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        return await VisibleCases(db, context).OrderByDescending(row => row.Case.RecordedAt).Take(100)
+            .Select(row => new CaseLinkTarget(row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle)).ToArrayAsync(cancellationToken);
+    }
+
+    public async Task<TakeToWorkResult> TakeToWorkAsync(Subject subject, TakeCatalogItemToWork command, string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        Listing catalogItem = (await db.Listings.FromSqlInterpolated(
+            $"SELECT * FROM catalog.listings WHERE id={command.CatalogItemId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
+        PropertyCaseSourceLink? existingLink = await db.PropertyCaseSourceLinks.SingleOrDefaultAsync(
+            item => item.CatalogItemId == catalogItem.Id && item.Confirmed, cancellationToken);
+        if (existingLink != null)
+        {
+            PropertyCase existing = await VisibleCases(db, context).Where(row => row.Case.Id == existingLink.PropertyCaseId)
+                .Select(row => row.Case).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
+            await transaction.CommitAsync(cancellationToken);
+            return new(existing.Id, existing.BusinessNumber, false);
+        }
+
+        PropertyCase propertyCase;
+        bool created = command.ExistingCaseId == null;
+        if (created)
+        {
+            await using var number = db.Database.GetDbConnection().CreateCommand();
+            number.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+            number.CommandText = "SELECT nextval('procurement.property_case_numbers')";
+            long businessNumber = (long)(await number.ExecuteScalarAsync(cancellationToken))!;
+            Guid caseId = DataConventions.NewId();
+            Assignment assignment = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = caseId, EmployeeId = context.EmployeeId };
+            WorkTask task = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = caseId, EmployeeId = context.EmployeeId, Title = "Первичный анализ", RecordedAt = time.GetUtcNow() };
+            propertyCase = new()
+            {
+                Id = caseId, OrganizationId = context.OrganizationId,
+                BusinessNumber = "PC-" + businessNumber.ToString("D6", System.Globalization.CultureInfo.InvariantCulture),
+                WorkingTitle = catalogItem.Title ?? "Объект без названия", WorkingPrice = catalogItem.Price, Currency = catalogItem.Currency,
+                WorkingAreaSquareMeters = catalogItem.AreaSquareMeters, WorkingLocation = catalogItem.Location,
+                CadastralNumber = catalogItem.CadastralNumber, FactsProvenance = "Catalog snapshot at case creation",
+                DepartmentId = context.DepartmentId, TeamId = context.TeamId, ManagerEmployeeId = context.EmployeeId,
+                AssignmentId = assignment.Id, WorkTaskId = task.Id, ReviewedDataRevision = catalogItem.DataRevision,
+                RecordedAt = time.GetUtcNow()
+            };
+            db.WorkAssignments.Add(assignment); db.WorkTasks.Add(task); db.PropertyCases.Add(propertyCase);
+            db.WorkflowTransitions.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = caseId, FromStageId = "new", ToStageId = "analysis", Action = "TakeWork", ActorEmployeeId = context.EmployeeId, ObjectVersion = 1, RecordedAt = time.GetUtcNow() });
+        }
+        else
+        {
+            Guid existingCaseId = command.ExistingCaseId.GetValueOrDefault();
+            propertyCase = await VisibleCases(db, context).Where(row => row.Case.Id == existingCaseId)
+                .Select(row => row.Case).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
+        }
+
+        db.PropertyCaseSourceLinks.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, PropertyCaseId = propertyCase.Id,
+            CatalogItemId = catalogItem.Id, Confirmed = true, RelationType = "Source", ActorEmployeeId = context.EmployeeId,
+            Provenance = "User confirmed", ReviewedDataRevision = catalogItem.DataRevision, RecordedAt = time.GetUtcNow()
+        });
+        catalogItem.Disposition = CatalogDisposition.InWork;
+        db.Entry(catalogItem).Property(value => value.Version).IsModified = true;
+        string title = created ? "Взят в работу" : "Добавлен источник";
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = propertyCase.Id,
+            ActorEmployeeId = context.EmployeeId, Kind = created ? "Decision" : "SourceLinked", Title = title,
+            Body = $"{catalogItem.Source}: {catalogItem.Title ?? "источник"}", RecordedAt = time.GetUtcNow()
+        });
+        OrganizationWorkspace.AddAudit(db, context, subject, created ? "CatalogItemTakenToWork" : "CatalogItemLinkedToCase",
+            "PropertyCase", propertyCase.Id, new { CatalogItemId = catalogItem.Id, propertyCase.BusinessNumber }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new(propertyCase.Id, propertyCase.BusinessNumber, created);
+    }
+
     public async Task<ProcurementQueuePage> ReadQueueAsync(Subject subject, QueueFilter filter, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        ValidatePage(filter.Text, filter.Offset, filter.Size);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        var query = Visible(db, context);
-        if (filter.Text.Length > 200 || filter.Offset < 0 || filter.Size is < 1 or > 100) throw new ArgumentException("QUEUE_FILTER_INVALID");
-        if (filter.Text.Length > 0) query = query.Where(row => (row.Listing.Title ?? "").Contains(filter.Text) || (row.Listing.Location ?? "").Contains(filter.Text) || row.Listing.ExternalId.Contains(filter.Text));
-        if (filter.Source != null) query = query.Where(row => row.Listing.Source == filter.Source);
-        if (filter.Stage.Length > 0) query = query.Where(row => (row.Case == null ? "new" : row.Case.StageId) == filter.Stage);
-        else query = query.Where(row => row.Case == null || row.Case.StageId != "rejected" && row.Case.StageId != "approved" || row.Listing.DataRevision > row.Case.ReviewedDataRevision);
-        if (filter.ChangedOnly) query = query.Where(row => row.Case != null && row.Listing.DataRevision > row.Case.ReviewedDataRevision);
+        IQueryable<Row> query = VisibleCases(db, context);
+        if (filter.Text.Length > 0)
+            query = query.Where(row => row.Case.WorkingTitle.Contains(filter.Text) || (row.Case.WorkingLocation ?? "").Contains(filter.Text)
+                || row.Case.BusinessNumber.Contains(filter.Text) || db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id
+                    && db.Listings.Any(item => item.Id == link.CatalogItemId && ((item.ExternalId ?? "").Contains(filter.Text) || (item.Title ?? "").Contains(filter.Text)))));
+        if (filter.Source != null)
+            query = query.Where(row => db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id && link.Confirmed
+                && db.Listings.Any(item => item.Id == link.CatalogItemId && item.Source == filter.Source)));
+        if (filter.Stage.Length > 0) query = query.Where(row => row.Case.StageId == filter.Stage);
+        else query = query.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "approved"
+            || db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id && link.Confirmed
+                && db.Listings.Any(item => item.Id == link.CatalogItemId && item.DataRevision > link.ReviewedDataRevision)));
+        if (filter.ChangedOnly) query = query.Where(row => db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id && link.Confirmed
+            && db.Listings.Any(item => item.Id == link.CatalogItemId && item.DataRevision > link.ReviewedDataRevision)));
         int total = await query.CountAsync(cancellationToken);
-        Row[] rows = await query.OrderByDescending(row => row.Listing.ChangedAt).ThenBy(row => row.Listing.Id).Skip(filter.Offset).Take(filter.Size).ToArrayAsync(cancellationToken);
-        var names = await db.Employees.Where(item => item.OrganizationId == context.OrganizationId).ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
-        return new(rows.Select(row => Item(row, names)).ToArray(), total);
+        Row[] rows = await query.OrderByDescending(row => row.Case.RecordedAt).ThenBy(row => row.Case.Id)
+            .Skip(filter.Offset).Take(filter.Size).ToArrayAsync(cancellationToken);
+        Dictionary<Guid, string> names = await db.Employees.Where(item => item.OrganizationId == context.OrganizationId)
+            .ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
+        var sourceMap = await LoadSourcesAsync(db, rows.Select(row => row.Case.Id).ToArray(), cancellationToken);
+        return new(rows.Select(row => Item(row, names, sourceMap.GetValueOrDefault(row.Case.Id, []))).ToArray(), total);
     }
-    public async Task<CaseCard> ReadCardAsync(Subject subject, Guid listingId, CancellationToken cancellationToken)
+
+    public async Task<CaseCard> ReadCardAsync(Subject subject, Guid caseId, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        Row row = await Visible(db, context).SingleOrDefaultAsync(item => item.Listing.Id == listingId, cancellationToken) ?? throw new AccessDeniedException();
-        var names = await db.Employees.Where(item => item.OrganizationId == context.OrganizationId).ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
-        var timeline = await db.BusinessTimeline.Where(item => item.OrganizationId == context.OrganizationId && item.ObjectType == "PropertyCase" && row.Case != null && item.ObjectId == row.Case.Id)
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == caseId, cancellationToken) ?? throw new AccessDeniedException();
+        Dictionary<Guid, string> names = await db.Employees.Where(item => item.OrganizationId == context.OrganizationId)
+            .ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
+        List<(PropertyCaseSourceLink Link, Listing Item)> sources = (await LoadSourcesAsync(db, [caseId], cancellationToken)).GetValueOrDefault(caseId, []);
+        Guid[] sourceIds = sources.Select(item => item.Item.Id).ToArray();
+        BusinessTimelineEntry[] timeline = await db.BusinessTimeline.Where(item => item.OrganizationId == context.OrganizationId && item.ObjectType == "PropertyCase" && item.ObjectId == caseId)
             .OrderByDescending(item => item.RecordedAt).ThenByDescending(item => item.Id).Take(200).ToArrayAsync(cancellationToken);
-        var observations = await db.ListingObservations.Where(item => item.ListingId == listingId).OrderByDescending(item => item.ObservedAt).ThenByDescending(item => item.Id).Take(100).ToArrayAsync(cancellationToken);
-        var heads = await TargetsAsync(db, context.OrganizationId, Permissions.HeadDecide, cancellationToken, row.Listing);
-        var managers = await TargetsAsync(db, context.OrganizationId, Permissions.ManagerDecide, cancellationToken, row.Listing);
-        bool manager = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken) && (row.Case == null || row.Assignment?.EmployeeId == context.EmployeeId)
-            && row.Case?.StageId != "pending_head" && (row.Case?.StageId is not ("approved" or "rejected") || row.Listing.DataRevision > row.Case.ReviewedDataRevision);
-        bool head = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken) && row.Case?.StageId == "pending_head" && row.Assignment?.EmployeeId == context.EmployeeId
-            && row.Case.ManagerEmployeeId != context.EmployeeId;
-        return new(Item(row, names), row.Listing.Url, row.Listing.Description, row.Listing.SellerName, JsonSerializer.Deserialize<string[]>(row.Listing.PhotosJson)!,
+        CatalogObservation[] observations = await db.ListingObservations.Where(item => sourceIds.Contains(item.ListingId))
+            .OrderByDescending(item => item.ObservedAt).ThenByDescending(item => item.Id).Take(200).ToArrayAsync(cancellationToken);
+        DecisionTarget[] heads = await TargetsAsync(db, row.Case, Permissions.HeadDecide, cancellationToken);
+        DecisionTarget[] managers = await TargetsAsync(db, row.Case, Permissions.ManagerDecide, cancellationToken);
+        bool manager = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken) && row.Assignment.EmployeeId == context.EmployeeId
+            && row.Case.StageId != "pending_head" && (row.Case.StageId is not ("approved" or "rejected") || SourcesChanged(sources));
+        bool head = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken) && row.Case.StageId == "pending_head"
+            && row.Assignment.EmployeeId == context.EmployeeId && row.Case.ManagerEmployeeId != context.EmployeeId;
+        Listing? primary = sources.OrderBy(item => item.Link.RecordedAt).Select(item => item.Item).FirstOrDefault();
+        string[] photos = sources.SelectMany(item => JsonSerializer.Deserialize<string[]>(item.Item.PhotosJson) ?? []).Distinct().ToArray();
+        return new(Item(row, names, sources), primary?.Description, primary?.SellerName, photos,
+            sources.Select(value => new CaseSourceView(value.Item.Id, value.Item.Source, value.Item.ExternalId, value.Item.Url,
+                value.Item.Title ?? "Источник без названия", value.Item.Price, value.Item.AreaSquareMeters, value.Item.Location,
+                value.Item.Provenance, value.Item.LastObservedAt)).ToArray(),
             timeline.Select(item => new TimelineItem(item.Id, item.Kind, item.Title, item.Body, names.GetValueOrDefault(item.ActorEmployeeId, "Сотрудник"),
                 item.TargetEmployeeId == null ? null : names.GetValueOrDefault(item.TargetEmployeeId.Value, "Сотрудник"), item.RecordedAt, item.EffectiveAt, item.DueAt)).ToArray(),
-            observations.Select(item => new ObservationView(item.Id, item.ObservedAt, item.RecordedAt, JsonSerializer.Deserialize<ListingData>(item.PayloadJson, CollectionJson.Options)!, JsonSerializer.Deserialize<string[]>(item.ChangesJson)!)).ToArray(),
-            heads.Where(item => item.EmployeeId != context.EmployeeId).ToArray(), managers, row.Case?.ManagerEmployeeId, manager, head);
+            observations.Select(item => new ObservationView(item.Id, item.ListingId, item.ObservedAt, item.RecordedAt,
+                JsonSerializer.Deserialize<ListingData>(item.PayloadJson, CollectionJson.Options)!, JsonSerializer.Deserialize<string[]>(item.ChangesJson)!)).ToArray(),
+            heads.Where(item => item.EmployeeId != context.EmployeeId).ToArray(), managers, row.Case.ManagerEmployeeId, manager, head);
     }
+
+    public async Task<Guid?> ResolveLegacyListingAsync(Subject subject, Guid listingId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        Guid? caseId = await db.PropertyCaseSourceLinks.Where(item => item.CatalogItemId == listingId && item.Confirmed)
+            .Select(item => (Guid?)item.PropertyCaseId).SingleOrDefaultAsync(cancellationToken);
+        if (caseId == null) return null;
+        return await VisibleCases(db, context).AnyAsync(item => item.Case.Id == caseId.Value, cancellationToken) ? caseId : throw new AccessDeniedException();
+    }
+
     public async Task DecideAsync(Subject subject, DecisionCommand command, string correlationId, CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(command.Action)) throw new ArgumentException("DECISION_INVALID");
         bool headAction = command.Action is ProcurementAction.Return or ProcurementAction.Approve;
-        // Monitor/Reject belong to the current stage; a head cannot call the manager path by selecting another verb.
         AccessContext read = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var locked = await db.Listings.FromSqlInterpolated($"SELECT * FROM catalog.listings WHERE id={command.ListingId} AND organization_id={read.OrganizationId} FOR UPDATE").ToListAsync(cancellationToken);
-        if (locked.Count == 0) throw new AccessDeniedException();
-        Row row = await Visible(db, read).SingleOrDefaultAsync(item => item.Listing.Id == command.ListingId, cancellationToken) ?? throw new AccessDeniedException();
-        PropertyCase? item = row.Case; Listing listing = locked[0];
-        if ((item?.Version ?? 0) != command.ExpectedCaseVersion || listing.DataRevision != command.ExpectedDataRevision) throw new DbUpdateConcurrencyException();
-        headAction |= item?.StageId == "pending_head";
+        PropertyCase propertyCase = (await db.PropertyCases.FromSqlInterpolated(
+            $"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={read.OrganizationId} FOR UPDATE")
+            .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
+        Row row = await VisibleCases(db, read).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
+        List<(PropertyCaseSourceLink Link, Listing Item)> sources = (await LoadSourcesAsync(db, [propertyCase.Id], cancellationToken)).GetValueOrDefault(propertyCase.Id, []);
+        long sourceRevision = SourceRevision(sources);
+        if (propertyCase.Version != command.ExpectedCaseVersion || sourceRevision != command.ExpectedSourceRevision) throw new DbUpdateConcurrencyException();
+        headAction |= propertyCase.StageId == "pending_head";
         AccessContext context = await access.RequireAsync(subject, headAction ? Permissions.HeadDecide : Permissions.ManagerDecide, cancellationToken);
-        if (item != null && row.Assignment?.EmployeeId != context.EmployeeId || headAction && (item?.StageId != "pending_head" || item.ManagerEmployeeId == context.EmployeeId)) throw new AccessDeniedException();
-        if (!headAction && command.Action is ProcurementAction.Return or ProcurementAction.Approve || headAction && command.Action is not (ProcurementAction.Return or ProcurementAction.Approve or ProcurementAction.Monitor or ProcurementAction.Reject)) throw new AccessDeniedException();
-        if (item?.StageId is "approved" or "rejected" && listing.DataRevision <= item.ReviewedDataRevision) throw new ArgumentException("Решение завершено. Для нового анализа нужны изменившиеся данные.");
-        string reason = Text(command.Reason, command.Action != ProcurementAction.TakeWork);
-        string clarification = Text(command.Clarification, command.Action is ProcurementAction.Return or ProcurementAction.Clarify);
-        if (command.DueAt?.Offset != null && command.DueAt.Value.Offset != TimeSpan.Zero || command.DueAt < time.GetUtcNow() || command.DueAt > time.GetUtcNow().AddYears(2)) throw new ArgumentException("Укажите будущий срок в UTC.");
-        string from = item?.StageId ?? "new";
-        if (item == null)
-        {
-            await using var number = db.Database.GetDbConnection().CreateCommand(); number.Transaction = db.Database.CurrentTransaction!.GetDbTransaction(); number.CommandText = "SELECT nextval('procurement.property_case_numbers')";
-            long businessNumber = (long)(await number.ExecuteScalarAsync(cancellationToken))!;
-            Guid id = DataConventions.NewId(); Assignment assignment = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = id, EmployeeId = context.EmployeeId };
-            WorkTask task = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = id, EmployeeId = context.EmployeeId, Title = "Первичный анализ", RecordedAt = time.GetUtcNow() };
-            item = new()
-            {
-                Id = id,
-                OrganizationId = context.OrganizationId,
-                ListingId = listing.Id,
-                BusinessNumber = "PC-" + businessNumber.ToString("D6", System.Globalization.CultureInfo.InvariantCulture),
-                ManagerEmployeeId = context.EmployeeId,
-                AssignmentId = assignment.Id,
-                WorkTaskId = task.Id,
-                RecordedAt = time.GetUtcNow()
-            };
-            db.PropertyCases.Add(item); db.WorkAssignments.Add(assignment); db.WorkTasks.Add(task); row = new() { Listing = listing, Case = item, Assignment = assignment, Task = task };
-        }
-        string stage = command.Action switch { ProcurementAction.TakeWork => "analysis", ProcurementAction.Monitor => "monitor", ProcurementAction.Clarify => "clarify", ProcurementAction.Reject => "rejected", ProcurementAction.Forward => "pending_head", ProcurementAction.Return => "returned", _ => "approved" };
+        if (row.Assignment.EmployeeId != context.EmployeeId || headAction && (propertyCase.StageId != "pending_head" || propertyCase.ManagerEmployeeId == context.EmployeeId)) throw new AccessDeniedException();
+        if (!headAction && command.Action is ProcurementAction.Return or ProcurementAction.Approve
+            || headAction && command.Action is not (ProcurementAction.Return or ProcurementAction.Approve or ProcurementAction.Monitor or ProcurementAction.Reject)) throw new AccessDeniedException();
+        if (propertyCase.StageId is "approved" or "rejected" && !SourcesChanged(sources)) throw new ArgumentException("Решение завершено. Для нового анализа нужны изменившиеся данные.");
+        string reason = Required(command.Reason, 3, 4000, "Укажите пояснение от 3 до 4000 символов.");
+        string clarification = command.Action is ProcurementAction.Return or ProcurementAction.Clarify
+            ? Required(command.Clarification, 3, 4000, "Укажите, что требуется уточнить.") : Optional(command.Clarification, 4000) ?? "";
+        if (command.DueAt?.Offset != null && command.DueAt.Value.Offset != TimeSpan.Zero || command.DueAt < time.GetUtcNow() || command.DueAt > time.GetUtcNow().AddYears(2))
+            throw new ArgumentException("Укажите будущий срок в UTC.");
+        string from = propertyCase.StageId;
+        string stage = command.Action switch { ProcurementAction.Monitor => "monitor", ProcurementAction.Clarify => "clarify", ProcurementAction.Reject => "rejected", ProcurementAction.Forward => "pending_head", ProcurementAction.Return => "returned", _ => "approved" };
         Guid target = context.EmployeeId;
         if (command.Action == ProcurementAction.Forward)
         {
             target = command.TargetEmployeeId ?? throw new ArgumentException("Выберите руководителя закупки.");
-            if (target == context.EmployeeId || !(await TargetsAsync(db, context.OrganizationId, Permissions.HeadDecide, cancellationToken, listing)).Any(value => value.EmployeeId == target)) throw new AccessDeniedException();
-            item.PendingApprovalId = DataConventions.NewId();
+            if (target == context.EmployeeId || !(await TargetsAsync(db, propertyCase, Permissions.HeadDecide, cancellationToken)).Any(value => value.EmployeeId == target)) throw new AccessDeniedException();
+            propertyCase.PendingApprovalId = DataConventions.NewId();
         }
         if (headAction)
         {
-            if (command.Action == ProcurementAction.Approve && listing.DataRevision != item.ReviewedDataRevision) throw new ArgumentException("Данные изменились после передачи. Верните объект менеджеру для обновления анализа.");
-            target = command.Action == ProcurementAction.Return ? command.TargetEmployeeId ?? item.ManagerEmployeeId : item.ManagerEmployeeId;
-            if (!(await TargetsAsync(db, context.OrganizationId, Permissions.ManagerDecide, cancellationToken, listing)).Any(value => value.EmployeeId == target)) throw new AccessDeniedException();
-            db.Approvals.Add(new()
-            {
-                Id = item.PendingApprovalId ?? throw new AccessDeniedException(),
-                OrganizationId = context.OrganizationId,
-                ObjectType = "PropertyCase",
-                ObjectId = item.Id,
-                RequesterEmployeeId = item.ManagerEmployeeId,
-                ApproverEmployeeId = context.EmployeeId,
-                Outcome = command.Action.ToString(),
-                Reason = reason,
-                ConsideredDataRevision = listing.DataRevision,
-                ObjectVersion = item.Version,
-                RecordedAt = time.GetUtcNow()
-            });
-            item.PendingApprovalId = null;
-            if (command.Action == ProcurementAction.Return) item.ManagerEmployeeId = target;
+            if (command.Action == ProcurementAction.Approve && SourcesChanged(sources)) throw new ArgumentException("Источники изменились после передачи. Верните объект менеджеру для обновления анализа.");
+            target = command.Action == ProcurementAction.Return ? command.TargetEmployeeId ?? propertyCase.ManagerEmployeeId : propertyCase.ManagerEmployeeId;
+            if (!(await TargetsAsync(db, propertyCase, Permissions.ManagerDecide, cancellationToken)).Any(value => value.EmployeeId == target)) throw new AccessDeniedException();
+            db.Approvals.Add(new() { Id = propertyCase.PendingApprovalId ?? throw new AccessDeniedException(), OrganizationId = context.OrganizationId,
+                ObjectType = "PropertyCase", ObjectId = propertyCase.Id, RequesterEmployeeId = propertyCase.ManagerEmployeeId,
+                ApproverEmployeeId = context.EmployeeId, Outcome = command.Action.ToString(), Reason = reason,
+                ConsideredDataRevision = sourceRevision, ObjectVersion = propertyCase.Version, RecordedAt = time.GetUtcNow() });
+            propertyCase.PendingApprovalId = null;
+            if (command.Action == ProcurementAction.Return) propertyCase.ManagerEmployeeId = target;
         }
-        item.StageId = stage; item.ReviewedDataRevision = listing.DataRevision;
-        if (db.Entry(item).State != EntityState.Added) db.Entry(item).Property(value => value.Version).IsModified = true;
-        row.Assignment!.EmployeeId = target; row.Task!.EmployeeId = target; row.Task.DueAt = command.DueAt;
+        propertyCase.StageId = stage; propertyCase.ReviewedDataRevision = sourceRevision;
+        foreach (var source in sources) source.Link.ReviewedDataRevision = source.Item.DataRevision;
+        db.Entry(propertyCase).Property(value => value.Version).IsModified = true;
+        row.Assignment.EmployeeId = target; row.Task.EmployeeId = target; row.Task.DueAt = command.DueAt;
         row.Task.Completed = stage is "approved" or "rejected";
         row.Task.Title = stage switch { "pending_head" => "Рассмотреть первичный анализ", "returned" => "Исправить / уточнить первичный анализ", "clarify" => "Уточнить данные объекта", "monitor" => "Наблюдать за объектом", "approved" => "Дальнейшая работа одобрена", "rejected" => "Объект отклонён", _ => "Первичный анализ" };
         string title = ActionLabel(command.Action, headAction);
-        db.WorkflowTransitions.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = item.Id, FromStageId = from, ToStageId = stage, Action = command.Action.ToString(), ActorEmployeeId = context.EmployeeId, ObjectVersion = item.Version + (db.Entry(item).State == EntityState.Added ? 0 : 1), RecordedAt = time.GetUtcNow() });
-        db.BusinessTimeline.Add(new()
-        {
-            Id = DataConventions.NewId(),
-            OrganizationId = context.OrganizationId,
-            ObjectType = "PropertyCase",
-            ObjectId = item.Id,
-            ActorEmployeeId = context.EmployeeId,
-            Kind = "Decision",
-            Title = title,
-            Body = reason + (clarification.Length == 0 ? "" : "\nУточнить: " + clarification),
-            TargetEmployeeId = target,
-            DueAt = command.DueAt,
-            RecordedAt = time.GetUtcNow()
-        });
-        if (target != context.EmployeeId) db.Notifications.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, EmployeeId = target, ObjectType = "PropertyCase", ObjectId = item.Id, Title = item.BusinessNumber + ": " + title, RecordedAt = time.GetUtcNow() });
-        OrganizationWorkspace.AddAudit(db, context, subject, "Procurement" + command.Action, "PropertyCase", item.Id, new { From = from, To = stage, Target = target, command.DueAt, Reason = reason, Clarification = clarification, DataRevision = listing.DataRevision }, correlationId);
+        db.WorkflowTransitions.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = propertyCase.Id,
+            FromStageId = from, ToStageId = stage, Action = command.Action.ToString(), ActorEmployeeId = context.EmployeeId,
+            ObjectVersion = propertyCase.Version + 1, RecordedAt = time.GetUtcNow() });
+        db.BusinessTimeline.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = propertyCase.Id,
+            ActorEmployeeId = context.EmployeeId, Kind = "Decision", Title = title, Body = reason + (clarification.Length == 0 ? "" : "\nУточнить: " + clarification),
+            TargetEmployeeId = target, DueAt = command.DueAt, RecordedAt = time.GetUtcNow() });
+        if (target != context.EmployeeId) db.Notifications.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, EmployeeId = target,
+            ObjectType = "PropertyCase", ObjectId = propertyCase.Id, Title = propertyCase.BusinessNumber + ": " + title, RecordedAt = time.GetUtcNow() });
+        OrganizationWorkspace.AddAudit(db, context, subject, "Procurement" + command.Action, "PropertyCase", propertyCase.Id,
+            new { From = from, To = stage, Target = target, command.DueAt, Reason = reason, Clarification = clarification, SourceRevision = sourceRevision }, correlationId);
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
     }
+
     public async Task AddNoteAsync(Subject subject, AddCaseNote command, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
-        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken); await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await db.Listings.FromSqlInterpolated($"SELECT * FROM catalog.listings WHERE id={command.ListingId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
-        Row row = await Visible(db, context).SingleOrDefaultAsync(value => value.Listing.Id == command.ListingId, cancellationToken) ?? throw new AccessDeniedException();
-        if (row.Case == null || row.Assignment?.EmployeeId != context.EmployeeId) throw new AccessDeniedException();
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(value => value.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
+        if (row.Assignment.EmployeeId != context.EmployeeId) throw new AccessDeniedException();
         await access.RequireAsync(subject, row.Case.StageId == "pending_head" ? Permissions.HeadDecide : Permissions.ManagerDecide, cancellationToken);
         if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
         if (command.EffectiveAt?.Offset != null && command.EffectiveAt.Value.Offset != TimeSpan.Zero || command.EffectiveAt > time.GetUtcNow().AddMinutes(5)) throw new ArgumentException("Укажите фактическое время контакта UTC.");
-        string text = Text(command.Text, true); string result = Text(command.ContactResult, command.Contact);
+        string text = Required(command.Text, 3, 4000, "Укажите заметку.");
+        string result = command.Contact ? Required(command.ContactResult, 3, 4000, "Укажите результат контакта.") : "";
         db.Entry(row.Case).Property(item => item.Version).IsModified = true;
-        db.BusinessTimeline.Add(new()
-        {
-            Id = DataConventions.NewId(),
-            OrganizationId = context.OrganizationId,
-            ObjectType = "PropertyCase",
-            ObjectId = row.Case.Id,
-            ActorEmployeeId = context.EmployeeId,
-            Kind = command.Contact ? "Contact" : "Note",
-            Title = command.Contact ? "Контакт с продавцом" : "Рабочая заметка",
-            Body = text + (command.Contact ? "\nРезультат: " + result : ""),
-            EffectiveAt = command.EffectiveAt,
-            RecordedAt = time.GetUtcNow()
-        });
-        OrganizationWorkspace.AddAudit(db, context, subject, command.Contact ? "SellerContactRecorded" : "CaseNoteAdded", "PropertyCase", row.Case.Id, new { command.Contact, command.EffectiveAt }, correlationId);
+        db.BusinessTimeline.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
+            ActorEmployeeId = context.EmployeeId, Kind = command.Contact ? "Contact" : "Note", Title = command.Contact ? "Контакт с продавцом" : "Рабочая заметка",
+            Body = text + (command.Contact ? "\nРезультат: " + result : ""), EffectiveAt = command.EffectiveAt, RecordedAt = time.GetUtcNow() });
+        OrganizationWorkspace.AddAudit(db, context, subject, command.Contact ? "SellerContactRecorded" : "CaseNoteAdded", "PropertyCase", row.Case.Id,
+            new { command.Contact, command.EffectiveAt }, correlationId);
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
     }
+
     public async Task<IReadOnlyList<NotificationView>> ReadNotificationsAsync(Subject subject, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken); await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        return await db.Notifications.Where(item => item.OrganizationId == context.OrganizationId && item.EmployeeId == context.EmployeeId).OrderByDescending(item => item.RecordedAt).Take(50)
-            .Select(item => new NotificationView(item.Id, item.ObjectId, db.PropertyCases.Where(value => value.Id == item.ObjectId && value.OrganizationId == context.OrganizationId).Select(value => value.ListingId).First(), item.Title, item.RecordedAt, item.ReadAt != null)).ToArrayAsync(cancellationToken);
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        return await db.Notifications.Where(item => item.OrganizationId == context.OrganizationId && item.EmployeeId == context.EmployeeId)
+            .OrderByDescending(item => item.RecordedAt).Take(50).Select(item => new NotificationView(item.Id, item.ObjectId, item.Title, item.RecordedAt, item.ReadAt != null))
+            .ToArrayAsync(cancellationToken);
     }
+
     public async Task MarkNotificationReadAsync(Subject subject, Guid id, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken); await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         InternalNotification item = await db.Notifications.SingleOrDefaultAsync(value => value.Id == id && value.OrganizationId == context.OrganizationId && value.EmployeeId == context.EmployeeId, cancellationToken) ?? throw new AccessDeniedException();
         item.ReadAt ??= time.GetUtcNow(); await db.SaveChangesAsync(cancellationToken);
     }
-    private async Task<bool> AllowedAsync(Subject subject, string permission, CancellationToken cancellationToken) { try { await access.RequireAsync(subject, permission, cancellationToken); return true; } catch (AccessDeniedException) { return false; } }
-    private static Task<DecisionTarget[]> TargetsAsync(LandErpDbContext db, Guid organization, string permission, CancellationToken cancellationToken, Listing? listing = null)
+
+    private async Task<bool> AllowedAsync(Subject subject, string permission, CancellationToken cancellationToken)
+    { try { await access.RequireAsync(subject, permission, cancellationToken); return true; } catch (AccessDeniedException) { return false; } }
+
+    private static Task<DecisionTarget[]> TargetsAsync(LandErpDbContext db, PropertyCase propertyCase, string permission, CancellationToken cancellationToken)
     {
         var query = from employee in db.Employees
                     join assignment in db.EmployeeAssignments on employee.Id equals assignment.EmployeeId
                     join grant in db.RolePermissions on assignment.RoleId equals grant.RoleId
-                    where employee.OrganizationId == organization && employee.Active && grant.PermissionId == permission
-                    select new { employee.Id, employee.DisplayName, assignment.Scope, assignment.OrgUnitId, assignment.TeamId };
-        if (listing != null)
-        {
-            Guid? department = listing.DepartmentId; Guid? team = listing.TeamId;
-            query = query.Where(item => item.Scope == AccessScope.Organization || item.Scope == AccessScope.Own || item.Scope == AccessScope.AssignedObjects
-                || item.Scope == AccessScope.Department && department != null && item.OrgUnitId == department || item.Scope == AccessScope.Team && team != null && item.TeamId == team);
-        }
-        return query.Select(item => new { item.Id, item.DisplayName }).Distinct().OrderBy(item => item.DisplayName)
-            .Select(item => new DecisionTarget(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);
+                    where employee.OrganizationId == propertyCase.OrganizationId && employee.Active && grant.PermissionId == permission
+                        && (assignment.Scope == AccessScope.Organization || assignment.Scope == AccessScope.Own || assignment.Scope == AccessScope.AssignedObjects
+                            || assignment.Scope == AccessScope.Department && propertyCase.DepartmentId != null && assignment.OrgUnitId == propertyCase.DepartmentId
+                            || assignment.Scope == AccessScope.Team && propertyCase.TeamId != null && assignment.TeamId == propertyCase.TeamId)
+                    select new { employee.Id, employee.DisplayName };
+        return query.Distinct().OrderBy(item => item.DisplayName).Select(item => new DecisionTarget(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);
     }
-    private static QueueItem Item(Row row, Dictionary<Guid, string> names) => new(row.Listing.Id, row.Case?.Id, row.Case?.BusinessNumber, row.Listing.Title ?? "Название неизвестно", row.Listing.Source, row.Listing.Price, row.Listing.Currency, row.Listing.AreaSquareMeters, row.Listing.Location,
-        row.Case?.StageId ?? "new", row.Assignment == null ? null : names.GetValueOrDefault(row.Assignment.EmployeeId, "Сотрудник"), row.Task?.DueAt,
-        row.Case?.StageId == "returned" ? "Руководитель вернул: требуются исправления" : row.Listing.QueueReason,
-        new[] { row.Listing.Price == null ? "цена" : null, row.Listing.AreaSquareMeters == null ? "площадь" : null, row.Listing.Location == null ? "местоположение" : null }.OfType<string>().ToArray(),
-        row.Case != null && row.Listing.DataRevision > row.Case.ReviewedDataRevision, row.Listing.DataRevision, row.Case?.Version ?? 0);
-    private static string Text(string text, bool required) => text.Length > 4000 || required && text.Trim().Length < 3 ? throw new ArgumentException("Укажите пояснение от 3 до 4000 символов.") : text.Trim();
-    public static string ActionLabel(ProcurementAction action, bool head) => action switch { ProcurementAction.TakeWork => "В работу", ProcurementAction.Monitor => head ? "Руководитель: наблюдать" : "Наблюдать", ProcurementAction.Clarify => "Уточнить", ProcurementAction.Reject => head ? "Руководитель отклонил" : "Отклонить", ProcurementAction.Forward => "Передан руководителю", ProcurementAction.Return => "Возвращён менеджеру", _ => "Дальнейшая работа одобрена" };
+
+    private static async Task<Dictionary<Guid, List<(PropertyCaseSourceLink Link, Listing Item)>>> LoadSourcesAsync(
+        LandErpDbContext db, Guid[] caseIds, CancellationToken cancellationToken)
+    {
+        var values = await (from link in db.PropertyCaseSourceLinks
+                            join item in db.Listings on link.CatalogItemId equals item.Id
+                            where caseIds.Contains(link.PropertyCaseId) && link.Confirmed
+                            select new { Link = link, Item = item }).ToArrayAsync(cancellationToken);
+        return values.GroupBy(value => value.Link.PropertyCaseId)
+            .ToDictionary(group => group.Key, group => group.Select(value => (value.Link, value.Item)).ToList());
+    }
+
+    private static QueueItem Item(Row row, Dictionary<Guid, string> names, List<(PropertyCaseSourceLink Link, Listing Item)> sources) => new(
+        row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle, sources.Select(item => item.Item.Source).Distinct().ToArray(),
+        row.Case.WorkingPrice, row.Case.Currency, row.Case.WorkingAreaSquareMeters, row.Case.WorkingLocation, row.Case.StageId,
+        names.GetValueOrDefault(row.Assignment.EmployeeId, "Сотрудник"), row.Task.DueAt,
+        row.Case.StageId == "returned" ? "Руководитель вернул: требуются исправления" : SourcesChanged(sources) ? "Источник изменился" : "Рабочий объект закупки",
+        new[] { row.Case.WorkingPrice == null ? "цена" : null, row.Case.WorkingAreaSquareMeters == null ? "площадь" : null, row.Case.WorkingLocation == null ? "местоположение" : null }.OfType<string>().ToArray(),
+        SourcesChanged(sources), SourceRevision(sources), row.Case.Version);
+
+    private static bool SourcesChanged(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Any(value => value.Item.DataRevision > value.Link.ReviewedDataRevision);
+    private static long SourceRevision(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Sum(value => value.Item.DataRevision);
+    private static void ValidatePage(string text, int offset, int size)
+    { if (text.Length > 200 || offset < 0 || size is < 1 or > 100) throw new ArgumentException("FILTER_INVALID"); }
+    private static string Required(string? value, int min, int max, string message)
+    { string result = value?.Trim() ?? ""; return result.Length < min || result.Length > max ? throw new ArgumentException(message) : result; }
+    private static string? Optional(string? value, int max)
+    { string? result = string.IsNullOrWhiteSpace(value) ? null : value.Trim(); return result?.Length > max ? throw new ArgumentException("Значение слишком длинное.") : result; }
+    public static string ActionLabel(ProcurementAction action, bool head) => action switch
+    { ProcurementAction.Monitor => head ? "Руководитель: наблюдать" : "Наблюдать", ProcurementAction.Clarify => "Уточнить",
+        ProcurementAction.Reject => head ? "Руководитель отклонил" : "Отклонить", ProcurementAction.Forward => "Передан руководителю",
+        ProcurementAction.Return => "Возвращён менеджеру", _ => "Дальнейшая работа одобрена" };
 }

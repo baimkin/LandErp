@@ -17,5 +17,5 @@
     [Parameter] public bool Busy { get; set; }
     [Parameter] public string? Error { get; set; }
     private DecisionDraft draft=new(); private bool initialized;
-    protected override void OnParametersSet() { if(!initialized) { initialized=true; draft=new() { Target=Action==ProcurementAction.Return ? Card.ManagerEmployeeId : null,Reason=Action==ProcurementAction.TakeWork ? "Начат первичный анализ" : "" }; } }
+    protected override void OnParametersSet() { if(!initialized) { initialized=true; draft=new() { Target=Action==ProcurementAction.Return ? Card.ManagerEmployeeId : null }; } }
 }

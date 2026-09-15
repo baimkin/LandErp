@@ -6,6 +6,7 @@
         <nav class="side-nav">
             <p class="nav-label">Рабочее место</p>
             <NavLink class="nav-item" href="/" Match="NavLinkMatch.All">◫ Обзор</NavLink>
+            <AuthorizeView Policy="manager_queue.read"><NavLink class="nav-item" href="/incoming" @onclick="() => menuOpen=false">⇥ Входящие</NavLink></AuthorizeView>
             <AuthorizeView Policy="manager_queue.read"><NavLink class="nav-item" href="/procurement" @onclick="() => menuOpen=false">◫ Закупка</NavLink></AuthorizeView>
             <AuthorizeView Policy="users.read"><NavLink class="nav-item" href="/employees">♙ Сотрудники</NavLink></AuthorizeView>
             <AuthorizeView Policy="organization.manage"><NavLink class="nav-item" href="/organization">▦ Оргструктура</NavLink></AuthorizeView>

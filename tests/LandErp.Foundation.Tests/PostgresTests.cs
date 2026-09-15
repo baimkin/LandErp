@@ -181,7 +181,11 @@ public sealed class PostgresTests
             RedirectStandardError = true,
             WorkingDirectory = Path.Combine(root, "src", project)
         };
-        start.ArgumentList.Add(Path.Combine(root, "src", project, "bin", "Release", "net10.0", project + ".dll"));
+        string? testBuildRoot = Environment.GetEnvironmentVariable("LANDERP_TEST_BUILD_ROOT");
+        string assembly = string.IsNullOrWhiteSpace(testBuildRoot)
+            ? Path.Combine(root, "src", project, "bin", "Release", "net10.0", project + ".dll")
+            : Path.Combine(testBuildRoot, "bin", project, "release", project + ".dll");
+        start.ArgumentList.Add(assembly);
         start.Environment["Database__ConnectionString"] = connection;
         start.Environment["DOTNET_ENVIRONMENT"] = "Test";
         if (port.HasValue)

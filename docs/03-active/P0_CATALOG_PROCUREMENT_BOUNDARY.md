@@ -1,9 +1,10 @@
 # P0 — Граница Catalog → Procurement
 
-**Статус:** утверждено владельцем, обязательная следующая серверная задача  
-**Приоритет:** P0 — исправить до дальнейшего развития Procurement, LandAsset и любых внешних кабинетов  
+**Статус:** выполнено; owner correction по database transition утверждён 2026-09-15  
+**Приоритет:** P0 — каноническая граница Catalog / Procurement  
 **Дата решения:** 2026-09-15  
-**Ветка:** `codex/stage-1-procurement-core`
+**Ветка:** `codex/stage-1-procurement-core`  
+**Database transition correction:** [`STAGE1_PHASE1_DATABASE_RESET_DECISION.md`](STAGE1_PHASE1_DATABASE_RESET_DECISION.md)
 
 ## 1. Почему это P0
 
@@ -148,7 +149,7 @@ PropertyCase имеет собственный идентификатор и с�
 
 Для подтверждённой связи один Catalog item не должен одновременно считаться каноническим источником двух разных PropertyCase. Возможные совпадения могут существовать как отдельные неподтверждённые match records по правилам FP-024.
 
-`PropertyCase` должен уметь существовать с `0..N` связанными Catalog items. Ноль допустим как технический инвариант для миграции/импорта/восстановления, хотя обычный пользовательский поток начинается из входящего каталога.
+`PropertyCase` должен уметь существовать с `0..N` связанными Catalog items. Ноль допустим как технический инвариант для импорта/восстановления и самостоятельного создания case, хотя обычный пользовательский поток начинается из входящего каталога.
 
 ## 7. Команда `Взять в работу`
 
@@ -198,32 +199,37 @@ Procurement после перехода не должен определять �
 
 Правила видимости самого входящего Catalog могут развиваться отдельно. Они не должны становиться скрытой зависимостью жизненного цикла PropertyCase.
 
-## 10. Миграция существующей Stage 1 модели
+## 10. Database transition Phase 1 — clean rebuild
 
-Исправление должно сохранить уже созданные данные.
+Решением владельца от 2026-09-15 pre-Phase-1 базы LandErp признаны **disposable development/test state**. Их данные не являются production data и не требуют in-place migration.
 
-Минимальная миграционная стратегия:
+Канонический Phase 1 transition:
 
-1. ввести нейтральную связь PropertyCase ↔ Catalog item;
-2. для каждого существующего `PropertyCase.ListingId` создать подтверждённую source-link запись;
-3. перенести необходимые рабочие поля/снимок в PropertyCase, если они сейчас существуют только в Listing;
-4. перевести read/write Procurement API на `CaseId`;
-5. перевести Procurement queue на root `PropertyCases`;
-6. после переходного периода убрать обязательный FK `PropertyCase.ListingId`;
-7. existing Avito/Cian Listing/Observations не пересоздавать и не терять;
-8. уже существующие BusinessNumber, timeline, assignment, task, approval и audit сохранить;
-9. добавить серверный ручной ingestion path без Agent/Job;
-10. только после этого удалять переходные compatibility paths.
+1. существующую dev/test БД удалить;
+2. создать чистую БД;
+3. применить полный migration chain к пустой БД;
+4. проверить `Database.HasPendingModelChanges() == false`;
+5. проверить текущие Avito/Cian и manual/Telegram-like сценарии уже на новой модели.
+
+Следствия:
+
+- Phase 1 migration является **schema-only** и не выполняет legacy data backfill;
+- не требуется переносить старые `PropertyCase.ListingId` в source links;
+- не требуется сохранять pre-Phase-1 BusinessNumber/workflow/timeline/audit/Observation dataset, потому что этот dataset не является сохраняемым production state;
+- nullable compatibility field `PropertyCase.ListingId` может физически остаться до Phase 9, но новые business operations от него не зависят;
+- ownership источников существует только через `PropertyCaseSourceLink`;
+- legacy `/procurement/listings/{ListingId}` резолвит confirmed source link и не использует `PropertyCase.ListingId` как каноническую связь;
+- не пытаться «долечивать» старые локальные базы — их следует пересоздать.
+
+Это owner-approved уточнение **supersede-ит** конфликтующие требования legacy backfill/preservation в ранней версии этого P0 и в `STAGE1_COMPLETION_MASTER_PLAN.md` только для Phase 1 pre-production database transition. Правила безопасных production migrations для последующих фаз остаются обязательными.
 
 Если физическое переименование `Listing` → `CatalogItem` создаёт ненужный миграционный риск, его разрешено отложить. **Запрещено** откладывать саму архитектурную независимость PropertyCase от Listing.
 
 ## 11. Порядок реализации — обязателен
 
-Это следующая серверная задача до дальнейшего расширения бизнес-модулей.
-
 1. Добавить/скорректировать тесты, фиксирующие целевые инварианты.
 2. Исправить domain/data model Catalog ↔ Procurement.
-3. Выполнить безопасную migration существующих данных.
+3. Применить schema-only Phase 1 migration на clean database.
 4. Перевести application contracts Procurement с `ListingId` на `CaseId` после создания кейса.
 5. Перевести `ProcurementWorkspace`/queue/card на PropertyCase-root queries.
 6. Добавить server command ручного создания Catalog item.
@@ -248,9 +254,10 @@ Procurement после перехода не должен определять �
 - исходные значения каждого источника сохраняются отдельно;
 - изменение цены на Avito не уничтожает текущую подтверждённую цену/факты PropertyCase;
 - manual/Telegram item не создаёт fake Collector Agent/Job;
-- существующие Stage 1 Avito кейсы мигрируются без потери BusinessNumber, workflow, timeline и assignment;
+- clean database поднимается полным migration chain без legacy data/backfill и без pending model changes;
 - права Procurement не зависят от наличия Listing;
-- concurrency/audit сохраняются.
+- concurrency/audit сохраняются;
+- legacy ListingId route открывает уже связанный Case и не создаёт Case для несвязанного source.
 
 ## 13. Не входит в P0
 
@@ -267,6 +274,8 @@ Procurement после перехода не должен определять �
 Этот P0 документ является приоритетным уточнением текущей Stage 1 реализации и старых feature plans в части границы Catalog/Procurement.
 
 В частности, любые места, где `PropertyCase` неявно или явно требует `Listing`, читать с учётом этого решения. FP-024 остаётся полезным для сопоставления нескольких внешних источников с одним реальным объектом, но не делает Listing владельцем PropertyCase.
+
+Database-transition semantics дополнительно зафиксированы в [`STAGE1_PHASE1_DATABASE_RESET_DECISION.md`](STAGE1_PHASE1_DATABASE_RESET_DECISION.md). В силу приоритета этого P0 более старые требования master-plan о migration legacy Stage 1 dataset не применяются к Phase 1.
 
 Экранные спецификации:
 

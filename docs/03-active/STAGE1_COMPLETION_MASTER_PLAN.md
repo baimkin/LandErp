@@ -1,7 +1,7 @@
 # Stage 1 — Completion Master Plan
 
 **Статус:** canonical execution plan — review corrections applied  
-**Дата ревизии:** 2026-09-15  
+**Дата ревизии:** 2026-09-16  
 **Рабочая ветка:** `codex/stage-1-procurement-core`  
 **Baseline master-plan:** `733b7e49fb878fd4d633942ececf4272f177509a`  
 **Independent review:** `docs/03-active/STAGE1_COMPLETION_MASTER_PLAN_REVIEW.md` @ `298cb4c28ac2df1cd929f171c5c84e988e3fc35a`  
@@ -30,7 +30,7 @@ HTML prototypes в `docs/14-ui-kit/prototypes/` задают композици�
 - не реализовывать `Owned Assets`, `LandAsset`, Investor cabinet и полноценный post-purchase contour;
 - Stage 1 заканчивается подтверждённым `Acquired` внутри `PropertyCase`: фактическая цена + дата + комментарий; дальнейший `LandAsset` — только будущая точка передачи;
 - не создавать отдельный большой модуль/экран «Сделка»;
-- старые migrations не переписывать: только новые additive/transform/cleanup migrations;
+- старые migration files не переписывать; до первого production deployment действует pre-production migration policy из §1.3, после него — data-preserving policy;
 - не делать глобальный UI rewrite отдельно от нужного business flow;
 - не строить generic workflow engine, generic media/document platform, distributed offline sync framework или event-sourcing rewrite ради Stage 1.
 
@@ -48,6 +48,22 @@ HTML prototypes в `docs/14-ui-kit/prototypes/` задают композици�
 - **Overview** — использует те же scope-aware predicates/query services, что Catalog/Procurement/Collection; не изобретает собственную трактовку scope.
 
 Phase 6 остаётся фазой Organization/Identity UX и финальной cross-module permission-matrix проверки, а не первой фазой, где access становится корректным.
+
+### 1.3. Migration policy до первого production deployment
+
+**Owner decision:** текущие dev/test БД до первого production deployment являются disposable и при несовместимом изменении схемы пересоздаются с нуля.
+
+До первого production deployment:
+
+- для Phase 1/2 **не требуется backfill исторических dev/test rows** и не требуется поддерживать upgrade произвольной старой локальной dev/test БД;
+- migration quality gate — **clean install с нуля**, корректный полный migration chain, правильная конечная schema и `Database.HasPendingModelChanges() == false`;
+- повторное применение актуального migration chain должно быть воспроизводимым; тесты runtime-инвариантов могут явно seed нужные состояния уже в текущей schema и не превращают их в обязательный legacy-data migration contract;
+- отсутствие backfill исторических dev/test rows не ослабляет business/runtime invariants: новые writes, leases, executor history, provenance и authorization обязаны работать корректно в текущей модели;
+- старые migration files по-прежнему не переписываются: корректируется только forward chain новыми migrations.
+
+**Первый production deployment является границей policy.** После него disposable/reset правило автоматически прекращает действовать: production DB не пересоздаётся для обычного upgrade, а все последующие migrations по умолчанию обязаны сохранять существующие production data и выполнять необходимые transformations/backfills безопасно. Destructive reset production data возможен только как отдельное явно утверждённое operational решение, а не как обычная migration strategy.
+
+Эта owner policy имеет приоритет над более ранними формулировками этого master-plan о backfill/legacy-dataset migration для Phase 1/2.
 
 ---
 
@@ -287,15 +303,18 @@ Attachment должен поддерживать:
 
 ### Миграции Phase 1
 
-Порядок обязателен:
+До первого production deployment применяется §1.3: исторические dev/test rows не являются поддерживаемым upgrade source и могут быть отброшены вместе с пересозданием dev/test БД.
+
+Обязательные требования Phase 1 migrations:
 
 1. **Expand** — source-link table, nullable/new case-owned columns, server source classification support, optional external identity support;
-2. **Backfill** — для каждого legacy `PropertyCase.ListingId` создать confirmed source link;
-3. backfill минимальных case-owned facts из source snapshot с **migration/system provenance**, не создавая fake human confirmation;
-4. сохранить BusinessNumber, assignment, task, approvals, transitions, timeline, audit, Listing/Observation history;
-5. **Cutover** reads/writes/routes на CaseId;
-6. снять required FK/unique `PropertyCase.ListingId` coupling после green verification; сам legacy field/adapter может остаться до Phase 9;
-7. source removal не hard-delete: сохранять last known snapshot/observations/link provenance и unavailable/removed-at-source classification.
+2. **Cutover** reads/writes/routes на CaseId и снять required FK/unique `PropertyCase.ListingId` coupling после green verification; сам legacy field/adapter может остаться до Phase 9;
+3. полный migration chain с чистой БД обязан приводить к правильной конечной schema без ручных DB fixes;
+4. current runtime model сохраняет BusinessNumber, assignment/task semantics, timeline/audit/provenance и не создаёт fake human confirmation;
+5. source removal не hard-delete: сохранять last known snapshot/observations/link provenance и unavailable/removed-at-source classification;
+6. `Database.HasPendingModelChanges() == false` после реализации.
+
+Backfill исторических Phase 1 dev/test rows **не является exit-gate требованием** до первого production deployment.
 
 ### UI Phase 1
 
@@ -321,7 +340,7 @@ Attachment должен поддерживать:
 - source disappearance/change не ломает Case и не overwrite verified facts;
 - scope Team/Department/Own/Assigned/Organization идёт через Case responsibility, не Listing metadata;
 - legacy ListingId route redirects existing link и не creates Case;
-- migration from legacy Stage 1 dataset сохраняет business history и migration provenance.
+- clean DB проходит полный migration chain и получает ожидаемые Phase 1 invariants/schema.
 
 Executable baseline:
 
@@ -331,7 +350,7 @@ dotnet build LandErp.slnx --no-restore
 dotnet test tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj --no-build
 ```
 
-PostgreSQL migration tests: clean DB + legacy Stage 1 DB; `Database.HasPendingModelChanges() == false`.
+PostgreSQL migration tests до первого production deployment: clean DB -> полный migration chain -> expected final schema; `Database.HasPendingModelChanges() == false`.
 
 ### Exit gate Phase 1
 
@@ -344,7 +363,7 @@ PostgreSQL migration tests: clean DB + legacy Stage 1 DB; `Database.HasPendingMo
 - legacy ListingId route compatibility доказана;
 - Avito и manual/Telegram-like acceptance scenarios green;
 - scope-safe Procurement доказан без Listing Department/Team;
-- migrations воспроизводимы и не теряют history/provenance.
+- pre-production migration gate из §1.3 green: clean install, полный migration chain, правильная конечная schema, no pending model changes.
 
 **Phase 1 READY TO IMPLEMENT**
 
@@ -371,28 +390,31 @@ Phase 2 остаётся **одной фазой**, но выполнять её
 6. server maps Collector V1 source -> server-owned Catalog source code;
 7. Parser Agent internals не читать глубоко и не менять.
 
-#### Deterministic migration старых jobs
+#### Pre-production migration policy Phase 2A
 
-- **Pending** -> legacy preassignment освобождается; job входит в shared pool;
-- **Leased с валидным незавершённым lease** -> не отбирать и не reassign; дождаться completion/expiry;
-- **expired unfinished lease** -> reclaim может выполнить другой compatible Agent;
-- **Completed** -> навсегда сохранить фактического Agent как historical executor;
-- terminal `LimitReached`, `AwaitingManualAction`, `Failed`, `Interrupted` -> сохранить текущего Agent как historical executor, если он отражает фактическое выполнение;
-- job executor nullable только для unclaimed work; claim заполняет его атомарно;
-- legacy Search `AgentId/DepartmentId/TeamId` columns физически не удалять, пока новый код и compatibility path их больше не читают.
+До первого production deployment применяется §1.3:
+
+- **не требуется** deterministic backfill/migration исторических dev/test Job rows из pre-Phase2 схемы;
+- dev/test БД при необходимости пересоздаются с нуля и проходят полный migration chain;
+- clean final schema должна допускать `AgentId = null` только для unclaimed work, а claim атомарно устанавливает фактического executor;
+- active lease, expired lease reclaim, stale fencing и historical executor проверяются как **runtime invariants текущей модели**, а не как обязательный upgrade старых dev/test rows;
+- legacy Search `AgentId/DepartmentId/TeamId` columns могут физически оставаться до Phase 9 как compatibility-only, если новый runtime их не читает и не заполняет;
+- после первого production deployment любые дальнейшие изменения этой schema автоматически подпадают под data-preserving rule §1.3.
 
 #### Tests 2A
 
-- old Pending освобождается в pool;
+- новый Pending создаётся без preassigned Agent и входит в shared pool;
 - active Leased не steals;
 - expired lease reclaimable другим compatible Agent;
-- Completed сохраняет historical Agent;
+- Completed/terminal сохраняет фактического historical Agent;
 - two Agents cannot lease same Job;
 - incompatible Agent не получает Job;
+- stale Agent/Lease не может heartbeat/complete после reclaim;
 - V1 registration/heartbeat/claim/result remains green;
-- Catalog ingestion organization-wide и не получает Search Department/Team ownership.
+- Catalog ingestion organization-wide и не получает Search Department/Team ownership;
+- clean DB проходит полный migration chain, final schema соответствует current model, pending model changes отсутствуют.
 
-**2A exit gate:** deterministic migration + shared claim + V1 compatibility + concurrency tests green.
+**2A exit gate:** pre-production migration gate §1.3 + shared claim + capability/lease fencing + V1 compatibility + concurrency tests green.
 
 ### Phase 2B — SearchGroup + schedules + management UI
 
@@ -414,11 +436,12 @@ Scope: Collection management — organization-admin surface; server-side authori
 
 - Search не закреплён за машиной/Department/Team;
 - Pending jobs работают через shared pool;
-- active leases/history мигрированы безопасно;
+- lease fencing/reclaim и historical executor semantics текущей модели доказаны runtime/concurrency tests;
 - compatible Agent определяется при claim;
 - schedules/group/UI строятся уже поверх 2A model;
 - V1 Collector wire path green без code change локального Parser Agent;
-- новый incoming поток не получает routing ownership от search/agent.
+- новый incoming поток не получает routing ownership от search/agent;
+- pre-production migration gate §1.3 green; backfill исторических dev/test Jobs не требуется.
 
 ---
 
@@ -662,9 +685,9 @@ Scope: `audit.read` + organization-level visibility enforced server-side.
 2. `/procurement/listings/{ListingId}` нужен только как tested deprecated adapter либо уже не имеет known consumers;
 3. no remaining application read/write зависит от `PropertyCase.ListingId`;
 4. no remaining Collection logic читает/пишет legacy Search Agent/Department/Team routing;
-5. deterministic migration verification green на clean + legacy datasets;
+5. migration gate соответствует §1.3: до first production deployment green clean install/full chain/final schema; если production deployment уже состоялся — дополнительно green data-preserving upgrade для затронутой production schema/data;
 6. V1 Collector server compatibility green;
-7. completed/terminal Job executor history сохранена;
+7. completed/terminal Job executor history текущей runtime модели сохраняется;
 8. no pending model changes.
 
 Только после этого:
@@ -683,7 +706,8 @@ Scope: `audit.read` + organization-level visibility enforced server-side.
 ### Exit gate Stage 1
 
 - clean build/tests;
-- clean + legacy migration tests;
+- clean install + полный migration chain + correct final schema + no pending model changes;
+- если первый production deployment уже состоялся — data-preserving upgrade tests для последующих migrations;
 - restart persistence;
 - authorization negative tests;
 - idempotency/concurrency tests;
@@ -709,7 +733,7 @@ Scope: `audit.read` + organization-level visibility enforced server-side.
 | legacy ListingId route -> existing Case redirect, no implicit create | 1/9 |
 | external source removed -> provenance/history retained, Case alive | 1/3 |
 | source changed -> attention, no verified overwrite | 1/3/4 |
-| migration backfill preserves history + system provenance | 1 |
+| clean DB -> full migration chain -> correct final schema / no pending model changes | 1/2/9 |
 | rejected -> monitoring -> threshold met -> active incoming | 3 |
 | target total price trigger | 3 |
 | target price-per-sotka trigger | 3 |
@@ -722,10 +746,11 @@ Scope: `audit.read` + organization-level visibility enforced server-side.
 | media retry state preserves reference | 5 |
 | Acquired cannot happen twice | 5 |
 | create employee -> temp password -> forced change -> scoped work | 6 |
-| Pending legacy Job released to shared pool | 2A |
+| new Pending Job enters shared pool with `AgentId = null` | 2A |
 | active Leased Job not stolen | 2A |
 | expired lease reclaimable by different compatible Agent | 2A |
 | Completed/terminal Job preserves historical Agent | 2A |
+| stale Agent/Lease cannot complete after reclaim | 2A |
 | two Agents cannot lease same Job | 2A |
 | schedule -> shared Job -> compatible claim -> Catalog | 2B/3 |
 | current V1 Collector registration/heartbeat/claim/result green | 2A/9 |
@@ -740,24 +765,36 @@ Scope: `audit.read` + organization-level visibility enforced server-side.
 
 # 7. Migration strategy как единая программа
 
-Каждая breaking boundary проходит одинаковую последовательность:
+### 7.1. До первого production deployment
 
-1. **Expand** — new tables/nullable columns/read-write structures;
-2. **Backfill** — deterministic data migration + provenance;
-3. **Dual compatibility** — legacy reads/adapters работают, новые commands уже target-centric;
-4. **Cutover** — CaseId/shared pool/server source code;
-5. **Verify** — clean + legacy migration tests, counts/invariants/concurrency;
-6. **Contract** — destructive cleanup только в доказанно безопасной последующей migration, главным образом Phase 9.
+Для текущего pre-production Stage 1 действует owner decision §1.3:
 
-Нельзя:
+1. **Clean install first** — поддерживаемый migration source для dev/test — пустая БД;
+2. **Forward chain** — старые migration files не переписываются, новые migrations должны последовательно привести пустую БД к current schema;
+3. **Cutover** — application reads/writes переходят на CaseId/shared pool/server source code без обязательства трансформировать исторические локальные dev/test rows;
+4. **Verify** — полный migration chain, expected final schema, constraints/indexes/comments где они являются contract, `Database.HasPendingModelChanges() == false`;
+5. **Contract cleanup** — destructive schema cleanup допускается только после доказанного code cutover и остаётся forward migration, а не редактированием истории migrations.
 
-- редактировать старые migration files;
-- пересоздавать Listing/Observation history;
-- менять BusinessNumber существующих Cases;
-- лечить миграцию удалением production-like DB;
+Для Phase 1/2 **не являются обязательными** legacy-dataset backfill, deterministic transformation старых dev/test rows или сохранение disposable локальной БД между несовместимыми pre-production changes.
+
+При этом нельзя:
+
+- редактировать уже существующие migration files;
+- оставлять clean install broken или требующим ручных SQL fixes;
 - создавать fake Agent/Job/Observation для manual Catalog items;
-- hard-delete исчезнувший source provenance;
-- очищать active lease/executor history ради новой shared-pool модели.
+- hard-delete source provenance из текущей runtime модели;
+- нарушать current-schema lease fencing/executor history/business invariants;
+- выдавать отсутствие legacy dev/test backfill за разрешение на потерю production data после первого deployment.
+
+### 7.2. После первого production deployment
+
+С момента первого production deployment policy автоматически меняется:
+
+1. существующая production DB становится обязательным migration source;
+2. последующие migrations по умолчанию **сохраняют production data**;
+3. schema changes, требующие преобразования существующих rows, получают deterministic transform/backfill и verification;
+4. active business state/history/provenance не сбрасываются ради удобства migration;
+5. destructive data reset допускается только как отдельное явно утверждённое operational решение с собственным recovery/backup plan, а не как стандартный upgrade path.
 
 ---
 
@@ -767,14 +804,15 @@ Scope: `audit.read` + organization-level visibility enforced server-side.
 
 1. **CatalogBoundaryTests** — manual/Telegram, source ownership, confirmed uniqueness, concurrent take/link, multi-source, source changes, compatibility route;
 2. **ProcurementWorkflowTests** — CaseId transitions, assignments, approvals, scope, concurrency, restart, reopen/resume;
-3. **CollectionPoolTests** — old-job migration states, shared claim/capability/lease/idempotent delivery/V1 compatibility;
+3. **CollectionPoolTests** — shared claim/capability/lease fencing/reclaim/idempotent delivery/V1 compatibility;
 4. **IncomingMonitoringTests** — threshold monitoring/reactivation/classifications;
 5. **NegotiationAttachmentTests** — price statements, checks, attachment authorization;
 6. **InspectionAcquisitionTests** — local draft/reconnect/media retry + Acquired;
 7. **OrganizationIdentityTests** — direct account + temporary password + archive/scope;
 8. **AuditReadModelTests** — semantic formatting/filter/paging/tenant isolation;
 9. **OverviewTests** — aggregate consistency and scope;
-10. browser/UI scenarios для critical flows без snapshot-only confidence.
+10. **MigrationChainTests/Foundation PostgreSQL tests** — clean install, полный chain, expected final schema, no pending model changes; после первого production deployment — также data-preserving upgrade coverage для новых migrations;
+11. browser/UI scenarios для critical flows без snapshot-only confidence.
 
 ParserSpike test projects не расширять в рамках этого master plan.
 
@@ -791,7 +829,7 @@ Stage 1 завершён только когда:
 - monitoring/reactivation и distinct source classifications работают;
 - existing real object resumes/reopens existing Case вместо duplicate Case;
 - Procurement scope не зависит от Listing Department/Team;
-- Collection работает как shared server pool; old jobs migrated safely; V1 Collector compatible;
+- Collection работает как shared server pool; lease/reclaim/fencing и historical executor semantics текущей модели safe; V1 Collector compatible;
 - local Parser Agent не изменён;
 - negotiations/checks/attachments/inspection/offline-draft/Acquired работают сквозно;
 - Organization управляет employee lifecycle без hard delete;
@@ -799,7 +837,7 @@ Stage 1 завершён только когда:
 - Audit human-readable и paged;
 - Overview использует реальные scope-safe aggregates;
 - raw technical vocabulary отсутствует на staff surfaces;
-- migrations safe/tested from legacy Stage 1;
+- pre-production migrations доказаны через clean install/full chain/correct final schema/no pending model changes; после первого production deployment дальнейшие migrations data-preserving by default;
 - legacy ListingId/Search-routing cleanup выполнен только после Phase 9 gates;
 - automated + executable verification green;
 - Owned Assets/LandAsset/Investor остаются out of Stage 1.
@@ -828,7 +866,7 @@ Stage 1 завершён только когда:
 
 ### Migration safety
 
-Все breaking changes идут через expand -> backfill -> compatibility -> cutover -> verify -> contract. Active Collection leases не steal, completed executor history не теряется, legacy Procurement history не пересоздаётся, source provenance не hard-delete.
+До первого production deployment migration safety означает clean install/full forward chain/correct final schema/no pending model changes; historical dev/test backfill Phase 1/2 не требуется. Runtime business invariants, lease fencing, executor history и provenance проверяются на текущей schema. После первого production deployment включается data-preserving policy §1.3/§7.2 и необходимые transformations/backfills становятся обязательными для затронутых production rows.
 
 ### Межфазные противоречия
 
@@ -849,12 +887,12 @@ Stage 1 завершён только когда:
 1. перечитать `P0_CATALOG_PROCUREMENT_BOUNDARY.md`, Phase 1 этого master-plan и relevant current tests;
 2. зафиксировать target invariants failing/characterization tests;
 3. выполнить additive migration source links + case-owned facts + server source/optional identity support;
-4. backfill legacy data с migration provenance;
+4. доказать clean DB -> full migration chain -> correct Phase 1 schema и `Database.HasPendingModelChanges() == false` без обязательного backfill disposable dev/test rows;
 5. реализовать minimal manual/Telegram-like ingestion;
 6. реализовать DB-enforced/idempotent/concurrent-safe `TakeToWork`;
 7. перевести Procurement contracts/workspace/queue/canonical route на CaseId;
 8. оставить tested ListingId compatibility redirect;
-9. доказать current Avito + manual/Telegram-like + scope + migration scenarios;
+9. доказать current Avito + manual/Telegram-like + scope + clean migration-chain scenarios;
 10. не начинать Phase 2 до executable evidence Phase 1 exit gate.
 
 Повторный общий архитектурный аудит Stage 1 перед Phase 1 **не нужен**. Реализацию локального Parser Agent не начинать.

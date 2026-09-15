@@ -2,6 +2,7 @@
 @attribute [Authorize(Policy = "agents.manage")]
 @inherits WorkspaceComponent
 @using LandErp.Application.Modules.Collection.Contracts
+@using LandErp.Application.Modules.Catalog.Domain
 @using LandErp.Collector.Contracts.V1
 @inject ICollectionAdministration Administration
 @inject IOrganizationWorkspace Organization
@@ -24,10 +25,8 @@ else
         <label class="field"><span>Название поиска</span><input @bind="searchInput.Label" @bind:event="oninput" /></label>
         <label class="field"><span>Источник поиска</span><InputSelect aria-label="Источник поиска" @bind-Value="searchInput.Source"><option value="Avito">Avito</option><option value="Cian">Cian</option></InputSelect></label>
         <label class="field"><span>Ссылка поиска</span><input type="url" @bind="searchInput.Url" @bind:event="oninput" /></label>
-        <label class="field"><span>Исполняющий Collector</span><InputSelect aria-label="Исполняющий Collector" @bind-Value="searchInput.AgentId"><option value="">Выберите Collector</option>@foreach(AgentView agent in view.Agents.Where(item => item.Enabled)) { <option value="@agent.Id">@agent.Name</option> }</InputSelect></label>
-        <label class="field"><span>Подразделение закупки</span><InputSelect aria-label="Подразделение закупки" @bind-Value="searchInput.DepartmentId"><option value="">Организация</option>@foreach(NamedItem department in organization.Departments) { <option value="@department.Id">@department.Name</option> }</InputSelect></label>
-        <label class="field"><span>Команда закупки</span><InputSelect aria-label="Команда закупки" @bind-Value="searchInput.TeamId"><option value="">Не назначена</option>@foreach(NamedItem team in organization.Teams) { <option value="@team.Id">@team.Name</option> }</InputSelect></label>
-        <label class="field"><span>Предел страниц</span><InputNumber @bind-Value="searchInput.MaxPages" /></label><ActionButton Type="submit" Label="Сохранить поиск" Busy="Busy" Disabled="@(searchInput.AgentId == Guid.Empty)" /></EditForm></article></div>
+        <p class="subtle">Конкретный Collector не назначается: работу возьмёт свободный совместимый парсер.</p>
+        <label class="field"><span>Предел страниц</span><InputNumber @bind-Value="searchInput.MaxPages" /></label><ActionButton Type="submit" Label="Сохранить поиск" Busy="Busy" /></EditForm></article></div>
         <article class="surface"><h2>Поиски</h2>@foreach(SearchView search in view.Searches) { <div class="list-row"><div><strong>@search.Label</strong><small>@search.Source · до @search.MaxPages страниц</small><a href="@search.Url" target="_blank" rel="noopener noreferrer">Открыть источник</a></div><ActionButton Label="Поставить сбор" OnClick="() => EnqueueAsync(search.Id)" Busy="Busy" /></div> }</article>
         <article class="surface table-surface"><div class="table-toolbar"><h2>Последние работы</h2></div>@if(view.Jobs.Count == 0) { <PageState Title="Работ пока нет" Description="Поставьте сбор для разрешённого поиска." /> }
         else { <div class="table-wrap"><table class="data-table"><thead><tr><th>Поиск / Collector</th><th>Состояние</th><th>Срок lease</th><th>Результат</th></tr></thead><tbody>@foreach(CollectionJobView job in view.Jobs) { <tr><td><strong>@job.Label</strong><small>@job.Agent · @Time(job.CreatedAt)</small></td><td><StatusBadge Label="@JobLabel(job.State)" Tone="@(job.State == "Completed" ? "success" : "warning")" /></td><td>@Time(job.LeaseExpiresAt)</td><td>@job.ResultCode<small>Принято: @job.AcceptedCount</small></td></tr> }</tbody></table></div> }</article>
@@ -40,10 +39,10 @@ else
     private Task CreateAgentAsync() => ExecuteAsync(async () => { credential=await Administration.CreateAgentAsync(CurrentSubject,agentInput.Name,Guid.CreateVersion7().ToString(),CancellationToken.None); agentInput.Name=""; });
     private Task RevokeAsync(AgentView agent) => ExecuteAsync(() => Administration.RevokeAgentAsync(CurrentSubject,agent.Id,agent.Revision,Guid.CreateVersion7().ToString(),CancellationToken.None));
     private Task RotateAsync(AgentView agent) => ExecuteAsync(async () => credential=await Administration.RotateCredentialAsync(CurrentSubject,agent.Id,agent.Revision,Guid.CreateVersion7().ToString(),CancellationToken.None));
-    private Task CreateSearchAsync() => ExecuteAsync(async () => { await Administration.CreateSearchAsync(CurrentSubject,new(searchInput.AgentId,searchInput.DepartmentId,searchInput.TeamId,searchInput.Label,searchInput.Source,searchInput.Url,searchInput.MaxPages),Guid.CreateVersion7().ToString(),CancellationToken.None); searchInput=new(); });
+    private Task CreateSearchAsync() => ExecuteAsync(async () => { await Administration.CreateSearchAsync(CurrentSubject,new(searchInput.Label,searchInput.Source,searchInput.Url,searchInput.MaxPages),Guid.CreateVersion7().ToString(),CancellationToken.None); searchInput=new(); });
     private Task EnqueueAsync(Guid id) => ExecuteAsync(() => Administration.EnqueueAsync(CurrentSubject,id,Guid.CreateVersion7().ToString(),CancellationToken.None));
     private static string Time(DateTimeOffset? instant) => instant?.ToUniversalTime().ToString("dd.MM HH:mm 'UTC'",System.Globalization.CultureInfo.InvariantCulture) ?? "—";
     private static string JobLabel(string state) => state switch { "Pending"=>"Ожидает", "Leased"=>"Собирается", "Completed"=>"Завершена", "LimitReached"=>"Предел страниц", "AwaitingManualAction"=>"Ручная проверка", "Interrupted"=>"Прервана", _=>"Ошибка" };
     private sealed class AgentInput { [Required,MaxLength(200)] public string Name { get; set; }=""; }
-    private sealed class SearchInput { [Required,MaxLength(200)] public string Label { get; set; }=""; [Required,Url] public string Url { get; set; }=""; public ListingSource Source { get; set; } public Guid AgentId { get; set; } public Guid? DepartmentId { get; set; } public Guid? TeamId { get; set; } [Range(1,100)] public int MaxPages { get; set; }=10; }
+    private sealed class SearchInput { [Required,MaxLength(200)] public string Label { get; set; }=""; [Required,Url] public string Url { get; set; }=""; public CatalogSource Source { get; set; } [Range(1,100)] public int MaxPages { get; set; }=10; }
 }

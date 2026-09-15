@@ -53,22 +53,22 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         CollectorAgent agent = await AuthenticateAsync(db, credential, cancellationToken);
         if (agent.RegisteredAt == null) throw new CollectorProtocolException("REGISTRATION_REQUIRED");
         DateTimeOffset now = time.GetUtcNow();
-        // A disabled search is excluded even if old queued work remains. SKIP LOCKED allows independent agents.
+        string[] capabilities = agent.Capabilities.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        // Shared work is assigned only here. SKIP LOCKED prevents two compatible agents leasing the same job.
         var jobs = await db.CollectionJobs.FromSqlInterpolated($"""
             SELECT j.* FROM collection.jobs j JOIN collection.search_configurations s ON s.id=j.search_id
-            WHERE j.agent_id={agent.Id} AND s.enabled=true
+            WHERE j.organization_id={agent.OrganizationId} AND s.enabled=true AND s.source=ANY({capabilities})
               AND (j.state='Pending' OR (j.state='Leased' AND j.lease_expires_at<={now}))
             ORDER BY j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED
             """).ToListAsync(cancellationToken);
         if (jobs.Count == 0) { await transaction.CommitAsync(cancellationToken); return null; }
         ServerCollectionJob job = jobs[0];
         SearchConfiguration search = await db.SearchConfigurations.SingleAsync(item => item.Id == job.SearchId, cancellationToken);
-        if (!agent.Capabilities.Split(',').Contains(search.Source.ToString(), StringComparer.Ordinal))
-            throw new CollectorProtocolException("CAPABILITY_UNSUPPORTED");
-        job.State = CollectionJobState.Leased; job.LeaseId = DataConventions.NewId(); job.LeaseExpiresAt = now.AddMinutes(3);
+        job.AgentId = agent.Id; job.State = CollectionJobState.Leased;
+        job.LeaseId = DataConventions.NewId(); job.LeaseExpiresAt = now.AddMinutes(3);
         agent.LastHeartbeatAt = now;
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
-        return new(job.Id, job.LeaseId.Value, job.LeaseExpiresAt.Value, search.Source, search.Url, search.MaxPages, search.Label);
+        return new(job.Id, job.LeaseId.Value, job.LeaseExpiresAt.Value, CollectorSource(search.Source), search.Url, search.MaxPages, search.Label);
     }
 
     public async Task<CollectionReceipt> AcceptAsync(AgentCredential credential, CollectionResult result, CancellationToken cancellationToken)
@@ -96,7 +96,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         ServerCollectionJob job = await LockedJobAsync(db, result.JobId, agent.Id, cancellationToken);
         EnsureLease(job, result.LeaseId);
         SearchConfiguration search = await db.SearchConfigurations.SingleAsync(item => item.Id == job.SearchId, cancellationToken);
-        if (result.Observations.Any(item => item.Data.Source != search.Source)) throw new ArgumentException("SOURCE_MISMATCH");
+        if (result.Observations.Any(item => MapSource(item.Data.Source) != search.Source)) throw new ArgumentException("SOURCE_MISMATCH");
         // Global ordering of natural identity locks avoids two overlapping search batches deadlocking.
         foreach (string identity in result.Observations.Select(item => $"{agent.OrganizationId}:{item.Data.Source}:{item.Data.ExternalId}").Distinct().Order(StringComparer.Ordinal))
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({identity},0))", cancellationToken);
@@ -120,8 +120,6 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             {
                 Id = DataConventions.NewId(),
                 OrganizationId = agent.OrganizationId,
-                DepartmentId = search.DepartmentId,
-                TeamId = search.TeamId,
                 Source = source,
                 ExternalId = data.ExternalId,
                 Url = data.Url,
@@ -217,6 +215,13 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
     {
         ListingSource.Avito => CatalogSource.Avito,
         ListingSource.Cian => CatalogSource.Cian,
+        _ => throw new CollectorProtocolException("SOURCE_UNSUPPORTED")
+    };
+
+    private static ListingSource CollectorSource(CatalogSource source) => source switch
+    {
+        CatalogSource.Avito => ListingSource.Avito,
+        CatalogSource.Cian => ListingSource.Cian,
         _ => throw new CollectorProtocolException("SOURCE_UNSUPPORTED")
     };
 

@@ -14,9 +14,10 @@ internal static class CollectionMappings
         builder.Entity<SearchConfiguration>().ToTable("search_configurations", "collection");
         builder.Entity<SearchConfiguration>().Property(item => item.Source).HasConversion<string>();
         builder.Entity<SearchConfiguration>().Property(item => item.Url).HasMaxLength(2000);
-        builder.Entity<SearchConfiguration>().HasOne<CollectorAgent>().WithMany().HasForeignKey(item => item.AgentId).OnDelete(DeleteBehavior.Restrict);
-        builder.Entity<SearchConfiguration>().HasOne<OrgUnit>().WithMany().HasForeignKey(item => item.DepartmentId).OnDelete(DeleteBehavior.Restrict);
-        builder.Entity<SearchConfiguration>().HasOne<Team>().WithMany().HasForeignKey(item => item.TeamId).OnDelete(DeleteBehavior.Restrict);
+        // Compatibility-only columns remain physically present until final cleanup; runtime routing never reads them.
+        builder.Entity<SearchConfiguration>().Property<Guid?>("AgentId");
+        builder.Entity<SearchConfiguration>().Property<Guid?>("DepartmentId");
+        builder.Entity<SearchConfiguration>().Property<Guid?>("TeamId");
         builder.Entity<ServerCollectionJob>().ToTable("jobs", "collection");
         builder.Entity<ServerCollectionJob>().Property(item => item.State).HasConversion<string>();
         builder.Entity<ServerCollectionJob>().HasOne<CollectorAgent>().WithMany().HasForeignKey(item => item.AgentId).OnDelete(DeleteBehavior.Restrict);

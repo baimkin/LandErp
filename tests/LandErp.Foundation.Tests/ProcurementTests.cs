@@ -265,7 +265,8 @@ public sealed class ProcurementTests
             await gateway.RegisterAsync(agent, new(1, "phase1", [ListingSource.Avito, ListingSource.Cian]), CancellationToken.None);
             foreach (ListingSource source in new[] { ListingSource.Avito, ListingSource.Cian })
             {
-                await administration.CreateSearchAsync(Owner, new(agent.AgentId, DepartmentB, TeamB, "Phase1 " + source, source,
+                CatalogSource catalogSource = source == ListingSource.Avito ? CatalogSource.Avito : CatalogSource.Cian;
+                await administration.CreateSearchAsync(Owner, new("Phase1 " + source, catalogSource,
                     source == ListingSource.Avito ? "https://www.avito.ru/moskva/zemelnye_uchastki" : "https://www.cian.ru/cat.php?deal_type=sale", 1), "test", CancellationToken.None);
                 Guid searchId = (await administration.ReadAsync(Owner, CancellationToken.None)).Searches.Single(item => item.Label == "Phase1 " + source).Id;
                 await administration.EnqueueAsync(Owner, searchId, "test", CancellationToken.None);

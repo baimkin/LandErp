@@ -1,4 +1,5 @@
 using LandErp.Application.Modules.IdentityAccess.Contracts;
+using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Collector.Contracts.V1;
 
 namespace LandErp.Application.Modules.Collection.Contracts;
@@ -9,12 +10,12 @@ public sealed record AgentCredential(Guid AgentId, string Token)
 }
 public sealed record AgentView(Guid Id, string Name, bool Enabled, bool Online, string Version,
     string Capabilities, DateTimeOffset? LastHeartbeatAt, long Revision);
-public sealed record SearchView(Guid Id, string Label, ListingSource Source, string Url, Guid AgentId, int MaxPages);
-public sealed record CollectionJobView(Guid Id, string Label, string Agent, string State, DateTimeOffset CreatedAt,
+public sealed record SearchView(Guid Id, string Label, CatalogSource Source, string Url, int MaxPages);
+public sealed record CollectionJobView(Guid Id, string Label, string? Agent, string State, DateTimeOffset CreatedAt,
     DateTimeOffset? LeaseExpiresAt, string ResultCode, int AcceptedCount);
 public sealed record CollectionAdminView(IReadOnlyList<AgentView> Agents, IReadOnlyList<SearchView> Searches,
     IReadOnlyList<CollectionJobView> Jobs);
-public sealed record CreateSearch(Guid AgentId, Guid? DepartmentId, Guid? TeamId, string Label, ListingSource Source, string Url, int MaxPages);
+public sealed record CreateSearch(string Label, CatalogSource Source, string Url, int MaxPages);
 public interface ICollectionAdministration
 {
     Task<CollectionAdminView> ReadAsync(Subject subject, CancellationToken cancellationToken);

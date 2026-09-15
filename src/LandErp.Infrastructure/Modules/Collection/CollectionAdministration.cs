@@ -1,4 +1,5 @@
 using LandErp.Application.Foundation;
+using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Collection.Contracts;
 using LandErp.Application.Modules.Collection.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
@@ -27,10 +28,11 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
             .Select(item => new AgentView(item.Id, item.Name, item.Enabled, item.Enabled && item.LastHeartbeatAt >= onlineSince,
                 item.VersionText, item.Capabilities, item.LastHeartbeatAt, item.Version)).ToArrayAsync(cancellationToken);
         var searches = await db.SearchConfigurations.Where(item => item.OrganizationId == context.OrganizationId).OrderBy(item => item.Label)
-            .Select(item => new SearchView(item.Id, item.Label, item.Source, item.Url, item.AgentId, item.MaxPages)).ToArrayAsync(cancellationToken);
+            .Select(item => new SearchView(item.Id, item.Label, item.Source, item.Url, item.MaxPages)).ToArrayAsync(cancellationToken);
         var jobs = await (from job in db.CollectionJobs join search in db.SearchConfigurations on job.SearchId equals search.Id
-                          join agent in db.CollectorAgents on job.AgentId equals agent.Id where job.OrganizationId == context.OrganizationId
-                          orderby job.CreatedAt descending select new CollectionJobView(job.Id, search.Label, agent.Name,
+                          join agentValue in db.CollectorAgents on job.AgentId equals (Guid?)agentValue.Id into agentValues
+                          from agent in agentValues.DefaultIfEmpty() where job.OrganizationId == context.OrganizationId
+                          orderby job.CreatedAt descending select new CollectionJobView(job.Id, search.Label, agent == null ? null : agent.Name,
                               job.State.ToString(), job.CreatedAt, job.LeaseExpiresAt, job.ResultCode, job.AcceptedCount)).Take(100).ToArrayAsync(cancellationToken);
         return new(agents, searches, jobs);
     }
@@ -60,19 +62,14 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     {
         AccessContext context = await RequireAsync(subject, cancellationToken);
         await access.RequireAsync(subject, Permissions.CollectionManage, cancellationToken);
-        if (!ContractRules.IsSourceUrl(command.Url, command.Source) || command.Url.Length > 2000 || command.MaxPages is < 1 or > 100)
+        if (!ContractRules.IsSourceUrl(command.Url, CollectorSource(command.Source)) || command.Url.Length > 2000 || command.MaxPages is < 1 or > 100)
             throw new ArgumentException("Укажите публичную HTTPS-ссылку Avito/Cian и предел 1–100 страниц.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        if (!await db.CollectorAgents.AnyAsync(item => item.Id == command.AgentId && item.OrganizationId == context.OrganizationId && item.Enabled, cancellationToken)
-            || command.DepartmentId != null && !await db.OrgUnits.AnyAsync(item => item.Id == command.DepartmentId && item.OrganizationId == context.OrganizationId, cancellationToken)
-            || command.TeamId != null && !await db.Teams.AnyAsync(item => item.Id == command.TeamId && item.OrganizationId == context.OrganizationId && item.OrgUnitId == command.DepartmentId, cancellationToken))
-            throw new AccessDeniedException();
         SearchConfiguration search = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
-            AgentId = command.AgentId, DepartmentId = command.DepartmentId, TeamId = command.TeamId,
             Label = OrganizationWorkspace.ValidateName(command.Label), Source = command.Source, Url = command.Url, MaxPages = command.MaxPages };
         db.SearchConfigurations.Add(search);
         OrganizationWorkspace.AddAudit(db, context, subject, "CollectionSearchCreated", "SearchConfiguration", search.Id,
-            new { search.Label, search.Source, search.AgentId, search.DepartmentId, search.TeamId, search.MaxPages }, correlationId);
+            new { search.Label, search.Source, search.MaxPages }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
     }
     public async Task<AgentCredential> RotateCredentialAsync(Subject subject, Guid agentId, long expectedVersion, string correlationId, CancellationToken cancellationToken)
@@ -99,13 +96,20 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var searches = await db.SearchConfigurations.FromSqlInterpolated($"SELECT * FROM collection.search_configurations WHERE id={searchId} AND organization_id={context.OrganizationId} FOR UPDATE").ToListAsync(cancellationToken);
         SearchConfiguration search = searches.SingleOrDefault() ?? throw new AccessDeniedException();
-        if (!search.Enabled || !await db.CollectorAgents.AnyAsync(item => item.Id == search.AgentId && item.Enabled, cancellationToken)) throw new AccessDeniedException();
+        if (!search.Enabled) throw new AccessDeniedException();
         if (await db.CollectionJobs.AnyAsync(item => item.SearchId == searchId && (item.State == CollectionJobState.Pending || item.State == CollectionJobState.Leased), cancellationToken))
             throw new ArgumentException("Для поиска уже есть активная работа.");
         ServerCollectionJob job = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
-            SearchId = search.Id, AgentId = search.AgentId, CreatedAt = time.GetUtcNow(), State = CollectionJobState.Pending };
+            SearchId = search.Id, AgentId = null, CreatedAt = time.GetUtcNow(), State = CollectionJobState.Pending };
         db.CollectionJobs.Add(job);
         OrganizationWorkspace.AddAudit(db, context, subject, "CollectionJobQueued", "CollectionJob", job.Id, new { job.SearchId, job.AgentId }, correlationId);
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
     }
+
+    private static ListingSource CollectorSource(CatalogSource source) => source switch
+    {
+        CatalogSource.Avito => ListingSource.Avito,
+        CatalogSource.Cian => ListingSource.Cian,
+        _ => throw new ArgumentException("Collector поддерживает только Avito/Cian.")
+    };
 }

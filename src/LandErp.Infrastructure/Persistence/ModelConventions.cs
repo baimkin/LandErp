@@ -18,8 +18,8 @@ internal static class ModelConventions
         ["business_timeline"] = "Неизменяемая бизнес-история объекта: решения, заметки, контакты, кому возвращён объект, что уточнить и срок. Отдельна от технического audit.",
         ["notifications"] = "Внутренние уведомления исполнителю о передаче/возврате/решении. ReadAt отмечает просмотр; внешняя доставка не включена.",
         ["agents"] = "Зарегистрированные локальные Collector. Сервер хранит только verifier credential; отзыв немедленно запрещает новые обращения.",
-        ["search_configurations"] = "Разрешённые поиски организации с конкретным Collector и областью закупки. Browser settings и cookies остаются локально.",
-        ["jobs"] = "Одна работа сбора: Pending ожидает; Leased закреплена до срока; Completed/LimitReached завершена; AwaitingManualAction требует ручного действия; Failed/Interrupted не считаются пустым успехом.",
+        ["search_configurations"] = "Поисковые ссылки организации без назначения конкретного Collector или области закупки. Browser settings и cookies остаются локально.",
+        ["jobs"] = "Работа общего пула: Pending без исполнителя; Agent назначается при claim. Lease fencing и terminal executor сохраняют фактическую историю.",
         ["deliveries"] = "Неизменяемые квитанции доставки Collector. Повтор ResultId с тем же payload возвращает прежний ответ; другой payload запрещён.",
         ["listings"] = "Универсальные входящие предложения Catalog из автоматических и ручных источников; не идентичность земельного участка.",
         ["observations"] = "Неизменяемые наблюдения публичных объявлений: Source/ExternalId, Raw/Parsed/Presence, provenance и версия адаптера. Browser state и raw HTML здесь не хранятся.",
@@ -145,7 +145,15 @@ internal static class ModelConventions
             foreach (IMutableProperty property in entity.GetProperties())
             {
                 property.SetColumnName(Snake(property.Name));
-                if (ColumnComments.TryGetValue(property.Name, out string? comment))
+                if (table == "search_configurations" && property.Name is "AgentId" or "DepartmentId" or "TeamId")
+                {
+                    property.SetComment("Устаревшее поле прежней маршрутизации; новый runtime его не читает и не заполняет.");
+                }
+                else if (table == "jobs" && property.Name == "AgentId")
+                {
+                    property.SetComment("Фактический исполнитель работы; отсутствует у Pending и устанавливается атомарно при claim.");
+                }
+                else if (ColumnComments.TryGetValue(property.Name, out string? comment))
                 {
                     property.SetComment(comment);
                 }

@@ -1,5 +1,7 @@
 # Активная задача LandErp
 
+> **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). Следующий implementation-agent начинает с **Phase 1** этого плана. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
+
 ## P0 — обязательная следующая задача перед дальнейшим развитием
 
 **Текущий приоритет:** исправить архитектурную границу `Catalog → Procurement` по документу [`P0_CATALOG_PROCUREMENT_BOUNDARY.md`](P0_CATALOG_PROCUREMENT_BOUNDARY.md).

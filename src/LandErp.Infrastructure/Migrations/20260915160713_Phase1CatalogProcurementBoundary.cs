@@ -12,6 +12,8 @@ namespace LandErp.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Owner decision 2026-09-15: pre-Phase-1 databases are disposable development state.
+            // This migration is intentionally schema-only. Existing dev databases must be rebuilt clean.
             migrationBuilder.DropIndex(
                 name: "ix_property_cases_listing_id",
                 schema: "procurement",
@@ -59,7 +61,6 @@ namespace LandErp.Infrastructure.Migrations
                 type: "character varying(3)",
                 maxLength: 3,
                 nullable: false,
-                defaultValue: "RUB",
                 comment: "ISO 4217 валюта денежного значения; Stage 1 принимает RUB.");
 
             migrationBuilder.AddColumn<Guid>(
@@ -77,7 +78,6 @@ namespace LandErp.Infrastructure.Migrations
                 type: "character varying(1000)",
                 maxLength: 1000,
                 nullable: false,
-                defaultValue: "Migration from legacy Listing snapshot",
                 comment: "Происхождение первоначальных рабочих фактов кейса; migration/system не означает подтверждение человеком.");
 
             migrationBuilder.AddColumn<Guid>(
@@ -124,7 +124,6 @@ namespace LandErp.Infrastructure.Migrations
                 type: "character varying(20000)",
                 maxLength: 20000,
                 nullable: false,
-                defaultValue: "Объект без названия",
                 comment: "Рабочее название PropertyCase, сохраняемое независимо от последующих изменений внешних источников.");
 
             migrationBuilder.AlterColumn<string>(
@@ -196,7 +195,6 @@ namespace LandErp.Infrastructure.Migrations
                 table: "listings",
                 type: "text",
                 nullable: false,
-                defaultValue: "Incoming",
                 comment: "Текущее решение первичного отбора: входящее, мониторинг, в работе, отклонено, снято или продано.");
 
             migrationBuilder.AddColumn<string>(
@@ -205,7 +203,6 @@ namespace LandErp.Infrastructure.Migrations
                 table: "listings",
                 type: "text",
                 nullable: false,
-                defaultValue: "Collector",
                 comment: "Способ поступления: Collector, сотрудник, миграция или интеграция; ручной путь не создаёт фиктивные jobs/observations.");
 
             migrationBuilder.AddColumn<string>(
@@ -224,7 +221,6 @@ namespace LandErp.Infrastructure.Migrations
                 type: "character varying(2000)",
                 maxLength: 2000,
                 nullable: false,
-                defaultValue: "Collector V1 (legacy)",
                 comment: "Человекочитаемое происхождение входящего элемента или подтверждения связи без технических секретов.");
 
             migrationBuilder.AddColumn<DateTimeOffset>(
@@ -233,7 +229,6 @@ namespace LandErp.Infrastructure.Migrations
                 table: "listings",
                 type: "timestamp with time zone",
                 nullable: false,
-                defaultValue: new DateTimeOffset(new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                 comment: "UTC момент поступления элемента в Catalog; для автоматического источника отличается от времени наблюдения при задержке доставки.");
 
             migrationBuilder.CreateTable(
@@ -278,38 +273,6 @@ namespace LandErp.Infrastructure.Migrations
                         onDelete: ReferentialAction.Restrict);
                 },
                 comment: "Подтверждённые и возможные связи входящих элементов Catalog с PropertyCase. Один входящий элемент может иметь не более одной подтверждённой связи.");
-
-            migrationBuilder.Sql("""
-                UPDATE catalog.listings
-                SET ingestion_kind = 'Collector',
-                    provenance = 'Collector V1 (legacy)',
-                    disposition = CASE WHEN EXISTS (
-                        SELECT 1 FROM procurement.property_cases pc WHERE pc.listing_id = catalog.listings.id
-                    ) THEN 'InWork' ELSE 'Incoming' END,
-                    received_at = recorded_at;
-
-                UPDATE procurement.property_cases pc
-                SET working_title = COALESCE(l.title, 'Объект без названия'),
-                    working_price = l.price,
-                    currency = l.currency,
-                    working_area_square_meters = l.area_square_meters,
-                    working_location = l.location,
-                    department_id = (SELECT ea.org_unit_id FROM organization.employee_assignments ea WHERE ea.employee_id = pc.manager_employee_id LIMIT 1),
-                    team_id = (SELECT ea.team_id FROM organization.employee_assignments ea WHERE ea.employee_id = pc.manager_employee_id LIMIT 1),
-                    facts_provenance = 'Migration from legacy Listing snapshot'
-                FROM catalog.listings l
-                WHERE pc.listing_id = l.id;
-
-                INSERT INTO procurement.property_case_source_links
-                    (id, organization_id, property_case_id, catalog_item_id, confirmed, relation_type,
-                     actor_employee_id, provenance, reviewed_data_revision, recorded_at)
-                SELECT pc.listing_id, pc.organization_id, pc.id, pc.listing_id, true, 'Source',
-                       NULL, 'Migration from legacy PropertyCase.ListingId', pc.reviewed_data_revision, pc.recorded_at
-                FROM procurement.property_cases pc
-                WHERE pc.listing_id IS NOT NULL;
-
-                UPDATE procurement.property_cases SET listing_id = NULL WHERE listing_id IS NOT NULL;
-                """);
 
             migrationBuilder.CreateIndex(
                 name: "ix_property_cases_department_id",
@@ -400,16 +363,6 @@ namespace LandErp.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(
-                """
-                UPDATE procurement.property_cases AS property_case
-                SET listing_id = source_link.catalog_item_id
-                FROM procurement.property_case_source_links AS source_link
-                WHERE source_link.property_case_id = property_case.id
-                  AND source_link.confirmed = TRUE
-                  AND property_case.listing_id IS NULL;
-                """);
-
             migrationBuilder.DropForeignKey(
                 name: "fk_listings_created_by_employee_id",
                 schema: "catalog",
@@ -552,7 +505,6 @@ namespace LandErp.Infrastructure.Migrations
                 table: "property_cases",
                 type: "uuid",
                 nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"),
                 oldClrType: typeof(Guid),
                 oldType: "uuid",
                 oldNullable: true);
@@ -564,7 +516,6 @@ namespace LandErp.Infrastructure.Migrations
                 type: "character varying(2000)",
                 maxLength: 2000,
                 nullable: false,
-                defaultValue: "",
                 oldClrType: typeof(string),
                 oldType: "character varying(2000)",
                 oldMaxLength: 2000,
@@ -577,7 +528,6 @@ namespace LandErp.Infrastructure.Migrations
                 table: "listings",
                 type: "timestamp with time zone",
                 nullable: false,
-                defaultValue: new DateTimeOffset(new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                 comment: "Самый новый принятый UTC момент наблюдения для обновления current state.",
                 oldClrType: typeof(DateTimeOffset),
                 oldType: "timestamp with time zone",
@@ -590,7 +540,6 @@ namespace LandErp.Infrastructure.Migrations
                 table: "listings",
                 type: "timestamp with time zone",
                 nullable: false,
-                defaultValue: new DateTimeOffset(new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                 comment: "Самый ранний известный UTC момент наблюдения этого объявления.",
                 oldClrType: typeof(DateTimeOffset),
                 oldType: "timestamp with time zone",
@@ -604,7 +553,6 @@ namespace LandErp.Infrastructure.Migrations
                 type: "character varying(512)",
                 maxLength: 512,
                 nullable: false,
-                defaultValue: "",
                 oldClrType: typeof(string),
                 oldType: "character varying(512)",
                 oldMaxLength: 512,

@@ -46,13 +46,37 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         ValidatePage(filter.Text, filter.Offset, filter.Size);
+        if (!Enum.IsDefined(filter.Age) || filter.MinPrice < 0 || filter.MaxPrice < 0 || filter.MinAreaSquareMeters < 0 || filter.MaxAreaSquareMeters < 0
+            || filter.MinPrice > filter.MaxPrice || filter.MinAreaSquareMeters > filter.MaxAreaSquareMeters)
+            throw new ArgumentException("Некорректный диапазон фильтра входящих.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        IQueryable<Listing> query = db.Listings.Where(item => item.OrganizationId == context.OrganizationId);
+        IQueryable<Listing> organizationItems = db.Listings.Where(item => item.OrganizationId == context.OrganizationId);
+        IncomingCatalogSummary summary = new(
+            await organizationItems.CountAsync(item => item.Disposition == CatalogDisposition.Incoming, cancellationToken),
+            await organizationItems.CountAsync(item => item.AttentionRequired, cancellationToken),
+            await organizationItems.CountAsync(item => item.Disposition == CatalogDisposition.Monitoring, cancellationToken),
+            await organizationItems.CountAsync(item => item.Disposition == CatalogDisposition.InWork, cancellationToken),
+            await organizationItems.CountAsync(item => item.Price == null || item.AreaSquareMeters == null || item.Location == null, cancellationToken));
+        IQueryable<Listing> query = organizationItems;
         if (filter.Text.Length > 0)
             query = query.Where(item => (item.Title ?? "").Contains(filter.Text) || (item.Location ?? "").Contains(filter.Text)
                 || (item.ExternalId ?? "").Contains(filter.Text) || (item.CadastralNumber ?? "").Contains(filter.Text));
         if (filter.Source != null) query = query.Where(item => item.Source == filter.Source);
         if (filter.Disposition != null) query = query.Where(item => item.Disposition == filter.Disposition);
+        if (filter.AttentionOnly) query = query.Where(item => item.AttentionRequired);
+        if (filter.MinPrice != null) query = query.Where(item => item.Price >= filter.MinPrice);
+        if (filter.MaxPrice != null) query = query.Where(item => item.Price <= filter.MaxPrice);
+        if (filter.MinAreaSquareMeters != null) query = query.Where(item => item.AreaSquareMeters >= filter.MinAreaSquareMeters);
+        if (filter.MaxAreaSquareMeters != null) query = query.Where(item => item.AreaSquareMeters <= filter.MaxAreaSquareMeters);
+        DateTimeOffset now = time.GetUtcNow();
+        query = filter.Age switch
+        {
+            CatalogAgeRange.Today => query.Where(item => item.ReceivedAt >= now.AddDays(-1)),
+            CatalogAgeRange.ThreeDays => query.Where(item => item.ReceivedAt >= now.AddDays(-3)),
+            CatalogAgeRange.Week => query.Where(item => item.ReceivedAt >= now.AddDays(-7)),
+            CatalogAgeRange.OlderThanWeek => query.Where(item => item.ReceivedAt < now.AddDays(-7)),
+            _ => query
+        };
         int total = await query.CountAsync(cancellationToken);
         Listing[] items = await query.OrderByDescending(item => item.ChangedAt).ThenBy(item => item.Id)
             .Skip(filter.Offset).Take(filter.Size).ToArrayAsync(cancellationToken);
@@ -65,10 +89,27 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         return new(items.Select(item =>
         {
             byItem.TryGetValue(item.Id, out var link);
-            return new CatalogItemView(item.Id, item.Source, item.ExternalId, item.Url, item.Title ?? "Название неизвестно",
-                item.Price, item.Currency, item.AreaSquareMeters, item.Location, item.CadastralNumber, item.Description,
-                item.Provenance, item.IngestionKind, item.Disposition, item.ReceivedAt, link?.Id, link?.BusinessNumber, item.Version);
-        }).ToArray(), total);
+            return CatalogView(item, link?.Id, link?.BusinessNumber);
+        }).ToArray(), total, summary);
+    }
+
+    public async Task<CatalogItemDetail> ReadItemAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        Listing item = await db.Listings.AsNoTracking().SingleOrDefaultAsync(value => value.Id == catalogItemId
+            && value.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
+        var link = await (from sourceLink in db.PropertyCaseSourceLinks
+                          join propertyCase in db.PropertyCases on sourceLink.PropertyCaseId equals propertyCase.Id
+                          where sourceLink.CatalogItemId == item.Id && sourceLink.Confirmed
+                          select new { propertyCase.Id, propertyCase.BusinessNumber }).SingleOrDefaultAsync(cancellationToken);
+        CatalogEventView[] events = await db.CatalogEvents.AsNoTracking().Where(value => value.CatalogItemId == item.Id)
+            .OrderByDescending(value => value.RecordedAt).ThenByDescending(value => value.Id).Take(100)
+            .Select(value => new CatalogEventView(value.Id, value.Kind, value.Message, value.ObservedPrice,
+                value.ObservedPricePerSotka, value.RecordedAt)).ToArrayAsync(cancellationToken);
+        return new(CatalogView(item, link?.Id, link?.BusinessNumber), item.SellerName, item.IngressComment,
+            new(item.TargetTotalPrice, item.TargetPricePerSotka, item.MonitoringStartedAt, item.LastEvaluatedPrice,
+                item.LastEvaluatedPricePerSotka, item.LastEvaluatedAt), events);
     }
 
     public async Task<Guid> CreateManualAsync(Subject subject, CreateManualCatalogItem command, string correlationId, CancellationToken cancellationToken)
@@ -105,7 +146,9 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             ReceivedAt = now,
             RecordedAt = now,
             ChangedAt = now,
-            QueueReason = "Добавлено вручную"
+            QueueReason = "Добавлено вручную",
+            AttentionRequired = true,
+            AttentionAt = now
         };
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         db.Listings.Add(item);
@@ -117,7 +160,9 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
     public async Task SetDispositionAsync(Subject subject, SetCatalogDisposition command, string correlationId, CancellationToken cancellationToken)
     {
-        if (command.Disposition is CatalogDisposition.InWork) throw new ArgumentException("Используйте команду «Взять в работу».");
+        if (command.Disposition is CatalogDisposition.InWork or CatalogDisposition.Monitoring or CatalogDisposition.Incoming)
+            throw new ArgumentException("Используйте специальное действие для выбранного состояния.");
+        if (!Enum.IsDefined(command.Disposition)) throw new ArgumentException("Классификация не поддерживается.");
         AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         Listing item = await db.Listings.SingleOrDefaultAsync(value => value.Id == command.CatalogItemId && value.OrganizationId == context.OrganizationId, cancellationToken)
@@ -126,9 +171,45 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         string reason = Required(command.Reason, 3, 4000, "Укажите причину решения.");
         item.Disposition = command.Disposition;
         item.QueueReason = reason;
+        item.AttentionRequired = false;
+        item.TargetTotalPrice = null;
+        item.TargetPricePerSotka = null;
+        item.MonitoringStartedAt = null;
         db.Entry(item).Property(value => value.Version).IsModified = true;
+        db.CatalogEvents.Add(CatalogEvent(item, CatalogEventKind.Classified,
+            $"{DispositionLabel(command.Disposition)}: {reason}", time.GetUtcNow()));
         OrganizationWorkspace.AddAudit(db, context, subject, "CatalogDispositionChanged", "CatalogItem", item.Id,
             new { command.Disposition, Reason = reason }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SetMonitoringAsync(Subject subject, SetCatalogMonitoring command, string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        decimal? total = command.TargetTotalPrice == null ? null : DataConventions.RoundRubles(command.TargetTotalPrice.Value);
+        decimal? perSotka = command.TargetPricePerSotka == null ? null : DataConventions.RoundRubles(command.TargetPricePerSotka.Value);
+        if (total <= 0 || perSotka <= 0 || total == null && perSotka == null)
+            throw new ArgumentException("Укажите положительную целевую общую цену или цену за сотку.");
+        string reason = Required(command.Reason, 3, 4000, "Укажите комментарий к мониторингу.");
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        Listing item = await db.Listings.SingleOrDefaultAsync(value => value.Id == command.CatalogItemId
+            && value.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
+        if (item.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException();
+        DateTimeOffset now = time.GetUtcNow();
+        item.Disposition = CatalogDisposition.Monitoring;
+        item.TargetTotalPrice = total;
+        item.TargetPricePerSotka = perSotka;
+        item.MonitoringStartedAt = now;
+        item.LastEvaluatedPrice = item.Price;
+        item.LastEvaluatedPricePerSotka = PricePerSotka(item.Price, item.AreaSquareMeters);
+        item.LastEvaluatedAt = now;
+        item.AttentionRequired = false;
+        item.QueueReason = reason;
+        db.Entry(item).Property(value => value.Version).IsModified = true;
+        db.CatalogEvents.Add(CatalogEvent(item, CatalogEventKind.MonitoringStarted,
+            $"Мониторинг цены: {reason}", now));
+        OrganizationWorkspace.AddAudit(db, context, subject, "CatalogMonitoringStarted", "CatalogItem", item.Id,
+            new { TargetTotalPrice = total, TargetPricePerSotka = perSotka, Reason = reason }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -213,6 +294,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             RecordedAt = time.GetUtcNow()
         });
         catalogItem.Disposition = CatalogDisposition.InWork;
+        catalogItem.AttentionRequired = false;
         db.Entry(catalogItem).Property(value => value.Version).IsModified = true;
         string title = created ? "Взят в работу" : "Добавлен источник";
         db.BusinessTimeline.Add(new()
@@ -232,6 +314,55 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new(propertyCase.Id, propertyCase.BusinessNumber, created);
+    }
+
+    public async Task<TakeToWorkResult> ResumeCaseAsync(Subject subject, ResumeCatalogItemCase command, string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        Listing catalogItem = (await db.Listings.FromSqlInterpolated(
+            $"SELECT * FROM catalog.listings WHERE id={command.CatalogItemId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
+        if (catalogItem.Version != command.ExpectedCatalogVersion) throw new DbUpdateConcurrencyException();
+        PropertyCaseSourceLink link = await db.PropertyCaseSourceLinks.SingleOrDefaultAsync(value => value.CatalogItemId == catalogItem.Id
+            && value.Confirmed, cancellationToken) ?? throw new ArgumentException("Входящий элемент ещё не связан с PropertyCase.");
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(value => value.Case.Id == link.PropertyCaseId, cancellationToken)
+            ?? throw new AccessDeniedException();
+        if (row.Case.StageId is not ("rejected" or "monitor"))
+            throw new ArgumentException("Возобновить можно только отклонённый или приостановленный PropertyCase.");
+        string from = row.Case.StageId;
+        row.Case.StageId = "analysis";
+        row.Case.ManagerEmployeeId = context.EmployeeId;
+        row.Assignment.EmployeeId = context.EmployeeId;
+        row.Task.EmployeeId = context.EmployeeId;
+        row.Task.Completed = false;
+        row.Task.DueAt = null;
+        row.Task.Title = "Повторный анализ";
+        db.Entry(row.Case).Property(value => value.Version).IsModified = true;
+        catalogItem.Disposition = CatalogDisposition.InWork;
+        catalogItem.AttentionRequired = false;
+        db.Entry(catalogItem).Property(value => value.Version).IsModified = true;
+        DateTimeOffset now = time.GetUtcNow();
+        db.WorkflowTransitions.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+            ObjectId = row.Case.Id, FromStageId = from, ToStageId = "analysis", Action = "Resume",
+            ActorEmployeeId = context.EmployeeId, ObjectVersion = row.Case.Version + 1, RecordedAt = now
+        });
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+            ObjectId = row.Case.Id, ActorEmployeeId = context.EmployeeId, Kind = "Resume",
+            Title = "PropertyCase возобновлён", Body = $"Повторный интерес из источника {catalogItem.Source}: {catalogItem.QueueReason}", RecordedAt = now
+        });
+        db.CatalogEvents.Add(CatalogEvent(catalogItem, CatalogEventKind.CaseResumed,
+            $"Возобновлён {row.Case.BusinessNumber}", now));
+        OrganizationWorkspace.AddAudit(db, context, subject, "PropertyCaseResumedFromCatalog", "PropertyCase", row.Case.Id,
+            new { CatalogItemId = catalogItem.Id, From = from, To = "analysis" }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new(row.Case.Id, row.Case.BusinessNumber, false);
     }
 
     public async Task<ProcurementQueuePage> ReadQueueAsync(Subject subject, QueueFilter filter, CancellationToken cancellationToken)
@@ -495,6 +626,29 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
     private static bool SourcesChanged(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Any(value => value.Item.DataRevision > value.Link.ReviewedDataRevision);
     private static long SourceRevision(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Sum(value => value.Item.DataRevision);
+    private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber) => new(
+        item.Id, item.Source, item.ExternalId, item.Url, item.Title ?? "Название неизвестно", item.Price,
+        PricePerSotka(item.Price, item.AreaSquareMeters), item.Currency, item.AreaSquareMeters, item.Location,
+        item.CadastralNumber, item.Description, item.Provenance, item.IngestionKind, item.Disposition,
+        item.QueueReason, item.AttentionRequired, item.ReceivedAt, item.ChangedAt, item.LastObservedAt,
+        caseId, businessNumber, item.Version);
+    private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
+        ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
+    private static CatalogEvent CatalogEvent(Listing item, CatalogEventKind kind, string message, DateTimeOffset recordedAt) => new()
+    {
+        Id = DataConventions.NewId(), OrganizationId = item.OrganizationId, CatalogItemId = item.Id,
+        Kind = kind, Message = message, ObservedPrice = item.Price,
+        ObservedPricePerSotka = PricePerSotka(item.Price, item.AreaSquareMeters), RecordedAt = recordedAt
+    };
+    private static string DispositionLabel(CatalogDisposition value) => value switch
+    {
+        CatalogDisposition.Dismissed => "Не подходит",
+        CatalogDisposition.Duplicate => "Дубль",
+        CatalogDisposition.Fake => "Фейк",
+        CatalogDisposition.RemovedAtSource => "Снято",
+        CatalogDisposition.Sold => "Продано",
+        _ => value.ToString()
+    };
     private static void ValidatePage(string text, int offset, int size)
     { if (text.Length > 200 || offset < 0 || size is < 1 or > 100) throw new ArgumentException("FILTER_INVALID"); }
     private static string Required(string? value, int min, int max, string message)

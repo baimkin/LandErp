@@ -34,6 +34,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CollectionDelivery> CollectionDeliveries => Set<CollectionDelivery>();
     public DbSet<Listing> Listings => Set<Listing>();
     public DbSet<CatalogObservation> ListingObservations => Set<CatalogObservation>();
+    public DbSet<CatalogEvent> CatalogEvents => Set<CatalogEvent>();
     public DbSet<PropertyCase> PropertyCases => Set<PropertyCase>();
     public DbSet<PropertyCaseSourceLink> PropertyCaseSourceLinks => Set<PropertyCaseSourceLink>();
     public DbSet<Assignment> WorkAssignments => Set<Assignment>();
@@ -107,7 +108,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     {
         foreach (var entry in ChangeTracker.Entries())
         {
-            if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation or WorkflowTransition or Approval or BusinessTimelineEntry && entry.State is EntityState.Modified or EntityState.Deleted)
+            if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation or CatalogEvent or WorkflowTransition or Approval or BusinessTimelineEntry && entry.State is EntityState.Modified or EntityState.Deleted)
             {
                 throw new InvalidOperationException("Audit facts are append-only.");
             }

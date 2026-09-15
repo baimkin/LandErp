@@ -129,7 +129,9 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
                 Provenance = "Collector V1",
                 ReceivedAt = time.GetUtcNow(),
                 RecordedAt = time.GetUtcNow(),
-                ChangedAt = time.GetUtcNow()
+                ChangedAt = time.GetUtcNow(),
+                AttentionRequired = true,
+                AttentionAt = time.GetUtcNow()
             };
             if (await db.ListingObservations.AnyAsync(item => item.ListingId == listing.Id && item.ObservedAt == data.ObservedAt && item.ContentHash == hash, cancellationToken)
                 || db.ListingObservations.Local.Any(item => item.ListingId == listing.Id && item.ObservedAt == data.ObservedAt && item.ContentHash == hash))
@@ -143,7 +145,15 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
                 {
                     listing.DataRevision++; listing.ChangedAt = time.GetUtcNow();
                     listing.QueueReason = "Изменились: " + string.Join(", ", changes);
+                    if (listing.Disposition != CatalogDisposition.Monitoring)
+                    {
+                        listing.AttentionRequired = true;
+                        listing.AttentionAt = time.GetUtcNow();
+                    }
+                    db.CatalogEvents.Add(NewCatalogEvent(listing, CatalogEventKind.SourceChanged,
+                        listing.QueueReason, time.GetUtcNow()));
                 }
+                EvaluateMonitoring(db, listing, time.GetUtcNow());
             }
             if (data.ObservedAt < listing.FirstObservedAt) listing.FirstObservedAt = data.ObservedAt;
             if (isNew) db.Listings.Add(listing);
@@ -240,4 +250,32 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         if (data.PhotoUrls.Length > 0 && listing.PhotosJson != photos) { listing.PhotosJson = photos; changes.Add("фотографии"); }
         listing.Url = data.Url;
     }
+
+    private static void EvaluateMonitoring(LandErpDbContext db, Listing listing, DateTimeOffset now)
+    {
+        if (listing.Disposition != CatalogDisposition.Monitoring) return;
+        decimal? perSotka = PricePerSotka(listing.Price, listing.AreaSquareMeters);
+        listing.LastEvaluatedPrice = listing.Price;
+        listing.LastEvaluatedPricePerSotka = perSotka;
+        listing.LastEvaluatedAt = now;
+        bool totalReached = listing.TargetTotalPrice != null && listing.Price != null && listing.Price <= listing.TargetTotalPrice;
+        bool perSotkaReached = listing.TargetPricePerSotka != null && perSotka != null && perSotka <= listing.TargetPricePerSotka;
+        if (!totalReached && !perSotkaReached) return;
+        listing.Disposition = CatalogDisposition.Incoming;
+        listing.AttentionRequired = true;
+        listing.AttentionAt = now;
+        listing.QueueReason = totalReached && perSotkaReached ? "Достигнуты оба порога мониторинга"
+            : totalReached ? "Общая цена достигла порога мониторинга" : "Цена за сотку достигла порога мониторинга";
+        db.CatalogEvents.Add(NewCatalogEvent(listing, CatalogEventKind.MonitoringTriggered, listing.QueueReason, now));
+    }
+
+    private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
+        ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
+
+    private static CatalogEvent NewCatalogEvent(Listing listing, CatalogEventKind kind, string message, DateTimeOffset now) => new()
+    {
+        Id = DataConventions.NewId(), OrganizationId = listing.OrganizationId, CatalogItemId = listing.Id,
+        Kind = kind, Message = message, ObservedPrice = listing.Price,
+        ObservedPricePerSotka = PricePerSotka(listing.Price, listing.AreaSquareMeters), RecordedAt = now
+    };
 }

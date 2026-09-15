@@ -1,3 +1,11 @@
 @using LandErp.Application.Modules.Catalog.Domain
-<span class="badge source-tag">@Source</span>
-@code { [Parameter] public CatalogSource Source { get; set; } }
+<span class="badge source-tag">@Label(Source)</span>
+@code {
+    [Parameter] public CatalogSource Source { get; set; }
+    public static string Label(CatalogSource source)=>source switch
+    {
+        CatalogSource.Avito=>"Авито", CatalogSource.Cian=>"ЦИАН", CatalogSource.Telegram=>"Telegram",
+        CatalogSource.Referral=>"Знакомый", CatalogSource.Agent=>"Агент", CatalogSource.DirectOwner=>"Собственник",
+        CatalogSource.Manual=>"Ручной ввод", _=>"Другое"
+    };
+}

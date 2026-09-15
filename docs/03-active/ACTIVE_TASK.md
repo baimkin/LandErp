@@ -1,6 +1,6 @@
 # Активная задача LandErp
 
-> **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phase 1 завершена 2026-09-15**; evidence: [`STAGE1_PHASE1_REPORT.md`](reports/STAGE1_PHASE1_REPORT.md). Phase 2 не начата и текущей задачей не активирована. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
+> **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–3 завершены**; evidence: [`STAGE1_PHASE1_REPORT.md`](reports/STAGE1_PHASE1_REPORT.md), [`STAGE1_PHASE2_REPORT.md`](reports/STAGE1_PHASE2_REPORT.md), [`STAGE1_PHASE3_REPORT.md`](reports/STAGE1_PHASE3_REPORT.md). Phase 4 не активирована и не начиналась. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
 
 ## P0 — обязательная следующая задача перед дальнейшим развитием
 

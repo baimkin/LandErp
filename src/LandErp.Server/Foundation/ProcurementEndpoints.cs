@@ -1,5 +1,6 @@
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Catalog.Contracts;
+using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Server.Security;
 using Microsoft.AspNetCore.Antiforgery;
@@ -21,13 +22,25 @@ internal static class ProcurementEndpoints
         group.MapGet("/antiforgery", (HttpContext http, IAntiforgery antiforgery) => { http.Response.Headers.CacheControl = "no-store"; return Results.Ok(new { requestToken = antiforgery.GetAndStoreTokens(http).RequestToken }); });
         group.MapPost("/decisions", async (DecisionCommand command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.DecideAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/notes", async (AddCaseNote command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.AddNoteAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
-        group.MapGet("/incoming", async (HttpContext http, ICatalogWorkspace workspace, CancellationToken token) => Results.Ok(await workspace.ReadIncomingAsync(PermissionAuthorization.SubjectFrom(http.User), new(), token)));
+        group.MapGet("/incoming", async (string? text, CatalogSource? source, CatalogDisposition? disposition,
+            CatalogAgeRange? age, decimal? minPrice, decimal? maxPrice, decimal? minAreaSquareMeters,
+            decimal? maxAreaSquareMeters, bool? attentionOnly, int? offset, int? size, HttpContext http,
+            ICatalogWorkspace workspace, CancellationToken token) => Results.Ok(await workspace.ReadIncomingAsync(
+                PermissionAuthorization.SubjectFrom(http.User), new(text ?? "", source, disposition,
+                    age ?? CatalogAgeRange.Any, minPrice, maxPrice, minAreaSquareMeters, maxAreaSquareMeters,
+                    attentionOnly ?? false, offset ?? 0, size ?? 40), token)));
+        group.MapGet("/incoming/{id:guid}", async (Guid id, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
+            Results.Ok(await workspace.ReadItemAsync(PermissionAuthorization.SubjectFrom(http.User), id, token)));
         group.MapPost("/incoming/manual", async (CreateManualCatalogItem command, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
             Results.Ok(new { id = await workspace.CreateManualAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token) })).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/incoming/disposition", async (SetCatalogDisposition command, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
         { await workspace.SetDispositionAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapPost("/incoming/monitoring", async (SetCatalogMonitoring command, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
+        { await workspace.SetMonitoringAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/incoming/take-to-work", async (TakeCatalogItemToWork command, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
             Results.Ok(await workspace.TakeToWorkAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token))).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapPost("/incoming/resume-case", async (ResumeCatalogItemCase command, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
+            Results.Ok(await workspace.ResumeCaseAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token))).AddEndpointFilter(ValidateCsrfAsync);
     }
     private static async ValueTask<object?> ValidateCsrfAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {

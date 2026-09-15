@@ -16,6 +16,39 @@ namespace LandErp.Foundation.Tests;
 public sealed class CollectionPoolTests
 {
     [TestMethod]
+    public async Task StaleAgentAcceptIsRejectedAfterExpiredLeaseIsReclaimed()
+    {
+        await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
+        await using (LandErpDbContext migrator = sandbox.Context()) await migrator.Database.MigrateAsync();
+        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
+        Guid ownerId = await IdentityOrganizationTests.BootstrapAsync(bootstrap, "owner-stale-accept@test.invalid", "Stale accept");
+        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerId);
+        await sandbox.GrantRuntimeAsync();
+        await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
+        IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
+        TestClock clock = new();
+        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        Subject owner = new(ownerId, true);
+        AgentCredential agentA = await CreateRegisteredAsync(administration, factory, clock, owner, "Agent A", ListingSource.Avito);
+        AgentCredential agentB = await CreateRegisteredAsync(administration, factory, clock, owner, "Agent B", ListingSource.Avito);
+        await administration.CreateSearchAsync(owner, new("Lease fencing", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 1), "stale", CancellationToken.None);
+        Guid searchId = (await administration.ReadAsync(owner, CancellationToken.None)).Searches.Single().Id;
+        await administration.EnqueueAsync(owner, searchId, "stale", CancellationToken.None);
+        CollectorGateway gatewayA = new(factory, clock); CollectorGateway gatewayB = new(factory, clock);
+
+        CollectionWork firstLease = (await gatewayA.ClaimAsync(agentA, CancellationToken.None))!;
+        clock.Advance(TimeSpan.FromMinutes(4));
+        CollectionWork reclaimedLease = (await gatewayB.ClaimAsync(agentB, CancellationToken.None))!;
+        Assert.AreEqual(firstLease.JobId, reclaimedLease.JobId);
+        Assert.AreNotEqual(firstLease.LeaseId, reclaimedLease.LeaseId);
+        await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() => gatewayA.AcceptAsync(agentA,
+            new(Guid.CreateVersion7(), firstLease.JobId, firstLease.LeaseId, CollectionOutcome.Success, [], true), CancellationToken.None));
+        await gatewayB.AcceptAsync(agentB,
+            new(Guid.CreateVersion7(), reclaimedLease.JobId, reclaimedLease.LeaseId, CollectionOutcome.Success, [], true), CancellationToken.None);
+    }
+
+    [TestMethod]
     public async Task SharedPoolClaimsByCapabilityFencesLeaseAndKeepsActualExecutor()
     {
         await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
@@ -65,6 +98,8 @@ public sealed class CollectionPoolTests
         Assert.AreNotEqual(active.LeaseId, reclaimed.LeaseId);
         await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() => gatewayA.HeartbeatAsync(avitoA,
             new(active.JobId, active.LeaseId), CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() => gatewayA.AcceptAsync(avitoA,
+            new(Guid.CreateVersion7(), active.JobId, active.LeaseId, CollectionOutcome.Success, [], true), CancellationToken.None));
         await gatewayB.AcceptAsync(avitoB,
             new(Guid.CreateVersion7(), reclaimed.JobId, reclaimed.LeaseId, CollectionOutcome.Success, [], true), CancellationToken.None);
 

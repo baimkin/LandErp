@@ -1,8 +1,9 @@
 namespace LandErp.Application.Modules.Catalog.Domain;
 
 public enum CatalogSource { Avito, Cian, Telegram, Referral, Agent, DirectOwner, Manual, Other }
-public enum CatalogDisposition { Incoming, Monitoring, InWork, Dismissed, RemovedAtSource, Sold }
+public enum CatalogDisposition { Incoming, Monitoring, InWork, Dismissed, Duplicate, Fake, RemovedAtSource, Sold }
 public enum CatalogIngestionKind { Collector, Employee, Migration, Integration }
+public enum CatalogEventKind { SourceChanged, MonitoringStarted, MonitoringTriggered, Classified, CaseResumed }
 
 public sealed class Listing
 {
@@ -33,8 +34,28 @@ public sealed class Listing
     public DateTimeOffset RecordedAt { get; set; }
     public DateTimeOffset ChangedAt { get; set; }
     public string QueueReason { get; set; } = "Новое объявление";
+    public bool AttentionRequired { get; set; } = true;
+    public DateTimeOffset? AttentionAt { get; set; }
+    public decimal? TargetTotalPrice { get; set; }
+    public decimal? TargetPricePerSotka { get; set; }
+    public DateTimeOffset? MonitoringStartedAt { get; set; }
+    public decimal? LastEvaluatedPrice { get; set; }
+    public decimal? LastEvaluatedPricePerSotka { get; set; }
+    public DateTimeOffset? LastEvaluatedAt { get; set; }
     public long DataRevision { get; set; } = 1;
     public long Version { get; set; } = 1;
+}
+
+public sealed class CatalogEvent
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public Guid CatalogItemId { get; set; }
+    public CatalogEventKind Kind { get; set; }
+    public string Message { get; set; } = "";
+    public decimal? ObservedPrice { get; set; }
+    public decimal? ObservedPricePerSotka { get; set; }
+    public DateTimeOffset RecordedAt { get; set; }
 }
 public sealed class CatalogObservation
 {

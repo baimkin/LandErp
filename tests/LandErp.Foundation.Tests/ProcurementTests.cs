@@ -40,9 +40,8 @@ public sealed class ProcurementTests
         Assert.AreEqual(jobsBefore, await fixture.CountAsync(db => db.CollectionJobs.CountAsync()));
         Assert.AreEqual(observationsBefore, await fixture.CountAsync(db => db.ListingObservations.CountAsync()));
 
-        await workspace.SetDispositionAsync(fixture.Manager, new(manualId, manual.Version, CatalogDisposition.Monitoring, "Ждём снижения цены"), "monitor", CancellationToken.None);
+        await workspace.SetMonitoringAsync(fixture.Manager, new(manualId, manual.Version, 2_000_000m, null, "Ждём снижения цены"), "monitor", CancellationToken.None);
         manual = (await workspace.ReadIncomingAsync(fixture.Manager, new(Disposition: CatalogDisposition.Monitoring), CancellationToken.None)).Items.Single();
-        await workspace.SetDispositionAsync(fixture.Manager, new(manualId, manual.Version, CatalogDisposition.Incoming, "Условия снова интересны"), "resume", CancellationToken.None);
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => workspace.TakeToWorkAsync(fixture.Head, new(manualId), "head", CancellationToken.None));
 
         TakeToWorkResult created = await workspace.TakeToWorkAsync(fixture.Manager, new(manualId), "take", CancellationToken.None);
@@ -178,7 +177,7 @@ public sealed class ProcurementTests
         Assert.AreEqual(0, await db.Listings.CountAsync());
     }
 
-    private sealed class Phase1Fixture : IAsyncDisposable
+    internal sealed class Phase1Fixture : IAsyncDisposable
     {
         public PostgresSandbox Sandbox { get; private init; } = default!;
         public ServiceProvider Services { get; private init; } = default!;
@@ -281,13 +280,17 @@ public sealed class ProcurementTests
         }
 
         public async Task IngestChangedAvitoAsync(AgentCredential agent, CollectionAdministration administration, decimal price)
+            => await IngestChangedAsync(ListingSource.Avito, agent, administration, price, "phase1-avito-changed");
+
+        public async Task IngestChangedAsync(ListingSource source, AgentCredential agent, CollectionAdministration administration,
+            decimal price, string observationKey)
         {
             CollectorGateway gateway = new(Factory, TimeProvider.System);
-            Guid search = (await administration.ReadAsync(Owner, CancellationToken.None)).Searches.Single(item => item.Label == "Phase1 Avito").Id;
+            Guid search = (await administration.ReadAsync(Owner, CancellationToken.None)).Searches.Single(item => item.Label == "Phase1 " + source).Id;
             await administration.EnqueueAsync(Owner, search, "test", CancellationToken.None);
             CollectionWork work = (await gateway.ClaimAsync(agent, CancellationToken.None))!;
             await gateway.AcceptAsync(agent, new(Guid.CreateVersion7(), work.JobId, work.LeaseId, CollectionOutcome.Success,
-                [new("phase1-avito-changed", Data(ListingSource.Avito, "10001", price, DateTimeOffset.UtcNow.AddMinutes(1)))], true), CancellationToken.None);
+                [new(observationKey, Data(source, source == ListingSource.Avito ? "10001" : "20001", price, DateTimeOffset.UtcNow.AddMinutes(1)))], true), CancellationToken.None);
         }
 
         public async Task<Guid> InsertIndependentCaseAsync(string title)

@@ -78,7 +78,7 @@ internal sealed class PostgresSandbox : IAsyncDisposable
             + $"GRANT DELETE ON identity.user_roles TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON SCHEMA collection,catalog TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_groups,collection.search_configurations,collection.jobs,catalog.listings TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations TO \"{RuntimeRole}\"; "
+            + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations,catalog.events TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON SCHEMA workflow,procurement TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT ON workflow.stages TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,foundation.notifications TO \"{RuntimeRole}\"; "
@@ -93,7 +93,7 @@ internal sealed class PostgresSandbox : IAsyncDisposable
         await source.OpenAsync();
         await using NpgsqlCommand sourceHistory = new("SELECT count(*) FROM foundation.migration_history", source);
         long expected = (long)(await sourceHistory.ExecuteScalarAsync())!;
-        await using NpgsqlCommand sourceRows = new("SELECT (SELECT count(*) FROM catalog.listings)+(SELECT count(*) FROM catalog.observations)+(SELECT count(*) FROM foundation.audit_events)+(SELECT count(*) FROM foundation.business_timeline)+(SELECT count(*) FROM workflow.transitions)+(SELECT count(*) FROM workflow.approvals)+(SELECT count(*) FROM procurement.property_cases)+(SELECT count(*) FROM procurement.property_case_source_links)", source);
+        await using NpgsqlCommand sourceRows = new("SELECT (SELECT count(*) FROM catalog.listings)+(SELECT count(*) FROM catalog.observations)+(SELECT count(*) FROM catalog.events)+(SELECT count(*) FROM foundation.audit_events)+(SELECT count(*) FROM foundation.business_timeline)+(SELECT count(*) FROM workflow.transitions)+(SELECT count(*) FROM workflow.approvals)+(SELECT count(*) FROM procurement.property_cases)+(SELECT count(*) FROM procurement.property_case_source_links)", source);
         long expectedRows = (long)(await sourceRows.ExecuteScalarAsync())!;
         string restored = DatabaseName + "_restore";
         await CreateDatabaseAsync(restored);
@@ -110,7 +110,7 @@ internal sealed class PostgresSandbox : IAsyncDisposable
         {
             throw new InvalidOperationException("Restored schema history mismatch.");
         }
-        await using NpgsqlCommand restoredRows = new("SELECT (SELECT count(*) FROM catalog.listings)+(SELECT count(*) FROM catalog.observations)+(SELECT count(*) FROM foundation.audit_events)+(SELECT count(*) FROM foundation.business_timeline)+(SELECT count(*) FROM workflow.transitions)+(SELECT count(*) FROM workflow.approvals)+(SELECT count(*) FROM procurement.property_cases)+(SELECT count(*) FROM procurement.property_case_source_links)", connection);
+        await using NpgsqlCommand restoredRows = new("SELECT (SELECT count(*) FROM catalog.listings)+(SELECT count(*) FROM catalog.observations)+(SELECT count(*) FROM catalog.events)+(SELECT count(*) FROM foundation.audit_events)+(SELECT count(*) FROM foundation.business_timeline)+(SELECT count(*) FROM workflow.transitions)+(SELECT count(*) FROM workflow.approvals)+(SELECT count(*) FROM procurement.property_cases)+(SELECT count(*) FROM procurement.property_case_source_links)", connection);
         if ((long)(await restoredRows.ExecuteScalarAsync())! != expectedRows) throw new InvalidOperationException("Restored business rows mismatch.");
     }
 

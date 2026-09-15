@@ -133,4 +133,13 @@ button { cursor: pointer; }
 .business-timeline li { border-left:2px solid var(--border); padding:0 0 var(--space-4) var(--space-4); font-size:.8rem; }
 .business-timeline small { display:block; color:var(--text-muted); margin:var(--space-1) 0; }
 .business-timeline p { margin:var(--space-2) 0; }
+.incoming-metrics { grid-template-columns:repeat(5,minmax(0,1fr)); }
+.queue-filters .compact-field { flex:.65; min-width:140px; }
+.incoming-table td:first-child { min-width:250px; }
+.incoming-table td:nth-child(4) { min-width:190px; }
+.incoming-table .attention-row { background:var(--warning-soft); }
+.incoming-detail { display:grid; gap:var(--space-4); }
+.incoming-detail > .surface { margin:0; }
+.incoming-primary-actions { justify-content:flex-end; margin-top:var(--space-4); }
 @media(max-width:600px) { .queue-card { grid-template-columns:1fr; gap:var(--space-3); } .queue-side { border-left:0; border-top:1px solid var(--border); padding:var(--space-3) 0 0; } .queue-summary { flex-direction:column; } .facts-grid { grid-template-columns:1fr; gap:var(--space-3); } .modal-body { padding:var(--space-3); } .case-workspace .surface { padding:var(--space-4); } .decision-actions > .btn { flex:1; white-space:normal; } }
+@media(max-width:1000px) { .incoming-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }

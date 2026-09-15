@@ -55,6 +55,10 @@ internal static class CollectionMappings
         builder.Entity<Listing>().Property(item => item.CadastralNumber).HasMaxLength(128);
         builder.Entity<Listing>().Property(item => item.Price).HasPrecision(19, 4);
         builder.Entity<Listing>().Property(item => item.AreaSquareMeters).HasPrecision(19, 4);
+        builder.Entity<Listing>().Property(item => item.TargetTotalPrice).HasPrecision(19, 4);
+        builder.Entity<Listing>().Property(item => item.TargetPricePerSotka).HasPrecision(19, 4);
+        builder.Entity<Listing>().Property(item => item.LastEvaluatedPrice).HasPrecision(19, 4);
+        builder.Entity<Listing>().Property(item => item.LastEvaluatedPricePerSotka).HasPrecision(19, 4);
         builder.Entity<Listing>().Property(item => item.Currency).HasMaxLength(3);
         builder.Entity<Listing>().Property(item => item.PhotosJson).HasColumnType("jsonb");
         builder.Entity<CatalogObservation>().ToTable("observations", "catalog");
@@ -65,5 +69,13 @@ internal static class CollectionMappings
         builder.Entity<CatalogObservation>().HasOne<Listing>().WithMany().HasForeignKey(item => item.ListingId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CatalogObservation>().HasOne<ServerCollectionJob>().WithMany().HasForeignKey(item => item.JobId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CatalogObservation>().HasOne<CollectorAgent>().WithMany().HasForeignKey(item => item.AgentId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CatalogEvent>().ToTable("events", "catalog");
+        builder.Entity<CatalogEvent>().Property(item => item.Kind).HasConversion<string>();
+        builder.Entity<CatalogEvent>().Property(item => item.Message).HasMaxLength(4000);
+        builder.Entity<CatalogEvent>().Property(item => item.ObservedPrice).HasPrecision(19, 4);
+        builder.Entity<CatalogEvent>().Property(item => item.ObservedPricePerSotka).HasPrecision(19, 4);
+        builder.Entity<CatalogEvent>().HasIndex(item => new { item.CatalogItemId, item.RecordedAt });
+        builder.Entity<CatalogEvent>().HasOne<Listing>().WithMany().HasForeignKey(item => item.CatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CatalogEvent>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
     }
 }

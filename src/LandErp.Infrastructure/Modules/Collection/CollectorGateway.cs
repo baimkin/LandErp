@@ -3,6 +3,7 @@ using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Collection.Contracts;
 using LandErp.Application.Modules.Collection.Domain;
 using LandErp.Collector.Contracts.V1;
+using LandErp.Infrastructure.Modules.Catalog;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
@@ -153,7 +154,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
                     db.CatalogEvents.Add(NewCatalogEvent(listing, CatalogEventKind.SourceChanged,
                         listing.QueueReason, time.GetUtcNow()));
                 }
-                EvaluateMonitoring(db, listing, time.GetUtcNow());
+                CatalogMonitoringEvaluator.Evaluate(db, listing, time.GetUtcNow());
             }
             if (data.ObservedAt < listing.FirstObservedAt) listing.FirstObservedAt = data.ObservedAt;
             if (isNew) db.Listings.Add(listing);
@@ -251,26 +252,8 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         listing.Url = data.Url;
     }
 
-    private static void EvaluateMonitoring(LandErpDbContext db, Listing listing, DateTimeOffset now)
-    {
-        if (listing.Disposition != CatalogDisposition.Monitoring) return;
-        decimal? perSotka = PricePerSotka(listing.Price, listing.AreaSquareMeters);
-        listing.LastEvaluatedPrice = listing.Price;
-        listing.LastEvaluatedPricePerSotka = perSotka;
-        listing.LastEvaluatedAt = now;
-        bool totalReached = listing.TargetTotalPrice != null && listing.Price != null && listing.Price <= listing.TargetTotalPrice;
-        bool perSotkaReached = listing.TargetPricePerSotka != null && perSotka != null && perSotka <= listing.TargetPricePerSotka;
-        if (!totalReached && !perSotkaReached) return;
-        listing.Disposition = CatalogDisposition.Incoming;
-        listing.AttentionRequired = true;
-        listing.AttentionAt = now;
-        listing.QueueReason = totalReached && perSotkaReached ? "Достигнуты оба порога мониторинга"
-            : totalReached ? "Общая цена достигла порога мониторинга" : "Цена за сотку достигла порога мониторинга";
-        db.CatalogEvents.Add(NewCatalogEvent(listing, CatalogEventKind.MonitoringTriggered, listing.QueueReason, now));
-    }
-
-    private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
-        ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
+    private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) =>
+        CatalogMonitoringEvaluator.PricePerSotka(price, areaSquareMeters);
 
     private static CatalogEvent NewCatalogEvent(Listing listing, CatalogEventKind kind, string message, DateTimeOffset now) => new()
     {

@@ -19,6 +19,102 @@ public sealed class IncomingMonitoringTests
     }
 
     [TestMethod]
+    public async Task ResumeAvailabilityFollowsLinkedCaseLifecycleNotSourceDisposition()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        var ingested = await fixture.IngestMarketplacePairAsync();
+        TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager,
+            new(ingested.AvitoId), "resume-lifecycle-take", CancellationToken.None);
+
+        await DecideAsync(fixture, taken.CaseId, ProcurementAction.Reject, "PropertyCase отклонён");
+        CatalogItemDetail rejected = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
+        Assert.AreEqual("rejected", rejected.Item.LinkedCaseStage);
+        Assert.IsTrue(rejected.Item.CanResumeCase, "Rejected PropertyCase must offer resume regardless of source disposition.");
+
+        await fixture.Workspace.ResumeCaseAsync(fixture.Manager,
+            new(ingested.AvitoId, rejected.Item.Version), "resume-rejected", CancellationToken.None);
+        await DecideAsync(fixture, taken.CaseId, ProcurementAction.Monitor, "PropertyCase приостановлен");
+        CatalogItemDetail paused = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
+        Assert.AreEqual("monitor", paused.Item.LinkedCaseStage);
+        Assert.IsTrue(paused.Item.CanResumeCase, "Paused PropertyCase must offer resume regardless of source disposition.");
+
+        await fixture.Workspace.ResumeCaseAsync(fixture.Manager,
+            new(ingested.AvitoId, paused.Item.Version), "resume-monitor", CancellationToken.None);
+        foreach (CatalogDisposition disposition in new[]
+                 {
+                     CatalogDisposition.RemovedAtSource,
+                     CatalogDisposition.Sold,
+                     CatalogDisposition.Fake,
+                     CatalogDisposition.Duplicate
+                 })
+        {
+            CatalogItemDetail active = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
+            await fixture.Workspace.SetDispositionAsync(fixture.Manager,
+                new(ingested.AvitoId, active.Item.Version, disposition, $"Источник: {disposition}"),
+                "classify-active-source", CancellationToken.None);
+            active = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
+            Assert.AreEqual("analysis", active.Item.LinkedCaseStage);
+            Assert.IsFalse(active.Item.CanResumeCase,
+                $"Active PropertyCase must not offer resume for source disposition {disposition}.");
+        }
+    }
+
+    [TestMethod]
+    public async Task MonitoringImmediatelyReactivatesWhenCurrentTotalPriceMeetsThreshold()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        var ingested = await fixture.IngestMarketplacePairAsync();
+        CatalogItemDetail before = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
+
+        await fixture.Workspace.SetMonitoringAsync(fixture.Manager,
+            new(ingested.AvitoId, before.Item.Version, 2_100_000m, null, "Текущая общая цена уже подходит"),
+            "monitor-immediate-total", CancellationToken.None);
+
+        CatalogItemDetail result = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
+        Assert.AreEqual(CatalogDisposition.Incoming, result.Item.Disposition);
+        Assert.IsTrue(result.Item.AttentionRequired);
+        Assert.AreEqual(2_000_000m, result.Monitoring.LastEvaluatedPrice);
+        Assert.IsTrue(result.Events.Any(item => item.Kind == CatalogEventKind.MonitoringTriggered));
+    }
+
+    [TestMethod]
+    public async Task MonitoringImmediatelyReactivatesWhenCurrentPricePerSotkaMeetsThreshold()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        var ingested = await fixture.IngestMarketplacePairAsync();
+        CatalogItemDetail before = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.CianId, CancellationToken.None);
+
+        await fixture.Workspace.SetMonitoringAsync(fixture.Manager,
+            new(ingested.CianId, before.Item.Version, null, 140_000m, "Текущая цена за сотку уже подходит"),
+            "monitor-immediate-sotka", CancellationToken.None);
+
+        CatalogItemDetail result = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.CianId, CancellationToken.None);
+        Assert.AreEqual(CatalogDisposition.Incoming, result.Item.Disposition);
+        Assert.IsTrue(result.Item.AttentionRequired);
+        Assert.IsTrue(result.Monitoring.LastEvaluatedPricePerSotka <= 140_000m);
+        Assert.IsTrue(result.Events.Any(item => item.Kind == CatalogEventKind.MonitoringTriggered));
+    }
+
+    [TestMethod]
+    public async Task MonitoringRemainsPausedWhenNoCurrentThresholdIsMet()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        var ingested = await fixture.IngestMarketplacePairAsync();
+        CatalogItemDetail before = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
+
+        await fixture.Workspace.SetMonitoringAsync(fixture.Manager,
+            new(ingested.AvitoId, before.Item.Version, 1_900_000m, 120_000m, "Оба порога пока не достигнуты"),
+            "monitor-not-reached", CancellationToken.None);
+
+        CatalogItemDetail result = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
+        Assert.AreEqual(CatalogDisposition.Monitoring, result.Item.Disposition);
+        Assert.IsFalse(result.Item.AttentionRequired);
+        Assert.AreEqual(2_000_000m, result.Monitoring.LastEvaluatedPrice);
+        Assert.IsTrue(result.Monitoring.LastEvaluatedPricePerSotka > 120_000m);
+        Assert.IsFalse(result.Events.Any(item => item.Kind == CatalogEventKind.MonitoringTriggered));
+    }
+
+    [TestMethod]
     public async Task TotalPriceReactivatesAttentionAndResumesTheSameRejectedCase()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
@@ -105,5 +201,14 @@ public sealed class IncomingMonitoringTests
             fixture.Workspace.SetDispositionAsync(fixture.ForeignOwner,
                 new(all.Items[0].Id, all.Items[0].Version, CatalogDisposition.Dismissed, "Чужая организация"),
                 "phase3-foreign", CancellationToken.None));
+    }
+
+    private static async Task DecideAsync(ProcurementTests.Phase1Fixture fixture, Guid caseId,
+        ProcurementAction action, string reason)
+    {
+        CaseCard card = await fixture.Workspace.ReadCardAsync(fixture.Manager, caseId, CancellationToken.None);
+        await fixture.Workspace.DecideAsync(fixture.Manager,
+            new(caseId, card.Item.CaseVersion, card.Item.SourceRevision, action, reason, "", null, null),
+            "case-lifecycle", CancellationToken.None);
     }
 }

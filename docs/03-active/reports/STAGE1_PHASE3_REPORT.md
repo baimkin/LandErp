@@ -27,6 +27,17 @@ item в active Incoming/attention. Source revision не изменяет working
 создания второго case или source link. Server-side organization/case scope и
 negative tenant tests входят в Phase 3.
 
+Post-gate correction: доступность `Возобновить` теперь определяется lifecycle
+связанного PropertyCase (`rejected` / `monitor`), а не состоянием источника.
+Активный Case всегда предлагает только открытие существующего PropertyCase;
+`RemovedAtSource`, `Sold`, `Fake` и `Duplicate` сами по себе не разрешают resume.
+Серверная `ResumeCaseAsync` сохраняет прежнюю строгую проверку lifecycle.
+
+Post-gate correction: `SetMonitoringAsync` сразу оценивает текущую общую цену и
+цену за сотку по той же OR-семантике, что и новое Collector observation. Если
+любой заполненный порог уже достигнут, item немедленно возвращается в active
+Incoming/attention; иначе остаётся в `Monitoring`.
+
 ## Phase 2 verification hardening
 
 - прямой regression: `Agent A claim -> lease expired -> Agent B reclaim -> stale
@@ -60,15 +71,21 @@ negative tenant tests входят в Phase 3.
 | V1 Collector executable/durable delivery path | green |
 | Incoming desktop/mobile browser scenarios | green |
 
+После post-gate corrections точечно запущены четыре новые regression tests:
+linked Case lifecycle против source disposition, immediate total-price trigger,
+immediate price-per-sotka trigger и сохранение `Monitoring` при недостигнутых
+порогах. Результат: `4/4` green. Повторный полный verification и migration chain
+не запускались; schema не менялась, новая migration не создавалась.
+
 Browser evidence сохранён в ignored `artifacts/stage1/phase3-ui/` и не добавлен в Git.
 
 ## Ограничения
 
 - До первого production deployment действует pre-production clean-rebuild policy
   master plan; production apply не выполнялся.
-- Автоматическая переоценка monitoring происходит при новом observation источника.
-  Для ручных/Telegram-like items без integration revision порог хранится, но внешний
-  источник не опрашивается сервером самостоятельно.
+- Monitoring оценивается сразу при постановке по текущим source values и повторно
+  при новом observation. Для ручных/Telegram-like items сервер не опрашивает
+  внешний источник самостоятельно после initial evaluation.
 - Rule engine не вводился: утверждённая семантика двух заполненных порогов — ИЛИ.
 - Полные переговоры, dossier/checks/attachments относятся к Phase 4 и не начинались.
 - Локальный Parser Agent не изучался и не изменялся.

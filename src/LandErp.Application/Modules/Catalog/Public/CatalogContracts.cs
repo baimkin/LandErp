@@ -13,7 +13,8 @@ public sealed record CatalogItemView(Guid Id, CatalogSource Source, string? Exte
     decimal? Price, decimal? PricePerSotka, string Currency, decimal? AreaSquareMeters, string? Location, string? CadastralNumber,
     string? Description, string Provenance, CatalogIngestionKind IngestionKind, CatalogDisposition Disposition,
     string QueueReason, bool AttentionRequired, DateTimeOffset ReceivedAt, DateTimeOffset ChangedAt,
-    DateTimeOffset? LastObservedAt, Guid? PropertyCaseId, string? BusinessNumber, long Version);
+    DateTimeOffset? LastObservedAt, Guid? PropertyCaseId, string? BusinessNumber, string? LinkedCaseStage,
+    bool CanResumeCase, long Version);
 public sealed record IncomingCatalogSummary(int Incoming, int Attention, int Monitoring, int InWork, int Incomplete);
 public sealed record IncomingCatalogPage(IReadOnlyList<CatalogItemView> Items, int Total, IncomingCatalogSummary Summary);
 public sealed record CatalogMonitoringView(decimal? TargetTotalPrice, decimal? TargetPricePerSotka,

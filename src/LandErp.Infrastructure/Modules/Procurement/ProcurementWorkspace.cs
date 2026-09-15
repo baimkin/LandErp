@@ -6,6 +6,7 @@ using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;
 using LandErp.Collector.Contracts.V1;
+using LandErp.Infrastructure.Modules.Catalog;
 using LandErp.Infrastructure.Modules.Organization;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -84,12 +85,12 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         var linked = await (from link in db.PropertyCaseSourceLinks
                             join propertyCase in db.PropertyCases on link.PropertyCaseId equals propertyCase.Id
                             where ids.Contains(link.CatalogItemId) && link.Confirmed
-                            select new { link.CatalogItemId, propertyCase.Id, propertyCase.BusinessNumber }).ToArrayAsync(cancellationToken);
+                            select new { link.CatalogItemId, propertyCase.Id, propertyCase.BusinessNumber, propertyCase.StageId }).ToArrayAsync(cancellationToken);
         var byItem = linked.ToDictionary(item => item.CatalogItemId);
         return new(items.Select(item =>
         {
             byItem.TryGetValue(item.Id, out var link);
-            return CatalogView(item, link?.Id, link?.BusinessNumber);
+            return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId);
         }).ToArray(), total, summary);
     }
 
@@ -102,12 +103,12 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         var link = await (from sourceLink in db.PropertyCaseSourceLinks
                           join propertyCase in db.PropertyCases on sourceLink.PropertyCaseId equals propertyCase.Id
                           where sourceLink.CatalogItemId == item.Id && sourceLink.Confirmed
-                          select new { propertyCase.Id, propertyCase.BusinessNumber }).SingleOrDefaultAsync(cancellationToken);
+                          select new { propertyCase.Id, propertyCase.BusinessNumber, propertyCase.StageId }).SingleOrDefaultAsync(cancellationToken);
         CatalogEventView[] events = await db.CatalogEvents.AsNoTracking().Where(value => value.CatalogItemId == item.Id)
             .OrderByDescending(value => value.RecordedAt).ThenByDescending(value => value.Id).Take(100)
             .Select(value => new CatalogEventView(value.Id, value.Kind, value.Message, value.ObservedPrice,
                 value.ObservedPricePerSotka, value.RecordedAt)).ToArrayAsync(cancellationToken);
-        return new(CatalogView(item, link?.Id, link?.BusinessNumber), item.SellerName, item.IngressComment,
+        return new(CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId), item.SellerName, item.IngressComment,
             new(item.TargetTotalPrice, item.TargetPricePerSotka, item.MonitoringStartedAt, item.LastEvaluatedPrice,
                 item.LastEvaluatedPricePerSotka, item.LastEvaluatedAt), events);
     }
@@ -208,6 +209,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         db.Entry(item).Property(value => value.Version).IsModified = true;
         db.CatalogEvents.Add(CatalogEvent(item, CatalogEventKind.MonitoringStarted,
             $"Мониторинг цены: {reason}", now));
+        CatalogMonitoringEvaluator.Evaluate(db, item, now);
         OrganizationWorkspace.AddAudit(db, context, subject, "CatalogMonitoringStarted", "CatalogItem", item.Id,
             new { TargetTotalPrice = total, TargetPricePerSotka = perSotka, Reason = reason }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
@@ -626,12 +628,12 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
     private static bool SourcesChanged(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Any(value => value.Item.DataRevision > value.Link.ReviewedDataRevision);
     private static long SourceRevision(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Sum(value => value.Item.DataRevision);
-    private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber) => new(
+    private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber, string? caseStage) => new(
         item.Id, item.Source, item.ExternalId, item.Url, item.Title ?? "Название неизвестно", item.Price,
         PricePerSotka(item.Price, item.AreaSquareMeters), item.Currency, item.AreaSquareMeters, item.Location,
         item.CadastralNumber, item.Description, item.Provenance, item.IngestionKind, item.Disposition,
         item.QueueReason, item.AttentionRequired, item.ReceivedAt, item.ChangedAt, item.LastObservedAt,
-        caseId, businessNumber, item.Version);
+        caseId, businessNumber, caseStage, caseStage is "rejected" or "monitor", item.Version);
     private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
         ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
     private static CatalogEvent CatalogEvent(Listing item, CatalogEventKind kind, string message, DateTimeOffset recordedAt) => new()

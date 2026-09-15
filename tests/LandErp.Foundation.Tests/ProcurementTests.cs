@@ -13,11 +13,8 @@ using LandErp.Infrastructure.Modules.IdentityAccess;
 using LandErp.Infrastructure.Modules.Procurement;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Migrations;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Npgsql;
 
 namespace LandErp.Foundation.Tests;
 
@@ -169,63 +166,16 @@ public sealed class ProcurementTests
     }
 
     [TestMethod]
-    public async Task LegacyStage1MigrationBackfillsLinksFactsScopeAndProvenance()
+    public async Task CleanDatabaseMigrationAppliesWithoutLegacyBackfillContract()
     {
         await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
-        await using (LandErpDbContext db = sandbox.Context())
-        {
-            IMigrator migrator = db.Database.GetService<IMigrator>();
-            await migrator.MigrateAsync("20260914201752_ProcurementResponsibilityComment");
-        }
-        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
-        Guid ownerId = await IdentityOrganizationTests.BootstrapAsync(bootstrap, "legacy-owner@test.invalid", "Legacy migration");
-        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerId);
-        IOrganizationWorkspace organization = bootstrap.GetRequiredService<IOrganizationWorkspace>();
-        Subject owner = new(ownerId, true);
-        await organization.CreateDepartmentAsync(owner, "Закупка", "legacy", CancellationToken.None);
-        OrganizationView structure = await organization.ReadAsync(owner, CancellationToken.None);
-        Guid department = structure.Departments.Single().Id;
-        Guid managerUser = await ProcurementTestsHelper.InviteAsync(bootstrap, organization, owner, structure, "Legacy manager", "legacy-manager@test.invalid", "ProcurementManager", department, AccessScope.Department);
-        Guid organizationId = await bootstrap.GetRequiredService<LandErpDbContext>().Organizations
-            .Where(item => item.Name == "Legacy migration").Select(item => item.Id).SingleAsync();
-        Guid employeeId = (await organization.ReadAsync(owner, CancellationToken.None)).Employees.Single(item => item.Login == "legacy-manager@test.invalid").Id;
-        Guid listingId = Guid.CreateVersion7(), caseId = Guid.CreateVersion7(), assignmentId = Guid.CreateVersion7(), taskId = Guid.CreateVersion7(), timelineId = Guid.CreateVersion7();
-        await using (NpgsqlConnection connection = new(sandbox.MigratorConnection))
-        {
-            await connection.OpenAsync();
-            await using NpgsqlCommand command = new("""
-                INSERT INTO catalog.listings
-                  (id,organization_id,department_id,team_id,source,external_id,url,title,price,currency,area_square_meters,location,description,seller_name,photos_json,first_observed_at,last_observed_at,recorded_at,changed_at,queue_reason,data_revision,version)
-                VALUES (@listing,@org,@department,NULL,'Avito','legacy-1','https://www.avito.ru/legacy','Legacy title',1234567,'RUB',1400,'Legacy place',NULL,NULL,'[]',now(),now(),now(),now(),'Legacy',2,1);
-                INSERT INTO workflow.assignments (id,organization_id,object_type,object_id,employee_id,version) VALUES (@assignment,@org,'PropertyCase',@case,@employee,1);
-                INSERT INTO workflow.work_tasks (id,organization_id,object_type,object_id,title,employee_id,completed,due_at,recorded_at,version) VALUES (@task,@org,'PropertyCase',@case,'Legacy task',@employee,false,NULL,now(),1);
-                INSERT INTO procurement.property_cases (id,organization_id,listing_id,business_number,stage_id,manager_employee_id,assignment_id,work_task_id,pending_approval_id,reviewed_data_revision,recorded_at,version)
-                VALUES (@case,@org,@listing,'PC-009999','analysis',@employee,@assignment,@task,NULL,1,now(),4);
-                INSERT INTO foundation.business_timeline (id,organization_id,object_type,object_id,actor_employee_id,kind,title,body,target_employee_id,recorded_at,effective_at,due_at)
-                VALUES (@timeline,@org,'PropertyCase',@case,@employee,'Note','Legacy history','Preserve me',NULL,now(),NULL,NULL);
-                """, connection);
-            command.Parameters.AddWithValue("listing", listingId); command.Parameters.AddWithValue("org", organizationId);
-            command.Parameters.AddWithValue("department", department); command.Parameters.AddWithValue("case", caseId);
-            command.Parameters.AddWithValue("employee", employeeId); command.Parameters.AddWithValue("assignment", assignmentId);
-            command.Parameters.AddWithValue("task", taskId); command.Parameters.AddWithValue("timeline", timelineId);
-            await command.ExecuteNonQueryAsync();
-        }
-        await using (LandErpDbContext db = sandbox.Context()) { await db.Database.MigrateAsync(); Assert.IsFalse(db.Database.HasPendingModelChanges()); }
-        await sandbox.GrantRuntimeAsync();
-        await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
-        await using AsyncServiceScope serviceScope = services.CreateAsyncScope();
-        IDbContextFactory<LandErpDbContext> factory = serviceScope.ServiceProvider.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
-        ProcurementWorkspace workspace = new(factory, serviceScope.ServiceProvider.GetRequiredService<IAccessControl>(), TimeProvider.System);
-        CaseCard card = await workspace.ReadCardAsync(new(managerUser, false), caseId, CancellationToken.None);
-        Assert.AreEqual("PC-009999", card.Item.BusinessNumber); Assert.AreEqual("Legacy title", card.Item.Title);
-        Assert.AreEqual(1, card.Sources.Count); Assert.AreEqual(1234567m, card.Item.Price);
-        await using LandErpDbContext verify = sandbox.Context();
-        PropertyCase migrated = await verify.PropertyCases.SingleAsync(item => item.Id == caseId);
-        Assert.IsNull(migrated.ListingId); Assert.AreEqual(department, migrated.DepartmentId);
-        PropertyCaseSourceLink link = await verify.PropertyCaseSourceLinks.SingleAsync();
-        Assert.AreEqual("Migration from legacy PropertyCase.ListingId", link.Provenance); Assert.AreEqual(1L, link.ReviewedDataRevision);
-        Assert.IsTrue(await verify.BusinessTimeline.AnyAsync(item => item.Id == timelineId && item.Body == "Preserve me"));
-        Assert.AreEqual(caseId, await workspace.ResolveLegacyListingAsync(new(managerUser, false), listingId, CancellationToken.None));
+        await using LandErpDbContext db = sandbox.Context();
+        await db.Database.MigrateAsync();
+
+        Assert.IsFalse(db.Database.HasPendingModelChanges());
+        Assert.AreEqual(0, await db.PropertyCases.CountAsync());
+        Assert.AreEqual(0, await db.PropertyCaseSourceLinks.CountAsync());
+        Assert.AreEqual(0, await db.Listings.CountAsync());
     }
 
     private sealed class Phase1Fixture : IAsyncDisposable

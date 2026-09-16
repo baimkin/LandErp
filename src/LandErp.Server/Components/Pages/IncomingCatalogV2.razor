@@ -87,12 +87,12 @@
 
                 @* TODO-BACKEND-INCOMING: exact presets/counts are local UI placeholders and do not alter the server query. *@
                 <div class="v2-presets" data-todo-backend="TODO-BACKEND-INCOMING">
-                    <button type="button" class="v2-preset @(demoPreset == "all" ? "active" : "")" @onclick="() => demoPreset = "all"">Все 42</button>
-                    <button type="button" class="v2-preset @(demoPreset == "new" ? "active" : "")" @onclick="() => demoPreset = "new"">Новые 28</button>
-                    <button type="button" class="v2-preset @(demoPreset == "price" ? "active" : "")" @onclick="() => demoPreset = "price"">Изменилась цена 7</button>
-                    <button type="button" class="v2-preset @(demoPreset == "duplicate" ? "active" : "")" @onclick="() => demoPreset = "duplicate"">Возможный дубль 4</button>
-                    <button type="button" class="v2-preset @(demoPreset == "incomplete" ? "active" : "")" @onclick="() => demoPreset = "incomplete"">Неполные данные 3</button>
-                    <button type="button" class="v2-preset @(demoPreset == "monitor" ? "active" : "")" @onclick="() => demoPreset = "monitor"">Вернулись из мониторинга 5</button>
+                    <button type="button" class="v2-preset @(demoPreset == "all" ? "active" : "")" @onclick="SelectPresetAll">Все 42</button>
+                    <button type="button" class="v2-preset @(demoPreset == "new" ? "active" : "")" @onclick="SelectPresetNew">Новые 28</button>
+                    <button type="button" class="v2-preset @(demoPreset == "price" ? "active" : "")" @onclick="SelectPresetPrice">Изменилась цена 7</button>
+                    <button type="button" class="v2-preset @(demoPreset == "duplicate" ? "active" : "")" @onclick="SelectPresetDuplicate">Возможный дубль 4</button>
+                    <button type="button" class="v2-preset @(demoPreset == "incomplete" ? "active" : "")" @onclick="SelectPresetIncomplete">Неполные данные 3</button>
+                    <button type="button" class="v2-preset @(demoPreset == "monitor" ? "active" : "")" @onclick="SelectPresetMonitor">Вернулись из мониторинга 5</button>
                 </div>
 
                 @if (catalogPage.Items.Count == 0)
@@ -172,9 +172,9 @@
                     <div class="v2-checkrow">
                         <div><strong>@item.Title</strong><span>@item.Description</span></div>
                         <div class="v2-segmented">
-                            <button type="button" class="@(CheckClass(item.Key, "ok"))" @onclick="() => SetCheck(item.Key, "ok")">✓ Подходит</button>
-                            <button type="button" class="@(CheckClass(item.Key, "issue"))" @onclick="() => SetCheck(item.Key, "issue")">! Проблема</button>
-                            <button type="button" class="@(CheckClass(item.Key, "unknown"))" @onclick="() => SetCheck(item.Key, "unknown")">? Не проверено</button>
+                            <button type="button" class="@(CheckClass(item.Key, "ok"))" @onclick="() => SetCheckOk(item.Key)">✓ Подходит</button>
+                            <button type="button" class="@(CheckClass(item.Key, "issue"))" @onclick="() => SetCheckIssue(item.Key)">! Проблема</button>
+                            <button type="button" class="@(CheckClass(item.Key, "unknown"))" @onclick="() => SetCheckUnknown(item.Key)">? Не проверено</button>
                         </div>
                     </div>
                 }
@@ -290,7 +290,7 @@
         else if (classification == CatalogDisposition.Sold)
         {
             @* TODO-BACKEND-INCOMING: confirmation source / sale date / sale price have no structured persistence contract. Fields are disabled and never sent. *@
-            <div data-todo-backend="TODO-BACKEND-INCOMING"><p>Подтверждённый человеком факт о реальном объекте.</p><label class="field"><span>Источник</span><select disabled><option>Со слов продавца</option><option>Со слов агента</option><option>Другой подтверждённый источник</option></select></label><label class="field"><span>Цена сделки, ₽ (необязательно)</span><input inputmode="numeric" disabled /></label></div>
+            <div data-todo-backend="TODO-BACKEND-INCOMING"><p>Подтверждённый человеком факт о реальном объекте.</p><label class="field"><span>Дата подтверждения</span><input type="date" disabled /></label><label class="field"><span>Источник</span><select disabled><option>Со слов продавца</option><option>Со слов агента</option><option>Другой подтверждённый источник</option></select></label><label class="field"><span>Цена сделки, ₽ (необязательно)</span><input inputmode="numeric" disabled /></label></div>
         }
         <label class="field"><span>Причина / подтверждение</span><InputTextArea @bind-Value="classificationReason" /></label>
         <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => classificationOpen = false" /><ActionButton Label="Подтвердить" Busy="Busy" OnClick="ClassifyAsync" /></div>
@@ -352,6 +352,13 @@
     private Task ResetFilterAsync() { filter.Reset(); page = 0; return ReloadAsync(); }
     private Task PreviousAsync() { page--; return ReloadAsync(); }
     private Task NextAsync() { page++; return ReloadAsync(); }
+
+    private void SelectPresetAll() => demoPreset = "all";
+    private void SelectPresetNew() => demoPreset = "new";
+    private void SelectPresetPrice() => demoPreset = "price";
+    private void SelectPresetDuplicate() => demoPreset = "duplicate";
+    private void SelectPresetIncomplete() => demoPreset = "incomplete";
+    private void SelectPresetMonitor() => demoPreset = "monitor";
 
     private async Task OpenDetailAsync(Guid id)
     {
@@ -442,6 +449,9 @@
     private void OpenCase(Guid? caseId) { if (caseId != null) Navigation.NavigateTo($"/procurement/{caseId}"); }
 
     private void SetCheck(string key, string state) => checklistState[key] = state;
+    private void SetCheckOk(string key) => SetCheck(key, "ok");
+    private void SetCheckIssue(string key) => SetCheck(key, "issue");
+    private void SetCheckUnknown(string key) => SetCheck(key, "unknown");
     private string CheckClass(string key, string state) => checklistState.GetValueOrDefault(key, "unknown") == state ? state : "";
 
     private string DemoSearchLabel() => demoSearchConfiguration switch
@@ -462,6 +472,7 @@
         return 55 + known * 9;
     }
 
+    // TODO-BACKEND-INCOMING: semantic row-state projection is not available; use only current exposed facts for the visual preview.
     private static string RowTone(CatalogItemView item)
     {
         if (item.Disposition == CatalogDisposition.Duplicate) return "duplicate";

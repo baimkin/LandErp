@@ -38,7 +38,7 @@ public sealed partial class ProcurementQueueV2ReadService
         };
     }
 
-    private async Task<ProcurementInspectionSummary> ReadInspectionAsync(LandErpDbContext db, Guid caseId, CancellationToken cancellationToken)
+    private static async Task<ProcurementInspectionSummary> ReadInspectionAsync(LandErpDbContext db, Guid caseId, CancellationToken cancellationToken)
     {
         SiteInspection? inspection = await db.SiteInspections.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .OrderByDescending(item => item.StartedAt).FirstOrDefaultAsync(cancellationToken);
@@ -54,7 +54,7 @@ public sealed partial class ProcurementQueueV2ReadService
             items.Length, checkedItems, problems, materials);
     }
 
-    private async Task<ProcurementTimelineSummary[]> ReadTimelineAsync(LandErpDbContext db, Guid organizationId, Guid caseId, CancellationToken cancellationToken)
+    private static async Task<ProcurementTimelineSummary[]> ReadTimelineAsync(LandErpDbContext db, Guid organizationId, Guid caseId, CancellationToken cancellationToken)
     {
         BusinessTimelineEntry[] entries = await db.BusinessTimeline.AsNoTracking()
             .Where(item => item.OrganizationId == organizationId && item.ObjectType == "PropertyCase" && item.ObjectId == caseId)

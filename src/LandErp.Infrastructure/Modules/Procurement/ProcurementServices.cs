@@ -2,6 +2,7 @@ using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Foundation.Files;
 using LandErp.Infrastructure.Foundation.Files;
+using LandErp.Infrastructure.Modules.Catalog;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -23,6 +24,7 @@ public static class ProcurementServices
         services.AddScoped<ProcurementWorkspace>();
         services.AddScoped<IProcurementWorkspace>(provider => provider.GetRequiredService<ProcurementWorkspace>());
         services.AddScoped<ICatalogWorkspace>(provider => provider.GetRequiredService<ProcurementWorkspace>());
+        services.AddScoped<IIncomingCatalogReadService, IncomingCatalogReadService>();
         return services;
     }
 }

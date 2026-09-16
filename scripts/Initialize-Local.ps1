@@ -6,7 +6,7 @@ $env:LANDERP_REPOSITORY_ROOT = $stageRoot
 if ([string]::IsNullOrWhiteSpace($env:LANDERP_TEST_ADMIN_CONNECTION)) {
     $env:LANDERP_TEST_ADMIN_CONNECTION = [Environment]::GetEnvironmentVariable('LANDERP_TEST_ADMIN_CONNECTION','User')
 }
-& $DotnetPath run --project src/LandErp.LocalSetup -c Release --no-build
+& $DotnetPath run --project src/LandErp.LocalSetup -c Release
 if ($LASTEXITCODE -ne 0) { throw 'Local setup failed; credentials were not printed' }
 $stageSecretDirectory = Join-Path $stageRoot 'local-data/stage1'
 if ($IsWindows) {

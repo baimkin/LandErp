@@ -30,9 +30,6 @@ public sealed record InvitationResult(Guid InvitationId, string OneTimeToken);
 public sealed record ChangeAssignment(Guid EmployeeId, Guid? DepartmentId, Guid? PositionId,
     Guid? TeamId, Guid? ManagerId, Guid RoleId, AccessScope Scope, long ExpectedVersion);
 public sealed record SetEmployeeActive(Guid EmployeeId, long ExpectedVersion, bool Active);
-public sealed record AuditView(DateTimeOffset RecordedAt, string Action, string ObjectType,
-    Guid ObjectId, Guid ActorId, string Changes);
-
 public interface IOrganizationWorkspace
 {
     Task<OrganizationView> ReadAsync(Subject subject, CancellationToken cancellationToken);
@@ -50,5 +47,4 @@ public interface IOrganizationWorkspace
     Task SetEmployeeActiveAsync(Subject subject, SetEmployeeActive command, string correlationId, CancellationToken cancellationToken);
     Task<InvitationResult> InviteAsync(Subject subject, InviteEmployee command, string correlationId, CancellationToken cancellationToken);
     Task ChangeAssignmentAsync(Subject subject, ChangeAssignment command, string correlationId, CancellationToken cancellationToken);
-    Task<IReadOnlyList<AuditView>> ReadAuditAsync(Subject subject, CancellationToken cancellationToken);
 }

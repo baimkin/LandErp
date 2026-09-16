@@ -30,6 +30,7 @@ public sealed class IdentityOrganizationTests
         await using ServiceProvider runtimeServices = Services(sandbox.RuntimeConnection);
         await using AsyncServiceScope scope = runtimeServices.CreateAsyncScope();
         IOrganizationWorkspace workspace = scope.ServiceProvider.GetRequiredService<IOrganizationWorkspace>();
+        IAuditReadService auditReader = scope.ServiceProvider.GetRequiredService<IAuditReadService>();
         IAccessControl access = scope.ServiceProvider.GetRequiredService<IAccessControl>();
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => workspace.ReadAsync(new(owner, false), CancellationToken.None));
         await EnableMfaAsync(services, owner);
@@ -59,7 +60,8 @@ public sealed class IdentityOrganizationTests
         Guid manager = (await db.Users.AsNoTracking().SingleAsync(item => item.Email == "manager@test.invalid")).Id;
         Subject managerActor = new(manager, false);
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => workspace.CreateDepartmentAsync(managerActor, "Forbidden", "test", CancellationToken.None));
-        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => workspace.ReadAuditAsync(managerActor, CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => auditReader.ReadAsync(managerActor, new(), CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => auditReader.ReadTechnicalAsync(managerActor, Guid.CreateVersion7(), CancellationToken.None));
         OrganizationView managerView = await workspace.ReadAsync(managerActor, CancellationToken.None);
         Assert.AreEqual(1, managerView.Employees.Count);
         Assert.AreEqual("Менеджер 1", managerView.Employees[0].Name);
@@ -83,10 +85,12 @@ public sealed class IdentityOrganizationTests
         ChangeAssignment own = change with { Scope = AccessScope.Own, ExpectedVersion = change.ExpectedVersion + 1 };
         await workspace.ChangeAssignmentAsync(actor, own, "test", CancellationToken.None);
         Assert.AreEqual(1, (await workspace.ReadAsync(managerActor, CancellationToken.None)).Employees.Count);
-        IReadOnlyList<AuditView> audit = await workspace.ReadAuditAsync(actor, CancellationToken.None);
-        Assert.IsTrue(audit.Any(item => item.Action == "AssignmentChanged"));
-        Assert.IsFalse(audit.Any(item => item.Changes.Contains(invitation.OneTimeToken, StringComparison.Ordinal)
-            || item.Changes.Contains(TestPassword, StringComparison.Ordinal)));
+        AuditPage audit = await auditReader.ReadAsync(actor, new(PageSize: 100), CancellationToken.None);
+        Assert.IsTrue(audit.Items.Any(item => item.Title == "Изменены назначение и доступ сотрудника"));
+        AuditExport auditExport = await auditReader.ExportCsvAsync(actor, new(), CancellationToken.None);
+        string auditCsv = System.Text.Encoding.UTF8.GetString(auditExport.Content);
+        Assert.IsFalse(auditCsv.Contains(invitation.OneTimeToken, StringComparison.Ordinal)
+            || auditCsv.Contains(TestPassword, StringComparison.Ordinal));
         await sandbox.GrantRuntimeAsync();
         await using Npgsql.NpgsqlConnection runtime = new(sandbox.RuntimeConnection);
         await runtime.OpenAsync();
@@ -107,6 +111,7 @@ public sealed class IdentityOrganizationTests
         await using ServiceProvider services = Services(sandbox.RuntimeConnection);
         await using AsyncServiceScope scope = services.CreateAsyncScope();
         IOrganizationWorkspace workspace = scope.ServiceProvider.GetRequiredService<IOrganizationWorkspace>();
+        IAuditReadService auditReader = scope.ServiceProvider.GetRequiredService<IAuditReadService>();
         UserManager<LandErpUser> users = scope.ServiceProvider.GetRequiredService<UserManager<LandErpUser>>();
         IAccessControl access = scope.ServiceProvider.GetRequiredService<IAccessControl>();
         Subject owner = new(ownerUserId, true);
@@ -166,12 +171,14 @@ public sealed class IdentityOrganizationTests
         await workspace.SetEmployeeActiveAsync(owner, new(employee.Id, employee.EmployeeVersion, true), "phase6", CancellationToken.None);
         Assert.AreEqual(EmployeeState.Active, (await workspace.ReadAsync(owner, CancellationToken.None)).Employees.Single(item => item.Id == employee.Id).State);
 
-        IReadOnlyList<AuditView> audit = await workspace.ReadAuditAsync(owner, CancellationToken.None);
-        Assert.IsTrue(audit.Any(item => item.Action == "DepartmentUpdated"));
-        Assert.IsTrue(audit.Any(item => item.Action == "TeamArchived"));
-        Assert.IsTrue(audit.Any(item => item.Action == "EmployeeDeactivated"));
-        Assert.IsFalse(audit.Any(item => item.Changes.Contains(credential.Password, StringComparison.Ordinal)
-            || item.Changes.Contains(reset.Password, StringComparison.Ordinal)));
+        AuditPage audit = await auditReader.ReadAsync(owner, new(PageSize: 100), CancellationToken.None);
+        Assert.IsTrue(audit.Items.Any(item => item.Title == "Изменён отдел"));
+        Assert.IsTrue(audit.Items.Any(item => item.Title == "Команда архивирована"));
+        Assert.IsTrue(audit.Items.Any(item => item.Title == "Сотрудник отключён"));
+        AuditExport auditExport = await auditReader.ExportCsvAsync(owner, new(), CancellationToken.None);
+        string auditCsv = System.Text.Encoding.UTF8.GetString(auditExport.Content);
+        Assert.IsFalse(auditCsv.Contains(credential.Password, StringComparison.Ordinal)
+            || auditCsv.Contains(reset.Password, StringComparison.Ordinal));
     }
 
     internal static ServiceProvider Services(string connection)

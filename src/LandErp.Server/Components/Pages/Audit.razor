@@ -1,11 +1,79 @@
 @page "/audit"
 @attribute [Authorize(Policy = "audit.read")]
 @inherits WorkspaceComponent
-@inject IOrganizationWorkspace Workspace
-<PageTitle>Аудит · LandErp</PageTitle><PageHeader Title="Аудит действий" Breadcrumb="Администрирование / История" Description="Последние 100 значимых действий вашей организации. События не редактируются." />
-@if (Loading) { <PageState Kind="loading" Title="Загружаем историю…" /> }
-else if (Forbidden) { <PageState Kind="forbidden" Title="Нет доступа к аудиту" /> }
-else if (Error != null) { <PageState Kind="error" Title="@Error"><ActionButton Label="Повторить" OnClick="ReloadAsync" /></PageState> }
-else if (events.Count == 0) { <PageState Title="История пока пуста" /> }
-else { <article class="surface table-surface"><div class="table-wrap"><table class="data-table"><thead><tr><th>Время (UTC)</th><th>Действие</th><th>Объект</th><th>Автор / изменения</th></tr></thead><tbody>@foreach(AuditView item in events) { <tr><td>@item.RecordedAt.ToString("dd.MM.yyyy HH:mm:ss")</td><td>@item.Action</td><td>@item.ObjectType<small>@item.ObjectId</small></td><td><small>@item.ActorId</small><details><summary>Изменения</summary><pre>@item.Changes</pre></details></td></tr> }</tbody></table></div></article> }
-@code { private IReadOnlyList<AuditView> events = []; protected override async Task ReadAsync() => events = await Workspace.ReadAuditAsync(CurrentSubject,CancellationToken.None); }
+@inject IAuditReadService Reader
+@inject NavigationManager Navigation
+
+<PageTitle>Аудит · LandErp</PageTitle>
+@if(Loading)
+{
+    <PageState Kind="loading" Title="Загружаем аудит…" Description="Получаем события в пределах вашей организации." />
+}
+else if(Forbidden)
+{
+    <PageState Kind="forbidden" Title="Нет доступа к аудиту" Description="Для просмотра требуется разрешение audit.read и область всей организации." />
+}
+else if(auditPage!=null)
+{
+    <div class="audit-workspace">
+        <header class="audit-heading"><div><span class="kicker">Администрирование / Аудит</span><h1>Аудит действий</h1><p>Понятная история значимых действий. События нельзя изменять или удалять.</p></div><a class="btn secondary" href="@ExportUrl">Экспорт CSV</a></header>
+        @if(Error!=null){<PageState Kind="error" Title="@Error"><ActionButton Label="Повторить" OnClick="ReloadAsync" /></PageState>}
+        @if(filterError!=null){<PageState Kind="error" Title="@filterError" />}
+        <section class="audit-stats" aria-label="Сводка за выбранный период">
+            <article><small>События</small><strong>@auditPage.Statistics.TotalEvents</strong><span>@PeriodCaption</span></article><article><small>Пользователи</small><strong>@auditPage.Statistics.ActiveActors</strong><span>совершали действия</span></article><article><small>Изменения данных</small><strong>@auditPage.Statistics.DataChanges</strong><span>значимых операций</span></article><article><small>Безопасность</small><strong>@auditPage.Statistics.SecurityEvents</strong><span>входы и управление доступом</span></article>
+        </section>
+        <section class="audit-card">
+            <form class="audit-toolbar" @onsubmit="ApplyFiltersAsync" @onsubmit:preventDefault>
+                <label class="audit-search"><span class="sr-only">Поиск</span><input @bind="search" placeholder="Найти сотрудника, объект или действие" /></label>
+                <label><span class="sr-only">Период</span><select value="@period" @onchange="PeriodChangedAsync"><option value="7">Последние 7 дней</option><option value="today">Сегодня</option><option value="30">Последние 30 дней</option><option value="custom">Произвольный период</option></select></label>
+                <label><span class="sr-only">Сотрудник</span><select value="@(actorId?.ToString()??"")" @onchange="ActorChangedAsync"><option value="">Все сотрудники</option>@foreach(AuditActorOption actor in auditPage.Actors){<option value="@actor.Id">@actor.Name@(actor.Archived?" · архивирован":"")</option>}</select></label>
+                <label><span class="sr-only">Раздел</span><select value="@module" @onchange="ModuleChangedAsync"><option value="">Все разделы</option>@foreach(AuditModuleOption item in auditPage.Modules){<option value="@item.Id">@item.Name</option>}</select></label>
+                <button class="btn secondary audit-find" type="submit">Найти</button><button class="btn quiet" type="button" @onclick="ResetAsync">Сбросить</button>
+            </form>
+            <nav class="audit-chips" aria-label="Категории событий">@foreach((AuditCategory Id,string Label) item in Categories){<button class="audit-chip @(category==item.Id?"active":"")" @onclick="()=>SelectCategoryAsync(item.Id)">@item.Label</button>}</nav>
+            @if(auditPage.Items.Count==0){<PageState Kind="empty" Title="Событий не найдено" Description="Измените период или фильтры. История при этом остаётся неизменной." />}
+            else
+            {
+                <div class="audit-days">@foreach(IGrouping<DateOnly,AuditEventView> day in auditPage.Items.GroupBy(item=>item.DisplayDate)){<section class="audit-day"><header><strong>@DayCaption(day.Key)</strong><span>@(day.Key==auditPage.Items[0].DisplayDate?TimeZoneCaption:$"{day.Count()} событий")</span></header><div class="audit-events">@foreach(AuditEventView item in day){<button class="audit-event @(selected?.Id==item.Id?"selected":"")" @onclick="()=>OpenEvent(item)" aria-label="Открыть событие: @item.Title"><time>@item.DisplayTime.ToString("HH:mm")</time><span class="audit-icon @item.Tone" aria-hidden="true">@item.Icon</span><span class="audit-event-main"><strong>@item.Title</strong><small>@item.Summary</small></span><span class="audit-person"><strong>@item.ActorDisplayName</strong><small>@item.ActorContext</small></span><span class="audit-object"><strong>@item.ObjectDisplayType</strong><small>@item.ObjectDisplayName@if(item.ObjectArchived){<em>Архивный</em>}</small></span><span class="audit-arrow" aria-hidden="true">›</span></button>}</div></section>}</div>
+            }
+            <footer class="audit-footer"><span>Страница @auditPage.Page из @auditPage.PageCount · @auditPage.TotalCount событий</span><div><button class="btn secondary" disabled="@(auditPage.Page<=1)" @onclick="()=>ChangePageAsync(-1)">Назад</button><button class="btn secondary" disabled="@(auditPage.Page>=auditPage.PageCount)" @onclick="()=>ChangePageAsync(1)">Далее</button></div></footer>
+        </section>
+    </div>
+}
+
+@if(selected!=null)
+{
+    <Modal Kind="drawer audit-drawer" Title="@selected.Title" OnClose="CloseEvent"><p class="audit-drawer-summary">@selected.Summary</p><div class="audit-facts"><div><small>Когда</small><strong>@selected.DisplayTime.ToString("dd.MM.yyyy · HH:mm:ss")</strong></div><div><small>Кто</small><strong>@selected.ActorDisplayName</strong><span>@selected.ActorContext</span></div><div><small>Раздел</small><strong>@selected.Module</strong></div><div><small>Объект</small><strong>@selected.ObjectDisplayType</strong><span>@selected.ObjectDisplayName</span></div></div><h3 class="audit-section-title">Что изменилось</h3><div class="audit-changes"><div class="audit-change-head"><span>Поле</span><span>Было</span><span>Стало</span></div>@foreach(AuditChangeView change in selected.Changes){<div class="audit-change"><strong>@change.Field</strong><span class="before">@change.Before</span><span class="after">@change.After</span></div>}</div><div class="audit-technical-heading"><h3 class="audit-section-title">Технические данные</h3><button class="btn secondary" @onclick="ToggleTechnicalAsync">@(technicalOpen?"Скрыть":"Показать")</button></div>
+        @if(technicalOpen){@if(technicalLoading){<PageState Kind="loading" Title="Загружаем технические данные…" />}else if(technicalError!=null){<PageState Kind="error" Title="@technicalError" />}else if(technical!=null){<div class="audit-facts technical"><div><small>Action</small><strong>@technical.Action</strong></div><div><small>Entity</small><strong>@technical.Entity</strong></div><div><small>Object ID</small><strong>@technical.ObjectId</strong></div><div><small>Actor ID</small><strong>@technical.ActorId</strong></div><div class="wide"><small>Correlation ID</small><strong>@technical.CorrelationId</strong></div></div><pre class="audit-json">@technical.PayloadJson</pre>}}
+    </Modal>
+}
+@if(customPeriodOpen)
+{
+    <Modal Title="Произвольный период" OnClose="CloseCustomPeriod"><div class="audit-period-form"><label class="field"><span>С</span><InputDate @bind-Value="customFrom" /></label><label class="field"><span>По</span><InputDate @bind-Value="customTo" /></label></div><p class="subtle">Даты рассчитываются по часовому поясу организации.</p><div class="form-actions"><button class="btn secondary" @onclick="CloseCustomPeriod">Отмена</button><button class="btn primary" @onclick="ApplyCustomPeriodAsync">Применить</button></div></Modal>
+}
+
+@code {
+    private static readonly (AuditCategory Id,string Label)[] Categories=[(AuditCategory.All,"Все"),(AuditCategory.DataChanges,"Изменения данных"),(AuditCategory.Security,"Входы и доступ"),(AuditCategory.Collection,"Сбор данных"),(AuditCategory.Procurement,"Закупка")];
+    private AuditPage? auditPage; private AuditEventView? selected; private AuditTechnicalDetails? technical;
+    private string search="",module="",period="7"; private Guid? actorId; private AuditCategory category=AuditCategory.All; private int currentPage=1;
+    private DateOnly? from,to,customFrom,customTo; private bool customPeriodOpen,technicalOpen,technicalLoading; private string? technicalError,filterError;
+    protected override async Task ReadAsync(){auditPage=await Reader.ReadAsync(CurrentSubject,Query(),CancellationToken.None);from=auditPage.From;to=auditPage.To;}
+    private AuditQuery Query()=>new(from,to,actorId,module,category,search,currentPage,30);
+    private async Task ApplyFiltersAsync(){currentPage=1;filterError=null;await ReloadAsync();}
+    private async Task ResetAsync(){search="";module="";actorId=null;category=AuditCategory.All;period="7";from=null;to=null;currentPage=1;filterError=null;await ReloadAsync();}
+    private async Task SelectCategoryAsync(AuditCategory value){category=value;currentPage=1;await ReloadAsync();}
+    private async Task ActorChangedAsync(ChangeEventArgs args){actorId=Guid.TryParse(args.Value?.ToString(),out Guid value)?value:null;currentPage=1;await ReloadAsync();}
+    private async Task ModuleChangedAsync(ChangeEventArgs args){module=args.Value?.ToString()??"";currentPage=1;await ReloadAsync();}
+    private async Task PeriodChangedAsync(ChangeEventArgs args){period=args.Value?.ToString()??"7";if(period=="custom"){customFrom=from;customTo=to;customPeriodOpen=true;return;}DateOnly today=BusinessToday;to=today;from=period switch{"today"=>today,"30"=>today.AddDays(-29),_=>today.AddDays(-6)};currentPage=1;await ReloadAsync();}
+    private async Task ApplyCustomPeriodAsync(){if(customFrom==null||customTo==null||customTo<customFrom){filterError="Укажите корректные даты начала и окончания периода.";return;}from=customFrom;to=customTo;currentPage=1;customPeriodOpen=false;filterError=null;await ReloadAsync();}
+    private void CloseCustomPeriod(){customPeriodOpen=false;if(from==null)period="7";}
+    private async Task ChangePageAsync(int delta){currentPage=Math.Clamp(currentPage+delta,1,auditPage!.PageCount);await ReloadAsync();}
+    private void OpenEvent(AuditEventView item){selected=item;technical=null;technicalOpen=false;technicalError=null;}
+    private void CloseEvent(){selected=null;technical=null;technicalOpen=false;}
+    private async Task ToggleTechnicalAsync(){technicalOpen=!technicalOpen;if(!technicalOpen||technical!=null)return;technicalLoading=true;technicalError=null;try{technical=await Reader.ReadTechnicalAsync(CurrentSubject,selected!.Id,CancellationToken.None);}catch(AccessDeniedException){technicalError="Нет доступа к техническим данным события.";}catch(Exception){technicalError="Технические данные временно недоступны.";}finally{technicalLoading=false;}}
+    private string ExportUrl{get{Dictionary<string,object?> values=new(){{"from",from?.ToString("yyyy-MM-dd")},{"to",to?.ToString("yyyy-MM-dd")},{"actorId",actorId?.ToString()},{"module",module},{"category",category.ToString()},{"search",search}};return Navigation.GetUriWithQueryParameters("/api/audit/export",values);}}
+    private string PeriodCaption=>from==to?$"{from:dd.MM.yyyy}":$"{from:dd.MM.yyyy}–{to:dd.MM.yyyy}";
+    private string TimeZoneCaption=>auditPage!.BusinessTimeZone=="Europe/Moscow"?"Время московское":auditPage.BusinessTimeZone;
+    private DateOnly BusinessToday=>DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,TimeZoneInfo.FindSystemTimeZoneById(auditPage!.BusinessTimeZone)).DateTime);
+    private static string DayCaption(DateOnly date)=>date.ToString("dddd · d MMMM",System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+}

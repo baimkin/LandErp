@@ -21,6 +21,7 @@ public static class IdentityServices
         }).AddEntityFrameworkStores<LandErpDbContext>().AddDefaultTokenProviders();
         services.AddScoped<IAccessControl, AccessControl>();
         services.AddScoped<IOrganizationWorkspace, OrganizationWorkspace>();
+        services.AddScoped<IAuditReadService, AuditReadService>();
         return services;
     }
 }

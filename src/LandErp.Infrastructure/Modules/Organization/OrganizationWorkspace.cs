@@ -284,15 +284,6 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<AuditView>> ReadAuditAsync(Subject subject, CancellationToken cancellationToken)
-    {
-        AccessContext context = await RequireOrganizationAdminAsync(subject, Permissions.AuditRead, cancellationToken);
-        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        return await db.AuditEvents.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId)
-            .OrderByDescending(item => item.RecordedAt).Take(100).Select(item => new AuditView(item.RecordedAt,
-                item.Action, item.ObjectType, item.ObjectId, item.ActorId, item.Changes)).ToListAsync(cancellationToken);
-    }
-
     private async Task<AccessContext> RequireOrganizationAdminAsync(Subject subject, string permission, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, permission, cancellationToken);

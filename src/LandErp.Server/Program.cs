@@ -154,7 +154,26 @@ app.MapGet("/health/ready", async (IDatabaseStatus database, CancellationToken c
 app.MapGet("/api/organization", async (HttpContext context, IOrganizationWorkspace workspace, CancellationToken cancellationToken) =>
     Results.Ok(await workspace.ReadAsync(PermissionAuthorization.SubjectFrom(context.User), cancellationToken)))
     .RequireAuthorization(Permissions.UsersRead);
-app.MapGet("/api/audit", async (HttpContext context, IOrganizationWorkspace workspace, CancellationToken cancellationToken) =>
-    Results.Ok(await workspace.ReadAuditAsync(PermissionAuthorization.SubjectFrom(context.User), cancellationToken)))
+app.MapGet("/api/audit", async (HttpContext context, IAuditReadService audit, CancellationToken cancellationToken) =>
+    Results.Ok(await audit.ReadAsync(PermissionAuthorization.SubjectFrom(context.User), ParseAuditQuery(context.Request.Query), cancellationToken)))
     .RequireAuthorization(Permissions.AuditRead);
+app.MapGet("/api/audit/{eventId:guid}/technical", async (Guid eventId, HttpContext context, IAuditReadService audit, CancellationToken cancellationToken) =>
+    Results.Ok(await audit.ReadTechnicalAsync(PermissionAuthorization.SubjectFrom(context.User), eventId, cancellationToken)))
+    .RequireAuthorization(Permissions.AuditRead);
+app.MapGet("/api/audit/export", async (HttpContext context, IAuditReadService audit, CancellationToken cancellationToken) =>
+{
+    AuditExport export = await audit.ExportCsvAsync(PermissionAuthorization.SubjectFrom(context.User), ParseAuditQuery(context.Request.Query), cancellationToken);
+    return Results.File(export.Content, "text/csv; charset=utf-8", export.FileName);
+}).RequireAuthorization(Permissions.AuditRead);
+
+static AuditQuery ParseAuditQuery(IQueryCollection values)
+{
+    DateOnly? from = DateOnly.TryParse(values["from"], out DateOnly fromValue) ? fromValue : null;
+    DateOnly? to = DateOnly.TryParse(values["to"], out DateOnly toValue) ? toValue : null;
+    Guid? actor = Guid.TryParse(values["actorId"], out Guid actorValue) ? actorValue : null;
+    AuditCategory category = Enum.TryParse(values["category"], true, out AuditCategory categoryValue) ? categoryValue : AuditCategory.All;
+    int page = int.TryParse(values["page"], out int pageValue) ? pageValue : 1;
+    int pageSize = int.TryParse(values["pageSize"], out int sizeValue) ? sizeValue : 30;
+    return new(from, to, actor, values["module"], category, values["search"], page, pageSize);
+}
 await app.RunAsync();

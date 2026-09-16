@@ -367,9 +367,9 @@
         {
             Total = detail.Monitoring.TargetTotalPrice,
             PerSotka = detail.Monitoring.TargetPricePerSotka,
-            Reason = detail.Item.Disposition == CatalogDisposition.Monitoring ? detail.Item.QueueReason : "Ждём достижения целевой цены"
+            Reason = detail.Item.QueueReason
         };
-        drawerComment = detail.IngressComment ?? "";
+        drawerComment = "";
         checklistState.Clear();
         foreach (ChecklistItem item in checklist) checklistState[item.Key] = "unknown";
     }
@@ -435,7 +435,7 @@
         string note = classificationReason.Trim();
         if (!string.IsNullOrWhiteSpace(classificationCategory))
             return string.IsNullOrWhiteSpace(note) ? classificationCategory : $"{classificationCategory}: {note}";
-        return string.IsNullOrWhiteSpace(note) ? DispositionLabel(classification) : note;
+        return note;
     }
 
     private async Task ResumeAsync()

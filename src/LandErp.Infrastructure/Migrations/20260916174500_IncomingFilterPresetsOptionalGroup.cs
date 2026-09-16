@@ -11,6 +11,8 @@ namespace LandErp.Infrastructure.Migrations;
 [Migration("20260916174500_IncomingFilterPresetsOptionalGroup")]
 public sealed class IncomingFilterPresetsOptionalGroup : Migration
 {
+    private static readonly string[] OrganizationNameIndexColumns = ["organization_id", "name"];
+
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.AlterColumn<Guid>(
@@ -28,7 +30,7 @@ public sealed class IncomingFilterPresetsOptionalGroup : Migration
             name: "ix_incoming_filter_presets_organization_name_ungrouped_active",
             schema: "catalog",
             table: "incoming_filter_presets",
-            columns: new[] { "organization_id", "name" },
+            columns: OrganizationNameIndexColumns,
             unique: true,
             filter: "active AND search_group_id IS NULL");
     }

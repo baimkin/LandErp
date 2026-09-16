@@ -1,34 +1,76 @@
 @inherits LayoutComponentBase
 <div class="app-shell" data-density="@(compact ? "compact" : "comfortable")" data-interactive-ready="@(interactiveReady ? "true" : "false")" inert="@(!interactiveReady)">
     <aside class="sidebar @(menuOpen ? "open" : "")" aria-label="Навигация LandErp">
-        <a class="brand" href="/"><span class="brand-symbol" aria-hidden="true">▥</span><div><strong>LandErp</strong><small>Рабочий контур закупки</small></div></a>
-        <button class="icon-button mobile-menu" aria-label="Закрыть меню" @onclick="() => menuOpen=false">×</button>
+        <a class="brand" href="/" @onclick="() => menuOpen = false">
+            <span class="brand-symbol" aria-hidden="true">L</span>
+            <div><strong>LandErp</strong><small>Земля. Данные. Решения.</small></div>
+        </a>
+        <button type="button" class="icon-button mobile-menu sidebar-close" aria-label="Закрыть меню" @onclick="() => menuOpen = false">×</button>
+
         <nav class="side-nav">
-            <p class="nav-label">Рабочее место</p>
-            <NavLink class="nav-item" href="/" Match="NavLinkMatch.All">◫ Обзор</NavLink>
-            <AuthorizeView Policy="manager_queue.read"><NavLink class="nav-item" href="/incoming" @onclick="() => menuOpen=false">⇥ Входящие</NavLink></AuthorizeView>
-            <AuthorizeView Policy="manager_queue.read"><NavLink class="nav-item" href="/procurement" @onclick="() => menuOpen=false">◫ Закупка</NavLink></AuthorizeView>
-            <AuthorizeView Policy="users.read"><NavLink class="nav-item" href="/employees">♙ Сотрудники</NavLink></AuthorizeView>
-            <AuthorizeView Policy="organization.manage"><NavLink class="nav-item" href="/organization">▦ Оргструктура</NavLink></AuthorizeView>
-            <AuthorizeView Policy="audit.read"><NavLink class="nav-item" href="/audit">≡ Аудит</NavLink></AuthorizeView>
-            <AuthorizeView Policy="searches.manage"><NavLink class="nav-item" href="/collectors">⇅ Сбор данных</NavLink></AuthorizeView>
+            <p class="nav-label">Работа</p>
+            <NavLink class="nav-item" href="/" Match="NavLinkMatch.All" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">◫</span><span>Обзор</span></NavLink>
+            <AuthorizeView Policy="manager_queue.read">
+                <NavLink class="nav-item" href="/incoming" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">⇥</span><span>Входящие объявления</span></NavLink>
+                <NavLink class="nav-item" href="/procurement-v2" Match="NavLinkMatch.All" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">≡</span><span>Очередь закупки</span></NavLink>
+            </AuthorizeView>
+            <span class="nav-item nav-item-disabled" aria-disabled="true" title="Раздел ещё не подключён"><span class="nav-icon" aria-hidden="true">▦</span><span>Проекты и финансы</span></span>
+
+            <p class="nav-label">Система</p>
+            <AuthorizeView Policy="searches.manage"><NavLink class="nav-item" href="/collectors" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">⌁</span><span>Мониторинг Agent</span></NavLink></AuthorizeView>
+            <AuthorizeView Policy="users.read"><NavLink class="nav-item" href="/employees" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">♙</span><span>Сотрудники</span></NavLink></AuthorizeView>
+            <AuthorizeView Policy="organization.manage"><NavLink class="nav-item" href="/organization" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">▦</span><span>Оргструктура</span></NavLink></AuthorizeView>
+            <AuthorizeView Policy="audit.read"><NavLink class="nav-item" href="/audit" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">≡</span><span>Аудит</span></NavLink></AuthorizeView>
         </nav>
-        <div class="sidebar-footer"><small>Локальный контур</small></div>
+
+        <div class="sidebar-footer">
+            <div class="shell-status-line"><i aria-hidden="true"></i><span>Локальный контур</span></div>
+            <small>LandErp · Stage 1</small>
+        </div>
     </aside>
+
+    @if (menuOpen)
+    {
+        <button type="button" class="mobile-menu shell-mobile-backdrop" aria-label="Закрыть меню" @onclick="() => menuOpen = false"></button>
+    }
+
     <div class="workspace">
         <header class="topbar">
-            <button class="icon-button mobile-menu" aria-label="Открыть меню" aria-expanded="@menuOpen" @onclick="() => menuOpen = !menuOpen">☰</button>
-            <div><span class="eyebrow">Закупка</span><strong>Земля. Данные. Решения.</strong></div>
+            <button type="button" class="icon-button mobile-menu" aria-label="Открыть меню" aria-expanded="@menuOpen" @onclick="() => menuOpen = !menuOpen">☰</button>
+            <div class="top-context"><span class="eyebrow">Закупка</span><strong>Земля. Данные. Решения.</strong></div>
             <div class="top-actions">
-                <button class="btn quiet density-control" aria-pressed="@compact" @onclick="() => compact = !compact">@(compact ? "Обычно" : "Компактно")</button>
-                <AuthorizeView><Authorized Context="auth"><span class="user-chip">@auth.User.Identity?.Name</span><a class="btn secondary" href="/account/logout">Выход</a></Authorized>
-                    <NotAuthorized><a class="btn primary" href="/account/login">Войти</a></NotAuthorized></AuthorizeView>
+                <button type="button" class="btn quiet density-control" aria-pressed="@compact" @onclick="() => compact = !compact">@(compact ? "Обычно" : "Компактно")</button>
+                <AuthorizeView>
+                    <Authorized Context="auth">
+                        <div class="shell-user">
+                            <span class="shell-avatar" aria-hidden="true">@Initial(auth.User.Identity?.Name)</span>
+                            <span class="shell-user-copy"><strong>@auth.User.Identity?.Name</strong><small>Пользователь</small></span>
+                        </div>
+                        <a class="btn secondary" href="/account/logout">Выход</a>
+                    </Authorized>
+                    <NotAuthorized><a class="btn primary" href="/account/login">Войти</a></NotAuthorized>
+                </AuthorizeView>
             </div>
         </header>
         <main id="main-content" class="main-content">@Body</main>
     </div>
 </div>
+
 @code {
-    private bool compact; private bool menuOpen; private bool interactiveReady;
-    protected override void OnAfterRender(bool firstRender) { if (firstRender) { interactiveReady = true; StateHasChanged(); } }
+    private bool compact;
+    private bool menuOpen;
+    private bool interactiveReady;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender) return;
+        interactiveReady = true;
+        StateHasChanged();
+    }
+
+    private static string Initial(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "U";
+        return char.ToUpperInvariant(value.Trim()[0]).ToString();
+    }
 }

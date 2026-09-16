@@ -1,0 +1,544 @@
+@page "/incoming-v2"
+@attribute [Authorize(Policy = "manager_queue.read")]
+@using LandErp.Application.Modules.Catalog.Contracts
+@using LandErp.Application.Modules.Catalog.Domain
+@using LandErp.Server.Components.Procurement
+@inherits WorkspaceComponent
+@inject ICatalogWorkspace Workspace
+@inject NavigationManager Navigation
+
+<PageTitle>Входящие предложения v2 · LandErp</PageTitle>
+
+<div class="incoming-v2">
+    <div class="v2-head">
+        <div>
+            <div class="v2-eyebrow">Первичный отбор</div>
+            <h1>Входящие объявления</h1>
+            <p class="v2-lead">Новые и изменившиеся объявления из парсинга. Здесь решаем, что делать с объявлением до создания PropertyCase.</p>
+        </div>
+        <div class="v2-head-actions">
+            @* TODO-BACKEND-INCOMING: page-level decision history read model is not available. *@
+            <button type="button" class="v2-btn" data-todo-backend="TODO-BACKEND-INCOMING" @onclick="() => historyDemoOpen = true">История решений</button>
+            <button type="button" class="v2-btn primary" @onclick="() => manualOpen = true">+ Добавить ссылку вручную</button>
+        </div>
+    </div>
+
+    @if (Loading)
+    {
+        <PageState Kind="loading" Title="Загружаем входящие…" />
+    }
+    else if (Forbidden)
+    {
+        <PageState Kind="forbidden" Title="Нет доступа ко входящим" />
+    }
+    else
+    {
+        @if (Error != null)
+        {
+            <PageState Kind="error" Title="@Error"><ActionButton Label="Повторить" OnClick="ReloadAsync" /></PageState>
+        }
+
+        @if (catalogPage != null)
+        {
+            @* TODO-BACKEND-INCOMING: exact reference KPI semantics/counts require server projections. Values below are visual placeholders only. *@
+            <div class="v2-stats" data-todo-backend="TODO-BACKEND-INCOMING">
+                <div class="v2-stat"><label>Новые</label><strong>28</strong><span>не просмотрены</span></div>
+                <div class="v2-stat"><label>Цена изменилась</label><strong>7</strong><span>после мониторинга</span></div>
+                <div class="v2-stat warn"><label>Возможный дубль</label><strong>4</strong><span>нужна проверка</span></div>
+                <div class="v2-stat risk"><label>Не хватает данных</label><strong>3</strong><span>карточка неполная</span></div>
+                <div class="v2-stat"><label>Обработано сегодня</label><strong>41</strong><span>27 архив · 6 мониторинг · 8 работа</span></div>
+            </div>
+
+            <section class="v2-surface">
+                <EditForm Model="filter" FormName="incoming-v2-filter" OnValidSubmit="ApplyFilterAsync">
+                    <div class="v2-tools">
+                        <input @bind="filter.Text" placeholder="Адрес, населённый пункт, ID объявления…" aria-label="Поиск по входящим" />
+                        <InputSelect @bind-Value="filter.Source" aria-label="Источник">
+                            <option value="">Все источники</option>
+                            @foreach (CatalogSource source in Enum.GetValues<CatalogSource>())
+                            {
+                                <option value="@source">@SourceBadge.Label(source)</option>
+                            }
+                        </InputSelect>
+                        @* TODO-BACKEND-INCOMING: Incoming Catalog has no manager-safe search-configuration projection/filter yet. *@
+                        <select @bind="demoSearchConfiguration" data-todo-backend="TODO-BACKEND-INCOMING" aria-label="Поисковая конфигурация">
+                            <option value="all">Все поиски</option>
+                            <option value="khimki">Химки ≤ 20 км</option>
+                            <option value="solnechnogorsk">Солнечногорск север</option>
+                        </select>
+                        <button class="v2-btn sm" type="submit">Найти</button>
+                        <button class="v2-btn sm quiet" type="button" aria-expanded="@advancedOpen" @onclick="() => advancedOpen = !advancedOpen">Фильтры</button>
+                    </div>
+
+                    @if (advancedOpen)
+                    {
+                        <div class="v2-advanced">
+                            <label><span>Состояние</span><InputSelect @bind-Value="filter.Disposition"><option value="">Все состояния</option>@foreach (CatalogDisposition state in Enum.GetValues<CatalogDisposition>()) { <option value="@state">@DispositionLabel(state)</option> }</InputSelect></label>
+                            <label><span>Возраст</span><InputSelect @bind-Value="filter.Age"><option value="Any">Любой</option><option value="Today">До суток</option><option value="ThreeDays">До 3 дней</option><option value="Week">До недели</option><option value="OlderThanWeek">Старше недели</option></InputSelect></label>
+                            <label><span>Цена от, ₽</span><InputNumber @bind-Value="filter.MinPrice" /></label>
+                            <label><span>Цена до, ₽</span><InputNumber @bind-Value="filter.MaxPrice" /></label>
+                            <label><span>Площадь от, м²</span><InputNumber @bind-Value="filter.MinArea" /></label>
+                            <label><span>Площадь до, м²</span><InputNumber @bind-Value="filter.MaxArea" /></label>
+                            <label class="v2-check"><InputCheckbox @bind-Value="filter.AttentionOnly" /> Требует внимания</label>
+                            <div class="v2-advanced-actions"><button class="v2-btn sm" type="submit">Применить</button><button class="v2-btn sm quiet" type="button" @onclick="ResetFilterAsync">Сбросить</button></div>
+                        </div>
+                    }
+                </EditForm>
+
+                @* TODO-BACKEND-INCOMING: exact presets/counts are local UI placeholders and do not alter the server query. *@
+                <div class="v2-presets" data-todo-backend="TODO-BACKEND-INCOMING">
+                    <button type="button" class="v2-preset @(demoPreset == "all" ? "active" : "")" @onclick="() => demoPreset = "all"">Все 42</button>
+                    <button type="button" class="v2-preset @(demoPreset == "new" ? "active" : "")" @onclick="() => demoPreset = "new"">Новые 28</button>
+                    <button type="button" class="v2-preset @(demoPreset == "price" ? "active" : "")" @onclick="() => demoPreset = "price"">Изменилась цена 7</button>
+                    <button type="button" class="v2-preset @(demoPreset == "duplicate" ? "active" : "")" @onclick="() => demoPreset = "duplicate"">Возможный дубль 4</button>
+                    <button type="button" class="v2-preset @(demoPreset == "incomplete" ? "active" : "")" @onclick="() => demoPreset = "incomplete"">Неполные данные 3</button>
+                    <button type="button" class="v2-preset @(demoPreset == "monitor" ? "active" : "")" @onclick="() => demoPreset = "monitor"">Вернулись из мониторинга 5</button>
+                </div>
+
+                @if (catalogPage.Items.Count == 0)
+                {
+                    <div class="v2-empty"><strong>Предложений не найдено</strong><span>Измените фильтр, добавьте предложение вручную или дождитесь результата источника.</span></div>
+                }
+                else
+                {
+                    <div class="v2-table-wrap">
+                        <table class="v2-table">
+                            <thead>
+                                <tr><th>Объявление</th><th>Цена</th><th>Площадь</th><th>Категория / ВРИ</th><th>Почему в очереди</th><th>Данные</th><th>Найдено</th><th>Источник</th></tr>
+                            </thead>
+                            <tbody>
+                                @for (int index = 0; index < catalogPage.Items.Count; index++)
+                                {
+                                    CatalogItemView item = catalogPage.Items[index];
+                                    <tr class="@RowTone(item)" @onclick="() => OpenDetailAsync(item.Id)">
+                                        <td>
+                                            <div class="v2-object"><strong>@item.Title</strong><div class="v2-sub">@(item.Location ?? "Местоположение неизвестно") · @(item.ExternalId ?? "без внешнего ID")</div>@if (item.BusinessNumber != null) { <div class="v2-sub">@item.BusinessNumber</div> }</div>
+                                        </td>
+                                        <td><div class="v2-price">@ProcurementLabels.Money(item.Price)</div><div class="v2-sub">@(item.PricePerSotka == null ? "за сотку неизвестно" : ProcurementLabels.Money(item.PricePerSotka) + " / сот.")</div></td>
+                                        <td>@ProcurementLabels.Area(item.AreaSquareMeters)</td>
+                                        @* TODO-BACKEND-INCOMING: Category/VRI is not present in current Catalog read contracts. *@
+                                        <td data-todo-backend="TODO-BACKEND-INCOMING"><span class="v2-muted">Не указано</span></td>
+                                        <td><strong class="v2-reason">@item.QueueReason</strong><div class="v2-sub">@DispositionLabel(item.Disposition)</div></td>
+                                        @* TODO-BACKEND-INCOMING: completeness score is a UI-only preview derived from currently exposed fields. *@
+                                        <td data-todo-backend="TODO-BACKEND-INCOMING"><span class="v2-badge @(DemoCompleteness(item) < 75 ? "warn" : "ok")">@DemoCompleteness(item)%</span></td>
+                                        <td>@Age(item.ReceivedAt)<div class="v2-sub">@ProcurementLabels.Time(item.LastObservedAt ?? item.ChangedAt)</div></td>
+                                        <td><span class="v2-badge">@SourceBadge.Label(item.Source)</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+
+                <div class="v2-table-footer">
+                    <span>@PageRangeText()</span>
+                    <div><button type="button" class="v2-btn sm quiet" disabled="@(page == 0)" @onclick="PreviousAsync">Назад</button><button type="button" class="v2-btn sm quiet" disabled="@((page + 1) * PageSize >= catalogPage.Total)" @onclick="NextAsync">Далее</button></div>
+                </div>
+            </section>
+        }
+    }
+</div>
+
+@if (detail != null)
+{
+    <div class="v2-overlay open" @onclick="CloseDetail"></div>
+    <aside class="v2-drawer open" role="dialog" aria-modal="true" aria-label="Карточка входящего предложения" tabindex="0" @onkeydown="DrawerKeyDown">
+        <div class="v2-drawer-head">
+            <div class="v2-drawer-main"><h2>@detail.Item.Title</h2><div class="v2-sub">@(detail.Item.Location ?? "Местоположение неизвестно")</div></div>
+            @if (detail.Item.Url != null) { <a class="v2-btn sm" href="@detail.Item.Url" target="_blank" rel="noopener noreferrer">Открыть источник ↗</a> }
+            <button type="button" class="v2-btn sm" aria-label="Закрыть" @onclick="CloseDetail">×</button>
+        </div>
+
+        <div class="v2-drawer-body">
+            <section class="v2-card v2-hero">
+                @* TODO-BACKEND-INCOMING: Listing photos exist in storage but are not projected by CatalogItemDetail. *@
+                <div class="v2-photo" data-todo-backend="TODO-BACKEND-INCOMING"><span>Фото объекта</span></div>
+                <div class="v2-facts">
+                    <div class="v2-fact full"><label>Цена</label><strong>@ProcurementLabels.Money(detail.Item.Price)</strong></div>
+                    <div class="v2-fact"><label>Площадь</label><strong>@ProcurementLabels.Area(detail.Item.AreaSquareMeters)</strong></div>
+                    <div class="v2-fact"><label>₽ / сот.</label><strong>@ProcurementLabels.Money(detail.Item.PricePerSotka)</strong></div>
+                    @* TODO-BACKEND-INCOMING: Category/VRI read projection is absent. *@
+                    <div class="v2-fact full" data-todo-backend="TODO-BACKEND-INCOMING"><label>Категория / ВРИ</label><strong>Не указано</strong></div>
+                    @* TODO-BACKEND-INCOMING: search configuration is not available in Catalog detail. *@
+                    <div class="v2-fact full" data-todo-backend="TODO-BACKEND-INCOMING"><label>Поиск</label><strong>@DemoSearchLabel()</strong></div>
+                </div>
+            </section>
+
+            @* TODO-BACKEND-INCOMING: short checklist has no persistence contract. State below is local to this drawer only. *@
+            <section class="v2-card" data-todo-backend="TODO-BACKEND-INCOMING">
+                <h3>Первичный чек-лист</h3>
+                @foreach (ChecklistItem item in checklist)
+                {
+                    <div class="v2-checkrow">
+                        <div><strong>@item.Title</strong><span>@item.Description</span></div>
+                        <div class="v2-segmented">
+                            <button type="button" class="@(CheckClass(item.Key, "ok"))" @onclick="() => SetCheck(item.Key, "ok")">✓ Подходит</button>
+                            <button type="button" class="@(CheckClass(item.Key, "issue"))" @onclick="() => SetCheck(item.Key, "issue")">! Проблема</button>
+                            <button type="button" class="@(CheckClass(item.Key, "unknown"))" @onclick="() => SetCheck(item.Key, "unknown")">? Не проверено</button>
+                        </div>
+                    </div>
+                }
+            </section>
+
+            <section class="v2-card">
+                <h3>Комментарий</h3>
+                <textarea @bind="drawerComment" placeholder="Что важно передать дальше или почему объект не подходит…"></textarea>
+                @if (detail.Item.Description != null) { <p class="v2-description">@detail.Item.Description</p> }
+                <p class="v2-provenance">@detail.Item.Provenance@if (detail.IngressComment != null) { <span> · @detail.IngressComment</span> }</p>
+            </section>
+
+            @if (detail.Events.Count > 0)
+            {
+                <section class="v2-card v2-history">
+                    <h3>История внимания</h3>
+                    <ol>@foreach (CatalogEventView item in detail.Events.Take(5)) { <li><strong>@EventLabel(item.Kind)</strong><span>@ProcurementLabels.Time(item.RecordedAt)</span><p>@item.Message</p></li> }</ol>
+                </section>
+            }
+        </div>
+
+        <EditForm Model="monitoring" FormName="incoming-v2-monitor" OnValidSubmit="SaveMonitoringAsync">
+            <DataAnnotationsValidator />
+            <div class="v2-monitor">
+                <div class="v2-monitor-head"><div><strong>Мониторинг цены</strong><span>Вернуть объявление во входящие, когда цена станет интересной.</span></div><span class="v2-badge violet">Условие</span></div>
+                <div class="v2-monitor-grid">
+                    <div><label>Цена объявления ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.Total" /><span>₽</span></div></div>
+                    <div class="v2-or">или</div>
+                    <div><label>Цена за сотку ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.PerSotka" /><span>₽</span></div></div>
+                    <button type="submit" class="v2-btn" disabled="@Busy">Поставить на мониторинг</button>
+                </div>
+                @if (detail.Monitoring.LastEvaluatedAt != null) { <div class="v2-monitor-last">Последняя оценка @ProcurementLabels.Time(detail.Monitoring.LastEvaluatedAt): @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPrice) · @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPricePerSotka) / сот.</div> }
+            </div>
+        </EditForm>
+
+        <div class="v2-drawer-foot">
+            <div class="v2-classify">
+                <button type="button" class="v2-btn sm duplicate" @onclick="() => OpenClassification(CatalogDisposition.Duplicate)">Дубль</button>
+                <button type="button" class="v2-btn sm danger-text" @onclick="() => OpenClassification(CatalogDisposition.Fake)">Фейк</button>
+                <button type="button" class="v2-btn sm" @onclick="() => OpenClassification(CatalogDisposition.RemovedAtSource)">Снято</button>
+                <button type="button" class="v2-btn sm sold" @onclick="() => OpenClassification(CatalogDisposition.Sold)">Продано</button>
+            </div>
+            <div class="v2-decide">
+                <button type="button" class="v2-btn danger" @onclick="() => OpenClassification(CatalogDisposition.Dismissed)">Не подходит</button>
+                @if (detail.Item.PropertyCaseId == null)
+                {
+                    <button type="button" class="v2-btn primary" @onclick="() => OpenTakeAsync(detail.Item)">Взять в работу</button>
+                }
+                else if (detail.Item.CanResumeCase)
+                {
+                    <button type="button" class="v2-btn primary" @onclick="ResumeAsync">Возобновить</button>
+                }
+                else
+                {
+                    <button type="button" class="v2-btn primary" @onclick="() => OpenCase(detail.Item.PropertyCaseId)">Открыть PropertyCase</button>
+                }
+            </div>
+        </div>
+    </aside>
+}
+
+@if (manualOpen)
+{
+    <Modal Title="Добавить объявление / предложение" OnClose="() => manualOpen = false">
+        <EditForm Model="manual" FormName="manual-catalog-v2" OnValidSubmit="CreateManualAsync"><DataAnnotationsValidator /><ValidationSummary />
+            <div class="form-grid">
+                <label class="field"><span>Источник</span><InputSelect @bind-Value="manual.Source">@foreach (CatalogSource source in manualSources) { <option value="@source">@SourceBadge.Label(source)</option> }</InputSelect></label>
+                <label class="field"><span>Название</span><InputText @bind-Value="manual.Title" /></label>
+                <label class="field"><span>Локация</span><InputText @bind-Value="manual.Location" /></label>
+                <label class="field"><span>Ссылка HTTPS (необязательно)</span><InputText @bind-Value="manual.Url" /></label>
+                <label class="field"><span>Цена, ₽</span><InputNumber @bind-Value="manual.Price" /></label>
+                <label class="field"><span>Площадь, м²</span><InputNumber @bind-Value="manual.Area" /></label>
+                <label class="field"><span>Кадастровый номер</span><InputText @bind-Value="manual.CadastralNumber" /></label>
+                <label class="field"><span>Внешний ID (необязательно)</span><InputText @bind-Value="manual.ExternalId" /></label>
+                <label class="field" style="grid-column:1/-1"><span>Описание</span><InputTextArea @bind-Value="manual.Description" /></label>
+                <label class="field" style="grid-column:1/-1"><span>Комментарий / происхождение</span><InputTextArea @bind-Value="manual.Comment" /></label>
+                <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => manualOpen = false" /><ActionButton Label="Сохранить во входящие" Type="submit" Busy="Busy" /></div>
+            </div>
+        </EditForm>
+    </Modal>
+}
+
+@if (takeItem != null)
+{
+    <Modal Title="Взять в работу" OnClose="() => takeItem = null">
+        <p><strong>@takeItem.Title</strong></p><p class="subtle">Создайте новый PropertyCase либо подтвердите связь с существующим.</p>
+        <label class="field"><span>PropertyCase</span><InputSelect @bind-Value="existingCaseId"><option value="">Создать новый PropertyCase</option>@foreach (CaseLinkTarget target in targets) { <option value="@target.CaseId">@target.BusinessNumber · @target.Title</option> }</InputSelect></label>
+        <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => takeItem = null" /><ActionButton Label="Подтвердить" Busy="Busy" OnClick="TakeAsync" /></div>
+    </Modal>
+}
+
+@if (classificationOpen)
+{
+    <Modal Title="@DispositionLabel(classification)" OnClose="() => classificationOpen = false">
+        @if (classification == CatalogDisposition.Dismissed)
+        {
+            <label class="field"><span>Причина</span><select @bind="classificationCategory"><option>Цена</option><option>Площадь</option><option>Локация</option><option>Пропорции</option><option>Категория / ВРИ</option><option>Технические проблемы</option><option>Другое</option></select></label>
+        }
+        else if (classification == CatalogDisposition.Fake)
+        {
+            <label class="field"><span>Причина</span><select @bind="classificationCategory"><option>Нереальная цена</option><option>Фото/описание не соответствует</option><option>Объект не существует</option><option>Другое</option></select></label>
+        }
+        else if (classification == CatalogDisposition.Duplicate)
+        {
+            @* TODO-BACKEND-INCOMING: duplicate target matching/linking contract is absent. This selector is UI-only and disabled. *@
+            <label class="field" data-todo-backend="TODO-BACKEND-INCOMING"><span>Дубль чего</span><select disabled><option>PC-0187 · Сходня · 10 сот.</option><option>Найти другой объект…</option></select></label>
+        }
+        else if (classification == CatalogDisposition.RemovedAtSource)
+        {
+            @* TODO-BACKEND-INCOMING: structured removed-at date is not supported by the current classification command. *@
+            <p>Фиксируется только состояние объявления. Это не означает продажу объекта.</p><label class="field" data-todo-backend="TODO-BACKEND-INCOMING"><span>Дата</span><input type="date" disabled /></label>
+        }
+        else if (classification == CatalogDisposition.Sold)
+        {
+            @* TODO-BACKEND-INCOMING: confirmation source / sale date / sale price have no structured persistence contract. Fields are disabled and never sent. *@
+            <div data-todo-backend="TODO-BACKEND-INCOMING"><p>Подтверждённый человеком факт о реальном объекте.</p><label class="field"><span>Источник</span><select disabled><option>Со слов продавца</option><option>Со слов агента</option><option>Другой подтверждённый источник</option></select></label><label class="field"><span>Цена сделки, ₽ (необязательно)</span><input inputmode="numeric" disabled /></label></div>
+        }
+        <label class="field"><span>Причина / подтверждение</span><InputTextArea @bind-Value="classificationReason" /></label>
+        <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => classificationOpen = false" /><ActionButton Label="Подтвердить" Busy="Busy" OnClick="ClassifyAsync" /></div>
+    </Modal>
+}
+
+@if (historyDemoOpen)
+{
+    @* TODO-BACKEND-INCOMING: visual placeholder for page-level decision history. *@
+    <Modal Title="История решений" OnClose="() => historyDemoOpen = false">
+        <div data-todo-backend="TODO-BACKEND-INCOMING"><p class="subtle">UI preview: агрегированный server read для истории решений пока отсутствует.</p><ol class="business-timeline"><li><strong>Объект отправлен в мониторинг</strong><small>сегодня · demo</small></li><li><strong>Объект взят в работу</strong><small>вчера · demo</small></li></ol></div>
+    </Modal>
+}
+
+@if (Success != null)
+{
+    <div class="v2-toast show" role="status">@Success</div>
+}
+
+@code {
+    private const int PageSize = 25;
+    private IncomingCatalogPage? catalogPage;
+    private CatalogItemDetail? detail;
+    private readonly FilterInput filter = new();
+    private int page;
+    private bool manualOpen;
+    private bool historyDemoOpen;
+    private bool advancedOpen;
+    private string demoPreset = "all";
+    private string demoSearchConfiguration = "all";
+    private ManualInput manual = new();
+    private MonitoringInput monitoring = new();
+    private string drawerComment = "";
+    private CatalogItemView? takeItem;
+    private Guid? existingCaseId;
+    private IReadOnlyList<CaseLinkTarget> targets = [];
+    private bool classificationOpen;
+    private CatalogDisposition classification;
+    private string classificationCategory = "";
+    private string classificationReason = "";
+    private readonly Dictionary<string, string> checklistState = [];
+
+    private static readonly CatalogSource[] manualSources = [CatalogSource.Telegram, CatalogSource.Referral, CatalogSource.Agent, CatalogSource.DirectOwner, CatalogSource.Manual, CatalogSource.Other];
+    private static readonly ChecklistItem[] checklist =
+    [
+        new("price", "Цена", "Вписывается в рабочий диапазон"),
+        new("area", "Площадь", "Подходит под стратегию покупки"),
+        new("location", "Локация", "Район и удалённость подходят"),
+        new("shape", "Пропорции участка", "Форма не выглядит проблемной"),
+        new("vri", "Категория / ВРИ", "Допустимы для сценария"),
+        new("access", "Подъезд / техническое состояние", "Нет очевидного стоп-фактора")
+    ];
+
+    protected override async Task ReadAsync() => catalogPage = await Workspace.ReadIncomingAsync(CurrentSubject,
+        new(filter.Text, filter.Source, filter.Disposition, filter.Age, filter.MinPrice, filter.MaxPrice, filter.MinArea, filter.MaxArea,
+            filter.AttentionOnly, page * PageSize, PageSize), CancellationToken.None);
+
+    private Task ApplyFilterAsync() { page = 0; return ReloadAsync(); }
+    private Task ResetFilterAsync() { filter.Reset(); page = 0; return ReloadAsync(); }
+    private Task PreviousAsync() { page--; return ReloadAsync(); }
+    private Task NextAsync() { page++; return ReloadAsync(); }
+
+    private async Task OpenDetailAsync(Guid id)
+    {
+        detail = await Workspace.ReadItemAsync(CurrentSubject, id, CancellationToken.None);
+        monitoring = new()
+        {
+            Total = detail.Monitoring.TargetTotalPrice,
+            PerSotka = detail.Monitoring.TargetPricePerSotka,
+            Reason = detail.Item.Disposition == CatalogDisposition.Monitoring ? detail.Item.QueueReason : "Ждём достижения целевой цены"
+        };
+        drawerComment = detail.IngressComment ?? "";
+        checklistState.Clear();
+        foreach (ChecklistItem item in checklist) checklistState[item.Key] = "unknown";
+    }
+
+    private void CloseDetail() => detail = null;
+    private void DrawerKeyDown(KeyboardEventArgs args) { if (args.Key == "Escape") CloseDetail(); }
+
+    private async Task CreateManualAsync()
+    {
+        await ExecuteAsync(() => Workspace.CreateManualAsync(CurrentSubject,
+            new(manual.Source, manual.Title, manual.Location, manual.Price, manual.Area, manual.Url, manual.ExternalId, manual.CadastralNumber, manual.Description, manual.Comment),
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (Success != null) { manualOpen = false; manual = new(); }
+    }
+
+    private async Task OpenTakeAsync(CatalogItemView item)
+    {
+        takeItem = item;
+        existingCaseId = null;
+        targets = await Workspace.ReadLinkTargetsAsync(CurrentSubject, CancellationToken.None);
+    }
+
+    private async Task TakeAsync()
+    {
+        TakeToWorkResult? result = null;
+        await ExecuteAsync(async () => result = await Workspace.TakeToWorkAsync(CurrentSubject,
+            new(takeItem!.Id, existingCaseId), Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (result != null) Navigation.NavigateTo($"/procurement/{result.CaseId}");
+    }
+
+    private async Task SaveMonitoringAsync()
+    {
+        Guid id = detail!.Item.Id;
+        await ExecuteAsync(() => Workspace.SetMonitoringAsync(CurrentSubject,
+            new(id, detail.Item.Version, monitoring.Total, monitoring.PerSotka, monitoring.Reason), Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (Success != null) await OpenDetailAsync(id);
+    }
+
+    private void OpenClassification(CatalogDisposition value)
+    {
+        classification = value;
+        classificationReason = drawerComment;
+        classificationCategory = value switch
+        {
+            CatalogDisposition.Dismissed => "Другое",
+            CatalogDisposition.Fake => "Другое",
+            _ => ""
+        };
+        classificationOpen = true;
+    }
+
+    private async Task ClassifyAsync()
+    {
+        Guid id = detail!.Item.Id;
+        string reason = BuildClassificationReason();
+        await ExecuteAsync(() => Workspace.SetDispositionAsync(CurrentSubject,
+            new(id, detail.Item.Version, classification, reason), Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (Success != null) { classificationOpen = false; await OpenDetailAsync(id); }
+    }
+
+    private string BuildClassificationReason()
+    {
+        string note = classificationReason.Trim();
+        if (!string.IsNullOrWhiteSpace(classificationCategory))
+            return string.IsNullOrWhiteSpace(note) ? classificationCategory : $"{classificationCategory}: {note}";
+        return string.IsNullOrWhiteSpace(note) ? DispositionLabel(classification) : note;
+    }
+
+    private async Task ResumeAsync()
+    {
+        TakeToWorkResult? result = null;
+        await ExecuteAsync(async () => result = await Workspace.ResumeCaseAsync(CurrentSubject,
+            new(detail!.Item.Id, detail.Item.Version), Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (result != null) Navigation.NavigateTo($"/procurement/{result.CaseId}");
+    }
+
+    private void OpenCase(Guid? caseId) { if (caseId != null) Navigation.NavigateTo($"/procurement/{caseId}"); }
+
+    private void SetCheck(string key, string state) => checklistState[key] = state;
+    private string CheckClass(string key, string state) => checklistState.GetValueOrDefault(key, "unknown") == state ? state : "";
+
+    private string DemoSearchLabel() => demoSearchConfiguration switch
+    {
+        "khimki" => "Химки ≤ 20 км",
+        "solnechnogorsk" => "Солнечногорск север",
+        _ => "Химки ≤ 20 км"
+    };
+
+    private static int DemoCompleteness(CatalogItemView item)
+    {
+        int known = 0;
+        if (item.Price != null) known++;
+        if (item.AreaSquareMeters != null) known++;
+        if (!string.IsNullOrWhiteSpace(item.Location)) known++;
+        if (!string.IsNullOrWhiteSpace(item.CadastralNumber)) known++;
+        if (!string.IsNullOrWhiteSpace(item.Description)) known++;
+        return 55 + known * 9;
+    }
+
+    private static string RowTone(CatalogItemView item)
+    {
+        if (item.Disposition == CatalogDisposition.Duplicate) return "duplicate";
+        if (item.Price == null || item.AreaSquareMeters == null || string.IsNullOrWhiteSpace(item.Location)) return "incomplete";
+        if (item.AttentionRequired) return "changed";
+        return "";
+    }
+
+    private string PageRangeText()
+    {
+        if (catalogPage == null || catalogPage.Total == 0) return "0 предложений";
+        int from = page * PageSize + 1;
+        int to = Math.Min((page + 1) * PageSize, catalogPage.Total);
+        return $"{from}–{to} из {catalogPage.Total}";
+    }
+
+    private static string DispositionLabel(CatalogDisposition value) => value switch
+    {
+        CatalogDisposition.Incoming => "Входящее",
+        CatalogDisposition.Monitoring => "Мониторинг",
+        CatalogDisposition.InWork => "В работе",
+        CatalogDisposition.Dismissed => "Не подходит",
+        CatalogDisposition.Duplicate => "Дубль",
+        CatalogDisposition.Fake => "Фейк",
+        CatalogDisposition.RemovedAtSource => "Снято",
+        _ => "Продано"
+    };
+
+    private static string EventLabel(CatalogEventKind kind) => kind switch
+    {
+        CatalogEventKind.SourceChanged => "Источник изменился",
+        CatalogEventKind.MonitoringStarted => "Начат мониторинг",
+        CatalogEventKind.MonitoringTriggered => "Порог достигнут",
+        CatalogEventKind.Classified => "Классификация",
+        _ => "PropertyCase возобновлён"
+    };
+
+    private static string Age(DateTimeOffset value)
+    {
+        TimeSpan age = DateTimeOffset.UtcNow - value;
+        return age.TotalHours < 24 ? $"{Math.Max(0, (int)age.TotalHours)} ч назад" : $"{(int)age.TotalDays} дн. назад";
+    }
+
+    private sealed record ChecklistItem(string Key, string Title, string Description);
+
+    private sealed class FilterInput
+    {
+        public string Text { get; set; } = "";
+        public CatalogSource? Source { get; set; }
+        public CatalogDisposition? Disposition { get; set; } = CatalogDisposition.Incoming;
+        public CatalogAgeRange Age { get; set; }
+        public decimal? MinPrice { get; set; }
+        public decimal? MaxPrice { get; set; }
+        public decimal? MinArea { get; set; }
+        public decimal? MaxArea { get; set; }
+        public bool AttentionOnly { get; set; }
+        public void Reset() { Text = ""; Source = null; Disposition = CatalogDisposition.Incoming; Age = CatalogAgeRange.Any; MinPrice = MaxPrice = MinArea = MaxArea = null; AttentionOnly = false; }
+    }
+
+    private sealed class MonitoringInput
+    {
+        public decimal? Total { get; set; }
+        public decimal? PerSotka { get; set; }
+        [Required, MinLength(3), MaxLength(4000)] public string Reason { get; set; } = "Ждём достижения целевой цены";
+    }
+
+    private sealed class ManualInput
+    {
+        public CatalogSource Source { get; set; } = CatalogSource.Telegram;
+        [Required, MinLength(3), MaxLength(20000)] public string Title { get; set; } = "";
+        public string? Location { get; set; }
+        public decimal? Price { get; set; }
+        public decimal? Area { get; set; }
+        public string? Url { get; set; }
+        public string? ExternalId { get; set; }
+        public string? CadastralNumber { get; set; }
+        public string? Description { get; set; }
+        [Required, MinLength(3), MaxLength(4000)] public string Comment { get; set; } = "";
+    }
+}

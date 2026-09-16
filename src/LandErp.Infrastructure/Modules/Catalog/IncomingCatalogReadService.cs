@@ -9,7 +9,7 @@ namespace LandErp.Infrastructure.Modules.Catalog;
 
 /// <summary>
 /// Read-only projections for Incoming V2. Derives working views from facts already persisted by Catalog/Collection;
-/// it deliberately does not own commands or introduce new persistence.
+/// it deliberately does not own commands or introduce Listing persistence fields.
 /// </summary>
 public sealed class IncomingCatalogReadService(
     IDbContextFactory<LandErpDbContext> factory,
@@ -21,7 +21,7 @@ public sealed class IncomingCatalogReadService(
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         IncomingCatalogFilter baseFilter = filter.Base;
-        Validate(baseFilter, filter.SortField, filter.SortDirection);
+        Validate(filter);
 
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         IQueryable<Listing> organizationItems = db.Listings.AsNoTracking()
@@ -46,11 +46,7 @@ public sealed class IncomingCatalogReadService(
             await incomingItems.CountAsync(item => returnedFromMonitoringIds.Contains(item.Id), cancellationToken));
 
         IQueryable<Listing> query = organizationItems;
-        string[] searchTerms = baseFilter.Text.Trim()
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(12)
-            .ToArray();
+        string[] searchTerms = SearchTerms(baseFilter.Text);
         foreach (string term in searchTerms)
         {
             string pattern = $"%{term}%";
@@ -68,6 +64,13 @@ public sealed class IncomingCatalogReadService(
         if (baseFilter.MaxPrice != null) query = query.Where(item => item.Price <= baseFilter.MaxPrice);
         if (baseFilter.MinAreaSquareMeters != null) query = query.Where(item => item.AreaSquareMeters >= baseFilter.MinAreaSquareMeters);
         if (baseFilter.MaxAreaSquareMeters != null) query = query.Where(item => item.AreaSquareMeters <= baseFilter.MaxAreaSquareMeters);
+        if (filter.MinPricePerSotka != null)
+            query = query.Where(item => item.Price != null && item.AreaSquareMeters > 0
+                && item.Price.Value * 100m / item.AreaSquareMeters.Value >= filter.MinPricePerSotka.Value);
+        if (filter.MaxPricePerSotka != null)
+            query = query.Where(item => item.Price != null && item.AreaSquareMeters > 0
+                && item.Price.Value * 100m / item.AreaSquareMeters.Value <= filter.MaxPricePerSotka.Value);
+        query = IncomingLandTypeClassifier.ApplyFilter(query, filter.LandTypes);
 
         DateTimeOffset now = time.GetUtcNow();
         query = baseFilter.Age switch
@@ -79,13 +82,29 @@ public sealed class IncomingCatalogReadService(
             _ => query
         };
 
+        if (filter.SearchGroupId != null)
+        {
+            Guid groupId = filter.SearchGroupId.Value;
+            IQueryable<Guid> groupListingIds =
+                from observation in db.ListingObservations.AsNoTracking()
+                join job in db.CollectionJobs.AsNoTracking() on observation.JobId equals job.Id
+                join search in db.SearchConfigurations.AsNoTracking() on job.SearchId equals search.Id
+                join group in db.SearchGroups.AsNoTracking() on search.SearchGroupId equals group.Id
+                where job.OrganizationId == context.OrganizationId && search.OrganizationId == context.OrganizationId
+                    && group.OrganizationId == context.OrganizationId && group.Active && group.Id == groupId
+                select observation.ListingId;
+            query = query.Where(item => groupListingIds.Contains(item.Id));
+        }
+
         if (filter.SearchConfigurationId != null)
         {
             Guid searchId = filter.SearchConfigurationId.Value;
             IQueryable<Guid> searchListingIds =
                 from observation in db.ListingObservations.AsNoTracking()
                 join job in db.CollectionJobs.AsNoTracking() on observation.JobId equals job.Id
-                where job.OrganizationId == context.OrganizationId && job.SearchId == searchId
+                join search in db.SearchConfigurations.AsNoTracking() on job.SearchId equals search.Id
+                where job.OrganizationId == context.OrganizationId && search.OrganizationId == context.OrganizationId
+                    && search.Id == searchId
                 select observation.ListingId;
             query = query.Where(item => searchListingIds.Contains(item.Id));
         }
@@ -151,18 +170,26 @@ public sealed class IncomingCatalogReadService(
             bool priceChanged = flags?.PriceChanged ?? false;
             bool returned = flags?.Returned ?? false;
             string[] photos = PhotoUrls(item.PhotosJson);
+            IncomingLandType[] landTypes = IncomingLandTypeClassifier.Classify(item.Title, item.Description);
+            (IncomingCatalogMatchField? matchedField, string? matchedValue) = SearchMatch(item, searchTerms);
             rows[item.Id] = new(item.Id, search?.SearchId, search?.Label, Completeness(item),
-                RowState(item, priceChanged, returned), priceChanged, returned, photos.FirstOrDefault(), photos.Length);
+                RowState(item, priceChanged, returned), priceChanged, returned, photos.FirstOrDefault(), photos.Length,
+                landTypes, matchedField, matchedValue);
             return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId);
         }).ToArray();
 
+        IncomingSearchGroupView[] groups = await db.SearchGroups.AsNoTracking()
+            .Where(item => item.OrganizationId == context.OrganizationId && item.Active)
+            .OrderBy(item => item.SortOrder).ThenBy(item => item.Name).ThenBy(item => item.Id)
+            .Select(item => new IncomingSearchGroupView(item.Id, item.Name, item.SortOrder))
+            .ToArrayAsync(cancellationToken);
         IncomingSearchConfigurationView[] searches = await db.SearchConfigurations.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId && item.Enabled)
             .OrderBy(item => item.Label).ThenBy(item => item.Id)
-            .Select(item => new IncomingSearchConfigurationView(item.Id, item.Label, item.Source))
+            .Select(item => new IncomingSearchConfigurationView(item.Id, item.Label, item.Source, item.SearchGroupId))
             .ToArrayAsync(cancellationToken);
 
-        return new(views, total, summary, searches, rows);
+        return new(views, total, summary, groups, searches, rows);
     }
 
     public async Task<IncomingCatalogDetailRead> ReadDetailAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken)
@@ -185,7 +212,8 @@ public sealed class IncomingCatalogReadService(
             && value.Kind == CatalogEventKind.MonitoringTriggered, cancellationToken);
 
         return new(detail, PhotoUrls(item.PhotosJson), search?.SearchId, search?.Label, Completeness(item),
-            RowState(item, priceChanged, returned), priceChanged, returned);
+            RowState(item, priceChanged, returned), priceChanged, returned,
+            IncomingLandTypeClassifier.Classify(item.Title, item.Description));
     }
 
     private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber, string? caseStage) => new(
@@ -226,15 +254,38 @@ public sealed class IncomingCatalogReadService(
         }
     }
 
+    private static string[] SearchTerms(string text) => text.Trim()
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToArray();
+
+    private static (IncomingCatalogMatchField? Field, string? Value) SearchMatch(Listing item, string[] terms)
+    {
+        if (terms.Length == 0 || string.IsNullOrWhiteSpace(item.SellerName)) return (null, null);
+        foreach (string term in terms)
+        {
+            bool visible = Contains(item.Title, term) || Contains(item.Location, term)
+                || Contains(item.ExternalId, term) || Contains(item.CadastralNumber, term);
+            if (!visible && Contains(item.SellerName, term))
+                return (IncomingCatalogMatchField.SellerName, item.SellerName);
+        }
+        return (null, null);
+    }
+
+    private static bool Contains(string? value, string term) => value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
+
     private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
         ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
 
-    private static void Validate(IncomingCatalogFilter filter, IncomingCatalogSortField sortField, IncomingCatalogSortDirection sortDirection)
+    private static void Validate(IncomingCatalogReadFilter filter)
     {
-        if (filter.Text.Length > 200 || filter.Offset < 0 || filter.Size is < 1 or > 100 || !Enum.IsDefined(filter.Age)
-            || !Enum.IsDefined(sortField) || !Enum.IsDefined(sortDirection)
-            || filter.MinPrice < 0 || filter.MaxPrice < 0 || filter.MinAreaSquareMeters < 0 || filter.MaxAreaSquareMeters < 0
-            || filter.MinPrice > filter.MaxPrice || filter.MinAreaSquareMeters > filter.MaxAreaSquareMeters)
+        IncomingCatalogFilter baseFilter = filter.Base;
+        if (baseFilter.Text.Length > 200 || baseFilter.Offset < 0 || baseFilter.Size is < 1 or > 100 || !Enum.IsDefined(baseFilter.Age)
+            || !Enum.IsDefined(filter.SortField) || !Enum.IsDefined(filter.SortDirection)
+            || baseFilter.MinPrice < 0 || baseFilter.MaxPrice < 0 || baseFilter.MinAreaSquareMeters < 0 || baseFilter.MaxAreaSquareMeters < 0
+            || filter.MinPricePerSotka < 0 || filter.MaxPricePerSotka < 0
+            || baseFilter.MinPrice > baseFilter.MaxPrice || baseFilter.MinAreaSquareMeters > baseFilter.MaxAreaSquareMeters
+            || filter.MinPricePerSotka > filter.MaxPricePerSotka
+            || (filter.LandTypes?.Any(value => !Enum.IsDefined(value)) ?? false))
             throw new ArgumentException("Некорректный диапазон фильтра входящих.");
     }
 }

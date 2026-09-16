@@ -25,6 +25,7 @@ public static class ProcurementServices
         services.AddScoped<IProcurementWorkspace>(provider => provider.GetRequiredService<ProcurementWorkspace>());
         services.AddScoped<ICatalogWorkspace>(provider => provider.GetRequiredService<ProcurementWorkspace>());
         services.AddScoped<IIncomingCatalogReadService, IncomingCatalogReadService>();
+        services.AddScoped<IIncomingFilterPresetService, IncomingFilterPresetService>();
         return services;
     }
 }

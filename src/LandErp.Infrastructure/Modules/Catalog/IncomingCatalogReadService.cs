@@ -187,7 +187,7 @@ public sealed class IncomingCatalogReadService(
             : priceChanged ? IncomingCatalogRowState.PriceChanged
             : IncomingCatalogRowState.Normal;
 
-    private static IReadOnlyList<string> PhotoUrls(string json)
+    private static string[] PhotoUrls(string json)
     {
         try
         {

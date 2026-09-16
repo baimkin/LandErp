@@ -18,7 +18,7 @@ internal static class ProcurementMappings
             new WorkflowStage { Id = "clarify", Name = "Уточнить" }, new WorkflowStage { Id = "monitor", Name = "Наблюдать" },
             new WorkflowStage { Id = "rejected", Name = "Отклонён" }, new WorkflowStage { Id = "pending_head", Name = "У руководителя" },
             new WorkflowStage { Id = "returned", Name = "Возвращён менеджеру" }, new WorkflowStage { Id = "approved", Name = "Дальнейшая работа одобрена" },
-            new WorkflowStage { Id = "negotiation", Name = "Переговоры и проверки" });
+            new WorkflowStage { Id = "negotiation", Name = "Переговоры и проверки" }, new WorkflowStage { Id = "acquired", Name = "Куплено" });
         builder.Entity<Assignment>().ToTable("assignments", "workflow");
         builder.Entity<Assignment>().HasIndex(item => new { item.ObjectType, item.ObjectId }).IsUnique();
         builder.Entity<Assignment>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
@@ -54,6 +54,9 @@ internal static class ProcurementMappings
         builder.Entity<PropertyCase>().Property(item => item.WorkingLocation).HasMaxLength(20000);
         builder.Entity<PropertyCase>().Property(item => item.CadastralNumber).HasMaxLength(128);
         builder.Entity<PropertyCase>().Property(item => item.WorkingPrice).HasPrecision(19, 4);
+        builder.Entity<PropertyCase>().Property(item => item.AcquisitionPrice).HasPrecision(19, 4);
+        builder.Entity<PropertyCase>().Property(item => item.AcquisitionComment).HasMaxLength(4000);
+        builder.Entity<PropertyCase>().HasOne<Employee>().WithMany().HasForeignKey(item => item.AcquiredByEmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCase>().Property(item => item.WorkingAreaSquareMeters).HasPrecision(19, 4);
         builder.Entity<PropertyCase>().Property(item => item.Currency).HasMaxLength(3);
         builder.Entity<PropertyCase>().Property(item => item.FactsProvenance).HasMaxLength(1000);
@@ -65,8 +68,9 @@ internal static class ProcurementMappings
         builder.Entity<PropertyCaseSourceLink>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ActorEmployeeId).OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<CaseNegotiation>().ToTable("negotiations", "procurement");
-        builder.Entity<CaseNegotiation>().Property(item => item.PriceType).HasConversion<string>();
-        builder.Entity<CaseNegotiation>().Property(item => item.Amount).HasPrecision(19, 4);
+        builder.Entity<CaseNegotiation>().Property(item => item.SellerPrice).HasPrecision(19, 4);
+        builder.Entity<CaseNegotiation>().Property(item => item.BuyerOffer).HasPrecision(19, 4);
+        builder.Entity<CaseNegotiation>().Property(item => item.AgreedPrice).HasPrecision(19, 4);
         builder.Entity<CaseNegotiation>().Property(item => item.Currency).HasMaxLength(3);
         builder.Entity<CaseNegotiation>().Property(item => item.Channel).HasMaxLength(128);
         builder.Entity<CaseNegotiation>().Property(item => item.Contact).HasMaxLength(512);
@@ -82,6 +86,7 @@ internal static class ProcurementMappings
         builder.Entity<CaseCheck>().Property(item => item.Level).HasConversion<string>();
         builder.Entity<CaseCheck>().Property(item => item.Status).HasConversion<string>();
         builder.Entity<CaseCheck>().Property(item => item.Title).HasMaxLength(512);
+        builder.Entity<CaseCheck>().Property(item => item.DescriptionSnapshot).HasMaxLength(4000);
         builder.Entity<CaseCheck>().Property(item => item.Result).HasMaxLength(4000);
         builder.Entity<CaseCheck>().Property(item => item.Cost).HasPrecision(19, 4);
         builder.Entity<CaseCheck>().Property(item => item.Currency).HasMaxLength(3);
@@ -89,6 +94,14 @@ internal static class ProcurementMappings
         builder.Entity<CaseCheck>().HasOne<PropertyCase>().WithMany().HasForeignKey(item => item.PropertyCaseId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseCheck>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ResponsibleEmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseCheck>().HasOne<Employee>().WithMany().HasForeignKey(item => item.AuthorEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CaseCheck>().HasOne<CaseCheckTemplateItem>().WithMany().HasForeignKey(item => item.TemplateItemId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<CaseCheckTemplateItem>().ToTable("case_check_template_items", "procurement");
+        builder.Entity<CaseCheckTemplateItem>().Property(item => item.Level).HasConversion<string>();
+        builder.Entity<CaseCheckTemplateItem>().Property(item => item.Title).HasMaxLength(512);
+        builder.Entity<CaseCheckTemplateItem>().Property(item => item.Description).HasMaxLength(4000);
+        builder.Entity<CaseCheckTemplateItem>().HasIndex(item => new { item.OrganizationId, item.Title }).IsUnique();
+        builder.Entity<CaseCheckTemplateItem>().HasIndex(item => new { item.OrganizationId, item.SortOrder });
 
         builder.Entity<StoredFile>().ToTable("stored_files", "foundation", table => table.HasCheckConstraint(
             "ck_stored_files_reference", "(storage_key IS NOT NULL AND external_url IS NULL) OR (storage_key IS NULL AND external_url IS NOT NULL) OR status IN ('PendingUpload', 'UploadFailed')"));
@@ -102,15 +115,18 @@ internal static class ProcurementMappings
         builder.Entity<StoredFile>().HasOne<Employee>().WithMany().HasForeignKey(item => item.CreatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<CaseAttachment>().ToTable("case_attachments", "procurement", table => table.HasCheckConstraint(
-            "ck_case_attachments_owner", "(owner_type = 'Case' AND negotiation_id IS NULL AND check_id IS NULL) OR (owner_type = 'Negotiation' AND negotiation_id IS NOT NULL AND check_id IS NULL) OR (owner_type = 'Check' AND negotiation_id IS NULL AND check_id IS NOT NULL)"));
+            "ck_case_attachments_owner", "(owner_type = 'Case' AND negotiation_id IS NULL AND check_id IS NULL AND inspection_id IS NULL AND inspection_item_id IS NULL) OR (owner_type = 'Negotiation' AND negotiation_id IS NOT NULL AND check_id IS NULL AND inspection_id IS NULL AND inspection_item_id IS NULL) OR (owner_type = 'Check' AND negotiation_id IS NULL AND check_id IS NOT NULL AND inspection_id IS NULL AND inspection_item_id IS NULL) OR (owner_type = 'Inspection' AND negotiation_id IS NULL AND check_id IS NULL AND inspection_id IS NOT NULL AND inspection_item_id IS NULL) OR (owner_type = 'InspectionItem' AND negotiation_id IS NULL AND check_id IS NULL AND inspection_id IS NULL AND inspection_item_id IS NOT NULL)"));
         builder.Entity<CaseAttachment>().Property(item => item.OwnerType).HasConversion<string>();
         builder.Entity<CaseAttachment>().Property(item => item.Kind).HasConversion<string>();
         builder.Entity<CaseAttachment>().Property(item => item.Label).HasMaxLength(512);
+        builder.Entity<CaseAttachment>().Property(item => item.Description).HasMaxLength(4000);
         builder.Entity<CaseAttachment>().HasIndex(item => new { item.PropertyCaseId, item.RecordedAt });
         builder.Entity<CaseAttachment>().HasOne<PropertyCase>().WithMany().HasForeignKey(item => item.PropertyCaseId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseAttachment>().HasOne<StoredFile>().WithMany().HasForeignKey(item => item.StoredFileId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseAttachment>().HasOne<CaseNegotiation>().WithMany().HasForeignKey(item => item.NegotiationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseAttachment>().HasOne<CaseCheck>().WithMany().HasForeignKey(item => item.CheckId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CaseAttachment>().HasOne<SiteInspection>().WithMany().HasForeignKey(item => item.InspectionId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CaseAttachment>().HasOne<SiteInspectionItem>().WithMany().HasForeignKey(item => item.InspectionItemId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseAttachment>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ActorEmployeeId).OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<PropertyCaseFactRevision>().ToTable("case_fact_revisions", "procurement");
@@ -120,5 +136,36 @@ internal static class ProcurementMappings
         builder.Entity<PropertyCaseFactRevision>().HasOne<PropertyCase>().WithMany().HasForeignKey(item => item.PropertyCaseId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCaseFactRevision>().HasOne<Listing>().WithMany().HasForeignKey(item => item.CatalogItemId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCaseFactRevision>().HasOne<Employee>().WithMany().HasForeignKey(item => item.VerifiedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<InspectionTemplateItem>().ToTable("inspection_template_items", "procurement");
+        builder.Entity<InspectionTemplateItem>().Property(item => item.AnswerType).HasConversion<string>();
+        builder.Entity<InspectionTemplateItem>().Property(item => item.Key).HasMaxLength(128);
+        builder.Entity<InspectionTemplateItem>().Property(item => item.Title).HasMaxLength(512);
+        builder.Entity<InspectionTemplateItem>().Property(item => item.OptionsJson).HasColumnType("jsonb");
+        builder.Entity<InspectionTemplateItem>().Property(item => item.Unit).HasMaxLength(64);
+        builder.Entity<InspectionTemplateItem>().Property(item => item.NormalAnswer).HasMaxLength(512);
+        builder.Entity<InspectionTemplateItem>().HasIndex(item => new { item.OrganizationId, item.Key }).IsUnique();
+        builder.Entity<InspectionTemplateItem>().HasIndex(item => new { item.OrganizationId, item.SortOrder });
+
+        builder.Entity<SiteInspection>().ToTable("site_inspections", "procurement");
+        builder.Entity<SiteInspection>().Property(item => item.Status).HasConversion<string>();
+        builder.Entity<SiteInspection>().Property(item => item.OverallConclusion).HasMaxLength(4000);
+        builder.Entity<SiteInspection>().Property(item => item.PreliminaryDecision).HasMaxLength(1000);
+        builder.Entity<SiteInspection>().HasIndex(item => item.PropertyCaseId).IsUnique();
+        builder.Entity<SiteInspection>().HasOne<PropertyCase>().WithMany().HasForeignKey(item => item.PropertyCaseId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<SiteInspection>().HasOne<Employee>().WithMany().HasForeignKey(item => item.InspectorEmployeeId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<SiteInspectionItem>().ToTable("site_inspection_items", "procurement");
+        builder.Entity<SiteInspectionItem>().Property(item => item.AnswerTypeSnapshot).HasConversion<string>();
+        builder.Entity<SiteInspectionItem>().Property(item => item.Status).HasConversion<string>();
+        builder.Entity<SiteInspectionItem>().Property(item => item.TitleSnapshot).HasMaxLength(512);
+        builder.Entity<SiteInspectionItem>().Property(item => item.OptionsJsonSnapshot).HasColumnType("jsonb");
+        builder.Entity<SiteInspectionItem>().Property(item => item.UnitSnapshot).HasMaxLength(64);
+        builder.Entity<SiteInspectionItem>().Property(item => item.NormalAnswerSnapshot).HasMaxLength(512);
+        builder.Entity<SiteInspectionItem>().Property(item => item.Answer).HasMaxLength(4000);
+        builder.Entity<SiteInspectionItem>().Property(item => item.Note).HasMaxLength(4000);
+        builder.Entity<SiteInspectionItem>().HasIndex(item => new { item.InspectionId, item.TemplateItemId }).IsUnique();
+        builder.Entity<SiteInspectionItem>().HasOne<SiteInspection>().WithMany().HasForeignKey(item => item.InspectionId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<SiteInspectionItem>().HasOne<InspectionTemplateItem>().WithMany().HasForeignKey(item => item.TemplateItemId).OnDelete(DeleteBehavior.Restrict);
     }
 }

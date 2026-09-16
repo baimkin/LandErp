@@ -423,6 +423,10 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             .OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.Id).ToArrayAsync(cancellationToken);
         CaseCheck[] checks = await db.CaseChecks.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .OrderBy(item => item.Level).ThenBy(item => item.Title).ToArrayAsync(cancellationToken);
+        CaseCheckTemplateItem[] checkTemplates = await EnsureCheckTemplatesAsync(db, context.OrganizationId, cancellationToken);
+        SiteInspection? inspection = await db.SiteInspections.AsNoTracking().SingleOrDefaultAsync(item => item.PropertyCaseId == caseId, cancellationToken);
+        SiteInspectionItem[] inspectionItems = inspection == null ? [] : await db.SiteInspectionItems.AsNoTracking()
+            .Where(item => item.InspectionId == inspection.Id).OrderBy(item => item.SortOrderSnapshot).ToArrayAsync(cancellationToken);
         var attachments = await (from link in db.CaseAttachments.AsNoTracking()
                                  join file in db.StoredFiles.AsNoTracking() on link.StoredFileId equals file.Id
                                  where link.PropertyCaseId == caseId
@@ -439,17 +443,28 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             observations.Select(item => new ObservationView(item.Id, item.ListingId, item.ObservedAt, item.RecordedAt,
                 JsonSerializer.Deserialize<ListingData>(item.PayloadJson, CollectionJson.Options)!, JsonSerializer.Deserialize<string[]>(item.ChangesJson)!)).ToArray(),
             heads.Where(item => item.EmployeeId != context.EmployeeId).ToArray(), managers, row.Case.ManagerEmployeeId, manager, head,
-            negotiations.Select(item => new NegotiationView(item.Id, item.PriceType, item.Amount, item.Currency,
-                item.Channel, item.Contact, item.Outcome, item.Conditions, item.Comment, item.NextStep,
+            negotiations.Select(item => new NegotiationView(item.Id, item.SellerPrice, item.BuyerOffer, item.AgreedPrice, item.Currency,
+                item.Channel, item.Contact, item.Outcome, item.Conditions, item.Comment, item.NextStep, item.NextStepDueAt,
                 names.GetValueOrDefault(item.AuthorEmployeeId, "Сотрудник"), item.EffectiveAt, item.RecordedAt)).ToArray(),
             checks.Select(item => new CheckView(item.Id, item.Level, item.Title, item.Status,
+                item.ResponsibleEmployeeId,
                 item.ResponsibleEmployeeId == null ? null : names.GetValueOrDefault(item.ResponsibleEmployeeId.Value, "Сотрудник"),
-                item.DueAt, item.Cost, item.Currency, item.Result, item.Blocker, item.Version)).ToArray(),
+                item.DueAt, item.Cost, item.Currency, item.Result, item.Blocker, item.Version, item.DescriptionSnapshot,
+                item.TemplateItemId, item.TemplateItemVersion)).ToArray(),
             attachments.Select(item => new AttachmentView(item.Link.Id, item.Link.OwnerType,
-                item.Link.OwnerType == CaseAttachmentOwner.Negotiation ? item.Link.NegotiationId : item.Link.OwnerType == CaseAttachmentOwner.Check ? item.Link.CheckId : null,
-                item.Link.Kind, item.Link.Label, item.File.OriginalName, item.File.ContentType, item.File.SizeBytes,
+                AttachmentOwnerId(item.Link), item.Link.Kind, item.Link.Label, item.Link.Description,
+                AttachmentOwnerLabel(item.Link, negotiations, checks, inspectionItems), item.File.OriginalName, item.File.ContentType, item.File.SizeBytes,
                 item.File.Status, item.File.ExternalUrl != null, item.Link.RecordedAt)).ToArray(),
-            Discrepancies(row.Case, sources), canManageDossier, canManageBlockers);
+            Discrepancies(row.Case, sources),
+            checkTemplates.Select(item => new CheckTemplateView(item.Id, item.Title, item.Level, item.Description, item.SortOrder, item.Active, item.Version)).ToArray(),
+            inspection == null ? null : new InspectionView(inspection.Id, inspection.Status, inspection.OverallConclusion, inspection.PreliminaryDecision,
+                names.GetValueOrDefault(inspection.InspectorEmployeeId, "Сотрудник"), inspection.StartedAt, inspection.CompletedAt, inspection.Version,
+                inspectionItems.Select(item => new InspectionItemView(item.Id, item.TemplateItemId, item.TemplateItemVersion, item.TitleSnapshot,
+                    item.SortOrderSnapshot, item.AnswerTypeSnapshot, JsonSerializer.Deserialize<string[]>(item.OptionsJsonSnapshot) ?? [],
+                    item.UnitSnapshot, item.NormalAnswerSnapshot, item.AllowAttachmentsSnapshot, item.RequiredSnapshot, item.Status,
+                    item.Answer, item.Note, item.Version)).ToArray()),
+            row.Case.CadastralNumber, row.Case.AcquisitionPrice, row.Case.AcquisitionDate, row.Case.AcquisitionComment,
+            canManageDossier, canManageBlockers);
     }
 
     public async Task<Guid?> ResolveLegacyListingAsync(Subject subject, Guid listingId, CancellationToken cancellationToken)
@@ -601,26 +616,30 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
     public async Task AddNegotiationAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken)
     {
-        if (!Enum.IsDefined(command.PriceType) || command.Amount <= 0) throw new ArgumentException("Укажите тип и положительную цену переговоров.");
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await RequireDossierPermissionAsync(subject, cancellationToken);
         if (command.EffectiveAt.Offset != TimeSpan.Zero || command.EffectiveAt > time.GetUtcNow().AddMinutes(5))
             throw new ArgumentException("Укажите фактическое время контакта UTC.");
+        if (command.NextStepDueAt?.Offset != null && command.NextStepDueAt.Value.Offset != TimeSpan.Zero)
+            throw new ArgumentException("Срок следующего шага должен быть указан в UTC.");
+        decimal? sellerPrice = Price(command.SellerPrice); decimal? buyerOffer = Price(command.BuyerOffer); decimal? agreedPrice = Price(command.AgreedPrice);
+        string channel = Optional(command.Channel, 128) ?? ""; string contact = Optional(command.Contact, 512) ?? "";
+        string outcome = Optional(command.Outcome, 1000) ?? ""; string conditions = Optional(command.Conditions, 4000) ?? "";
+        string comment = Optional(command.Comment, 4000) ?? ""; string nextStep = Optional(command.NextStep, 1000) ?? "";
+        if (sellerPrice == null && buyerOffer == null && agreedPrice == null && channel.Length == 0 && contact.Length == 0
+            && outcome.Length == 0 && conditions.Length == 0 && comment.Length == 0 && nextStep.Length == 0)
+            throw new ArgumentException("Зафиксируйте хотя бы результат, комментарий, следующий шаг или цену.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
         Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
-        if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
         if (row.Case.StageId is "rejected" or "monitor") throw new ArgumentException("Сначала возобновите PropertyCase.");
         CaseNegotiation negotiation = new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, PropertyCaseId = row.Case.Id,
-            PriceType = command.PriceType, Amount = DataConventions.RoundRubles(command.Amount), Currency = "RUB",
-            Channel = Required(command.Channel, 2, 128, "Укажите канал контакта."),
-            Contact = Required(command.Contact, 2, 512, "Укажите контакт или сторону переговоров."),
-            Outcome = Required(command.Outcome, 2, 1000, "Укажите результат переговоров."),
-            Conditions = Optional(command.Conditions, 4000) ?? "", Comment = Optional(command.Comment, 4000) ?? "",
-            NextStep = Required(command.NextStep, 2, 1000, "Укажите следующий шаг."), AuthorEmployeeId = context.EmployeeId,
+            SellerPrice = sellerPrice, BuyerOffer = buyerOffer, AgreedPrice = agreedPrice, Currency = "RUB",
+            Channel = channel, Contact = contact, Outcome = outcome, Conditions = conditions, Comment = comment,
+            NextStep = nextStep, NextStepDueAt = command.NextStepDueAt, AuthorEmployeeId = context.EmployeeId,
             EffectiveAt = command.EffectiveAt, RecordedAt = time.GetUtcNow()
         };
         db.CaseNegotiations.Add(negotiation);
@@ -628,11 +647,11 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         db.BusinessTimeline.Add(new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
-            ActorEmployeeId = context.EmployeeId, Kind = "Negotiation", Title = NegotiationLabel(command.PriceType, negotiation.Amount),
-            Body = negotiation.Outcome + "\nСледующий шаг: " + negotiation.NextStep, EffectiveAt = negotiation.EffectiveAt, RecordedAt = negotiation.RecordedAt
+            ActorEmployeeId = context.EmployeeId, Kind = "Negotiation", Title = NegotiationLabel(negotiation),
+            Body = NegotiationBody(negotiation), EffectiveAt = negotiation.EffectiveAt, DueAt = negotiation.NextStepDueAt, RecordedAt = negotiation.RecordedAt
         });
         OrganizationWorkspace.AddAudit(db, context, subject, "CaseNegotiationAdded", "PropertyCase", row.Case.Id,
-            new { negotiation.PriceType, negotiation.Amount, negotiation.EffectiveAt }, correlationId);
+            new { negotiation.SellerPrice, negotiation.BuyerOffer, negotiation.AgreedPrice, negotiation.EffectiveAt }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
@@ -661,7 +680,10 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         bool blockerChanged = command.Blocker != (check?.Blocker ?? false);
         if (blockerChanged) await access.RequireAsync(subject, Permissions.HeadDecide, cancellationToken);
         if (check != null && check.Version != command.ExpectedCheckVersion) throw new DbUpdateConcurrencyException();
-        string title = Required(command.Title, 3, 512, "Укажите название проверки.");
+        CaseCheckTemplateItem? template = command.TemplateItemId == null ? null : await db.CaseCheckTemplateItems.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == command.TemplateItemId && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken)
+            ?? throw new AccessDeniedException();
+        string title = Required(template?.Title ?? command.Title, 3, 512, "Укажите название проверки.");
         string result = command.Status == CaseCheckStatus.Planned ? Optional(command.Result, 4000) ?? ""
             : Required(command.Result, 3, 4000, "Укажите результат проверки.");
         if (check == null)
@@ -670,11 +692,17 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                 AuthorEmployeeId = context.EmployeeId, RecordedAt = time.GetUtcNow() };
             db.CaseChecks.Add(check);
         }
-        check.Level = command.Level; check.Title = title; check.Status = command.Status;
-        check.ResponsibleEmployeeId = command.ResponsibleEmployeeId; check.DueAt = command.DueAt;
+        check.Level = template?.Level ?? command.Level; check.Title = title; check.Status = command.Status;
+        if (check.Id == Guid.Empty || command.UpdateResponsible || check.ResponsibleEmployeeId == null && command.ResponsibleEmployeeId != null)
+            check.ResponsibleEmployeeId = command.ResponsibleEmployeeId;
+        if (template != null && check.TemplateItemId == null)
+        {
+            check.TemplateItemId = template.Id; check.TemplateItemVersion = template.Version; check.DescriptionSnapshot = template.Description;
+        }
+        else if (check.TemplateItemId == null) check.DescriptionSnapshot = Optional(check.DescriptionSnapshot, 4000) ?? "";
+        check.DueAt = command.DueAt;
         check.Cost = command.Cost == null ? null : DataConventions.RoundRubles(command.Cost.Value);
         check.Result = result; check.Blocker = command.Blocker;
-        db.Entry(row.Case).Property(item => item.Version).IsModified = true;
         db.BusinessTimeline.Add(new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
@@ -687,6 +715,159 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task SaveCheckTemplateAsync(Subject subject, SaveCheckTemplate command, string correlationId, CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(command.Level) || command.SortOrder < 0) throw new ArgumentException("Некорректные параметры шаблона проверки.");
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await RequireDossierPermissionAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        CaseCheckTemplateItem? item = null;
+        if (command.Id != null)
+        {
+            item = await db.CaseCheckTemplateItems.SingleOrDefaultAsync(
+                value => value.Id == command.Id && value.OrganizationId == context.OrganizationId, cancellationToken)
+                ?? throw new AccessDeniedException();
+        }
+        if (item != null && item.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException();
+        item ??= new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId };
+        if (command.Id == null) db.CaseCheckTemplateItems.Add(item);
+        item.Title = Required(command.Title, 3, 512, "Укажите название шаблона проверки.");
+        item.Level = command.Level; item.Description = Optional(command.Description, 4000) ?? "";
+        item.SortOrder = command.SortOrder; item.Active = command.Active;
+        OrganizationWorkspace.AddAudit(db, context, subject, "CaseCheckTemplateSaved", "CaseCheckTemplateItem", item.Id,
+            new { item.Title, item.Level, item.SortOrder, item.Active }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SaveInspectionTemplateAsync(Subject subject, SaveInspectionTemplate command, string correlationId, CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(command.AnswerType) || command.SortOrder < 0) throw new ArgumentException("Некорректные параметры пункта осмотра.");
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await RequireDossierPermissionAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        InspectionTemplateItem? item = null;
+        if (command.Id != null)
+        {
+            item = await db.InspectionTemplateItems.SingleOrDefaultAsync(
+                value => value.Id == command.Id && value.OrganizationId == context.OrganizationId, cancellationToken)
+                ?? throw new AccessDeniedException();
+        }
+        if (item != null && item.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException();
+        item ??= new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId };
+        if (command.Id == null) db.InspectionTemplateItems.Add(item);
+        item.Key = Required(command.Key, 2, 128, "Укажите стабильный код пункта.");
+        item.Title = Required(command.Title, 3, 512, "Укажите название пункта."); item.SortOrder = command.SortOrder;
+        item.AnswerType = command.AnswerType; item.OptionsJson = JsonSerializer.Serialize(command.Options.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToArray());
+        if (item.AnswerType == InspectionAnswerType.Choice && command.Options.Length == 0) throw new ArgumentException("Добавьте варианты выбора.");
+        item.Unit = Optional(command.Unit, 64) ?? ""; item.NormalAnswer = Optional(command.NormalAnswer, 512) ?? "";
+        item.AllowAttachments = command.AllowAttachments; item.Required = command.Required; item.Active = command.Active;
+        OrganizationWorkspace.AddAudit(db, context, subject, "InspectionTemplateSaved", "InspectionTemplateItem", item.Id,
+            new { item.Key, item.Title, item.SortOrder, item.AnswerType, item.Active }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<Guid> SaveInspectionAsync(Subject subject, SaveInspection command, string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await RequireDossierPermissionAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
+        if (row.Case.StageId is "rejected" or "monitor" or "acquired") throw new ArgumentException("Осмотр нельзя изменять в текущем состоянии PropertyCase.");
+        SiteInspection? inspection = await db.SiteInspections.SingleOrDefaultAsync(item => item.PropertyCaseId == row.Case.Id, cancellationToken);
+        if (inspection == null)
+        {
+            if (command.InspectionId != null) throw new DbUpdateConcurrencyException();
+            InspectionTemplateItem[] templates = await EnsureInspectionTemplateAsync(db, context.OrganizationId, cancellationToken);
+            DateTimeOffset now = time.GetUtcNow(); inspection = new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, PropertyCaseId = row.Case.Id,
+                InspectorEmployeeId = context.EmployeeId, StartedAt = now
+            };
+            db.SiteInspections.Add(inspection);
+            db.SiteInspectionItems.AddRange(templates.Where(item => item.Active).Select(item => new SiteInspectionItem
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, InspectionId = inspection.Id,
+                TemplateItemId = item.Id, TemplateItemVersion = item.Version, TitleSnapshot = item.Title,
+                SortOrderSnapshot = item.SortOrder, AnswerTypeSnapshot = item.AnswerType, OptionsJsonSnapshot = item.OptionsJson,
+                UnitSnapshot = item.Unit, NormalAnswerSnapshot = item.NormalAnswer, AllowAttachmentsSnapshot = item.AllowAttachments,
+                RequiredSnapshot = item.Required
+            }));
+            OrganizationWorkspace.AddAudit(db, context, subject, "SiteInspectionStarted", "PropertyCase", row.Case.Id,
+                new { InspectionId = inspection.Id }, correlationId);
+            await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return inspection.Id;
+        }
+        if (command.InspectionId != inspection.Id || command.ExpectedInspectionVersion != inspection.Version) throw new DbUpdateConcurrencyException();
+        if (inspection.Status == InspectionStatus.Completed) throw new ArgumentException("Завершённый осмотр доступен только для чтения.");
+        SiteInspectionItem[] items = await db.SiteInspectionItems.Where(item => item.InspectionId == inspection.Id).ToArrayAsync(cancellationToken);
+        foreach (InspectionAnswer answer in command.Answers)
+        {
+            SiteInspectionItem item = items.SingleOrDefault(value => value.Id == answer.ItemId) ?? throw new AccessDeniedException();
+            if (item.Version != answer.ExpectedItemVersion || !Enum.IsDefined(answer.Status)) throw new DbUpdateConcurrencyException();
+            string value = Optional(answer.Answer, 4000) ?? ""; string note = Optional(answer.Note, 4000) ?? "";
+            if (answer.Status == InspectionItemStatus.Answered && value.Length == 0) throw new ArgumentException("Укажите ответ для обработанного пункта.");
+            item.Status = answer.Status; item.Answer = value; item.Note = note;
+        }
+        inspection.OverallConclusion = Optional(command.OverallConclusion, 4000) ?? "";
+        inspection.PreliminaryDecision = Optional(command.PreliminaryDecision, 1000) ?? "";
+        if (command.Complete)
+        {
+            if (items.Any(item => item.RequiredSnapshot && item.Status == InspectionItemStatus.Unanswered))
+                throw new ArgumentException("Обработайте обязательные пункты осмотра.");
+            inspection.OverallConclusion = Required(command.OverallConclusion, 3, 4000, "Укажите общий вывод осмотра.");
+            inspection.Status = InspectionStatus.Completed; inspection.CompletedAt = time.GetUtcNow();
+            db.BusinessTimeline.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
+                ActorEmployeeId = context.EmployeeId, Kind = "Inspection", Title = "Осмотр участка завершён",
+                Body = inspection.OverallConclusion, RecordedAt = inspection.CompletedAt.Value
+            });
+        }
+        OrganizationWorkspace.AddAudit(db, context, subject, command.Complete ? "SiteInspectionCompleted" : "SiteInspectionDraftSaved",
+            "PropertyCase", row.Case.Id, new { InspectionId = inspection.Id, inspection.Status }, correlationId);
+        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return inspection.Id;
+    }
+
+    public async Task MarkAcquiredAsync(Subject subject, MarkCaseAcquired command, string correlationId, CancellationToken cancellationToken)
+    {
+        if (command.ActualPrice <= 0) throw new ArgumentException("Фактическая цена покупки должна быть положительной.");
+        if (command.AcquisitionDate > DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime.AddDays(1))) throw new ArgumentException("Дата покупки не может быть в будущем.");
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await RequireDossierPermissionAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
+        decimal price = DataConventions.RoundRubles(command.ActualPrice); string comment = Optional(command.Comment, 4000) ?? "";
+        if (row.Case.StageId == "acquired")
+        {
+            if (row.Case.AcquisitionPrice == price && row.Case.AcquisitionDate == command.AcquisitionDate && row.Case.AcquisitionComment == comment) return;
+            throw new ArgumentException("PropertyCase уже отмечен как купленный.");
+        }
+        if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
+        if (row.Case.StageId is "rejected" or "monitor") throw new ArgumentException("Сначала возобновите PropertyCase.");
+        string from = row.Case.StageId; DateTimeOffset now = time.GetUtcNow();
+        row.Case.StageId = "acquired"; row.Case.AcquisitionPrice = price; row.Case.AcquisitionDate = command.AcquisitionDate;
+        row.Case.AcquisitionComment = comment; row.Case.AcquiredByEmployeeId = context.EmployeeId; row.Case.AcquiredAt = now;
+        db.Entry(row.Case).Property(item => item.Version).IsModified = true; row.Task.Completed = true;
+        db.WorkflowTransitions.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
+            FromStageId = from, ToStageId = "acquired", Action = "Acquire", ActorEmployeeId = context.EmployeeId,
+            ObjectVersion = row.Case.Version + 1, RecordedAt = now
+        });
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
+            ActorEmployeeId = context.EmployeeId, Kind = "Acquisition", Title = $"Объект куплен за {price:N0} ₽",
+            Body = $"Дата покупки / регистрации: {command.AcquisitionDate:dd.MM.yyyy}" + (comment.Length == 0 ? "" : "\n" + comment),
+            EffectiveAt = new DateTimeOffset(command.AcquisitionDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero), RecordedAt = now
+        });
+        OrganizationWorkspace.AddAudit(db, context, subject, "PropertyCaseAcquired", "PropertyCase", row.Case.Id,
+            new { ActualPrice = price, command.AcquisitionDate, Comment = comment, From = from, To = "acquired" }, correlationId);
+        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task<Guid> AddAttachmentAsync(Subject subject, AddCaseAttachment command, string correlationId, CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(command.OwnerType) || !Enum.IsDefined(command.Kind)) throw new ArgumentException("Некорректный тип вложения.");
@@ -696,9 +877,14 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
         Guid? negotiationId = command.OwnerType == CaseAttachmentOwner.Negotiation ? command.OwnerId : null;
         Guid? checkId = command.OwnerType == CaseAttachmentOwner.Check ? command.OwnerId : null;
+        Guid? inspectionId = command.OwnerType == CaseAttachmentOwner.Inspection ? command.OwnerId : null;
+        Guid? inspectionItemId = command.OwnerType == CaseAttachmentOwner.InspectionItem ? command.OwnerId : null;
         if (command.OwnerType == CaseAttachmentOwner.Case && command.OwnerId != null
             || command.OwnerType == CaseAttachmentOwner.Negotiation && (negotiationId == null || !await db.CaseNegotiations.AnyAsync(item => item.Id == negotiationId && item.PropertyCaseId == row.Case.Id, cancellationToken))
-            || command.OwnerType == CaseAttachmentOwner.Check && (checkId == null || !await db.CaseChecks.AnyAsync(item => item.Id == checkId && item.PropertyCaseId == row.Case.Id, cancellationToken)))
+            || command.OwnerType == CaseAttachmentOwner.Check && (checkId == null || !await db.CaseChecks.AnyAsync(item => item.Id == checkId && item.PropertyCaseId == row.Case.Id, cancellationToken))
+            || command.OwnerType == CaseAttachmentOwner.Inspection && (inspectionId == null || !await db.SiteInspections.AnyAsync(item => item.Id == inspectionId && item.PropertyCaseId == row.Case.Id, cancellationToken))
+            || command.OwnerType == CaseAttachmentOwner.InspectionItem && (inspectionItemId == null || !await db.SiteInspectionItems.AnyAsync(item => item.Id == inspectionItemId
+                && db.SiteInspections.Any(inspection => inspection.Id == item.InspectionId && inspection.PropertyCaseId == row.Case.Id), cancellationToken)))
             throw new AccessDeniedException();
         string? externalUrl = Optional(command.ExternalUrl, 2000);
         bool external = externalUrl != null;
@@ -722,8 +908,10 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         db.CaseAttachments.Add(new()
         {
             Id = attachmentId, OrganizationId = context.OrganizationId, PropertyCaseId = row.Case.Id, StoredFileId = storedId,
-            OwnerType = command.OwnerType, NegotiationId = negotiationId, CheckId = checkId, Kind = command.Kind,
-            Label = Required(command.Label, 2, 512, "Укажите понятное название вложения."), ActorEmployeeId = context.EmployeeId, RecordedAt = now
+            OwnerType = command.OwnerType, NegotiationId = negotiationId, CheckId = checkId, InspectionId = inspectionId,
+            InspectionItemId = inspectionItemId, Kind = command.Kind,
+            Label = Required(command.Label, 2, 512, "Укажите понятное название вложения."),
+            Description = Optional(command.Description, 4000) ?? "", ActorEmployeeId = context.EmployeeId, RecordedAt = now
         });
         await db.SaveChangesAsync(cancellationToken);
         if (!external)
@@ -766,6 +954,34 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         if (value.File.ExternalUrl != null) return new(value.File.OriginalName, value.File.ContentType, null, value.File.ExternalUrl);
         if (value.File.StorageKey == null) throw new InvalidOperationException("Вложение повреждено.");
         return new(value.File.OriginalName, value.File.ContentType, await fileStorage.ReadAsync(value.File.StorageKey, cancellationToken), null);
+    }
+
+    public async Task RetryAttachmentAsync(Subject subject, RetryCaseAttachment command, string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await RequireDossierPermissionAsync(subject, cancellationToken);
+        if (command.Content.Length == 0 || command.Content.Length > 8 * 1024 * 1024) throw new ArgumentException("Файл должен быть непустым и не больше 8 МБ.");
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        var value = await (from link in db.CaseAttachments join file in db.StoredFiles on link.StoredFileId equals file.Id
+                           where link.Id == command.AttachmentId && link.PropertyCaseId == command.CaseId && link.OrganizationId == context.OrganizationId
+                           select new { Link = link, File = file }).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
+        if (!await VisibleCases(db, context).AnyAsync(item => item.Case.Id == command.CaseId, cancellationToken)) throw new AccessDeniedException();
+        if (value.File.Status is not (StoredFileStatus.UploadFailed or StoredFileStatus.PendingUpload)) throw new ArgumentException("Повторная загрузка этому вложению не требуется.");
+        string contentType = Required(command.ContentType, 3, 256, "Укажите MIME-тип файла.");
+        if (!AllowedContentType(value.Link.Kind, contentType)) throw new ArgumentException("Тип файла не разрешён для выбранного вложения.");
+        try
+        {
+            FileWriteResult write = await fileStorage.WriteAsync(value.File.Id, command.Content, cancellationToken);
+            value.File.OriginalName = Required(command.OriginalName, 1, 512, "Укажите имя файла."); value.File.ContentType = contentType;
+            value.File.StorageKey = write.StorageKey; value.File.Sha256 = write.Sha256; value.File.SizeBytes = write.SizeBytes; value.File.Status = StoredFileStatus.Available;
+            OrganizationWorkspace.AddAudit(db, context, subject, "CaseAttachmentUploadRetried", "PropertyCase", command.CaseId,
+                new { command.AttachmentId, value.Link.OwnerType }, correlationId);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            value.File.Status = StoredFileStatus.UploadFailed; await db.SaveChangesAsync(CancellationToken.None); throw;
+        }
     }
 
     public async Task ApplySourceFactAsync(Subject subject, ApplySourceFact command, string correlationId, CancellationToken cancellationToken)
@@ -828,6 +1044,65 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             && !await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken)) throw new AccessDeniedException();
     }
 
+    private static async Task<InspectionTemplateItem[]> EnsureInspectionTemplateAsync(LandErpDbContext db, Guid organizationId, CancellationToken cancellationToken)
+    {
+        InspectionTemplateItem[] existing = await db.InspectionTemplateItems.Where(item => item.OrganizationId == organizationId)
+            .OrderBy(item => item.SortOrder).ToArrayAsync(cancellationToken);
+        if (existing.Length > 0) return existing;
+        (string Key, string Title, InspectionAnswerType Type, string Unit, string Normal, string[] Options)[] defaults =
+        [
+            ("road-settlement", "Дорога до ближайшего населённого пункта", InspectionAnswerType.Choice, "", "Асфальт", ["Асфальт", "Щебень", "Грунт", "Плохая / сезонная"]),
+            ("road-plot", "Дорога до участка", InspectionAnswerType.Number, "м", "", []),
+            ("terrain", "Рельеф участка", InspectionAnswerType.Choice, "", "Ровный", ["Ровный", "Небольшой уклон", "Сильный уклон", "Низина"]),
+            ("near-center", "Ближайший центр / население", InspectionAnswerType.Text, "", "", []),
+            ("big-city", "Расстояние до крупного города", InspectionAnswerType.Number, "км", "", []),
+            ("neighbors", "Наличие соседей", InspectionAnswerType.Boolean, "", "true", []),
+            ("village-level", "Уровень деревни", InspectionAnswerType.Choice, "", "Высокий", ["Высокий", "Средний", "Низкий", "Нужно уточнить"]),
+            ("shops", "Наличие магазинов / ТЦ", InspectionAnswerType.Boolean, "", "true", []),
+            ("water", "Наличие водоёмов", InspectionAnswerType.Boolean, "", "true", []),
+            ("lep", "Расстояние до ЛЭП", InspectionAnswerType.Number, "м", "", []),
+            ("gas", "Магистральный газ", InspectionAnswerType.Boolean, "", "true", []),
+            ("overgrowth", "Зарастание участка", InspectionAnswerType.Percentage, "%", "", []),
+            ("forest", "Лес на участке", InspectionAnswerType.Percentage, "%", "", []),
+            ("swamp", "На участке болото", InspectionAnswerType.Boolean, "", "false", []),
+            ("through-plots", "Проезд через другие участки", InspectionAnswerType.Boolean, "", "false", []),
+            ("dead-village", "Мёртвая деревня / нет соседей", InspectionAnswerType.Boolean, "", "false", []),
+            ("bad-objects", "Свалка / полигон / МСЗ / военная база", InspectionAnswerType.Boolean, "", "false", []),
+            ("animal-burial", "Скотомогильник", InspectionAnswerType.Boolean, "", "false", []),
+            ("cemetery", "Кладбище", InspectionAnswerType.Boolean, "", "false", []),
+            ("industrial-1km", "Промышленные объекты / свалки до 1 км", InspectionAnswerType.Boolean, "", "false", [])
+        ];
+        InspectionTemplateItem[] created = defaults.Select((value, index) => new InspectionTemplateItem
+        {
+            Id = DataConventions.NewId(), OrganizationId = organizationId, Key = value.Key, Title = value.Title,
+            SortOrder = (index + 1) * 10, AnswerType = value.Type, Unit = value.Unit, NormalAnswer = value.Normal,
+            OptionsJson = JsonSerializer.Serialize(value.Options), AllowAttachments = true, Required = true, Active = true
+        }).ToArray();
+        db.InspectionTemplateItems.AddRange(created); await db.SaveChangesAsync(cancellationToken); return created;
+    }
+
+    private static async Task<CaseCheckTemplateItem[]> EnsureCheckTemplatesAsync(LandErpDbContext db, Guid organizationId, CancellationToken cancellationToken)
+    {
+        CaseCheckTemplateItem[] existing = await db.CaseCheckTemplateItems.Where(item => item.OrganizationId == organizationId)
+            .OrderBy(item => item.SortOrder).ThenBy(item => item.Title).ToArrayAsync(cancellationToken);
+        if (existing.Length > 0) return existing;
+        (string Title, CaseCheckLevel Level, string Description)[] defaults =
+        [
+            ("Собственник", CaseCheckLevel.Quick, "Проверить собственника и основание права."),
+            ("Обременения", CaseCheckLevel.Quick, "Проверить зарегистрированные ограничения и обременения."),
+            ("Категория / ВРИ", CaseCheckLevel.Quick, "Сверить категорию земли и разрешённое использование."),
+            ("Подъезд", CaseCheckLevel.Quick, "Проверить юридический и фактический доступ к участку."),
+            ("ПЗЗ / генплан", CaseCheckLevel.Deep, "Проверить применимые градостроительные ограничения."),
+            ("Юридическая проверка", CaseCheckLevel.Deep, "Расширенная проверка прав, документов и рисков.")
+        ];
+        CaseCheckTemplateItem[] created = defaults.Select((value, index) => new CaseCheckTemplateItem
+        {
+            Id = DataConventions.NewId(), OrganizationId = organizationId, Title = value.Title, Level = value.Level,
+            Description = value.Description, SortOrder = (index + 1) * 10, Active = true
+        }).ToArray();
+        db.CaseCheckTemplateItems.AddRange(created); await db.SaveChangesAsync(cancellationToken); return created;
+    }
+
     private static bool AllowedContentType(CaseAttachmentKind kind, string contentType) => kind switch
     {
         CaseAttachmentKind.Photo => contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase),
@@ -839,12 +1114,45 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         _ => false
     };
 
-    private static string NegotiationLabel(NegotiationPriceType type, decimal amount) => type switch
+    private static decimal? Price(decimal? value)
     {
-        NegotiationPriceType.Ask => $"Стартовая цена: {amount:N0} ₽",
-        NegotiationPriceType.SellerOffer => $"Цена продавца: {amount:N0} ₽",
-        NegotiationPriceType.BuyerOffer => $"Предложение покупателя: {amount:N0} ₽",
-        _ => $"Согласованная цена: {amount:N0} ₽"
+        if (value == null) return null;
+        if (value <= 0) throw new ArgumentException("Цена должна быть положительной.");
+        return DataConventions.RoundRubles(value.Value);
+    }
+
+    private static string NegotiationLabel(CaseNegotiation value) => value.AgreedPrice is { } agreed ? $"Согласованная цена: {agreed:N0} ₽"
+        : value.BuyerOffer is { } buyer ? $"Наше предложение: {buyer:N0} ₽"
+        : value.SellerPrice is { } seller ? $"Цена продавца: {seller:N0} ₽"
+        : value.Outcome.Length > 0 ? value.Outcome : "Событие переговоров";
+
+    private static string NegotiationBody(CaseNegotiation value) => string.Join("\n", new[]
+    {
+        value.Channel.Length == 0 ? null : "Канал: " + value.Channel,
+        value.Contact.Length == 0 ? null : "Контакт: " + value.Contact,
+        value.Outcome.Length == 0 ? null : "Результат: " + value.Outcome,
+        value.Comment.Length == 0 ? null : value.Comment,
+        value.NextStep.Length == 0 ? null : "Следующий шаг: " + value.NextStep
+    }.OfType<string>());
+
+    private static Guid? AttachmentOwnerId(CaseAttachment item) => item.OwnerType switch
+    {
+        CaseAttachmentOwner.Negotiation => item.NegotiationId,
+        CaseAttachmentOwner.Check => item.CheckId,
+        CaseAttachmentOwner.Inspection => item.InspectionId,
+        CaseAttachmentOwner.InspectionItem => item.InspectionItemId,
+        _ => null
+    };
+
+    private static string AttachmentOwnerLabel(CaseAttachment item, CaseNegotiation[] negotiations, CaseCheck[] checks,
+        SiteInspectionItem[] inspectionItems) => item.OwnerType switch
+    {
+        CaseAttachmentOwner.Case => "Документ всего PropertyCase",
+        CaseAttachmentOwner.Negotiation => "Событие переговоров · " + negotiations.First(value => value.Id == item.NegotiationId).EffectiveAt.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU")),
+        CaseAttachmentOwner.Check => "Проверка · " + checks.First(value => value.Id == item.CheckId).Title,
+        CaseAttachmentOwner.Inspection => "Осмотр участка",
+        CaseAttachmentOwner.InspectionItem => "Пункт осмотра · " + inspectionItems.First(value => value.Id == item.InspectionItemId).TitleSnapshot,
+        _ => "PropertyCase"
     };
 
     private static SourceDiscrepancyView[] Discrepancies(PropertyCase propertyCase,

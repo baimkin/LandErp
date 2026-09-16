@@ -17,6 +17,11 @@ public sealed class PropertyCase
     public Guid? DepartmentId { get; set; }
     public Guid? TeamId { get; set; }
     public string StageId { get; set; } = "analysis";
+    public decimal? AcquisitionPrice { get; set; }
+    public DateOnly? AcquisitionDate { get; set; }
+    public string? AcquisitionComment { get; set; }
+    public Guid? AcquiredByEmployeeId { get; set; }
+    public DateTimeOffset? AcquiredAt { get; set; }
     public Guid ManagerEmployeeId { get; set; }
     public Guid AssignmentId { get; set; }
     public Guid WorkTaskId { get; set; }

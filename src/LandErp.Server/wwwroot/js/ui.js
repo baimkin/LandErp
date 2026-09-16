@@ -4,3 +4,40 @@ window.LandErpUi = {
         dialog.addEventListener("cancel", function (event) { event.preventDefault(); });
     }
 };
+
+window.landErpInspection = {
+    load: function (key) {
+        const value = localStorage.getItem(key);
+        if (!value) return null;
+        try { return JSON.parse(value); } catch { localStorage.removeItem(key); return null; }
+    },
+    save: function (key, value) { localStorage.setItem(key, JSON.stringify(value)); },
+    attach: function (key, initial) {
+        const root = document.querySelector("[data-inspection-root='true']");
+        if (!root || root.dataset.draftAttached === "true") return;
+        root.dataset.draftAttached = "true";
+        const update = function (event) {
+            const target = event.target;
+            let draft = initial;
+            try {
+                const saved = JSON.parse(localStorage.getItem(key));
+                if (saved && saved.inspectionId === initial.inspectionId && saved.version === initial.version) draft = saved;
+            } catch { localStorage.removeItem(key); }
+            const itemId = target.dataset.inspectionAnswer || target.dataset.inspectionNote || target.dataset.inspectionNotChecked;
+            const item = itemId ? draft.answers.find(value => value.id === itemId) : null;
+            if (target.dataset.inspectionConclusion) draft.conclusion = target.value;
+            else if (target.dataset.inspectionDecision) draft.decision = target.value;
+            else if (target.dataset.inspectionNote && item) item.note = target.value;
+            else if (target.dataset.inspectionNotChecked && item) { item.answer = ""; item.status = 2; }
+            else if (target.dataset.inspectionAnswer && item) {
+                item.answer = target.dataset.inspectionValue ?? target.value;
+                if (item.answer) item.status = 1;
+            }
+            localStorage.setItem(key, JSON.stringify(draft));
+        };
+        root.addEventListener("input", update);
+        root.addEventListener("change", update);
+        root.addEventListener("click", update);
+    },
+    remove: function (key) { localStorage.removeItem(key); }
+};

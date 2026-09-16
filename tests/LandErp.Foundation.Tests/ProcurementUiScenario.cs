@@ -134,19 +134,19 @@ internal static class ProcurementUiScenario
                 await page.GetByRole(AriaRole.Button, new() { Name = tab, Exact = true }).WaitForAsync();
 
             await StepAsync(async () => { await page.GetByRole(AriaRole.Button, new() { Name = "Переговоры", Exact = true }).ClickAsync();
-                await page.GetByLabel("Цена, ₽", new() { Exact = true }).FillAsync("16600000");
-                await page.GetByLabel("Результат", new() { Exact = true }).FillAsync("Продавец готов продолжить обсуждение");
+                await page.GetByLabel("Канал (необязательно)", new() { Exact = true }).FillAsync("Телефон");
+                await page.GetByLabel("Результат / статус", new() { Exact = true }).FillAsync("Не дозвонились");
                 await page.GetByLabel("Условия", new() { Exact = true }).FillAsync("Документы до следующего контакта");
                 await page.GetByLabel("Следующий шаг", new() { Exact = true }).FillAsync("Перезвонить завтра");
-                await page.GetByRole(AriaRole.Button, new() { Name = "Добавить контакт", Exact = true }).ClickAsync();
-                await page.GetByText("16 600 000 ₽", new() { Exact = false }).First.WaitForAsync(); }, "save-negotiation");
+                await page.GetByRole(AriaRole.Button, new() { Name = "Добавить событие", Exact = true }).ClickAsync();
+                await page.GetByText("Не дозвонились", new() { Exact = true }).First.WaitForAsync(); }, "save-negotiation-without-price");
 
             await StepAsync(async () => { await page.GetByRole(AriaRole.Button, new() { Name = "Проверки", Exact = true }).ClickAsync();
                 ILocator checkForm = page.Locator("article.surface", new() { HasText = "Добавить проверку" });
                 await checkForm.GetByRole(AriaRole.Heading, new() { Name = "Добавить проверку", Exact = true }).WaitForAsync();
-                await checkForm.Locator("select").Nth(1).SelectOptionAsync("Passed");
+                await checkForm.Locator("label", new() { HasText = "Статус" }).Locator("select").SelectOptionAsync("Passed");
                 await checkForm.Locator("label", new() { HasText = "Название" }).Locator("input").FillAsync("Сверить кадастровую карту");
-                await checkForm.Locator("textarea").FillAsync("Границы совпадают");
+                await checkForm.Locator("label", new() { HasText = "Результат / заключение" }).Locator("textarea").FillAsync("Границы совпадают");
                 await checkForm.GetByRole(AriaRole.Button, new() { Name = "Сохранить проверку", Exact = true }).ClickAsync();
                 await page.GetByText("Сверить кадастровую карту", new() { Exact = false }).First.WaitForAsync(); }, "save-check");
 
@@ -155,6 +155,7 @@ internal static class ProcurementUiScenario
                 await attachmentForm.GetByRole(AriaRole.Heading, new() { Name = "Добавить вложение", Exact = true }).WaitForAsync();
                 await attachmentForm.Locator("select").Nth(1).SelectOptionAsync("Link");
                 await attachmentForm.Locator("label", new() { HasText = "Название" }).Locator("input").FillAsync("Публичная кадастровая карта");
+                await attachmentForm.Locator("label", new() { HasText = "Комментарий" }).Locator("textarea").FillAsync("Документ всего объекта");
                 await attachmentForm.Locator("input[type='url']").FillAsync("https://example.test/cadastre");
                 await attachmentForm.GetByRole(AriaRole.Button, new() { Name = "Добавить вложение", Exact = true }).ClickAsync();
                 await page.GetByText("Публичная кадастровая карта", new() { Exact = true }).WaitForAsync(); }, "save-attachment");
@@ -166,6 +167,70 @@ internal static class ProcurementUiScenario
             Assert.IsTrue(await page.EvaluateAsync<bool>("document.documentElement.scrollWidth <= window.innerWidth"));
             await page.GetByRole(AriaRole.Button, new() { Name = "Основное", Exact = true }).ClickAsync();
             await page.ScreenshotAsync(new() { Path = Path.Combine(images, "property-case-mobile.png"), FullPage = true });
+        }
+        finally { if (!server.HasExited) { server.Kill(true); await server.WaitForExitAsync(); } }
+    }
+
+    internal static async Task RunPhase5Async(PostgresSandbox sandbox, string managerLogin, Guid caseId)
+    {
+        int port = PostgresTests.FreePort(); string origin = $"https://127.0.0.1:{port}";
+        using var server = PostgresTests.StartHost("LandErp.Server", sandbox.RuntimeConnection, port, true);
+        try
+        {
+            using IPlaywright playwright = await StepResultAsync(Playwright.CreateAsync, "create-playwright");
+            await using IBrowser browser = await StepResultAsync(() => playwright.Chromium.LaunchAsync(new() { Channel = "msedge", Headless = true, ChromiumSandbox = false }), "launch-browser");
+            await using IBrowserContext context = await StepResultAsync(() => browser.NewContextAsync(new() { IgnoreHTTPSErrors = true, ViewportSize = new() { Width = 390, Height = 900 } }), "create-mobile-context");
+            IPage page = await StepResultAsync(context.NewPageAsync, "create-page"); page.SetDefaultTimeout(10_000);
+            await StepAsync(async () =>
+            {
+                await WaitForLiveAsync(server, page, origin); await LoginAsync(page, origin, managerLogin);
+                await page.GotoAsync(origin + "/procurement/" + caseId + "/inspection"); await ReadyAsync(page);
+                await page.GetByRole(AriaRole.Button, new() { Name = "Начать осмотр", Exact = true }).ClickAsync();
+                await page.Locator("[data-inspection-ready='true'] .inspection-cover").WaitForAsync();
+            }, "start-inspection");
+
+            await StepAsync(async () =>
+            {
+                await page.GetByLabel("Ответ: Дорога до ближайшего населённого пункта", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Щебень" });
+                await context.SetOfflineAsync(true);
+                await page.GetByLabel("Общий вывод", new() { Exact = true }).FillAsync("Локальный вывод после краткого разрыва связи");
+                await Task.Delay(200);
+                Assert.IsTrue(await page.EvaluateAsync<bool>("Boolean(localStorage.getItem('landerp.inspection.' + location.pathname.split('/')[2]))"));
+                await context.SetOfflineAsync(false);
+                await page.ReloadAsync(); await ReadyAsync(page);
+                await page.GetByText("Локальный черновик", new() { Exact = true }).WaitForAsync();
+                Assert.AreEqual("Локальный вывод после краткого разрыва связи", await page.GetByLabel("Общий вывод", new() { Exact = true }).InputValueAsync());
+                for (int remaining = 19; remaining > 0; remaining--)
+                {
+                    await page.GetByRole(AriaRole.Button, new() { Name = "Не проверено", Exact = true }).First.ClickAsync();
+                    await page.GetByText($"Осталось обработать {remaining - 1} из 20.", new() { Exact = true }).WaitForAsync();
+                }
+                await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить черновик", Exact = true }).ClickAsync();
+                await page.GetByText("Изменения сохранены", new() { Exact = true }).WaitForAsync();
+                await page.GetByRole(AriaRole.Button, new() { Name = "Завершить осмотр", Exact = true }).ClickAsync();
+                await page.GetByRole(AriaRole.Button, new() { Name = "Завершить осмотр", Exact = true }).WaitForAsync(new() { State = WaitForSelectorState.Attached });
+                await page.WaitForFunctionAsync("() => document.querySelector('button') !== null && [...document.querySelectorAll('button')].some(x => x.textContent.includes('Завершить осмотр') && x.disabled)");
+            }, "offline-draft-reconnect-and-complete");
+
+            string images = Path.Combine(FoundationTests.RepositoryRoot(), "artifacts", "stage1", "phase5-ui");
+            Directory.CreateDirectory(images);
+            await page.ScreenshotAsync(new() { Path = Path.Combine(images, "inspection-mobile.png"), FullPage = true });
+            await StepAsync(async () =>
+            {
+                await page.GetByRole(AriaRole.Link, new() { Name = "‹ Карточка", Exact = true }).ClickAsync(); await ReadyAsync(page);
+                await page.GetByRole(AriaRole.Button, new() { Name = "Отметить как куплено", Exact = true }).ClickAsync();
+                ILocator dialog = page.GetByRole(AriaRole.Dialog);
+                await dialog.GetByLabel("Фактическая цена покупки, ₽", new() { Exact = true }).FillAsync("3750000");
+                await dialog.GetByLabel("Дата покупки / регистрации", new() { Exact = true }).FillAsync(DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+                await dialog.GetByLabel("Комментарий (необязательно)", new() { Exact = true }).FillAsync("Регистрация подтверждена");
+                await dialog.GetByRole(AriaRole.Button, new() { Name = "Подтвердить покупку", Exact = true }).ClickAsync();
+                await page.GetByText("Куплено", new() { Exact = true }).WaitForAsync();
+                Assert.AreEqual(0, await page.GetByRole(AriaRole.Button, new() { Name = "Отметить как куплено", Exact = true }).CountAsync());
+                await page.GetByRole(AriaRole.Button, new() { Name = "История", Exact = true }).ClickAsync();
+                await page.GetByText("Объект куплен за", new() { Exact = false }).WaitForAsync();
+            }, "acquire-and-read-history");
+            await page.SetViewportSizeAsync(1440, 1000);
+            await page.ScreenshotAsync(new() { Path = Path.Combine(images, "property-case-acquired.png"), FullPage = true });
         }
         finally { if (!server.HasExited) { server.Kill(true); await server.WaitForExitAsync(); } }
     }

@@ -1,33 +1,66 @@
-/* Procurement V2 visual sizing layer.
-   The approved prototype was visually reviewed at a larger effective pixel scale than the current production render.
-   Keep structure and colors in the isolated component stylesheet; this file only aligns readability, density and desktop column sizing. */
+/* Procurement V2 reference-alignment layer.
+   The page must use the full workspace width and stay readable on large desktop displays.
+   Structural colors/components remain in ProcurementQueueV2.razor.css; this layer owns scale,
+   viewport sizing and the production drawer density. */
+
+/* Procurement is a full-width operational screen. Do not inherit the generic 1500px centered page cap. */
+#main-content:has(> .pq2-reference) {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+}
+
+.pq2-reference {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+}
+
+.pq2-reference .main {
+    width: 100%;
+    max-width: none;
+    padding: 22px 24px 28px;
+}
+
+.pq2-reference .head {
+    gap: 18px;
+}
 
 .pq2-reference .head h1 {
-    font-size: 30px;
-    line-height: 1.15;
+    font-size: 28px;
+    line-height: 1.12;
+    margin-bottom: 6px;
 }
 
 .pq2-reference .head p {
     font-size: 13px;
-    line-height: 1.4;
+    line-height: 1.45;
 }
 
 .pq2-reference .kicker {
-    font-size: 10px;
+    font-size: 10.5px;
+    margin-bottom: 6px;
+}
+
+.pq2-reference .btn {
+    min-height: 38px;
+    padding: 0 13px;
+    font-size: 12px;
 }
 
 .pq2-reference .stats {
     gap: 10px;
-    margin: 16px 0;
+    margin: 16px 0 14px;
 }
 
 .pq2-reference .stat {
-    min-height: 82px;
-    padding: 13px;
+    min-height: 84px;
+    padding: 13px 14px;
 }
 
 .pq2-reference .stat span {
-    font-size: 11px;
+    font-size: 12px;
 }
 
 .pq2-reference .stat b {
@@ -36,7 +69,8 @@
 }
 
 .pq2-reference .stat small {
-    font-size: 10px;
+    font-size: 10.5px;
+    line-height: 1.35;
     margin-top: 5px;
 }
 
@@ -49,7 +83,11 @@
 .pq2-reference .tools select {
     height: 40px;
     padding: 0 11px;
-    font-size: 12px;
+    font-size: 13px;
+}
+
+.pq2-reference .tools select {
+    min-width: 180px;
 }
 
 .pq2-reference .chips {
@@ -60,13 +98,14 @@
 .pq2-reference .chipbtn {
     height: 30px;
     padding: 0 10px;
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pq2-reference .chipbtn b {
-    font-size: 9px;
+    font-size: 10px;
 }
 
+/* Full-workspace table on normal desktop widths. */
 .pq2-reference .table {
     width: 100%;
     overflow-x: auto;
@@ -79,38 +118,39 @@
 }
 
 .pq2-reference th {
-    height: 40px;
+    height: 42px;
     padding: 0 10px;
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.2;
+    letter-spacing: .025em;
 }
 
 .pq2-reference td {
-    height: 66px;
-    padding: 8px 10px;
-    font-size: 12px;
+    height: 72px;
+    padding: 9px 10px;
+    font-size: 13px;
     line-height: 1.35;
 }
 
 .pq2-reference th:nth-child(1),
 .pq2-reference td:nth-child(1) { width: 24%; }
 .pq2-reference th:nth-child(2),
-.pq2-reference td:nth-child(2) { width: 8%; }
+.pq2-reference td:nth-child(2) { width: 9%; }
 .pq2-reference th:nth-child(3),
 .pq2-reference td:nth-child(3) { width: 11%; }
 .pq2-reference th:nth-child(4),
 .pq2-reference td:nth-child(4) { width: 15%; }
 .pq2-reference th:nth-child(5),
-.pq2-reference td:nth-child(5) { width: 8%; }
+.pq2-reference td:nth-child(5) { width: 9%; }
 .pq2-reference th:nth-child(6),
-.pq2-reference td:nth-child(6) { width: 14%; }
+.pq2-reference td:nth-child(6) { width: 13%; }
 .pq2-reference th:nth-child(7),
-.pq2-reference td:nth-child(7) { width: 13%; }
+.pq2-reference td:nth-child(7) { width: 12%; }
 .pq2-reference th:nth-child(8),
 .pq2-reference td:nth-child(8) { width: 7%; }
 
 .pq2-reference .obj b {
-    font-size: 12px;
+    font-size: 13.5px;
     line-height: 1.3;
 }
 
@@ -119,82 +159,87 @@
 }
 
 .pq2-reference .thumb {
-    width: 48px;
-    height: 40px;
+    width: 54px;
+    height: 42px;
 }
 
 .pq2-reference .thumb.fallback {
-    font-size: 17px;
+    font-size: 18px;
 }
 
 .pq2-reference .sub {
-    font-size: 10px;
-    line-height: 1.3;
+    font-size: 11px;
+    line-height: 1.35;
     margin-top: 4px;
 }
 
 .pq2-reference .badge {
-    min-height: 24px;
+    min-height: 25px;
     padding: 0 8px;
-    font-size: 10px;
+    font-size: 10.5px;
 }
 
 .pq2-reference .price b {
-    font-size: 13px;
+    font-size: 14px;
 }
 
 .pq2-reference .price s {
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pq2-reference .ass {
-    gap: 7px;
+    gap: 8px;
 }
 
 .pq2-reference .av {
-    width: 28px;
-    height: 28px;
-    font-size: 10px;
+    width: 30px;
+    height: 30px;
+    font-size: 10.5px;
 }
 
 .pq2-reference .pager {
-    padding: 10px 11px;
-    font-size: 10px;
+    padding: 11px 12px;
+    font-size: 11px;
 }
 
 .pq2-reference .pager .btn,
 .pq2-reference .page-number {
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
 }
 
 .pq2-reference .state {
-    font-size: 12px;
+    font-size: 13px;
 }
 
-/* Drawer is a sibling of .pq2-reference. Prefixing with that sibling keeps these overrides local to Procurement V2. */
+/* Drawer. It is a sibling of .pq2-reference, so keep overrides scoped to this page. */
 .pq2-reference ~ .drawer {
-    width: min(760px, 100vw);
+    width: min(780px, 100vw);
 }
 
 .pq2-reference ~ .drawer .dh {
-    min-height: 70px;
-    padding: 10px 14px;
+    min-height: 72px;
+    padding: 11px 14px;
     gap: 10px;
 }
 
+.pq2-reference ~ .drawer .dh .grow {
+    min-width: 0;
+}
+
 .pq2-reference ~ .drawer .dh b {
-    font-size: 16px;
+    font-size: 18px;
+    line-height: 1.25;
 }
 
 .pq2-reference ~ .drawer .dh .sub {
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pq2-reference ~ .drawer .btn {
     min-height: 38px;
     padding: 0 12px;
-    font-size: 11px;
+    font-size: 12px;
 }
 
 .pq2-reference ~ .drawer .db {
@@ -203,25 +248,32 @@
 
 .pq2-reference ~ .drawer .card {
     padding: 14px;
-    margin-bottom: 10px;
+    margin-bottom: 11px;
+    border-radius: 11px;
 }
 
 .pq2-reference ~ .drawer .ct {
-    margin-bottom: 10px;
+    margin-bottom: 11px;
+    gap: 10px;
 }
 
 .pq2-reference ~ .drawer .ct b {
-    font-size: 13px;
+    font-size: 15px;
+}
+
+.pq2-reference ~ .drawer .ct > div {
+    gap: 7px;
+    align-items: center;
 }
 
 .pq2-reference ~ .drawer .hero {
-    grid-template-columns: 170px 1fr;
-    gap: 12px;
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 13px;
 }
 
 .pq2-reference ~ .drawer .photo {
-    width: 170px;
-    min-height: 132px;
+    width: 180px;
+    min-height: 138px;
 }
 
 .pq2-reference ~ .drawer .facts {
@@ -229,24 +281,30 @@
 }
 
 .pq2-reference ~ .drawer .fact {
-    padding: 9px;
+    padding: 10px;
 }
 
 .pq2-reference ~ .drawer .fact label,
 .pq2-reference ~ .drawer .p label {
-    font-size: 9px;
+    font-size: 10px;
+    margin-bottom: 4px;
 }
 
 .pq2-reference ~ .drawer .fact b,
 .pq2-reference ~ .drawer .p b,
 .pq2-reference ~ .drawer .next b {
-    font-size: 12px;
+    font-size: 14px;
     line-height: 1.35;
 }
 
 .pq2-reference ~ .drawer .fact small,
+.pq2-reference ~ .drawer .p small,
 .pq2-reference ~ .drawer .next p {
-    font-size: 9px;
+    display: block;
+    margin-top: 4px;
+    color: #667085;
+    font-size: 11px;
+    line-height: 1.4;
 }
 
 .pq2-reference ~ .drawer .prices {
@@ -255,7 +313,28 @@
 
 .pq2-reference ~ .drawer .p,
 .pq2-reference ~ .drawer .next {
-    padding: 9px;
+    padding: 10px;
+}
+
+.pq2-reference ~ .drawer .neg-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    margin-bottom: 10px;
+}
+
+.pq2-reference ~ .drawer .neg-summary-main b {
+    display: block;
+    font-size: 13.5px;
+    line-height: 1.35;
+}
+
+.pq2-reference ~ .drawer .neg-summary-main p {
+    margin: 4px 0 0;
+    color: #667085;
+    font-size: 11.5px;
+    line-height: 1.45;
 }
 
 .pq2-reference ~ .drawer .neg {
@@ -263,50 +342,98 @@
 }
 
 .pq2-reference ~ .drawer .negrow {
-    padding: 9px;
+    padding: 10px;
 }
 
 .pq2-reference ~ .drawer .negrow b,
 .pq2-reference ~ .drawer .check b,
 .pq2-reference ~ .drawer .inspection b,
-.pq2-reference ~ .drawer .timeline-row b {
-    font-size: 11px;
+.pq2-reference ~ .drawer .timeline-row b,
+.pq2-reference ~ .drawer .source-row b {
+    font-size: 13px;
+    line-height: 1.35;
 }
 
 .pq2-reference ~ .drawer .negrow p,
 .pq2-reference ~ .drawer .check p,
 .pq2-reference ~ .drawer .inspection p,
+.pq2-reference ~ .drawer .timeline-row p,
 .pq2-reference ~ .drawer .muted {
-    font-size: 10px;
-    line-height: 1.45;
+    font-size: 11.5px;
+    line-height: 1.5;
+}
+
+.pq2-reference ~ .drawer .negrow p,
+.pq2-reference ~ .drawer .timeline-row p {
+    margin: 5px 0 0;
+    color: #536273;
 }
 
 .pq2-reference ~ .drawer .meta {
     gap: 5px;
-    margin-top: 6px;
+    margin-top: 7px;
 }
 
 .pq2-reference ~ .drawer .tag {
-    font-size: 9px;
-    padding: 4px 6px;
+    font-size: 10px;
+    padding: 4px 7px;
 }
 
 .pq2-reference ~ .drawer .checks {
     gap: 9px;
 }
 
-.pq2-reference ~ .drawer .check,
+.pq2-reference ~ .drawer .check {
+    padding: 11px;
+}
+
+.pq2-reference ~ .drawer .check-line,
+.pq2-reference ~ .drawer .inspection-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
 .pq2-reference ~ .drawer .inspection {
-    padding: 10px;
+    padding: 11px;
+}
+
+.pq2-reference ~ .drawer .inspection.empty-inspection {
+    background: #fbfcfe;
+    border-color: #e1e7ee;
+}
+
+.pq2-reference ~ .drawer .inspection-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 9px;
+}
+
+.pq2-reference ~ .drawer .inspection-stat {
+    padding: 6px 8px;
+    border: 1px solid #dfe8e3;
+    border-radius: 8px;
+    background: #fff;
+    color: #536273;
+    font-size: 10.5px;
+}
+
+.pq2-reference ~ .drawer .inspection-stat b {
+    margin-right: 3px;
+    font-size: 12px;
 }
 
 .pq2-reference ~ .drawer .timeline-row {
-    padding: 9px 0;
+    padding: 10px 0;
 }
 
 .pq2-reference ~ .drawer .timeline-row span {
-    font-size: 9px;
-    margin-top: 3px;
+    display: block;
+    margin-top: 4px;
+    color: #667085;
+    font-size: 10.5px;
 }
 
 .pq2-reference ~ .drawer .source-list {
@@ -314,23 +441,23 @@
 }
 
 .pq2-reference ~ .drawer .source-row {
-    padding: 9px;
+    padding: 10px;
 }
 
-.pq2-reference ~ .drawer .source-row b,
 .pq2-reference ~ .drawer .source-row span,
 .pq2-reference ~ .drawer .source-row a {
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .pq2-reference ~ .drawer .df {
     padding: 11px 14px;
+    gap: 9px;
 }
 
-/* The eight-column queue remains fluid on normal desktop widths. Below that, preserve readability and allow horizontal scrolling rather than crushing text. */
-@media (max-width: 1180px) {
+/* Keep readable column widths when the viewport is genuinely narrow. */
+@media (max-width: 1320px) {
     .pq2-reference table {
-        min-width: 1080px;
+        min-width: 1180px;
         table-layout: auto;
     }
 
@@ -340,9 +467,31 @@
     }
 }
 
+@media (max-width: 1100px) {
+    .pq2-reference .main {
+        padding: 18px;
+    }
+
+    .pq2-reference ~ .drawer {
+        width: min(740px, 100vw);
+    }
+
+    .pq2-reference ~ .drawer .prices {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
 @media (max-width: 900px) {
+    #main-content:has(> .pq2-reference) {
+        padding: 0;
+    }
+
+    .pq2-reference .main {
+        padding: 14px;
+    }
+
     .pq2-reference .head h1 {
-        font-size: 27px;
+        font-size: 26px;
     }
 
     .pq2-reference ~ .drawer {
@@ -350,11 +499,11 @@
     }
 
     .pq2-reference ~ .drawer .hero {
-        grid-template-columns: 160px 1fr;
+        grid-template-columns: 165px minmax(0, 1fr);
     }
 
     .pq2-reference ~ .drawer .photo {
-        width: 160px;
+        width: 165px;
     }
 }
 
@@ -366,5 +515,10 @@
     .pq2-reference ~ .drawer .photo {
         width: 100%;
         height: 190px;
+    }
+
+    .pq2-reference ~ .drawer .checks,
+    .pq2-reference ~ .drawer .prices {
+        grid-template-columns: 1fr;
     }
 }

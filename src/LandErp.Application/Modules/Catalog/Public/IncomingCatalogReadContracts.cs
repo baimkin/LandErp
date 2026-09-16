@@ -39,10 +39,11 @@ public sealed record IncomingFilterPresetCriteriaV1(int SchemaVersion, CatalogSo
     Guid? SearchConfigurationId, CatalogDisposition? Disposition, CatalogAgeRange Age,
     decimal? MinTotalPrice, decimal? MaxTotalPrice, decimal? MinPricePerSotka, decimal? MaxPricePerSotka,
     decimal? MinAreaSquareMeters, decimal? MaxAreaSquareMeters, IncomingLandType[] LandTypes,
-    bool AttentionOnly, IncomingCatalogSortField SortField, IncomingCatalogSortDirection SortDirection);
-public sealed record IncomingFilterPresetView(Guid Id, Guid SearchGroupId, string Name,
+    bool AttentionOnly, IncomingCatalogSortField SortField, IncomingCatalogSortDirection SortDirection,
+    IncomingCatalogPreset? Preset = null);
+public sealed record IncomingFilterPresetView(Guid Id, Guid? SearchGroupId, string Name,
     IncomingFilterPresetCriteriaV1 Criteria, int SortOrder, long Version);
-public sealed record CreateIncomingFilterPreset(Guid SearchGroupId, string Name, IncomingFilterPresetCriteriaV1 Criteria);
+public sealed record CreateIncomingFilterPreset(Guid? SearchGroupId, string Name, IncomingFilterPresetCriteriaV1 Criteria);
 public sealed record RenameIncomingFilterPreset(Guid Id, long ExpectedVersion, string Name);
 public sealed record DeleteIncomingFilterPreset(Guid Id, long ExpectedVersion);
 
@@ -54,7 +55,7 @@ public interface IIncomingCatalogReadService
 
 public interface IIncomingFilterPresetService
 {
-    Task<IReadOnlyList<IncomingFilterPresetView>> ReadAsync(Subject subject, Guid searchGroupId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<IncomingFilterPresetView>> ReadAsync(Subject subject, CancellationToken cancellationToken);
     Task<IncomingFilterPresetView> CreateAsync(Subject subject, CreateIncomingFilterPreset command, CancellationToken cancellationToken);
     Task<IncomingFilterPresetView> RenameAsync(Subject subject, RenameIncomingFilterPreset command, CancellationToken cancellationToken);
     Task DeleteAsync(Subject subject, DeleteIncomingFilterPreset command, CancellationToken cancellationToken);

@@ -4,10 +4,11 @@ using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace LandErp.Infrastructure.Modules.Catalog;
 
-/// <summary>Organization-scoped saved Incoming filter states. The table is intentionally specialized, not a generic settings store.</summary>
+/// <summary>Organization-scoped saved Incoming filter states. Search group is optional organization metadata, not filter semantics.</summary>
 public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAccessControl access) : IIncomingFilterPresetService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -15,20 +16,18 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public async Task<IReadOnlyList<IncomingFilterPresetView>> ReadAsync(Subject subject, Guid searchGroupId, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<IncomingFilterPresetView>> ReadAsync(Subject subject, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await EnsureGroupAsync(connection, context.OrganizationId, searchGroupId, cancellationToken);
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT id, search_group_id, name, criteria_json::text, sort_order, version
             FROM catalog.incoming_filter_presets
-            WHERE organization_id = @organization_id AND search_group_id = @search_group_id AND active
-            ORDER BY sort_order, name, id
+            WHERE organization_id = @organization_id AND active
+            ORDER BY search_group_id NULLS FIRST, sort_order, name, id
             """;
         command.Parameters.AddWithValue("organization_id", context.OrganizationId);
-        command.Parameters.AddWithValue("search_group_id", searchGroupId);
         List<IncomingFilterPresetView> result = [];
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) result.Add(ReadView(reader));
@@ -41,8 +40,9 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
         string name = ValidateName(command.Name);
         ValidateCriteria(command.Criteria);
         await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await EnsureGroupAsync(connection, context.OrganizationId, command.SearchGroupId, cancellationToken);
-        await EnsureSearchConfigurationAsync(connection, context.OrganizationId, command.SearchGroupId,
+        if (command.SearchGroupId != null)
+            await EnsureGroupAsync(connection, context.OrganizationId, command.SearchGroupId.Value, cancellationToken);
+        await EnsureSearchConfigurationAsync(connection, context.OrganizationId,
             command.Criteria.SearchConfigurationId, cancellationToken);
         await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(cancellationToken);
         try
@@ -54,10 +54,12 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
                 order.CommandText = """
                     SELECT COALESCE(MAX(sort_order), 0) + 10
                     FROM catalog.incoming_filter_presets
-                    WHERE organization_id = @organization_id AND search_group_id = @search_group_id AND active
+                    WHERE organization_id = @organization_id
+                      AND search_group_id IS NOT DISTINCT FROM @search_group_id
+                      AND active
                     """;
                 order.Parameters.AddWithValue("organization_id", context.OrganizationId);
-                order.Parameters.AddWithValue("search_group_id", command.SearchGroupId);
+                AddNullableGuid(order.Parameters, "search_group_id", command.SearchGroupId);
                 sortOrder = Convert.ToInt32(await order.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
             }
 
@@ -72,7 +74,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
                 """;
             insert.Parameters.AddWithValue("id", id);
             insert.Parameters.AddWithValue("organization_id", context.OrganizationId);
-            insert.Parameters.AddWithValue("search_group_id", command.SearchGroupId);
+            AddNullableGuid(insert.Parameters, "search_group_id", command.SearchGroupId);
             insert.Parameters.AddWithValue("name", name);
             insert.Parameters.AddWithValue("criteria_json", criteriaJson);
             insert.Parameters.AddWithValue("sort_order", sortOrder);
@@ -83,7 +85,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
         {
             await transaction.RollbackAsync(cancellationToken);
-            throw new ArgumentException("В этой группе уже есть сохранённый фильтр с таким названием.");
+            throw new ArgumentException("Сохранённый фильтр с таким названием уже существует в выбранной группе.");
         }
     }
 
@@ -110,7 +112,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
         {
-            throw new ArgumentException("В этой группе уже есть сохранённый фильтр с таким названием.");
+            throw new ArgumentException("Сохранённый фильтр с таким названием уже существует в выбранной группе.");
         }
     }
 
@@ -137,7 +139,8 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
         IncomingFilterPresetCriteriaV1 criteria = JsonSerializer.Deserialize<IncomingFilterPresetCriteriaV1>(json, JsonOptions)
             ?? throw new InvalidOperationException("Сохранённый фильтр содержит пустые критерии.");
         ValidateCriteria(criteria);
-        return new(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), criteria, reader.GetInt32(4), reader.GetInt64(5));
+        Guid? groupId = reader.IsDBNull(1) ? null : reader.GetGuid(1);
+        return new(reader.GetGuid(0), groupId, reader.GetString(2), criteria, reader.GetInt32(4), reader.GetInt64(5));
     }
 
     private static async Task<IncomingFilterPresetView> ReadOneAsync(NpgsqlConnection connection, Guid organizationId, Guid id,
@@ -167,7 +170,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
             throw new ArgumentException("Группа поиска не найдена или недоступна.");
     }
 
-    private static async Task EnsureSearchConfigurationAsync(NpgsqlConnection connection, Guid organizationId, Guid searchGroupId,
+    private static async Task EnsureSearchConfigurationAsync(NpgsqlConnection connection, Guid organizationId,
         Guid? searchConfigurationId, CancellationToken cancellationToken)
     {
         if (searchConfigurationId == null) return;
@@ -175,13 +178,18 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
         command.CommandText = """
             SELECT EXISTS (
                 SELECT 1 FROM collection.search_configurations
-                WHERE id = @id AND organization_id = @organization_id AND search_group_id = @search_group_id)
+                WHERE id = @id AND organization_id = @organization_id)
             """;
         command.Parameters.AddWithValue("id", searchConfigurationId.Value);
         command.Parameters.AddWithValue("organization_id", organizationId);
-        command.Parameters.AddWithValue("search_group_id", searchGroupId);
         if (await command.ExecuteScalarAsync(cancellationToken) is not true)
-            throw new ArgumentException("Поисковая конфигурация не принадлежит выбранной группе.");
+            throw new ArgumentException("Поисковая конфигурация не найдена или недоступна.");
+    }
+
+    private static void AddNullableGuid(NpgsqlParameterCollection parameters, string name, Guid? value)
+    {
+        NpgsqlParameter parameter = parameters.Add(name, NpgsqlDbType.Uuid);
+        parameter.Value = value.HasValue ? (object)value.Value : DBNull.Value;
     }
 
     private static string ValidateName(string value)
@@ -197,6 +205,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
         if (criteria.SchemaVersion != 1 || !Enum.IsDefined(criteria.Age) || !Enum.IsDefined(criteria.SortField)
             || !Enum.IsDefined(criteria.SortDirection) || (criteria.Source != null && !Enum.IsDefined(criteria.Source.Value))
             || (criteria.Disposition != null && !Enum.IsDefined(criteria.Disposition.Value))
+            || (criteria.Preset != null && !Enum.IsDefined(criteria.Preset.Value))
             || landTypes.Any(value => !Enum.IsDefined(value)) || landTypes.Length != landTypes.Distinct().Count()
             || criteria.MinTotalPrice < 0 || criteria.MaxTotalPrice < 0 || criteria.MinPricePerSotka < 0
             || criteria.MaxPricePerSotka < 0 || criteria.MinAreaSquareMeters < 0 || criteria.MaxAreaSquareMeters < 0

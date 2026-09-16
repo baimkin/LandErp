@@ -1,5 +1,6 @@
 @page "/incoming-v2"
 @attribute [Authorize(Policy = "manager_queue.read")]
+@using System.Globalization
 @using Microsoft.AspNetCore.Components
 @using LandErp.Application.Modules.Catalog.Contracts
 @using LandErp.Application.Modules.Catalog.Domain
@@ -72,20 +73,65 @@
                                 <option value="@source">@SourceBadge.Label(source)</option>
                             }
                         </select>
-                        <select value="@searchGroupKey" @onchange="SearchGroupChangedAsync" aria-label="Группа поиска">
-                            <option value="">Все группы поиска</option>
-                            @foreach (IncomingSearchGroupView group in catalogPage.SearchGroups)
-                            {
-                                <option value="@group.Id">@group.Name</option>
-                            }
-                        </select>
                         <select value="@searchConfigurationKey" @onchange="SearchConfigurationChangedAsync" aria-label="Поисковая конфигурация">
                             <option value="">Все поиски</option>
-                            @foreach (IncomingSearchConfigurationView search in VisibleSearchConfigurations())
+                            @foreach (IncomingSearchGroupView group in catalogPage.SearchGroups)
                             {
-                                <option value="@search.Id">@search.Label</option>
+                                if (catalogPage.SearchConfigurations.Any(item => item.SearchGroupId == group.Id))
+                                {
+                                    <optgroup label="@group.Name">
+                                        @foreach (IncomingSearchConfigurationView search in catalogPage.SearchConfigurations.Where(item => item.SearchGroupId == group.Id))
+                                        {
+                                            <option value="@search.Id">@search.Label</option>
+                                        }
+                                    </optgroup>
+                                }
+                            }
+                            @if (catalogPage.SearchConfigurations.Any(item => item.SearchGroupId == null))
+                            {
+                                <optgroup label="Без группы">
+                                    @foreach (IncomingSearchConfigurationView search in catalogPage.SearchConfigurations.Where(item => item.SearchGroupId == null))
+                                    {
+                                        <option value="@search.Id">@search.Label</option>
+                                    }
+                                </optgroup>
                             }
                         </select>
+                        <select value="@(selectedSavedPresetId?.ToString() ?? "")" @onchange="SavedPresetChangedAsync" aria-label="Мои фильтры">
+                            <option value="">Мои фильтры</option>
+                            @if (savedPresets.Any(item => item.SearchGroupId == null))
+                            {
+                                <optgroup label="Без группы">
+                                    @foreach (IncomingFilterPresetView saved in savedPresets.Where(item => item.SearchGroupId == null))
+                                    {
+                                        <option value="@saved.Id">@saved.Name</option>
+                                    }
+                                </optgroup>
+                            }
+                            @foreach (IncomingSearchGroupView group in catalogPage.SearchGroups)
+                            {
+                                if (savedPresets.Any(item => item.SearchGroupId == group.Id))
+                                {
+                                    <optgroup label="@group.Name">
+                                        @foreach (IncomingFilterPresetView saved in savedPresets.Where(item => item.SearchGroupId == group.Id))
+                                        {
+                                            <option value="@saved.Id">@saved.Name</option>
+                                        }
+                                    </optgroup>
+                                }
+                            }
+                            @if (savedPresets.Any(item => item.SearchGroupId != null && catalogPage.SearchGroups.All(group => group.Id != item.SearchGroupId)))
+                            {
+                                <optgroup label="Другие группы">
+                                    @foreach (IncomingFilterPresetView saved in savedPresets.Where(item => item.SearchGroupId != null && catalogPage.SearchGroups.All(group => group.Id != item.SearchGroupId)))
+                                    {
+                                        <option value="@saved.Id">@saved.Name</option>
+                                    }
+                                </optgroup>
+                            }
+                        </select>
+                        <button class="v2-btn sm quiet" type="button" disabled="@(SelectedSavedPreset() == null)" title="Переименовать выбранный фильтр" aria-label="Переименовать выбранный фильтр" @onclick="OpenRenameSelectedPreset">✎</button>
+                        <button class="v2-btn sm quiet" type="button" disabled="@(SelectedSavedPreset() == null)" title="Удалить выбранный фильтр" aria-label="Удалить выбранный фильтр" @onclick="OpenDeleteSelectedPreset">×</button>
                         <button class="v2-btn sm quiet" type="button" aria-expanded="@advancedOpen" @onclick="() => advancedOpen = !advancedOpen">Фильтры</button>
                         <button class="v2-btn sm quiet v2-reset" type="button" @onclick="ResetFilterAsync">Сбросить</button>
                     </div>
@@ -111,7 +157,10 @@
                                     }
                                 </div>
                             </div>
-                            <div class="v2-advanced-actions"><button class="v2-btn sm primary" type="submit">Применить фильтры</button></div>
+                            <div class="v2-advanced-actions" style="gap:8px">
+                                <button class="v2-btn sm primary" type="submit">Применить фильтры</button>
+                                <button class="v2-btn sm" type="button" @onclick="OpenSavePreset">Сохранить фильтр</button>
+                            </div>
                         </div>
                     }
                 </EditForm>
@@ -125,34 +174,6 @@
                     <button type="button" class="v2-preset" disabled data-todo-backend="TODO-BACKEND-INCOMING">Возможный дубль —</button>
                     <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.Incomplete)">Неполные данные @catalogPage.Summary.Incomplete</button>
                     <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.ReturnedFromMonitoring ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.ReturnedFromMonitoring)">Вернулись из мониторинга @catalogPage.Summary.ReturnedFromMonitoring</button>
-                </div>
-
-                <div class="v2-saved-presets">
-                    <div class="v2-saved-head">
-                        <div><strong>Мои фильтры</strong><span>@SavedPresetContext()</span></div>
-                        <button type="button" class="v2-btn sm" disabled="@(SelectedSearchGroupId() == null)" @onclick="OpenSavePreset">+ Сохранить текущие</button>
-                    </div>
-                    @if (SelectedSearchGroupId() == null)
-                    {
-                        <div class="v2-saved-empty">Выберите группу поиска, чтобы использовать сохранённые фильтры.</div>
-                    }
-                    else if (savedPresets.Count == 0)
-                    {
-                        <div class="v2-saved-empty">Для этой группы сохранённых фильтров пока нет.</div>
-                    }
-                    else
-                    {
-                        <div class="v2-saved-list">
-                            @foreach (IncomingFilterPresetView saved in savedPresets)
-                            {
-                                <div class="v2-saved-chip @(selectedSavedPresetId == saved.Id ? "active" : "")">
-                                    <button type="button" class="v2-saved-apply" @onclick="() => ApplySavedPresetAsync(saved)">@saved.Name</button>
-                                    <button type="button" class="v2-saved-action" title="Переименовать" aria-label="Переименовать @saved.Name" @onclick="() => OpenRenamePreset(saved)">✎</button>
-                                    <button type="button" class="v2-saved-action danger" title="Удалить" aria-label="Удалить @saved.Name" @onclick="() => deletePreset = saved">×</button>
-                                </div>
-                            }
-                        </div>
-                    }
                 </div>
 
                 @if (catalogPage.Items.Count == 0)
@@ -441,8 +462,21 @@
 @if (savePresetOpen)
 {
     <Modal Title="Сохранить текущие фильтры" OnClose="() => savePresetOpen = false">
-        <p class="subtle">Группа поиска: <strong>@SelectedSearchGroupName()</strong>. Свободный текстовый поиск в preset не сохраняется.</p>
+        <p class="subtle">Название сформировано автоматически — его можно изменить. Группа нужна только для удобной организации. Свободный текстовый поиск не сохраняется.</p>
         <label class="field"><span>Название фильтра</span><InputText @bind-Value="presetName" /></label>
+        <label class="field">
+            <span>Группа</span>
+            <InputSelect @bind-Value="presetGroupId">
+                <option value="">Без группы</option>
+                @if (catalogPage != null)
+                {
+                    @foreach (IncomingSearchGroupView group in catalogPage.SearchGroups)
+                    {
+                        <option value="@group.Id">@group.Name</option>
+                    }
+                }
+            </InputSelect>
+        </label>
         <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => savePresetOpen = false" /><ActionButton Label="Сохранить" Busy="Busy" OnClick="SavePresetAsync" /></div>
     </Modal>
 }
@@ -458,7 +492,7 @@
 @if (deletePreset != null)
 {
     <Modal Title="Удалить сохранённый фильтр" OnClose="() => deletePreset = null">
-        <p>Удалить фильтр <strong>@deletePreset.Name</strong> для группы <strong>@SelectedSearchGroupName()</strong>?</p>
+        <p>Удалить фильтр <strong>@deletePreset.Name</strong>?</p>
         <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => deletePreset = null" /><ActionButton Label="Удалить" Tone="danger" Busy="Busy" OnClick="DeletePresetAsync" /></div>
     </Modal>
 }
@@ -519,6 +553,7 @@
 @code {
     private const int PageSize = 25;
     private const int SearchDebounceMilliseconds = 400;
+    private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private IncomingCatalogReadPage? catalogPage;
     private CatalogItemDetail? detail;
     private IncomingCatalogDetailRead? detailRead;
@@ -532,7 +567,6 @@
     private IncomingCatalogPreset? preset;
     private IncomingCatalogSortField sortField = IncomingCatalogSortField.ChangedAt;
     private IncomingCatalogSortDirection sortDirection = IncomingCatalogSortDirection.Descending;
-    private string searchGroupKey = "";
     private string searchConfigurationKey = "";
     private int searchRevision;
     private ManualInput manual = new();
@@ -548,12 +582,13 @@
     private string[] galleryPhotos = [];
     private int galleryIndex;
     private IReadOnlyList<IncomingFilterPresetView> savedPresets = [];
-    private Guid? loadedPresetGroupId;
+    private bool savedPresetsLoaded;
     private Guid? selectedSavedPresetId;
     private bool savePresetOpen;
     private IncomingFilterPresetView? renamePreset;
     private IncomingFilterPresetView? deletePreset;
     private string presetName = "";
+    private Guid? presetGroupId;
 
     private static readonly CatalogSource[] manualSources = [CatalogSource.Telegram, CatalogSource.Referral, CatalogSource.Agent, CatalogSource.DirectOwner, CatalogSource.Manual, CatalogSource.Other];
     private static readonly ChecklistItem[] checklist =
@@ -568,15 +603,14 @@
 
     protected override async Task ReadAsync()
     {
-        Guid? groupId = SelectedSearchGroupId();
         Guid? searchId = Guid.TryParse(searchConfigurationKey, out Guid parsed) ? parsed : null;
         IncomingCatalogFilter baseFilter = new(filter.Text.Trim(), filter.Source, filter.Disposition, filter.Age,
             filter.MinPrice, filter.MaxPrice, ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki),
             filter.AttentionOnly, page * PageSize, PageSize);
         catalogPage = await IncomingReads.ReadAsync(CurrentSubject,
-            new(baseFilter, searchId, preset, sortField, sortDirection, groupId,
+            new(baseFilter, searchId, preset, sortField, sortDirection, null,
                 filter.MinPricePerSotka, filter.MaxPricePerSotka, filter.LandTypes.Order().ToArray()), CancellationToken.None);
-        if (groupId != loadedPresetGroupId) await ReloadSavedPresetsAsync(groupId);
+        if (!savedPresetsLoaded) await ReloadSavedPresetsAsync();
     }
 
     private Task ApplyFilterAsync()
@@ -591,12 +625,9 @@
     {
         CancelSearchDebounce();
         filter.Reset();
-        searchGroupKey = "";
         searchConfigurationKey = "";
         preset = null;
         selectedSavedPresetId = null;
-        savedPresets = [];
-        loadedPresetGroupId = null;
         sortField = IncomingCatalogSortField.ChangedAt;
         sortDirection = IncomingCatalogSortDirection.Descending;
         page = 0;
@@ -650,17 +681,6 @@
         return ReloadAsync();
     }
 
-    private Task SearchGroupChangedAsync(ChangeEventArgs args)
-    {
-        CancelSearchDebounce();
-        searchGroupKey = args.Value?.ToString() ?? "";
-        searchConfigurationKey = "";
-        selectedSavedPresetId = null;
-        loadedPresetGroupId = null;
-        page = 0;
-        return ReloadAsync();
-    }
-
     private Task SearchConfigurationChangedAsync(ChangeEventArgs args)
     {
         CancelSearchDebounce();
@@ -670,12 +690,16 @@
         return ReloadAsync();
     }
 
-    private IEnumerable<IncomingSearchConfigurationView> VisibleSearchConfigurations()
+    private Task SavedPresetChangedAsync(ChangeEventArgs args)
     {
-        if (catalogPage == null) return [];
-        Guid? groupId = SelectedSearchGroupId();
-        return groupId == null ? catalogPage.SearchConfigurations
-            : catalogPage.SearchConfigurations.Where(item => item.SearchGroupId == groupId.Value);
+        string value = args.Value?.ToString() ?? "";
+        if (!Guid.TryParse(value, out Guid id))
+        {
+            selectedSavedPresetId = null;
+            return Task.CompletedTask;
+        }
+        IncomingFilterPresetView? saved = savedPresets.FirstOrDefault(item => item.Id == id);
+        return saved == null ? Task.CompletedTask : ApplySavedPresetAsync(saved);
     }
 
     private Task ToggleSortAsync(IncomingCatalogSortField field)
@@ -705,24 +729,17 @@
 
     private IncomingCatalogRowRead? Row(Guid id) => catalogPage != null && catalogPage.Rows.TryGetValue(id, out IncomingCatalogRowRead? row) ? row : null;
 
-    private async Task ReloadSavedPresetsAsync(Guid? groupId = null)
+    private async Task ReloadSavedPresetsAsync()
     {
-        groupId ??= SelectedSearchGroupId();
-        if (groupId == null)
-        {
-            savedPresets = [];
-            loadedPresetGroupId = null;
-            return;
-        }
-        savedPresets = await FilterPresets.ReadAsync(CurrentSubject, groupId.Value, CancellationToken.None);
-        loadedPresetGroupId = groupId;
+        savedPresets = await FilterPresets.ReadAsync(CurrentSubject, CancellationToken.None);
+        savedPresetsLoaded = true;
         if (selectedSavedPresetId != null && savedPresets.All(item => item.Id != selectedSavedPresetId.Value)) selectedSavedPresetId = null;
     }
 
     private void OpenSavePreset()
     {
-        if (SelectedSearchGroupId() == null) return;
-        presetName = "";
+        presetGroupId = null;
+        presetName = BuildPresetName();
         savePresetOpen = true;
     }
 
@@ -732,32 +749,40 @@
         presetName = value.Name;
     }
 
+    private void OpenRenameSelectedPreset()
+    {
+        IncomingFilterPresetView? selected = SelectedSavedPreset();
+        if (selected != null) OpenRenamePreset(selected);
+    }
+
+    private void OpenDeleteSelectedPreset()
+    {
+        deletePreset = SelectedSavedPreset();
+    }
+
     private async Task SavePresetAsync()
     {
-        Guid? groupId = SelectedSearchGroupId();
-        if (groupId == null) return;
         IncomingFilterPresetView? created = null;
         await ExecuteAsync(async () => created = await FilterPresets.CreateAsync(CurrentSubject,
-            new(groupId.Value, presetName, CurrentPresetCriteria()), CancellationToken.None));
+            new(presetGroupId, presetName, CurrentPresetCriteria()), CancellationToken.None));
         if (created != null)
         {
             savePresetOpen = false;
             selectedSavedPresetId = created.Id;
-            await ReloadSavedPresetsAsync(groupId);
+            await ReloadSavedPresetsAsync();
         }
     }
 
     private async Task RenamePresetAsync()
     {
         if (renamePreset == null) return;
-        Guid? groupId = SelectedSearchGroupId();
         IncomingFilterPresetView? updated = null;
         await ExecuteAsync(async () => updated = await FilterPresets.RenameAsync(CurrentSubject,
             new(renamePreset.Id, renamePreset.Version, presetName), CancellationToken.None));
         if (updated != null)
         {
             renamePreset = null;
-            await ReloadSavedPresetsAsync(groupId);
+            await ReloadSavedPresetsAsync();
         }
     }
 
@@ -765,14 +790,13 @@
     {
         if (deletePreset == null) return;
         Guid deletedId = deletePreset.Id;
-        Guid? groupId = SelectedSearchGroupId();
         await ExecuteAsync(() => FilterPresets.DeleteAsync(CurrentSubject,
             new(deletePreset.Id, deletePreset.Version), CancellationToken.None));
         if (Success != null)
         {
             deletePreset = null;
             if (selectedSavedPresetId == deletedId) selectedSavedPresetId = null;
-            await ReloadSavedPresetsAsync(groupId);
+            await ReloadSavedPresetsAsync();
         }
     }
 
@@ -780,7 +804,7 @@
     {
         IncomingFilterPresetCriteriaV1 criteria = saved.Criteria;
         CancelSearchDebounce();
-        preset = null;
+        preset = criteria.Preset;
         filter.Source = criteria.Source;
         filter.Disposition = criteria.Disposition;
         filter.Age = criteria.Age;
@@ -805,11 +829,62 @@
         Guid.TryParse(searchConfigurationKey, out Guid searchId) ? searchId : null, filter.Disposition, filter.Age,
         filter.MinPrice, filter.MaxPrice, filter.MinPricePerSotka, filter.MaxPricePerSotka,
         ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki), filter.LandTypes.Order().ToArray(),
-        filter.AttentionOnly, sortField, sortDirection);
+        filter.AttentionOnly, sortField, sortDirection, preset);
 
-    private Guid? SelectedSearchGroupId() => Guid.TryParse(searchGroupKey, out Guid id) ? id : null;
-    private string SelectedSearchGroupName() => catalogPage?.SearchGroups.FirstOrDefault(item => item.Id == SelectedSearchGroupId())?.Name ?? "не выбрана";
-    private string SavedPresetContext() => SelectedSearchGroupId() == null ? "Выберите группу поиска" : $"Группа: {SelectedSearchGroupName()}";
+    private IncomingFilterPresetView? SelectedSavedPreset() => selectedSavedPresetId == null
+        ? null : savedPresets.FirstOrDefault(item => item.Id == selectedSavedPresetId.Value);
+
+    private string BuildPresetName()
+    {
+        List<string> parts = [];
+        if (catalogPage != null && Guid.TryParse(searchConfigurationKey, out Guid searchId))
+        {
+            IncomingSearchConfigurationView? search = catalogPage.SearchConfigurations.FirstOrDefault(item => item.Id == searchId);
+            if (search != null) parts.Add(ShortPresetPart(search.Label));
+        }
+        if (parts.Count < 3 && filter.LandTypes.Count == 1) parts.Add(LandTypeFilterLabel(filter.LandTypes.Single()));
+        if (parts.Count < 3 && (filter.MinAreaSotki != null || filter.MaxAreaSotki != null))
+            parts.Add(RangePart(filter.MinAreaSotki, filter.MaxAreaSotki, " сот.", FormatPlain));
+        if (parts.Count < 3 && (filter.MinPricePerSotka != null || filter.MaxPricePerSotka != null))
+            parts.Add(RangePart(filter.MinPricePerSotka, filter.MaxPricePerSotka, " /сот.", FormatCompactAmount));
+        if (parts.Count < 3 && (filter.MinPrice != null || filter.MaxPrice != null))
+            parts.Add(RangePart(filter.MinPrice, filter.MaxPrice, " ₽", FormatCompactAmount));
+        if (parts.Count < 3 && preset != null) parts.Add(PresetNamePart(preset.Value));
+        if (parts.Count < 3 && filter.AttentionOnly) parts.Add("требует внимания");
+        if (parts.Count < 3 && filter.Disposition is { } disposition && disposition != CatalogDisposition.Incoming)
+            parts.Add(DispositionLabel(disposition));
+        if (parts.Count < 3 && filter.Source != null) parts.Add(SourceBadge.Label(filter.Source.Value));
+        return parts.Count == 0 ? "Мой фильтр" : string.Join(" · ", parts.Take(3));
+    }
+
+    private static string ShortPresetPart(string value)
+    {
+        string text = value.Trim();
+        return text.Length <= 34 ? text : $"{text[..33].TrimEnd()}…";
+    }
+
+    private static string RangePart(decimal? min, decimal? max, string suffix, Func<decimal, string> formatter)
+    {
+        if (min != null && max != null) return $"{formatter(min.Value)}–{formatter(max.Value)}{suffix}";
+        if (min != null) return $"от {formatter(min.Value)}{suffix}";
+        return $"до {formatter(max!.Value)}{suffix}";
+    }
+
+    private static string FormatPlain(decimal value) => value.ToString("0.#", RuCulture);
+    private static string FormatCompactAmount(decimal value)
+    {
+        decimal absolute = Math.Abs(value);
+        if (absolute >= 1_000_000m) return $"{(value / 1_000_000m).ToString("0.#", RuCulture)} млн";
+        if (absolute >= 1_000m) return $"{(value / 1_000m).ToString("0.#", RuCulture)} тыс";
+        return value.ToString("0.#", RuCulture);
+    }
+
+    private static string PresetNamePart(IncomingCatalogPreset value) => value switch
+    {
+        IncomingCatalogPreset.PriceChanged => "цена изменилась",
+        IncomingCatalogPreset.Incomplete => "неполные данные",
+        _ => "из мониторинга"
+    };
 
     private async Task OpenDetailAsync(Guid id)
     {

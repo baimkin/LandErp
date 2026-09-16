@@ -1,0 +1,163 @@
+/* Final Procurement V2 visual corrections layered after component-scoped styles.
+   These selectors intentionally use the page root / main-content id so they win over CSS-isolated
+   negative margins without changing shared AppShell behavior. */
+
+#main-content > .pq2-reference {
+    width: 100%;
+    max-width: none;
+    margin: 0 !important;
+}
+
+#main-content:has(> .pq2-reference) {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+}
+
+#main-content > .pq2-reference > .main {
+    width: 100%;
+    max-width: none;
+    padding: 24px 24px 30px;
+}
+
+#main-content > .pq2-reference .head {
+    margin: 0 0 2px;
+    align-items: flex-start;
+}
+
+#main-content > .pq2-reference .box,
+#main-content > .pq2-reference .stats {
+    width: 100%;
+}
+
+/* Negotiations must remain readable at normal browser zoom. */
+.pq2-reference ~ .drawer .ct b {
+    font-size: 15px;
+}
+
+.pq2-reference ~ .drawer .neg-summary-main b {
+    font-size: 14px;
+}
+
+.pq2-reference ~ .drawer .neg-summary-main p,
+.pq2-reference ~ .drawer .negrow p,
+.pq2-reference ~ .drawer .muted {
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+.pq2-reference ~ .drawer .negrow b {
+    font-size: 13.5px;
+    line-height: 1.4;
+}
+
+.pq2-reference ~ .drawer .tag {
+    padding: 5px 8px;
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.pq2-reference ~ .drawer .meta {
+    gap: 6px;
+    margin-top: 8px;
+}
+
+/* Bootstrap also owns a generic .modal class. Reset it explicitly for the Procurement contact editor. */
+.pq2-reference ~ .modalBack .modal {
+    position: relative !important;
+    inset: auto !important;
+    display: flex !important;
+    height: auto !important;
+    margin: 0 !important;
+    transform: none !important;
+}
+
+.pq2-reference ~ .modalBack .add-modal {
+    width: min(620px, calc(100vw - 32px));
+    max-height: calc(100dvh - 40px);
+    border: 1px solid #dde3ea;
+    border-radius: 12px;
+    box-shadow: 0 22px 60px rgb(16 34 58 / 24%);
+}
+
+.pq2-reference ~ .modalBack .mh {
+    min-height: 62px;
+    padding: 10px 14px;
+}
+
+.pq2-reference ~ .modalBack .mh b {
+    font-size: 15px;
+}
+
+.pq2-reference ~ .modalBack .mh .sub {
+    font-size: 11px;
+}
+
+.pq2-reference ~ .modalBack .mb {
+    padding: 14px;
+}
+
+.pq2-reference ~ .modalBack .field label {
+    margin-bottom: 6px;
+    font-size: 11.5px;
+}
+
+.pq2-reference ~ .modalBack .field input,
+.pq2-reference ~ .modalBack .field select,
+.pq2-reference ~ .modalBack .field textarea {
+    font-size: 13px;
+}
+
+.pq2-reference ~ .modalBack .field input,
+.pq2-reference ~ .modalBack .field select {
+    min-height: 40px;
+}
+
+.pq2-reference ~ .modalBack .field textarea {
+    min-height: 94px;
+    line-height: 1.45;
+}
+
+.pq2-reference ~ .modalBack .field small,
+.pq2-reference ~ .modalBack .validation-message,
+.pq2-reference ~ .modalBack .validation-errors {
+    font-size: 11px;
+}
+
+.pq2-reference ~ .modalBack .mf {
+    padding: 11px 14px;
+}
+
+.pq2-reference ~ .modalBack .btn {
+    min-height: 38px;
+    font-size: 12px;
+}
+
+/* On wide desktop the editor belongs to the open drawer, so place it immediately to its left. */
+@media (min-width: 1200px) {
+    .pq2-reference ~ .modalBack .add-modal {
+        position: fixed !important;
+        top: 50% !important;
+        right: 798px !important;
+        left: auto !important;
+        width: min(620px, calc(100vw - 824px));
+        transform: translateY(-50%) !important;
+    }
+}
+
+@media (max-width: 1100px) {
+    #main-content > .pq2-reference > .main {
+        padding: 18px;
+    }
+}
+
+@media (max-width: 900px) {
+    #main-content > .pq2-reference > .main {
+        padding: 14px;
+    }
+
+    .pq2-reference ~ .modalBack .add-modal {
+        width: min(620px, calc(100vw - 24px));
+    }
+}

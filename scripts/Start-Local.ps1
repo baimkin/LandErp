@@ -8,5 +8,5 @@ $stageSettings = Get-Content -Raw -LiteralPath $stageSettingsPath | ConvertFrom-
 $env:Database__ConnectionString = $stageSettings.RuntimeConnection
 $env:DOTNET_ENVIRONMENT = 'Local'
 $env:ASPNETCORE_URLS = 'https://localhost:7240'
-& $DotnetPath run --project "src/LandErp.$Service" -c Release --no-build
+& $DotnetPath run --project "src/LandErp.$Service" -c Release --no-build --no-launch-profile
 if ($LASTEXITCODE -ne 0) { throw 'Local host stopped with an error; connection values were not printed' }

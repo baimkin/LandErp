@@ -95,6 +95,7 @@ try
         + $"GRANT DELETE ON identity.user_roles TO \"{runtimeRole}\"; "
         + $"GRANT USAGE ON SCHEMA collection,catalog TO \"{runtimeRole}\"; "
         + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_groups,collection.search_configurations,collection.jobs,catalog.listings TO \"{runtimeRole}\"; "
+        + $"GRANT SELECT,INSERT,UPDATE ON catalog.incoming_filter_presets TO \"{runtimeRole}\"; "
         + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations,catalog.events TO \"{runtimeRole}\"; "
         + $"GRANT USAGE ON SCHEMA workflow,procurement TO \"{runtimeRole}\"; "
         + $"GRANT SELECT ON workflow.stages TO \"{runtimeRole}\"; "

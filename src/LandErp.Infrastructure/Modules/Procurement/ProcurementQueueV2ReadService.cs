@@ -100,8 +100,8 @@ public sealed partial class ProcurementQueueV2ReadService(
         Row? row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == caseId, cancellationToken);
         if (row == null) throw new AccessDeniedException();
         (DateTimeOffset todayStart, DateTimeOffset tomorrowStart) = TodayBounds();
-        SourceDb[] sourceRows = await SourceRows(db, context.OrganizationId, [caseId])
-            .OrderByDescending(item => item.LastObservedAt ?? item.ChangedAt).ToArrayAsync(cancellationToken);
+        SourceDb[] sourceRows = (await SourceRows(db, context.OrganizationId, [caseId]).ToArrayAsync(cancellationToken))
+            .OrderByDescending(item => item.LastObservedAt ?? item.ChangedAt).ToArray();
         bool sourceChanged = sourceRows.Any(item => item.DataRevision > item.ReviewedDataRevision);
 
         ProcurementQueueV2Negotiation[] negotiations = await db.CaseNegotiations.AsNoTracking().Where(item => item.PropertyCaseId == caseId)

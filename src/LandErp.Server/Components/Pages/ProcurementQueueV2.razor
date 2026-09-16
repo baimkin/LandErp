@@ -40,19 +40,19 @@
         {
             <div class="pq2-kpis" aria-label="Сводка очереди">
                 <button type="button" class="pq2-kpi" @onclick="ResetOperationalFiltersAsync">
-                    <span>В работе</span><strong>@page.Summary.InWork</strong><small>активных объектов</small>
+                    <span>В работе</span><strong>@(page.Summary.InWork)</strong><small>активных объектов</small>
                 </button>
                 <button type="button" class="pq2-kpi @(dueTodayOnly ? "is-active" : "")" @onclick="ToggleDueTodayAsync">
-                    <span>Сегодня</span><strong>@page.Summary.DueToday</strong><small>требуют действия</small>
+                    <span>Сегодня</span><strong>@(page.Summary.DueToday)</strong><small>требуют действия</small>
                 </button>
                 <button type="button" class="pq2-kpi pq2-kpi-danger @(overdueOnly ? "is-active" : "")" @onclick="ToggleOverdueAsync">
-                    <span>Просрочено</span><strong>@page.Summary.Overdue</strong><small>по следующему действию</small>
+                    <span>Просрочено</span><strong>@(page.Summary.Overdue)</strong><small>по следующему действию</small>
                 </button>
                 <button type="button" class="pq2-kpi pq2-kpi-warn @(sourceChangedOnly ? "is-active" : "")" @onclick="ToggleSourceChangedAsync">
-                    <span>Источники изменились</span><strong>@page.Summary.SourceChanged</strong><small>есть новая source revision</small>
+                    <span>Источники изменились</span><strong>@(page.Summary.SourceChanged)</strong><small>есть новая source revision</small>
                 </button>
                 <button type="button" class="pq2-kpi @(stageFilter == "returned" ? "is-active" : "")" @onclick="ShowReturnedAsync">
-                    <span>Возвращены</span><strong>@page.Summary.Returned</strong><small>реальный Case state</small>
+                    <span>Возвращены</span><strong>@(page.Summary.Returned)</strong><small>реальный Case state</small>
                 </button>
             </div>
 
@@ -122,7 +122,7 @@
                 {
                     <button type="button" class="pq2-chip-clear" @onclick="ClearFiltersAsync">Сбросить фильтры</button>
                 }
-                <span class="pq2-found">Найдено: <strong>@page.Total</strong></span>
+                <span class="pq2-found">Найдено: <strong>@(page.Total)</strong></span>
             </div>
 
             <div class="pq2-table-shell">
@@ -398,14 +398,14 @@
                 <label class="field"><span>Канал</span><input @bind="negotiation.Channel" maxlength="100" /></label>
                 <label class="field"><span>Контакт</span><input @bind="negotiation.Contact" maxlength="200" /></label>
                 <label class="field"><span>Результат</span><input @bind="negotiation.Outcome" maxlength="500" /></label>
-                <label class="field"><span>Дата контакта (МСК)</span><input type="datetime-local" @bind="negotiation.Effective" /></label>
+                <label class="field"><span>Дата контакта (МСК)</span><input type="datetime-local" value="@negotiation.Effective" @onchange="e => negotiation.Effective = e.Value?.ToString() ?? string.Empty" /></label>
                 <label class="field"><span>Цена продавца</span><InputNumber @bind-Value="negotiation.SellerPrice" /></label>
                 <label class="field"><span>Наше предложение</span><InputNumber @bind-Value="negotiation.BuyerOffer" /></label>
                 <label class="field"><span>Согласованная цена</span><InputNumber @bind-Value="negotiation.AgreedPrice" /></label>
                 <label class="field"><span>Следующий шаг</span><input @bind="negotiation.NextStep" maxlength="500" /></label>
                 <label class="field pq2-form-wide"><span>Условия</span><textarea @bind="negotiation.Conditions" maxlength="2000"></textarea></label>
                 <label class="field pq2-form-wide"><span>Комментарий</span><textarea @bind="negotiation.Comment" maxlength="4000"></textarea></label>
-                <label class="field"><span>Срок следующего шага (МСК)</span><input type="datetime-local" @bind="negotiation.NextStepDue" /></label>
+                <label class="field"><span>Срок следующего шага (МСК)</span><input type="datetime-local" value="@negotiation.NextStepDue" @onchange="e => negotiation.NextStepDue = e.Value?.ToString() ?? string.Empty" /></label>
             </div>
             <div class="pq2-atomic-todo" title="Текущий AddNegotiationAsync не возвращает NegotiationId для atomic attachment save.">
                 TODO-BACKEND-PROCUREMENT · вложения в том же сохранении переговоров пока недоступны. После сохранения вложение можно добавить в полной карточке.

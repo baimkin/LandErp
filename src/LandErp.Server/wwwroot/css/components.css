@@ -141,5 +141,38 @@ button { cursor: pointer; }
 .incoming-detail { display:grid; gap:var(--space-4); }
 .incoming-detail > .surface { margin:0; }
 .incoming-primary-actions { justify-content:flex-end; margin-top:var(--space-4); }
+.case-titlebar { display:flex; justify-content:space-between; align-items:flex-start; gap:var(--space-5); }
+.case-titlebar h2 { font-size:clamp(1.35rem,2vw,1.85rem); }
+.case-titlebar p { color:var(--text-muted); margin:var(--space-1) 0 0; font-size:.82rem; }
+.case-title-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:var(--space-2); }
+.case-hero { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(300px,.85fr); gap:var(--space-4); }
+.case-object-card { display:grid; grid-template-columns:minmax(230px,.9fr) minmax(0,1.1fr); padding:0; overflow:hidden; }
+.case-cover { min-height:280px; background:linear-gradient(145deg,#dce8d8,#bdccb7); display:grid; place-items:center; color:var(--text-muted); }
+.case-cover img { width:100%; height:100%; min-height:280px; object-fit:cover; }
+.case-cover.empty { font-size:.8rem; }
+.case-object-facts { padding:var(--space-5); }
+.case-warning,.case-problem { border:1px solid var(--warning); background:var(--warning-soft); color:var(--warning); border-radius:var(--radius-sm); padding:var(--space-3); font-size:.78rem; }
+.case-problem { border-color:var(--danger); background:var(--danger-soft); color:var(--danger); }
+.case-side-stack { display:grid; gap:var(--space-4); }
+.price-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-2); margin:var(--space-3) 0; }
+.price-grid > div,.check-summary > div { border:1px solid var(--border); background:var(--surface-subtle); border-radius:var(--radius-sm); padding:var(--space-3); }
+.price-grid small,.price-grid strong,.check-summary small,.check-summary strong { display:block; }
+.price-grid small,.check-summary small { color:var(--text-muted); font-size:.7rem; }
+.case-tabs { display:flex; overflow-x:auto; position:sticky; top:calc(var(--control-h) + var(--space-8)); z-index:20; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:0 var(--space-2); }
+.case-tab { min-height:46px; padding:0 var(--space-4); border:0; border-bottom:2px solid transparent; background:transparent; color:var(--text-muted); font-size:.8rem; font-weight:650; white-space:nowrap; }
+.case-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+.case-dashboard { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,.8fr); gap:var(--space-4); }
+.section-heading { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); }
+.check-summary,.check-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-3); }
+.dossier-row { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); flex-wrap:wrap; padding:var(--space-3) 0; border-bottom:1px solid var(--border); font-size:.82rem; }
+.dossier-row > div { flex:1; min-width:220px; }
+.dossier-row strong,.dossier-row small { display:block; }
+.dossier-row small { color:var(--text-muted); margin-top:var(--space-1); }
+.dossier-row p { margin:var(--space-2) 0; }
+.dossier-row.blocker { border-left:3px solid var(--danger); padding-left:var(--space-3); background:var(--danger-soft); }
+.dossier-wide { grid-column:1/-1; }
 @media(max-width:600px) { .queue-card { grid-template-columns:1fr; gap:var(--space-3); } .queue-side { border-left:0; border-top:1px solid var(--border); padding:var(--space-3) 0 0; } .queue-summary { flex-direction:column; } .facts-grid { grid-template-columns:1fr; gap:var(--space-3); } .modal-body { padding:var(--space-3); } .case-workspace .surface { padding:var(--space-4); } .decision-actions > .btn { flex:1; white-space:normal; } }
 @media(max-width:1000px) { .incoming-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:1050px) { .case-hero,.case-dashboard { grid-template-columns:1fr; } }
+@media(max-width:760px) { .case-titlebar { flex-direction:column; } .case-object-card { grid-template-columns:1fr; } .case-cover,.case-cover img { min-height:220px; } .check-columns { grid-template-columns:1fr; } .case-tabs { top:0; } }
+@media(max-width:520px) { .price-grid,.check-summary { grid-template-columns:1fr; } .case-tab { padding:0 var(--space-3); } }

@@ -1,6 +1,6 @@
 # Активная задача LandErp
 
-> **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–3 завершены**; evidence: [`STAGE1_PHASE1_REPORT.md`](reports/STAGE1_PHASE1_REPORT.md), [`STAGE1_PHASE2_REPORT.md`](reports/STAGE1_PHASE2_REPORT.md), [`STAGE1_PHASE3_REPORT.md`](reports/STAGE1_PHASE3_REPORT.md). Phase 4 не активирована и не начиналась. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
+> **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–4 завершены**; evidence: [`STAGE1_PHASE1_REPORT.md`](reports/STAGE1_PHASE1_REPORT.md), [`STAGE1_PHASE2_REPORT.md`](reports/STAGE1_PHASE2_REPORT.md), [`STAGE1_PHASE3_REPORT.md`](reports/STAGE1_PHASE3_REPORT.md), [`STAGE1_PHASE4_REPORT.md`](reports/STAGE1_PHASE4_REPORT.md). Phase 5 не активирована и не начиналась. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
 
 ## P0 — обязательная следующая задача перед дальнейшим развитием
 
@@ -12,7 +12,7 @@ P0 закрыт: Catalog является organization-shared входящим �
 case-centric, а `ListingId` сохранён только как deprecated compatibility adapter
 до Phase 9. Кабинет инвестора и пост-покупочные модули не начинались.
 
-Следующая фаза master plan здесь не активируется. Локальный Parser Agent не изучался
+Следующая Phase 5 master plan здесь не активируется. Локальный Parser Agent не изучался
 и не менялся.
 
 ## Текущее разрешение — Stage 1

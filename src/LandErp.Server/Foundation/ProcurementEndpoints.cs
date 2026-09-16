@@ -22,6 +22,16 @@ internal static class ProcurementEndpoints
         group.MapGet("/antiforgery", (HttpContext http, IAntiforgery antiforgery) => { http.Response.Headers.CacheControl = "no-store"; return Results.Ok(new { requestToken = antiforgery.GetAndStoreTokens(http).RequestToken }); });
         group.MapPost("/decisions", async (DecisionCommand command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.DecideAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/notes", async (AddCaseNote command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.AddNoteAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapPost("/negotiations", async (AddNegotiation command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.AddNegotiationAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapPost("/checks", async (SaveCaseCheck command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.SaveCheckAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapPost("/attachments", async (AddCaseAttachment command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
+            Results.Ok(new { id = await workspace.AddAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token) })).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapGet("/attachments/{id:guid}", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
+        {
+            AttachmentContent attachment = await workspace.ReadAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), id, token);
+            return attachment.ExternalUrl != null ? Results.Redirect(attachment.ExternalUrl) : Results.File(attachment.Content!, attachment.ContentType, attachment.OriginalName);
+        });
+        group.MapPost("/facts/source", async (ApplySourceFact command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.ApplySourceFactAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapGet("/incoming", async (string? text, CatalogSource? source, CatalogDisposition? disposition,
             CatalogAgeRange? age, decimal? minPrice, decimal? maxPrice, decimal? minAreaSquareMeters,
             decimal? maxAreaSquareMeters, bool? attentionOnly, int? offset, int? size, HttpContext http,

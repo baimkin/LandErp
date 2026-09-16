@@ -3,8 +3,8 @@
 Единственный указатель работы — [ACTIVE_TASK](03-active/ACTIVE_TASK.md), а
 канонический execution-документ завершения Stage 1 —
 [STAGE1_COMPLETION_MASTER_PLAN](03-active/STAGE1_COMPLETION_MASTER_PLAN.md).
-Phases 1–3 завершены по прямым запросам владельца; Phase 3 evidence находится в
-[STAGE1_PHASE3_REPORT](03-active/reports/STAGE1_PHASE3_REPORT.md). Phase 4 не
+Phases 1–4 завершены по прямым запросам владельца; Phase 4 evidence находится в
+[STAGE1_PHASE4_REPORT](03-active/reports/STAGE1_PHASE4_REPORT.md). Phase 5 не
 активирована и не начиналась. Следующие сведения сохранены
 как исторический маршрут ERP-00.
 Исследовательская фаза закрыта по ERP-00; следующий Gate — ERP-01.

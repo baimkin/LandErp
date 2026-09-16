@@ -1,4 +1,6 @@
 using LandErp.Application.Foundation;
+using LandErp.Application.Foundation.Files;
+using System.Security.Cryptography;
 using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Collection.Contracts;
@@ -119,8 +121,8 @@ public sealed class ProcurementTests
     {
         await using Phase1Fixture fixture = await Phase1Fixture.CreateAsync(includeSecondManager: true, includeTeams: false);
         Guid itemId = await fixture.CreateUnlinkedManualAsync();
-        ProcurementWorkspace first = new(fixture.Factory, fixture.Access, TimeProvider.System);
-        ProcurementWorkspace second = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementWorkspace first = new(fixture.Factory, fixture.Access, TimeProvider.System, fixture.FileStorage);
+        ProcurementWorkspace second = new(fixture.Factory, fixture.Access, TimeProvider.System, fixture.FileStorage);
         TakeToWorkResult[] results = await Task.WhenAll(
             first.TakeToWorkAsync(fixture.Manager, new(itemId), "concurrent-a", CancellationToken.None),
             second.TakeToWorkAsync(fixture.SecondManager, new(itemId), "concurrent-b", CancellationToken.None));
@@ -186,6 +188,7 @@ public sealed class ProcurementTests
         public IAccessControl Access { get; private init; } = default!;
         public IDbContextFactory<LandErpDbContext> Factory { get; private init; } = default!;
         public ProcurementWorkspace Workspace { get; private init; } = default!;
+        public IFileStorage FileStorage { get; private init; } = default!;
         public Subject Owner { get; private init; } = default!;
         public Subject ForeignOwner { get; private init; } = default!;
         public Subject Manager { get; private init; } = default!;
@@ -228,6 +231,7 @@ public sealed class ProcurementTests
             AsyncServiceScope scope = services.CreateAsyncScope();
             IDbContextFactory<LandErpDbContext> factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
             IAccessControl access = scope.ServiceProvider.GetRequiredService<IAccessControl>();
+            MemoryFileStorage fileStorage = new();
             return new()
             {
                 Sandbox = sandbox,
@@ -236,7 +240,8 @@ public sealed class ProcurementTests
                 Organization = scope.ServiceProvider.GetRequiredService<IOrganizationWorkspace>(),
                 Access = access,
                 Factory = factory,
-                Workspace = new(factory, access, TimeProvider.System),
+                Workspace = new(factory, access, TimeProvider.System, fileStorage),
+                FileStorage = fileStorage,
                 Owner = owner,
                 ForeignOwner = new(foreignId, true),
                 Manager = new(manager, false),
@@ -338,6 +343,17 @@ public sealed class ProcurementTests
 
         public async ValueTask DisposeAsync() { await Scope.DisposeAsync(); await Services.DisposeAsync(); await Sandbox.DisposeAsync(); }
     }
+}
+
+internal sealed class MemoryFileStorage : IFileStorage
+{
+    private readonly Dictionary<string, byte[]> values = new(StringComparer.Ordinal);
+    public Task<FileWriteResult> WriteAsync(Guid stableFileId, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
+    {
+        string key = stableFileId.ToString("N"); byte[] bytes = content.ToArray(); values.Add(key, bytes);
+        return Task.FromResult(new FileWriteResult(key, Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.Length));
+    }
+    public Task<byte[]> ReadAsync(string storageKey, CancellationToken cancellationToken) => Task.FromResult(values[storageKey].ToArray());
 }
 
 internal static class ProcurementTestsHelper

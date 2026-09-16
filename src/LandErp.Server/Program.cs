@@ -24,7 +24,7 @@ builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogL
 builder.Services.AddLandErpPersistence(builder.Configuration);
 builder.Services.AddLandErpIdentity();
 builder.Services.AddLandErpCollection();
-builder.Services.AddLandErpProcurement();
+builder.Services.AddLandErpProcurement(builder.Configuration, builder.Environment);
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 8 * 1024 * 1024);
 builder.Services.AddScoped<AccountActivation>();

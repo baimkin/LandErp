@@ -10,6 +10,7 @@ using LandErp.Infrastructure.Modules.Collection;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;
 using LandErp.Infrastructure.Modules.Procurement;
+using LandErp.Application.Foundation.Files;
 
 namespace LandErp.Infrastructure.Persistence;
 
@@ -37,6 +38,11 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CatalogEvent> CatalogEvents => Set<CatalogEvent>();
     public DbSet<PropertyCase> PropertyCases => Set<PropertyCase>();
     public DbSet<PropertyCaseSourceLink> PropertyCaseSourceLinks => Set<PropertyCaseSourceLink>();
+    public DbSet<CaseNegotiation> CaseNegotiations => Set<CaseNegotiation>();
+    public DbSet<CaseCheck> CaseChecks => Set<CaseCheck>();
+    public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
+    public DbSet<CaseAttachment> CaseAttachments => Set<CaseAttachment>();
+    public DbSet<PropertyCaseFactRevision> PropertyCaseFactRevisions => Set<PropertyCaseFactRevision>();
     public DbSet<Assignment> WorkAssignments => Set<Assignment>();
     public DbSet<WorkTask> WorkTasks => Set<WorkTask>();
     public DbSet<WorkflowTransition> WorkflowTransitions => Set<WorkflowTransition>();
@@ -108,7 +114,9 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     {
         foreach (var entry in ChangeTracker.Entries())
         {
-            if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation or CatalogEvent or WorkflowTransition or Approval or BusinessTimelineEntry && entry.State is EntityState.Modified or EntityState.Deleted)
+            if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation or CatalogEvent or WorkflowTransition or Approval
+                or BusinessTimelineEntry or CaseNegotiation or CaseAttachment or PropertyCaseFactRevision
+                && entry.State is EntityState.Modified or EntityState.Deleted)
             {
                 throw new InvalidOperationException("Audit facts are append-only.");
             }

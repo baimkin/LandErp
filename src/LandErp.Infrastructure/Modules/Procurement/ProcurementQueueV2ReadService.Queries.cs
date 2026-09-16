@@ -77,7 +77,7 @@ public sealed partial class ProcurementQueueV2ReadService
             db.CaseNegotiations.Where(entry => entry.PropertyCaseId == item.Id).OrderByDescending(entry => entry.EffectiveAt).ThenByDescending(entry => entry.RecordedAt)
                 .Select(entry => entry.Comment).FirstOrDefault()));
 
-    private async Task<ProcurementQueueV2Summary> ReadSummaryAsync(LandErpDbContext db, IQueryable<Row> visible,
+    private static async Task<ProcurementQueueV2Summary> ReadSummaryAsync(LandErpDbContext db, IQueryable<Row> visible,
         DateTimeOffset todayStart, DateTimeOffset tomorrowStart, CancellationToken cancellationToken)
     {
         IQueryable<Row> active = visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired");

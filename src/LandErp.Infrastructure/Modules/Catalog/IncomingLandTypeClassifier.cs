@@ -66,7 +66,7 @@ internal static class IncomingLandTypeClassifier
                 || EF.Functions.ILike(item.Title ?? "", "%рекреац%") || EF.Functions.ILike(item.Description ?? "", "%рекреац%")
                 || EF.Functions.ILike(item.Title ?? "", "%коммерческ%") || EF.Functions.ILike(item.Description ?? "", "%коммерческ%")
                 || ((EF.Functions.ILike(item.Title ?? "", "%общественно%") || EF.Functions.ILike(item.Description ?? "", "%общественно%"))
-                    && (EF.Functions.ILike(item.Title ?? "", "%делов%") || EF.Functions.ILike(item.Description ?? "", "%делов%")))))));
+                    && (EF.Functions.ILike(item.Title ?? "", "%делов%") || EF.Functions.ILike(item.Description ?? "", "%делов%"))))));
     }
 
     private static bool IsIzhs(string text) => text.Contains("ижс", StringComparison.Ordinal)

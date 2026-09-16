@@ -58,7 +58,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
                     """;
                 order.Parameters.AddWithValue("organization_id", context.OrganizationId);
                 order.Parameters.AddWithValue("search_group_id", command.SearchGroupId);
-                sortOrder = Convert.ToInt32(await order.ExecuteScalarAsync(cancellationToken));
+                sortOrder = Convert.ToInt32(await order.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
             }
 
             Guid id = Guid.CreateVersion7();

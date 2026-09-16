@@ -164,6 +164,16 @@
 
 .v2-drawer .v2-photo {
     font-size: 11px;
+    overflow: hidden;
+}
+
+.v2-drawer .v2-photo img {
+    width: 100%;
+    height: 100%;
+    min-height: 165px;
+    display: block;
+    object-fit: cover;
+    border-radius: inherit;
 }
 
 .v2-drawer .v2-fact label {
@@ -224,7 +234,8 @@
     font-size: 11px;
 }
 
-.v2-drawer .v2-monitor-grid label {
+.v2-drawer .v2-monitor-grid label,
+.v2-drawer .v2-monitor-reason label {
     font-size: 11px;
 }
 
@@ -240,6 +251,28 @@
 .v2-drawer .v2-or,
 .v2-drawer .v2-monitor-last {
     font-size: 11px;
+}
+
+.v2-drawer .v2-monitor-reason {
+    margin-top: 9px;
+}
+
+.v2-drawer .v2-monitor-reason label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #58677a;
+}
+
+.v2-drawer .v2-monitor-reason input {
+    width: 100%;
+    height: 38px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 0 9px;
+    font-size: 12.5px;
+    color: var(--text-strong);
 }
 
 .v2-drawer .v2-drawer-foot {

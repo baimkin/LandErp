@@ -209,10 +209,10 @@
                 <div class="card">
                     <div class="ct"><b>Цена и торг</b><button class="btn" type="button" aria-disabled="true" title="Полная история цены и переговоров пока не выдаётся V2 read model">История цены и переговоров</button></div>
                     <div class="prices">
-                        <div class="p"><label>Старт объявления</label><b>—</b></div>
+                        <div class="p"><label>Цена источника</label><b>@MoneyCompact(detail.CurrentSourceAsk)</b><small>@ValueOrDash(detail.CurrentSourceLabel)</small></div>
                         <div class="p good"><label>Сейчас продавец</label><b>@MoneyCompact(detail.LatestSellerOffer)</b></div>
                         <div class="p ours"><label>Наше последнее</label><b>@MoneyCompact(detail.LatestBuyerOffer)</b></div>
-                        <div class="p"><label>Снижение от старта</label><b>—</b></div>
+                        <div class="p good"><label>Согласовано</label><b>@MoneyCompact(detail.LatestAgreedPrice)</b></div>
                     </div>
                 </div>
 
@@ -222,12 +222,29 @@
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Переговоры</b><div><button class="btn" type="button" aria-disabled="true" title="Read model отдаёт только три последних контакта">Все переговоры</button> @if (detail.CanManageDossier) { <button class="btn primary" type="button" @onclick="OpenNegotiation">+ Добавить</button> }</div></div>
-                    @if (detail.Negotiations.Count == 0)
-                    {
-                        <div class="muted">Контакты ещё не зафиксированы.</div>
-                    }
-                    else
+                    <div class="ct"><b>Переговоры</b><div><span class="badge info">Показано @detail.Negotiations.Count</span><button class="btn" type="button" aria-disabled="true" title="Read model отдаёт только три последних контакта">Все переговоры</button> @if (detail.CanManageDossier) { <button class="btn primary" type="button" @onclick="OpenNegotiation">+ Добавить</button> }</div></div>
+                    <div class="neg-summary">
+                        <div class="neg-summary-main">
+                            @if (detail.Negotiations.Count == 0)
+                            {
+                                <b>Переговоры ещё не начаты</b>
+                                <p>Зафиксируйте первый контакт с владельцем.</p>
+                            }
+                            else
+                            {
+                                <b>@NegotiationTitle(detail.Negotiations[0])</b>
+                                @if (!string.IsNullOrWhiteSpace(detail.Negotiations[0].Comment))
+                                {
+                                    <p>@detail.Negotiations[0].Comment</p>
+                                }
+                                else
+                                {
+                                    <p>Последний контакт · @ShortDateTime(detail.Negotiations[0].EffectiveAt)</p>
+                                }
+                            }
+                        </div>
+                    </div>
+                    @if (detail.Negotiations.Count > 0)
                     {
                         <div class="neg">
                             @foreach (ProcurementQueueV2Negotiation item in detail.Negotiations)
@@ -251,23 +268,31 @@
                 <div class="card">
                     <div class="ct"><b>Проверки</b><button class="btn" type="button" @onclick="OpenFullCase">Открыть проверки</button></div>
                     <div class="checks">
-                        <div class="check"><b>Базовые · @CheckRatio(detail.QuickChecks)</b><p>@CheckLevelDescription(detail.QuickChecks)</p></div>
-                        <div class="check"><b>Глубокая проверка / DD · @CheckRatio(detail.DeepChecks)</b><p>@CheckLevelDescription(detail.DeepChecks)</p></div>
+                        <div class="check"><div class="check-line"><b>Базовые проверки</b><span class="badge @CheckBadge(detail.QuickChecks)">@CheckRatio(detail.QuickChecks)</span></div><p>@CheckLevelDescription(detail.QuickChecks)</p></div>
+                        <div class="check"><div class="check-line"><b>Глубокая проверка / DD</b><span class="badge @CheckBadge(detail.DeepChecks)">@CheckRatio(detail.DeepChecks)</span></div><p>@CheckLevelDescription(detail.DeepChecks)</p></div>
                     </div>
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Осмотр участка</b>@if (detail.Inspection.Exists) { <button class="btn" type="button" @onclick="OpenInspection">Результаты осмотра</button> }</div>
+                    <div class="ct"><b>Осмотр участка</b>@if (detail.Inspection.Exists || detail.CanManageDossier) { <button class="btn" type="button" @onclick="OpenInspection">@(detail.Inspection.Exists ? "Открыть осмотр" : "Начать осмотр")</button> }</div>
                     @if (!detail.Inspection.Exists)
                     {
-                        <div class="muted">Осмотр ещё не начат.</div>
+                        <div class="inspection empty-inspection">
+                            <div class="inspection-top"><div><b>Осмотр ещё не проводился</b><p>Полевой чек-лист, фото, видео и аудио появятся здесь после начала осмотра.</p></div><span class="badge neutral">Нет данных</span></div>
+                        </div>
                     }
                     else
                     {
                         <div class="inspection">
-                            <b>@(detail.Inspection.Status == InspectionStatus.Completed ? "Осмотр завершён" : "Осмотр начат") · @ShortDate(detail.Inspection.Date)</b>
-                            @if (!string.IsNullOrWhiteSpace(detail.Inspection.Conclusion)) { <p>@detail.Inspection.Conclusion</p> }
-                            <div class="meta"><span class="tag">@detail.Inspection.CheckedItems / @detail.Inspection.TotalItems пунктов</span><span class="tag">@detail.Inspection.Problems проблем</span><span class="tag">@detail.Inspection.MaterialCount материалов</span></div>
+                            <div class="inspection-top">
+                                <div><b>@(detail.Inspection.Status == InspectionStatus.Completed ? "Осмотр завершён" : "Осмотр начат") · @ShortDate(detail.Inspection.Date)</b>@if (!string.IsNullOrWhiteSpace(detail.Inspection.Conclusion)) { <p>@detail.Inspection.Conclusion</p> }</div>
+                                <span class="badge @(detail.Inspection.Problems > 0 ? "warn" : "ok")">@(detail.Inspection.Problems > 0 ? "Есть замечания" : "Без проблем")</span>
+                            </div>
+                            <div class="inspection-stats">
+                                <span class="inspection-stat"><b>@detail.Inspection.CheckedItems</b> из @detail.Inspection.TotalItems пунктов</span>
+                                <span class="inspection-stat"><b>@detail.Inspection.Problems</b> проблем</span>
+                                <span class="inspection-stat"><b>@detail.Inspection.MaterialCount</b> материалов</span>
+                            </div>
                         </div>
                     }
                 </div>
@@ -283,7 +308,7 @@
                         <div class="timeline-list">
                             @foreach (ProcurementTimelineSummary item in detail.Timeline)
                             {
-                                <div class="timeline-row"><b>@item.Title</b><span>@ShortDateTime(item.RecordedAt) · @item.Actor</span></div>
+                                <div class="timeline-row"><b>@item.Title</b>@if (!string.IsNullOrWhiteSpace(item.Body)) { <p>@item.Body</p> }<span>@ShortDateTime(item.RecordedAt) · @item.Actor</span></div>
                             }
                         </div>
                     }
@@ -516,6 +541,7 @@
         _ => "neutral"
     };
     private static string CheckBadge(ProcurementQuickCheckSummary check) => check.Issues > 0 ? "warn" : check.Total > 0 && check.Completed == check.Total ? "ok" : "info";
+    private static string CheckBadge(ProcurementCheckLevelSummary check) => check.Issues > 0 ? "warn" : check.Total > 0 && check.Completed == check.Total ? "ok" : "info";
     private static string CheckRatio(ProcurementQuickCheckSummary check) => check.Total == 0 ? "Не начат" : $"{check.Completed} / {check.Total}";
     private static string CheckRatio(ProcurementCheckLevelSummary check) => check.Total == 0 ? "не начат" : $"{check.Completed}/{check.Total}";
     private static string CheckLevelDescription(ProcurementCheckLevelSummary check) => check.Total == 0

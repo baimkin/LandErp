@@ -1,5 +1,6 @@
 @page "/procurement-v2"
 @attribute [Authorize(Policy = "manager_queue.read")]
+@using System.Globalization
 @using LandErp.Application.Modules.Catalog.Domain
 @using LandErp.Application.Modules.Procurement.Contracts
 @using LandErp.Application.Modules.Procurement.Domain
@@ -11,374 +12,322 @@
 
 <PageTitle>Очередь закупки · LandErp</PageTitle>
 
-<section class="pq2-page">
-    <header class="pq2-head">
-        <div>
-            <div class="pq2-eyebrow">Закупка / Очередь объектов</div>
-            <h1>Очередь закупки</h1>
-            <p>Только выбранные PropertyCase. Подробности открываются справа.</p>
+<section class="pq2-reference">
+    <main class="main">
+        <div class="head">
+            <div>
+                <span class="kicker">Рабочие объекты закупки</span>
+                <h1>Очередь закупки</h1>
+                <p>Только уже выбранные PropertyCase. В очереди — минимум информации; детали открываются справа.</p>
+            </div>
+            <button type="button" class="btn primary" aria-disabled="true" title="Требуется отдельное подключение ручного создания PropertyCase">+ Создать объект вручную</button>
         </div>
-        <button type="button" class="pq2-button pq2-button-secondary" @onclick="ReloadAsync" disabled="@Busy">Обновить</button>
-    </header>
 
-    @if (Loading)
-    {
-        <PageState Kind="loading" Title="Загружаем очередь закупки…" />
-    }
-    else if (Forbidden)
-    {
-        <PageState Kind="forbidden" Title="Нет доступа к очереди закупки" />
-    }
-    else
-    {
-        @if (Error != null)
+        @if (Loading)
         {
-            <PageState Kind="error" Title="@Error"><ActionButton Label="Повторить" OnClick="ReloadAsync" /></PageState>
+            <div class="state"><strong>Загружаем очередь закупки…</strong></div>
         }
-
-        @if (page != null)
+        else if (Forbidden)
         {
-            <div class="pq2-kpis" aria-label="Сводка очереди">
-                <button type="button" class="pq2-kpi" @onclick="ResetOperationalFiltersAsync">
-                    <span>В работе</span><strong>@(page.Summary.InWork)</strong><small>активных объектов</small>
-                </button>
-                <button type="button" class="pq2-kpi @(dueTodayOnly ? "is-active" : "")" @onclick="ToggleDueTodayAsync">
-                    <span>Сегодня</span><strong>@(page.Summary.DueToday)</strong><small>требуют действия</small>
-                </button>
-                <button type="button" class="pq2-kpi pq2-kpi-danger @(overdueOnly ? "is-active" : "")" @onclick="ToggleOverdueAsync">
-                    <span>Просрочено</span><strong>@(page.Summary.Overdue)</strong><small>по следующему действию</small>
-                </button>
-                <button type="button" class="pq2-kpi pq2-kpi-warn @(sourceChangedOnly ? "is-active" : "")" @onclick="ToggleSourceChangedAsync">
-                    <span>Источники изменились</span><strong>@(page.Summary.SourceChanged)</strong><small>есть новая source revision</small>
-                </button>
-                <button type="button" class="pq2-kpi @(stageFilter == "returned" ? "is-active" : "")" @onclick="ShowReturnedAsync">
-                    <span>Возвращены</span><strong>@(page.Summary.Returned)</strong><small>реальный Case state</small>
-                </button>
-            </div>
+            <div class="state"><strong>Нет доступа к очереди закупки</strong></div>
+        }
+        else
+        {
+            @if (Error != null)
+            {
+                <div class="state error"><strong>@Error</strong><button type="button" class="btn" @onclick="ReloadAsync">Повторить</button></div>
+            }
 
-            <div class="pq2-filters">
-                <div class="pq2-search">
-                    <span aria-hidden="true">⌕</span>
-                    <input value="@searchDraft" @oninput="e => searchDraft = e.Value?.ToString() ?? string.Empty"
-                           @onkeydown="SearchKeyDownAsync" placeholder="Кадастр, номер, объект, адрес, ID/название источника" />
-                    <button type="button" @onclick="ApplySearchAsync">Найти</button>
-                </div>
-                <label>
-                    <span>Этап</span>
-                    <select value="@stageFilter" @onchange="StageChangedAsync">
-                        <option value="">Все активные</option>
-                        @foreach (string stage in page.Stages)
-                        {
-                            <option value="@stage">@ProcurementLabels.Stage(stage)</option>
-                        }
-                    </select>
-                </label>
-                <label>
-                    <span>Ответственный</span>
-                    <select value="@assigneeFilter" @onchange="AssigneeChangedAsync">
-                        <option value="">Все</option>
-                        @foreach (ProcurementQueueV2Assignee assignee in page.Assignees)
-                        {
-                            <option value="@assignee.Id">@assignee.Name</option>
-                        }
-                    </select>
-                </label>
-                <label>
-                    <span>Источник</span>
-                    <select value="@sourceFilter" @onchange="SourceChangedAsync">
-                        <option value="">Все</option>
-                        @foreach (CatalogSource source in Enum.GetValues<CatalogSource>())
-                        {
-                            <option value="@source">@ProcurementLabels.Source(source)</option>
-                        }
-                    </select>
-                </label>
-                <label>
-                    <span>Проверки</span>
-                    <select value="@checksFilter" @onchange="ChecksChangedAsync">
-                        <option value="Any">Все</option>
-                        <option value="HasIssues">Есть проблемы</option>
-                        <option value="Incomplete">Не завершены</option>
-                        <option value="Complete">Завершены</option>
-                    </select>
-                </label>
-                <label>
-                    <span>Сортировка</span>
-                    <select value="@sort" @onchange="SortChangedAsync">
-                        <option value="RecordedAt">Новые сверху</option>
-                        <option value="DueAt">По сроку</option>
-                        <option value="WorkingPrice">По рабочей цене</option>
-                        <option value="Area">По площади</option>
-                        <option value="LastContact">По контакту</option>
-                    </select>
-                </label>
-            </div>
-
-            <div class="pq2-chips">
-                <button type="button" class="@(sourceChangedOnly ? "is-on" : "")" @onclick="ToggleSourceChangedAsync">Источник изменился</button>
-                <button type="button" class="@(dueTodayOnly ? "is-on" : "")" @onclick="ToggleDueTodayAsync">Срок сегодня</button>
-                <button type="button" class="@(overdueOnly ? "is-on" : "")" @onclick="ToggleOverdueAsync">Просрочено</button>
-                @if (HasFilters)
-                {
-                    <button type="button" class="pq2-chip-clear" @onclick="ClearFiltersAsync">Сбросить фильтры</button>
-                }
-                <span class="pq2-found">Найдено: <strong>@(page.Total)</strong></span>
-            </div>
-
-            <div class="pq2-table-shell">
-                <div class="pq2-table-scroll">
-                    <table class="pq2-table">
-                        <thead>
-                            <tr>
-                                <th>Объект</th>
-                                <th>Этап</th>
-                                <th>Цена / площадь</th>
-                                <th>Следующее действие</th>
-                                <th>Проверки</th>
-                                <th>Последний контакт</th>
-                                <th>Ответственный</th>
-                                <th>Источники</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @if (page.Items.Count == 0)
-                            {
-                                <tr><td colspan="8" class="pq2-empty">По выбранным условиям объектов нет.</td></tr>
-                            }
-                            @foreach (ProcurementQueueV2Row item in page.Items)
-                            {
-                                <tr @key="item.CaseId" class="@RowClass(item.RowState)" @onclick="() => OpenDrawerAsync(item.CaseId)">
-                                    <td class="pq2-object-cell">
-                                        @if (!string.IsNullOrWhiteSpace(item.ThumbnailUrl))
-                                        {
-                                            <img src="@item.ThumbnailUrl" alt="" loading="lazy" />
-                                        }
-                                        else
-                                        {
-                                            <div class="pq2-thumb-fallback" aria-hidden="true">⌂</div>
-                                        }
-                                        <div>
-                                            <strong>@item.Title</strong>
-                                            <span>@ValueOrDash(item.Location)</span>
-                                            <small>@item.BusinessNumber@if (!string.IsNullOrWhiteSpace(item.CadastralNumber)) { <text> · @item.CadastralNumber</text> }</small>
-                                        </div>
-                                    </td>
-                                    <td><span class="pq2-stage">@ProcurementLabels.Stage(item.Stage)</span></td>
-                                    <td class="pq2-price-cell"><strong>@Money(item.WorkingPrice)</strong><span>@Area(item.AreaSquareMeters)</span></td>
-                                    <td>
-                                        <strong class="pq2-action-title">@ValueOrDash(item.NextActionTitle)</strong>
-                                        <span class="pq2-due @DueClass(item.DueState)">@DueText(item.DueAt, item.DueState)</span>
-                                    </td>
-                                    <td>@CheckCompact(item.QuickChecks)</td>
-                                    <td>
-                                        @if (item.LatestContact == null)
-                                        {
-                                            <span class="pq2-muted">Контактов нет</span>
-                                        }
-                                        else
-                                        {
-                                            <strong>@ShortDate(item.LatestContact.EffectiveAt)</strong>
-                                            <span>@ContactCaption(item.LatestContact)</span>
-                                        }
-                                    </td>
-                                    <td><span class="pq2-person">@Initials(item.AssigneeName)</span><strong>@item.AssigneeName</strong></td>
-                                    <td>
-                                        <div class="pq2-source-badges">
-                                            @foreach (ProcurementSourceTypeSummary source in item.Sources)
-                                            {
-                                                <span>@ProcurementLabels.Source(source.Source)@(source.Count > 1 ? $" ×{source.Count}" : "")</span>
-                                            }
-                                            @if (item.SourceCount == 0) { <span class="pq2-muted-badge">нет</span> }
-                                            @if (item.SourceChanged) { <span class="pq2-changed">изменился</span> }
-                                        </div>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-                <footer class="pq2-pager">
-                    <span>@PageCaption</span>
-                    <div>
-                        <button type="button" @onclick="PreviousPageAsync" disabled="@(page.Offset == 0)">← Назад</button>
-                        <button type="button" @onclick="NextPageAsync" disabled="@(page.Offset + page.Size >= page.Total)">Вперёд →</button>
+            @if (queuePage != null)
+            {
+                <div class="stats" aria-label="Сводка очереди">
+                    <button type="button" class="stat @(dueTodayOnly ? "selected" : "")" @onclick="ToggleDueTodayAsync">
+                        <span>Сегодня</span><b>@(queuePage.Summary.DueToday)</b><small>действий</small>
+                    </button>
+                    <button type="button" class="stat danger @(overdueOnly ? "selected" : "")" @onclick="ToggleOverdueAsync">
+                        <span>Просрочено</span><b>@(queuePage.Summary.Overdue)</b><small>нужна реакция</small>
+                    </button>
+                    <button type="button" class="stat warning @(stageFilter == "returned" ? "selected" : "")" @onclick="ShowReturnedAsync">
+                        <span>Возвращены</span><b>@(queuePage.Summary.Returned)</b><small>руководителем</small>
+                    </button>
+                    <div class="stat unavailable" title="Текущий V2 read model не отдаёт отдельный server-side count состояния «На проверке»">
+                        <span>На проверке</span><b>—</b><small>нужен backend count</small>
                     </div>
-                </footer>
-            </div>
+                    <div class="stat unavailable" title="Текущий V2 read model не отдаёт отдельный server-side count состояния «У руководителя»">
+                        <span>У руководителя</span><b>—</b><small>нужен backend count</small>
+                    </div>
+                </div>
+
+                <section class="box">
+                    <div class="tools">
+                        <input value="@searchDraft"
+                               @oninput="e => searchDraft = e.Value?.ToString() ?? string.Empty"
+                               @onchange="SearchChangedAsync"
+                               @onkeydown="SearchKeyDownAsync"
+                               placeholder="Адрес, PropertyCase, кадастровый номер, продавец…" />
+                        <select value="@stageFilter" @onchange="StageChangedAsync" aria-label="Этап">
+                            <option value="">Все этапы</option>
+                            @foreach (string stage in queuePage.Stages)
+                            {
+                                <option value="@stage">@ProcurementLabels.Stage(stage)</option>
+                            }
+                        </select>
+                        <select value="@assigneeFilter" @onchange="AssigneeChangedAsync" aria-label="Ответственный">
+                            <option value="">Все ответственные</option>
+                            @foreach (ProcurementQueueV2Assignee assignee in queuePage.Assignees)
+                            {
+                                <option value="@assignee.Id">@assignee.Name</option>
+                            }
+                        </select>
+                        @if (HasFilters)
+                        {
+                            <button type="button" class="btn reset" @onclick="ClearFiltersAsync">Сбросить</button>
+                        }
+                    </div>
+
+                    <div class="chips">
+                        <button type="button" class="chipbtn @(!HasOperationalFilter ? "on" : "")" @onclick="ClearOperationalFiltersAsync">Все <b>@(queuePage.Total)</b></button>
+                        <button type="button" class="chipbtn @(dueTodayOnly ? "on" : "")" @onclick="ToggleDueTodayAsync">Сегодня <b>@(queuePage.Summary.DueToday)</b></button>
+                        <button type="button" class="chipbtn @(overdueOnly ? "on" : "")" @onclick="ToggleOverdueAsync">Просрочено <b>@(queuePage.Summary.Overdue)</b></button>
+                        <button type="button" class="chipbtn @(stageFilter == "returned" ? "on" : "")" @onclick="ShowReturnedAsync">Возвращены <b>@(queuePage.Summary.Returned)</b></button>
+                        <button type="button" class="chipbtn unavailable" aria-disabled="true" title="Сейчас сервер сообщает только об изменении source revision, а не именно цены">Изменилась цена <b>—</b></button>
+                        <button type="button" class="chipbtn unavailable" aria-disabled="true" title="Нужен отдельный server-side count/filter состояния руководителя">У руководителя <b>—</b></button>
+                    </div>
+
+                    <div class="table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Объект</th>
+                                    <th>Этап</th>
+                                    <th>Цена / площадь</th>
+                                    <th>Следующее действие</th>
+                                    <th>Проверка</th>
+                                    <th>Последний контакт</th>
+                                    <th>Ответственный</th>
+                                    <th>Источники</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (queuePage.Items.Count == 0)
+                                {
+                                    <tr><td colspan="8" class="empty">По выбранным условиям объектов нет.</td></tr>
+                                }
+                                @foreach (ProcurementQueueV2Row item in queuePage.Items)
+                                {
+                                    <tr @key="item.CaseId" class="@RowClass(item.RowState)" @onclick="() => OpenDrawerAsync(item.CaseId)">
+                                        <td class="obj">
+                                            <div class="objline">
+                                                @if (!string.IsNullOrWhiteSpace(item.ThumbnailUrl))
+                                                {
+                                                    <img class="thumb" src="@item.ThumbnailUrl" alt="" loading="lazy" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="thumb fallback" aria-hidden="true">⌂</span>
+                                                }
+                                                <div>
+                                                    <b>@item.Title</b>
+                                                    <div class="sub">@item.BusinessNumber@if (!string.IsNullOrWhiteSpace(item.CadastralNumber)) { <text> · @item.CadastralNumber</text> }</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td><span class="badge @StageBadge(item.Stage)">@ProcurementLabels.Stage(item.Stage)</span></td>
+                                        <td class="price"><b>@MoneyCompact(item.WorkingPrice)</b><div class="sub">@AreaSotki(item.AreaSquareMeters)</div></td>
+                                        <td><b>@ValueOrDash(item.NextActionTitle)</b><div class="sub @DueCss(item.DueState)">@DueCompact(item.DueAt, item.DueState)</div></td>
+                                        <td><span class="badge @CheckBadge(item.QuickChecks)">@CheckRatio(item.QuickChecks)</span></td>
+                                        <td>
+                                            @if (item.LatestContact == null)
+                                            {
+                                                <span>Нет контакта</span><div class="sub">переговоров нет</div>
+                                            }
+                                            else
+                                            {
+                                                <span>@ContactTime(item.LatestContact.EffectiveAt)</span><div class="sub">@ContactCaption(item.LatestContact)</div>
+                                            }
+                                        </td>
+                                        <td><div class="ass"><span class="av">@Initials(item.AssigneeName)</span><span>@item.AssigneeName</span></div></td>
+                                        <td><span class="badge neutral">@SourcesText(item.Sources)</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <footer class="pager">
+                        <span>@PageCaption</span>
+                        <div>
+                            <button type="button" class="btn" @onclick="PreviousPageAsync" disabled="@(queuePage.Offset == 0)">‹</button>
+                            <span class="page-number">@(queuePage.Total == 0 ? 1 : queuePage.Offset / queuePage.Size + 1)</span>
+                            <button type="button" class="btn" @onclick="NextPageAsync" disabled="@(queuePage.Offset + queuePage.Size >= queuePage.Total)">›</button>
+                        </div>
+                    </footer>
+                </section>
+            }
         }
-    }
+    </main>
 </section>
 
 @if (selectedCaseId != null)
 {
-    <div class="pq2-overlay" @onclick="CloseDrawer">
-        <aside class="pq2-drawer" @onclick:stopPropagation="true" aria-label="Карточка объекта">
-            @if (drawerLoading)
-            {
-                <div class="pq2-drawer-state"><PageState Kind="loading" Title="Загружаем объект…" /></div>
-            }
-            else if (drawerError != null)
-            {
-                <div class="pq2-drawer-state"><PageState Kind="error" Title="@drawerError" /></div>
-            }
-            else if (detail != null)
-            {
-                <div class="pq2-drawer-scroll">
-                    <section class="pq2-hero">
-                        <button type="button" class="pq2-close" title="Закрыть" @onclick="CloseDrawer">×</button>
-                        <div class="pq2-hero-media">
-                            @if (!string.IsNullOrWhiteSpace(detail.ThumbnailUrl)) { <img src="@detail.ThumbnailUrl" alt="" /> }
-                            else { <div class="pq2-hero-fallback">⌂</div> }
-                        </div>
-                        <div class="pq2-hero-main">
-                            <div class="pq2-hero-top"><span class="pq2-stage">@ProcurementLabels.Stage(detail.Stage)</span><span>@detail.BusinessNumber</span></div>
-                            <h2>@detail.Title</h2>
-                            <p>@ValueOrDash(detail.Location)</p>
-                            <div class="pq2-hero-facts">
-                                <div><span>Кадастр</span><strong>@ValueOrDash(detail.CadastralNumber)</strong></div>
-                                <div><span>Площадь</span><strong>@Area(detail.AreaSquareMeters)</strong></div>
-                                <div><span>Ответственный</span><strong>@detail.AssigneeName</strong></div>
-                            </div>
-                            <button type="button" class="pq2-link-button" @onclick="OpenFullCase">Открыть полную карточку ↗</button>
-                        </div>
-                    </section>
-
-                    <section class="pq2-block">
-                        <div class="pq2-block-head"><h3>Цена и торг</h3></div>
-                        <div class="pq2-price-grid">
-                            <div><span>Рабочая цена</span><strong>@Money(detail.WorkingPrice)</strong></div>
-                            <div><span>Источник Ask</span><strong>@Money(detail.CurrentSourceAsk)</strong><small>@ValueOrDash(detail.CurrentSourceLabel)</small></div>
-                            <div><span>Продавец</span><strong>@Money(detail.LatestSellerOffer)</strong></div>
-                            <div><span>Мы предложили</span><strong>@Money(detail.LatestBuyerOffer)</strong></div>
-                            <div><span>Согласовано</span><strong>@Money(detail.LatestAgreedPrice)</strong></div>
-                            <div class="pq2-backend-gap" title="TODO-BACKEND-PROCUREMENT: нет immutable baseline для корректного расчёта старта и снижения">
-                                <span>Старт / снижение</span><strong>—</strong><small>TODO-BACKEND-PROCUREMENT</small>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section class="pq2-block pq2-next">
-                        <div class="pq2-block-head"><h3>Следующее действие</h3></div>
-                        <div class="pq2-next-row">
-                            <div><strong>@ValueOrDash(detail.NextActionTitle)</strong><span>@detail.AssigneeName</span></div>
-                            <span class="pq2-due @DueClass(detail.DueState)">@DueText(detail.DueAt, detail.DueState)</span>
-                        </div>
-                    </section>
-
-                    <section class="pq2-block">
-                        <div class="pq2-block-head">
-                            <h3>Переговоры</h3>
-                            <div><button type="button" class="pq2-text-button" @onclick="OpenFullCase">Все переговоры</button><button type="button" class="pq2-text-button" @onclick="OpenNegotiation">+ Добавить</button></div>
-                        </div>
-                        @if (detail.Negotiations.Count == 0)
-                        {
-                            <p class="pq2-muted">Переговоров пока нет.</p>
-                        }
-                        else
-                        {
-                            <div class="pq2-list">
-                                @foreach (ProcurementQueueV2Negotiation negotiation in detail.Negotiations)
-                                {
-                                    <article><div><strong>@ShortDateTime(negotiation.EffectiveAt)</strong><span>@JoinNonEmpty(negotiation.Channel, negotiation.Outcome)</span></div><p>@ValueOrDash(negotiation.Comment)</p></article>
-                                }
-                            </div>
-                        }
-                    </section>
-
-                    <section class="pq2-block">
-                        <div class="pq2-block-head"><h3>Проверки</h3><button type="button" class="pq2-text-button" @onclick="OpenFullCase">Открыть</button></div>
-                        <div class="pq2-check-levels">
-                            <div><span>Quick</span><strong>@CheckLevelText(detail.QuickChecks)</strong><small>@ResponsibleText(detail.QuickChecks)</small></div>
-                            <div><span>Deep</span><strong>@CheckLevelText(detail.DeepChecks)</strong><small>@ResponsibleText(detail.DeepChecks)</small></div>
-                        </div>
-                    </section>
-
-                    <section class="pq2-block">
-                        <div class="pq2-block-head"><h3>Осмотр участка</h3>@if (detail.Inspection.Exists) { <button type="button" class="pq2-text-button" @onclick="OpenInspection">Результаты осмотра</button> }</div>
-                        @if (!detail.Inspection.Exists)
-                        {
-                            <p class="pq2-muted">Осмотр ещё не начат.</p>
-                        }
-                        else
-                        {
-                            <div class="pq2-inspection">
-                                <strong>@(detail.Inspection.Status == InspectionStatus.Completed ? "Завершён" : "Начат") · @ShortDate(detail.Inspection.Date)</strong>
-                                <span>@detail.Inspection.CheckedItems / @detail.Inspection.TotalItems проверено · проблем @detail.Inspection.Problems · материалов @detail.Inspection.MaterialCount</span>
-                                @if (!string.IsNullOrWhiteSpace(detail.Inspection.Conclusion)) { <p>@detail.Inspection.Conclusion</p> }
-                            </div>
-                        }
-                    </section>
-
-                    <section class="pq2-block">
-                        <div class="pq2-block-head"><h3>Последние события</h3><button type="button" class="pq2-text-button" @onclick="OpenFullCase">Вся история</button></div>
-                        @if (detail.Timeline.Count == 0)
-                        {
-                            <p class="pq2-muted">Событий пока нет.</p>
-                        }
-                        else
-                        {
-                            <div class="pq2-timeline">
-                                @foreach (ProcurementTimelineSummary item in detail.Timeline)
-                                {
-                                    <article><i></i><div><strong>@item.Title</strong><span>@ShortDateTime(item.RecordedAt) · @item.Actor</span>@if (!string.IsNullOrWhiteSpace(item.Body)) { <p>@item.Body</p> }</div></article>
-                                }
-                            </div>
-                        }
-                    </section>
-
-                    <section class="pq2-block pq2-sources-block">
-                        <div class="pq2-block-head"><h3>Источники <span>@detail.Sources.Count</span></h3></div>
-                        @if (detail.Sources.Count == 0)
-                        {
-                            <p class="pq2-muted">Case создан без внешних источников.</p>
-                        }
-                        @foreach (ProcurementSourceDetail source in detail.Sources)
-                        {
-                            <article class="pq2-source-card @(source.Changed ? "is-changed" : "")">
-                                <div class="pq2-source-card-head">
-                                    <div><strong>@ProcurementLabels.Source(source.Source)</strong><span>@ValueOrDash(source.ExternalId)</span></div>
-                                    @if (source.Changed) { <span class="pq2-changed">изменился</span> }
-                                </div>
-                                <div class="pq2-source-data">
-                                    <span>Цена <strong>@Money(source.Price)</strong></span>
-                                    <span>Площадь <strong>@Area(source.AreaSquareMeters)</strong></span>
-                                    <span>Локация <strong>@ValueOrDash(source.Location)</strong></span>
-                                    <span>Provenance <strong>@ValueOrDash(source.Provenance)</strong></span>
-                                </div>
-                                <div class="pq2-source-actions">
-                                    @if (!string.IsNullOrWhiteSpace(source.Url)) { <a href="@source.Url" target="_blank" rel="noopener noreferrer">Открыть источник ↗</a> }
-                                    @if (detail.CanManageDossier && source.ApplicableFacts.Count > 0)
-                                    {
-                                        @foreach (CaseFactField field in source.ApplicableFacts)
-                                        {
-                                            <button type="button" disabled="@Busy" @onclick="() => ApplySourceFactAsync(source, field)">Применить: @ProcurementLabels.Fact(field)</button>
-                                        }
-                                    }
-                                </div>
-                            </article>
-                        }
-                    </section>
-                </div>
-
-                <footer class="pq2-drawer-footer">
-                    @if (detail.CanHeadDecide)
+    <div class="overlay on" @onclick="CloseDrawer"></div>
+    <aside class="drawer on" @onclick:stopPropagation="true" aria-label="Карточка объекта">
+        @if (drawerLoading)
+        {
+            <div class="dh"><div class="grow"><b>Карточка объекта</b></div><button class="btn" type="button" @onclick="CloseDrawer">×</button></div>
+            <div class="db"><div class="state"><strong>Загружаем объект…</strong></div></div>
+        }
+        else if (drawerError != null)
+        {
+            <div class="dh"><div class="grow"><b>Карточка объекта</b></div><button class="btn" type="button" @onclick="CloseDrawer">×</button></div>
+            <div class="db"><div class="state error"><strong>@drawerError</strong></div></div>
+        }
+        else if (detail != null)
+        {
+            <div class="dh">
+                <div class="grow"><b>@detail.Title</b><div class="sub">@detail.BusinessNumber@if (!string.IsNullOrWhiteSpace(detail.CadastralNumber)) { <text> · @detail.CadastralNumber</text> }</div></div>
+                <button class="btn" type="button" @onclick="OpenFullCase">Открыть полную карточку ↗</button>
+                <button class="btn" type="button" @onclick="CloseDrawer">×</button>
+            </div>
+            <div class="db">
+                <div class="card hero">
+                    @if (!string.IsNullOrWhiteSpace(detail.ThumbnailUrl))
                     {
-                        <button type="button" class="pq2-button pq2-button-danger" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Return)">Вернуть</button>
-                        <button type="button" class="pq2-button pq2-button-primary" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Approve)">Продолжить</button>
-                    }
-                    else if (detail.CanManagerDecide)
-                    {
-                        <button type="button" class="pq2-button pq2-button-danger" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Reject)">Не подходит</button>
-                        <button type="button" class="pq2-button pq2-button-primary" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Forward)">Передать руководителю</button>
+                        <img class="photo" src="@detail.ThumbnailUrl" alt="" />
                     }
                     else
                     {
-                        <button type="button" class="pq2-button pq2-button-primary" @onclick="OpenFullCase">Открыть карточку</button>
+                        <div class="photo fallback" aria-hidden="true">⌂</div>
                     }
-                </footer>
-            }
-        </aside>
-    </div>
+                    <div class="facts">
+                        <div class="fact"><label>Объект</label><b>@detail.Title</b><small>@ValueOrDash(detail.CadastralNumber)</small></div>
+                        <div class="fact"><label>Площадь</label><b>@AreaSotki(detail.AreaSquareMeters)</b></div>
+                        <div class="fact"><label>Этап</label><b>@ProcurementLabels.Stage(detail.Stage)</b></div>
+                        <div class="fact"><label>Ответственный</label><b>@detail.AssigneeName</b></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="ct"><b>Цена и торг</b><button class="btn" type="button" aria-disabled="true" title="Полная история цены и переговоров пока не выдаётся V2 read model">История цены и переговоров</button></div>
+                    <div class="prices">
+                        <div class="p"><label>Старт объявления</label><b>—</b></div>
+                        <div class="p good"><label>Сейчас продавец</label><b>@MoneyCompact(detail.LatestSellerOffer)</b></div>
+                        <div class="p ours"><label>Наше последнее</label><b>@MoneyCompact(detail.LatestBuyerOffer)</b></div>
+                        <div class="p"><label>Снижение от старта</label><b>—</b></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="ct"><b>Следующее действие</b><span class="badge @DueBadge(detail.DueState)">@DueCompact(detail.DueAt, detail.DueState)</span></div>
+                    <div class="next"><b>@ValueOrDash(detail.NextActionTitle)</b></div>
+                </div>
+
+                <div class="card">
+                    <div class="ct"><b>Переговоры</b><div><button class="btn" type="button" aria-disabled="true" title="Read model отдаёт только три последних контакта">Все переговоры</button> @if (detail.CanManageDossier) { <button class="btn primary" type="button" @onclick="OpenNegotiation">+ Добавить</button> }</div></div>
+                    @if (detail.Negotiations.Count == 0)
+                    {
+                        <div class="muted">Контакты ещё не зафиксированы.</div>
+                    }
+                    else
+                    {
+                        <div class="neg">
+                            @foreach (ProcurementQueueV2Negotiation item in detail.Negotiations)
+                            {
+                                <div class="negrow">
+                                    <b>@NegotiationTitle(item)</b>
+                                    @if (!string.IsNullOrWhiteSpace(item.Comment)) { <p>@item.Comment</p> }
+                                    <div class="meta">
+                                        @if (!string.IsNullOrWhiteSpace(item.Channel)) { <span class="tag">@item.Channel</span> }
+                                        @if (item.SellerPrice != null) { <span class="tag ok">Продавец @MoneyCompact(item.SellerPrice)</span> }
+                                        @if (item.BuyerOffer != null) { <span class="tag info">Мы @MoneyCompact(item.BuyerOffer)</span> }
+                                        @if (item.AgreedPrice != null) { <span class="tag ok">Согласовано @MoneyCompact(item.AgreedPrice)</span> }
+                                        <span class="tag">@ShortDateTime(item.EffectiveAt)</span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="card">
+                    <div class="ct"><b>Проверки</b><button class="btn" type="button" @onclick="OpenFullCase">Открыть проверки</button></div>
+                    <div class="checks">
+                        <div class="check"><b>Базовые · @CheckRatio(detail.QuickChecks)</b><p>@CheckLevelDescription(detail.QuickChecks)</p></div>
+                        <div class="check"><b>Глубокая проверка / DD · @CheckRatio(detail.DeepChecks)</b><p>@CheckLevelDescription(detail.DeepChecks)</p></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="ct"><b>Осмотр участка</b>@if (detail.Inspection.Exists) { <button class="btn" type="button" @onclick="OpenInspection">Результаты осмотра</button> }</div>
+                    @if (!detail.Inspection.Exists)
+                    {
+                        <div class="muted">Осмотр ещё не начат.</div>
+                    }
+                    else
+                    {
+                        <div class="inspection">
+                            <b>@(detail.Inspection.Status == InspectionStatus.Completed ? "Осмотр завершён" : "Осмотр начат") · @ShortDate(detail.Inspection.Date)</b>
+                            @if (!string.IsNullOrWhiteSpace(detail.Inspection.Conclusion)) { <p>@detail.Inspection.Conclusion</p> }
+                            <div class="meta"><span class="tag">@detail.Inspection.CheckedItems / @detail.Inspection.TotalItems пунктов</span><span class="tag">@detail.Inspection.Problems проблем</span><span class="tag">@detail.Inspection.MaterialCount материалов</span></div>
+                        </div>
+                    }
+                </div>
+
+                <div class="card">
+                    <div class="ct"><b>Последние события</b><button class="btn" type="button" @onclick="OpenFullCase">Вся история</button></div>
+                    @if (detail.Timeline.Count == 0)
+                    {
+                        <div class="muted">Событий пока нет.</div>
+                    }
+                    else
+                    {
+                        <div class="timeline-list">
+                            @foreach (ProcurementTimelineSummary item in detail.Timeline)
+                            {
+                                <div class="timeline-row"><b>@item.Title</b><span>@ShortDateTime(item.RecordedAt) · @item.Actor</span></div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="card">
+                    <div class="ct"><b>Источники</b><span class="badge neutral">@detail.Sources.Count</span></div>
+                    @if (detail.Sources.Count == 0)
+                    {
+                        <div class="muted">Case создан без внешних источников.</div>
+                    }
+                    else
+                    {
+                        <div class="source-list">
+                            @foreach (ProcurementSourceDetail source in detail.Sources)
+                            {
+                                <div class="source-row">
+                                    <div><b>@ProcurementLabels.Source(source.Source)</b><span>@ValueOrDash(source.ExternalId)</span></div>
+                                    @if (!string.IsNullOrWhiteSpace(source.Url)) { <a href="@source.Url" target="_blank" rel="noopener noreferrer">Открыть ↗</a> }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="df">
+                @if (detail.CanHeadDecide)
+                {
+                    <button class="btn bad" type="button" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Return)">Вернуть</button>
+                    <button class="btn primary" type="button" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Approve)">Продолжить</button>
+                }
+                else if (detail.CanManagerDecide)
+                {
+                    <button class="btn bad" type="button" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Reject)">Не подходит</button>
+                    <button class="btn primary" type="button" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Forward)">Передать руководителю</button>
+                }
+                else
+                {
+                    <span></span><button class="btn primary" type="button" @onclick="OpenFullCase">Открыть карточку</button>
+                }
+            </div>
+        }
+    </aside>
 }
 
 @if (decisionCard != null)
@@ -389,34 +338,31 @@
 
 @if (negotiationOpen && detail != null)
 {
-    <Modal Title="Добавить переговоры" OnClose="CloseNegotiation">
-        <p class="subtle">@detail.BusinessNumber · @detail.Title</p>
-        <EditForm Model="negotiation" FormName="procurement-v2-negotiation" OnValidSubmit="SaveNegotiationAsync">
-            <DataAnnotationsValidator />
-            <ValidationSummary />
-            <div class="pq2-form-grid">
-                <label class="field"><span>Канал</span><input @bind="negotiation.Channel" maxlength="100" /></label>
-                <label class="field"><span>Контакт</span><input @bind="negotiation.Contact" maxlength="200" /></label>
-                <label class="field"><span>Результат</span><input @bind="negotiation.Outcome" maxlength="500" /></label>
-                <label class="field"><span>Дата контакта (МСК)</span><input type="datetime-local" value="@negotiation.Effective" @onchange="e => negotiation.Effective = e.Value?.ToString() ?? string.Empty" /></label>
-                <label class="field"><span>Цена продавца</span><InputNumber @bind-Value="negotiation.SellerPrice" /></label>
-                <label class="field"><span>Наше предложение</span><InputNumber @bind-Value="negotiation.BuyerOffer" /></label>
-                <label class="field"><span>Согласованная цена</span><InputNumber @bind-Value="negotiation.AgreedPrice" /></label>
-                <label class="field"><span>Следующий шаг</span><input @bind="negotiation.NextStep" maxlength="500" /></label>
-                <label class="field pq2-form-wide"><span>Условия</span><textarea @bind="negotiation.Conditions" maxlength="2000"></textarea></label>
-                <label class="field pq2-form-wide"><span>Комментарий</span><textarea @bind="negotiation.Comment" maxlength="4000"></textarea></label>
-                <label class="field"><span>Срок следующего шага (МСК)</span><input type="datetime-local" value="@negotiation.NextStepDue" @onchange="e => negotiation.NextStepDue = e.Value?.ToString() ?? string.Empty" /></label>
-            </div>
-            <div class="pq2-atomic-todo" title="Текущий AddNegotiationAsync не возвращает NegotiationId для atomic attachment save.">
-                TODO-BACKEND-PROCUREMENT · вложения в том же сохранении переговоров пока недоступны. После сохранения вложение можно добавить в полной карточке.
-            </div>
-            <div class="form-actions"><button type="button" class="pq2-button pq2-button-secondary" @onclick="CloseNegotiation">Отмена</button><button type="submit" class="pq2-button pq2-button-primary" disabled="@Busy">Сохранить</button></div>
-        </EditForm>
-    </Modal>
+    <div class="modalBack on" @onclick="CloseNegotiation">
+        <div class="modal add-modal" @onclick:stopPropagation="true">
+            <div class="mh"><div class="grow"><b>Добавить контакт</b><div class="sub">Переговоры по @detail.BusinessNumber</div></div><button class="btn" type="button" @onclick="CloseNegotiation">×</button></div>
+            <EditForm Model="negotiation" FormName="procurement-v2-negotiation" OnValidSubmit="SaveNegotiationAsync">
+                <DataAnnotationsValidator />
+                <div class="mb">
+                    <ValidationSummary />
+                    <div class="form">
+                        <div class="field"><label>Тип</label><select @bind="negotiation.Channel"><option>Телефон</option><option>Сообщение</option><option>Встреча</option></select></div>
+                        <div class="field"><label>Результат</label><input @bind="negotiation.Outcome" maxlength="500" /></div>
+                        <div class="field"><label>Цена продавца</label><InputNumber @bind-Value="negotiation.SellerPrice" /></div>
+                        <div class="field"><label>Наше предложение</label><InputNumber @bind-Value="negotiation.BuyerOffer" /></div>
+                        <div class="field full"><label>Комментарий</label><textarea @bind="negotiation.Comment" maxlength="4000"></textarea></div>
+                        <div class="field full"><label>Вложения</label><div class="attachment-placeholder"><button class="btn" type="button" aria-disabled="true">📎 Файл</button><button class="btn" type="button" aria-disabled="true">📷 Фото</button><button class="btn" type="button" aria-disabled="true">🎙 Аудио</button></div><small>Atomic attachment save требует расширения backend-контракта.</small></div>
+                    </div>
+                </div>
+                <div class="mf"><button class="btn" type="button" @onclick="CloseNegotiation">Отмена</button><button class="btn primary" type="submit" disabled="@Busy">Сохранить</button></div>
+            </EditForm>
+        </div>
+    </div>
 }
 
 @code {
-    private ProcurementQueueV2Page? page;
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private ProcurementQueueV2Page? queuePage;
     private ProcurementQueueV2Detail? detail;
     private Guid? selectedCaseId;
     private bool drawerLoading;
@@ -426,10 +372,6 @@
     private string search = "";
     private string stageFilter = "";
     private string assigneeFilter = "";
-    private string sourceFilter = "";
-    private string checksFilter = nameof(ProcurementQueueV2CheckFilter.Any);
-    private string sort = nameof(ProcurementQueueV2Sort.RecordedAt);
-    private bool sourceChangedOnly;
     private bool dueTodayOnly;
     private bool overdueOnly;
     private int offset;
@@ -442,7 +384,7 @@
 
     protected override async Task ReadAsync()
     {
-        page = await ReadModel.ReadPageAsync(CurrentSubject, BuildFilter(), CancellationToken.None);
+        queuePage = await ReadModel.ReadPageAsync(CurrentSubject, BuildFilter(), CancellationToken.None);
         if (selectedCaseId is Guid caseId)
             detail = await ReadModel.ReadDetailAsync(CurrentSubject, caseId, CancellationToken.None);
     }
@@ -450,39 +392,26 @@
     private ProcurementQueueV2Filter BuildFilter()
     {
         Guid? assignee = Guid.TryParse(assigneeFilter, out Guid assigneeId) ? assigneeId : null;
-        CatalogSource? source = Enum.TryParse(sourceFilter, out CatalogSource parsedSource) ? parsedSource : null;
-        ProcurementQueueV2CheckFilter checks = Enum.TryParse(checksFilter, out ProcurementQueueV2CheckFilter parsedChecks) ? parsedChecks : ProcurementQueueV2CheckFilter.Any;
-        ProcurementQueueV2Sort parsedSort = Enum.TryParse(sort, out ProcurementQueueV2Sort queueSort) ? queueSort : ProcurementQueueV2Sort.RecordedAt;
-        return new(search, stageFilter, assignee, source, sourceChangedOnly, dueTodayOnly, overdueOnly, checks, parsedSort, true, offset, PageSize);
+        return new(search, stageFilter, assignee, null, false, dueTodayOnly, overdueOnly,
+            ProcurementQueueV2CheckFilter.Any, ProcurementQueueV2Sort.RecordedAt, true, offset, PageSize);
     }
 
-    private bool HasFilters => search.Length > 0 || stageFilter.Length > 0 || assigneeFilter.Length > 0 || sourceFilter.Length > 0
-        || checksFilter != nameof(ProcurementQueueV2CheckFilter.Any) || sourceChangedOnly || dueTodayOnly || overdueOnly;
-
-    private string PageCaption => page == null || page.Total == 0 ? "0 объектов" : $"{page.Offset + 1}–{Math.Min(page.Offset + page.Size, page.Total)} из {page.Total}";
+    private bool HasFilters => search.Length > 0 || stageFilter.Length > 0 || assigneeFilter.Length > 0 || dueTodayOnly || overdueOnly;
+    private bool HasOperationalFilter => stageFilter.Length > 0 || dueTodayOnly || overdueOnly;
+    private string PageCaption => queuePage == null || queuePage.Total == 0 ? "Показано 0 объектов" : $"Показано {queuePage.Offset + 1}–{Math.Min(queuePage.Offset + queuePage.Size, queuePage.Total)} из {queuePage.Total} объектов";
 
     private async Task ApplySearchAsync() { search = searchDraft.Trim(); offset = 0; await ReloadAsync(); }
+    private async Task SearchChangedAsync(ChangeEventArgs e) { searchDraft = e.Value?.ToString() ?? ""; await ApplySearchAsync(); }
     private async Task SearchKeyDownAsync(KeyboardEventArgs args) { if (args.Key == "Enter") await ApplySearchAsync(); }
-    private async Task StageChangedAsync(ChangeEventArgs e) { stageFilter = e.Value?.ToString() ?? ""; offset = 0; await ReloadAsync(); }
+    private async Task StageChangedAsync(ChangeEventArgs e) { stageFilter = e.Value?.ToString() ?? ""; dueTodayOnly = overdueOnly = false; offset = 0; await ReloadAsync(); }
     private async Task AssigneeChangedAsync(ChangeEventArgs e) { assigneeFilter = e.Value?.ToString() ?? ""; offset = 0; await ReloadAsync(); }
-    private async Task SourceChangedAsync(ChangeEventArgs e) { sourceFilter = e.Value?.ToString() ?? ""; offset = 0; await ReloadAsync(); }
-    private async Task ChecksChangedAsync(ChangeEventArgs e) { checksFilter = e.Value?.ToString() ?? nameof(ProcurementQueueV2CheckFilter.Any); offset = 0; await ReloadAsync(); }
-    private async Task SortChangedAsync(ChangeEventArgs e) { sort = e.Value?.ToString() ?? nameof(ProcurementQueueV2Sort.RecordedAt); offset = 0; await ReloadAsync(); }
-    private async Task ToggleSourceChangedAsync() { sourceChangedOnly = !sourceChangedOnly; offset = 0; await ReloadAsync(); }
-    private async Task ToggleDueTodayAsync() { dueTodayOnly = !dueTodayOnly; if (dueTodayOnly) overdueOnly = false; offset = 0; await ReloadAsync(); }
-    private async Task ToggleOverdueAsync() { overdueOnly = !overdueOnly; if (overdueOnly) dueTodayOnly = false; offset = 0; await ReloadAsync(); }
-    private async Task ShowReturnedAsync() { stageFilter = stageFilter == "returned" ? "" : "returned"; offset = 0; await ReloadAsync(); }
-    private async Task ResetOperationalFiltersAsync() { stageFilter = ""; dueTodayOnly = false; overdueOnly = false; sourceChangedOnly = false; offset = 0; await ReloadAsync(); }
-    private async Task ClearFiltersAsync()
-    {
-        search = searchDraft = stageFilter = assigneeFilter = sourceFilter = "";
-        checksFilter = nameof(ProcurementQueueV2CheckFilter.Any);
-        sourceChangedOnly = dueTodayOnly = overdueOnly = false;
-        offset = 0;
-        await ReloadAsync();
-    }
+    private async Task ToggleDueTodayAsync() { dueTodayOnly = !dueTodayOnly; if (dueTodayOnly) { overdueOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }
+    private async Task ToggleOverdueAsync() { overdueOnly = !overdueOnly; if (overdueOnly) { dueTodayOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }
+    private async Task ShowReturnedAsync() { stageFilter = stageFilter == "returned" ? "" : "returned"; dueTodayOnly = overdueOnly = false; offset = 0; await ReloadAsync(); }
+    private async Task ClearOperationalFiltersAsync() { stageFilter = ""; dueTodayOnly = overdueOnly = false; offset = 0; await ReloadAsync(); }
+    private async Task ClearFiltersAsync() { search = searchDraft = stageFilter = assigneeFilter = ""; dueTodayOnly = overdueOnly = false; offset = 0; await ReloadAsync(); }
     private async Task PreviousPageAsync() { offset = Math.Max(0, offset - PageSize); await ReloadAsync(); }
-    private async Task NextPageAsync() { if (page != null && offset + PageSize < page.Total) { offset += PageSize; await ReloadAsync(); } }
+    private async Task NextPageAsync() { if (queuePage != null && offset + PageSize < queuePage.Total) { offset += PageSize; await ReloadAsync(); } }
 
     private async Task OpenDrawerAsync(Guid caseId)
     {
@@ -492,8 +421,8 @@
         catch (Exception) { drawerError = "Не удалось загрузить объект. Повторите после восстановления соединения."; }
         finally { drawerLoading = false; }
     }
-    private void CloseDrawer() { selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = false; }
 
+    private void CloseDrawer() { selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = false; }
     private void OpenFullCase() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}"); }
     private void OpenInspection() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}/inspection"); }
 
@@ -505,7 +434,9 @@
         catch (AccessDeniedException) { drawerError = "Нет права на это решение."; }
         catch (Exception) { drawerError = "Не удалось подготовить действие."; }
     }
+
     private void CloseDecision() => decisionCard = null;
+
     private async Task ConfirmDecisionAsync(DecisionDraft draft)
     {
         if (decisionCard == null) return;
@@ -523,7 +454,9 @@
         negotiation = new() { Effective = ProcurementLabels.LocalInput(DateTimeOffset.UtcNow) };
         negotiationOpen = true;
     }
+
     private void CloseNegotiation() => negotiationOpen = false;
+
     private async Task SaveNegotiationAsync()
     {
         if (detail == null) return;
@@ -532,22 +465,12 @@
         await ExecuteAsync(async () =>
         {
             DateTimeOffset effective = ProcurementLabels.ParseLocal(negotiation.Effective) ?? DateTimeOffset.UtcNow;
-            DateTimeOffset? nextDue = ProcurementLabels.ParseLocal(negotiation.NextStepDue);
             await Workspace.AddNegotiationAsync(CurrentSubject,
-                new AddNegotiation(caseId, version, negotiation.SellerPrice, negotiation.BuyerOffer, negotiation.AgreedPrice,
-                    negotiation.Channel, negotiation.Contact, negotiation.Outcome, negotiation.Conditions, negotiation.Comment,
-                    negotiation.NextStep, nextDue, effective), Correlation(), CancellationToken.None);
+                new AddNegotiation(caseId, version, negotiation.SellerPrice, negotiation.BuyerOffer, null,
+                    negotiation.Channel, "", negotiation.Outcome, "", negotiation.Comment, "", null, effective),
+                Correlation(), CancellationToken.None);
         });
         if (Error == null) negotiationOpen = false;
-    }
-
-    private async Task ApplySourceFactAsync(ProcurementSourceDetail source, CaseFactField field)
-    {
-        if (detail == null) return;
-        Guid caseId = detail.CaseId;
-        long version = detail.CaseVersion;
-        await ExecuteAsync(() => Workspace.ApplySourceFactAsync(CurrentSubject,
-            new ApplySourceFact(caseId, source.CatalogItemId, version, field), Correlation(), CancellationToken.None));
     }
 
     private static string Correlation() => $"procurement-v2-{Guid.NewGuid():N}";
@@ -561,51 +484,80 @@
     };
 
     private static string ValueOrDash(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
-    private static string Money(decimal? value) => value == null ? "—" : ProcurementLabels.Money(value);
-    private static string Area(decimal? value) => value == null ? "—" : ProcurementLabels.Area(value);
+    private static string MoneyCompact(decimal? value)
+    {
+        if (value == null) return "—";
+        if (Math.Abs(value.Value) >= 1_000_000m) return $"{(value.Value / 1_000_000m).ToString("0.#", Ru)} млн ₽";
+        return $"{value.Value.ToString("N0", Ru)} ₽";
+    }
+    private static string AreaSotki(decimal? squareMeters) => squareMeters == null ? "—" : $"{(squareMeters.Value / 100m).ToString("0.##", Ru)} сот.";
     private static string ShortDate(DateTimeOffset? value) => value == null ? "—" : ProcurementLabels.Time(value).Split(' ')[0];
     private static string ShortDateTime(DateTimeOffset value) => ProcurementLabels.Time(value).Replace(" МСК", "", StringComparison.Ordinal);
-    private static string JoinNonEmpty(string first, string second) => string.Join(" · ", new[] { first, second }.Where(item => !string.IsNullOrWhiteSpace(item)));
-    private static string ContactCaption(ProcurementLatestContact item) => JoinNonEmpty(item.Channel, item.Outcome);
+    private static string ContactCaption(ProcurementLatestContact item) => string.Join(" · ", new[] { item.Channel, item.Outcome }.Where(value => !string.IsNullOrWhiteSpace(value)));
+    private static string ContactTime(DateTimeOffset value) => ProcurementLabels.Time(value).Replace(" МСК", "", StringComparison.Ordinal);
     private static string Initials(string name)
     {
         string[] parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return string.Concat(parts.Take(2).Select(item => char.ToUpperInvariant(item[0])));
     }
-    private static string DueText(DateTimeOffset? dueAt, ProcurementDueState state) => state switch
+    private static string SourcesText(IReadOnlyList<ProcurementSourceTypeSummary> sources) => sources.Count == 0
+        ? "Нет источников"
+        : string.Join(" · ", sources.Select(item => item.Count > 1 ? $"{ProcurementLabels.Source(item.Source)} ×{item.Count}" : ProcurementLabels.Source(item.Source)));
+    private static string SourcesText(IReadOnlyList<ProcurementSourceDetail> sources) => sources.Count == 0
+        ? "Нет источников"
+        : string.Join(" · ", sources.Select(item => ProcurementLabels.Source(item.Source)).Distinct(StringComparer.Ordinal));
+    private static string StageBadge(string stage) => stage switch
     {
-        ProcurementDueState.Overdue => $"Просрочено · {ShortDate(dueAt)}",
-        ProcurementDueState.Today => $"Сегодня · {ShortDate(dueAt)}",
-        ProcurementDueState.Normal => ShortDate(dueAt),
-        _ => "Срок не задан"
+        "negotiation" => "violet",
+        "pending_head" => "warn",
+        "approved" or "acquired" => "ok",
+        "rejected" or "returned" => "bad",
+        "analysis" or "clarify" => "info",
+        _ => "neutral"
     };
-    private static string DueClass(ProcurementDueState state) => state switch
+    private static string CheckBadge(ProcurementQuickCheckSummary check) => check.Issues > 0 ? "warn" : check.Total > 0 && check.Completed == check.Total ? "ok" : "info";
+    private static string CheckRatio(ProcurementQuickCheckSummary check) => check.Total == 0 ? "Не начат" : $"{check.Completed} / {check.Total}";
+    private static string CheckRatio(ProcurementCheckLevelSummary check) => check.Total == 0 ? "не начат" : $"{check.Completed}/{check.Total}";
+    private static string CheckLevelDescription(ProcurementCheckLevelSummary check) => check.Total == 0
+        ? "Проверки ещё не начаты."
+        : check.Issues > 0 ? $"Есть проблем: {check.Issues}. Осталось: {check.Remaining}." : $"Осталось: {check.Remaining}.";
+    private static string DueCss(ProcurementDueState state) => state == ProcurementDueState.Overdue ? "text-bad" : state == ProcurementDueState.Today ? "text-warn" : "";
+    private static string DueBadge(ProcurementDueState state) => state == ProcurementDueState.Overdue ? "bad" : state == ProcurementDueState.Today ? "warn" : "neutral";
+    private static string DueCompact(DateTimeOffset? value, ProcurementDueState state)
     {
-        ProcurementDueState.Overdue => "is-overdue",
-        ProcurementDueState.Today => "is-today",
+        if (value == null) return "Срок не задан";
+        string time = ProcurementLabels.Time(value).Replace(" МСК", "", StringComparison.Ordinal);
+        string hhmm = time.Length >= 16 ? time[^5..] : time;
+        return state switch
+        {
+            ProcurementDueState.Today => $"Сегодня {hhmm}",
+            ProcurementDueState.Overdue => $"Просрочено · {time[..Math.Min(10, time.Length)]}",
+            _ => time
+        };
+    }
+    private static string RowClass(ProcurementQueueV2RowState state) => state switch
+    {
+        ProcurementQueueV2RowState.Overdue => "row-overdue",
+        ProcurementQueueV2RowState.DueToday => "row-today",
+        ProcurementQueueV2RowState.CheckIssue => "row-check",
+        ProcurementQueueV2RowState.SourceChanged => "row-source",
         _ => ""
     };
-    private static string RowClass(ProcurementQueueV2RowState state) => $"pq2-row pq2-row-{state.ToString().ToLowerInvariant()}";
-    private static string CheckCompact(ProcurementQuickCheckSummary check) => check.Total == 0
-        ? "Не начаты"
-        : check.Issues > 0 ? $"{check.Completed}/{check.Total} · проблем {check.Issues}" : $"{check.Completed}/{check.Total} · осталось {check.Remaining}";
-    private static string CheckLevelText(ProcurementCheckLevelSummary check) => check.Total == 0
-        ? "Не начаты"
-        : check.Issues > 0 ? $"{check.Completed}/{check.Total} · проблем {check.Issues}" : $"{check.Completed}/{check.Total} · осталось {check.Remaining}";
-    private static string ResponsibleText(ProcurementCheckLevelSummary check) => check.Responsible.Count == 0 ? "Ответственный не назначен" : string.Join(", ", check.Responsible);
+    private static string NegotiationTitle(ProcurementQueueV2Negotiation item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Outcome)) return item.Outcome;
+        if (item.SellerPrice != null) return $"Продавец: {MoneyCompact(item.SellerPrice)}";
+        if (item.BuyerOffer != null) return $"Наше предложение: {MoneyCompact(item.BuyerOffer)}";
+        return string.IsNullOrWhiteSpace(item.Channel) ? "Контакт" : item.Channel;
+    }
 
     private sealed class NegotiationDraft
     {
         [Required, MaxLength(100)] public string Channel { get; set; } = "Телефон";
-        [MaxLength(200)] public string Contact { get; set; } = "";
         [MaxLength(500)] public string Outcome { get; set; } = "";
-        [MaxLength(2000)] public string Conditions { get; set; } = "";
         [MaxLength(4000)] public string Comment { get; set; } = "";
-        [MaxLength(500)] public string NextStep { get; set; } = "";
         public decimal? SellerPrice { get; set; }
         public decimal? BuyerOffer { get; set; }
-        public decimal? AgreedPrice { get; set; }
         public string Effective { get; set; } = "";
-        public string NextStepDue { get; set; } = "";
     }
 }

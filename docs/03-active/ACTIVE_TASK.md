@@ -1,6 +1,6 @@
 # Активная задача LandErp
 
-> **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–6 завершены**; evidence: [`STAGE1_PHASE1_REPORT.md`](reports/STAGE1_PHASE1_REPORT.md), [`STAGE1_PHASE2_REPORT.md`](reports/STAGE1_PHASE2_REPORT.md), [`STAGE1_PHASE3_REPORT.md`](reports/STAGE1_PHASE3_REPORT.md), [`STAGE1_PHASE4_REPORT.md`](reports/STAGE1_PHASE4_REPORT.md), [`STAGE1_PHASE5_REPORT.md`](reports/STAGE1_PHASE5_REPORT.md), [`STAGE1_PHASE6_REPORT.md`](reports/STAGE1_PHASE6_REPORT.md). **Phase 7 реализована и ожидает приёмки владельца**; evidence: [`STAGE1_PHASE7_REPORT.md`](reports/STAGE1_PHASE7_REPORT.md). Phase 8 не активирована. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
+> **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–7 завершены и приняты владельцем**; evidence: [`STAGE1_PHASE1_REPORT.md`](reports/STAGE1_PHASE1_REPORT.md), [`STAGE1_PHASE2_REPORT.md`](reports/STAGE1_PHASE2_REPORT.md), [`STAGE1_PHASE3_REPORT.md`](reports/STAGE1_PHASE3_REPORT.md), [`STAGE1_PHASE4_REPORT.md`](reports/STAGE1_PHASE4_REPORT.md), [`STAGE1_PHASE5_REPORT.md`](reports/STAGE1_PHASE5_REPORT.md), [`STAGE1_PHASE6_REPORT.md`](reports/STAGE1_PHASE6_REPORT.md), [`STAGE1_PHASE7_REPORT.md`](reports/STAGE1_PHASE7_REPORT.md). Phase 8 не активирована. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
 
 ## P0 — обязательная следующая задача перед дальнейшим развитием
 
@@ -12,9 +12,8 @@ P0 закрыт: Catalog является organization-shared входящим �
 case-centric, а `ListingId` сохранён только как deprecated compatibility adapter
 до Phase 9. Кабинет инвестора и пост-покупочные модули не начинались.
 
-Phase 7 выполнена в ветке `codex/stage1-phase7-audit` от принятого baseline
-`ea61e1da7bee8cfd8255ef97e8811efcd4b1a18a` и ожидает приёмки владельца. Phase 8
-не активируется. Локальный Parser Agent не изучался и не менялся.
+Phase 7 интегрирована в `main` и принята владельцем 2026-09-17. Phase 8 не
+активирована. Локальный Parser Agent не изучался и не менялся.
 
 ## Текущее разрешение — Stage 1
 

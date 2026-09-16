@@ -7,9 +7,11 @@ using LandErp.Application.Modules.Organization.Contracts;
 using LandErp.Server.Security;
 using LandErp.Server.Components;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using System.Threading.RateLimiting;
 using LandErp.Infrastructure.Modules.Collection;
 using LandErp.Infrastructure.Modules.Procurement;
@@ -111,6 +113,32 @@ app.Use(async (context, next) =>
     await next(context);
 });
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    if (context.User.Identity?.IsAuthenticated == true && !context.Request.Path.StartsWithSegments("/account")
+        && !context.Request.Path.StartsWithSegments("/_framework") && !context.Request.Path.StartsWithSegments("/_content")
+        && !Path.HasExtension(context.Request.Path))
+    {
+        UserManager<LandErpUser> users = context.RequestServices.GetRequiredService<UserManager<LandErpUser>>();
+        LandErpUser? user = await users.GetUserAsync(context.User);
+        LandErpDbContext db = context.RequestServices.GetRequiredService<LandErpDbContext>();
+        bool active = user != null && await db.Employees.AnyAsync(item => item.UserId == user.Id && item.Active, context.RequestAborted);
+        if (!active)
+        {
+            await context.SignOutAsync(IdentityConstants.ApplicationScheme);
+            if (context.Request.Path.StartsWithSegments("/api")) context.Response.StatusCode = 401;
+            else context.Response.Redirect("/account/login");
+            return;
+        }
+        if (user!.MustChangePassword)
+        {
+            if (context.Request.Path.StartsWithSegments("/api")) context.Response.StatusCode = 403;
+            else context.Response.Redirect("/account/change-password");
+            return;
+        }
+    }
+    await next(context);
+});
 app.UseAuthorization();
 app.UseRateLimiter();
 app.UseAntiforgery();

@@ -159,6 +159,7 @@ internal static class ModelConventions
         ["ObjectType"] = "Тип связанного бизнес-объекта, позволяющий восстановить происхождение действия.",
         ["Action"] = "Стабильный код выполненного значимого действия, история сохраняется append-only.",
         ["BusinessTimeZone"] = "Явный IANA timezone бизнес-сроков организации. Instants в БД сохраняются UTC.",
+        ["MustChangePassword"] = "Требует сменить выданный администратором временный пароль до обычной работы в ERP.",
         ["PasswordHash"] = "Identity password verifier; открытый пароль не хранится и не логируется.",
         ["SecurityStamp"] = "Версия безопасности Identity для отзыва сессий при изменении учётной записи.",
         ["ConcurrencyStamp"] = "Технический Identity concurrency token для защиты от потерянных обновлений.",
@@ -196,6 +197,8 @@ internal static class ModelConventions
                 else if (table == "case_fact_revisions" && property.Name == "Value") property.SetComment("Человекочитаемое значение рабочего факта в момент явного подтверждения сотрудником.");
                 else if (table == "negotiations" && property.Name == "Outcome") property.SetComment("Результат конкретного контакта с продавцом; не является workflow-решением или фактом покупки.");
                 else if (table == "stored_files" && property.Name == "CreatedByEmployeeId") property.SetComment("Сотрудник, инициировавший загрузку файла или добавление внешней ссылки.");
+                else if (table is "org_units" or "teams" && property.Name == "ManagerEmployeeId") property.SetComment("Назначенный руководитель подразделения или команды; права доступа определяются отдельно ролью и scope.");
+                else if (table is "org_units" or "positions" or "teams" && property.Name == "Active") property.SetComment("Активный элемент доступен для новых назначений; архивный сохраняется в истории и может быть восстановлен.");
                 else if (ColumnComments.TryGetValue(property.Name, out string? comment))
                 {
                     property.SetComment(comment);

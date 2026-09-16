@@ -103,6 +103,15 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
         builder.Entity<Position>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Team>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Team>().HasOne<OrgUnit>().WithMany().HasForeignKey(item => item.OrgUnitId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<OrgUnit>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ManagerEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<Team>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ManagerEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<OrgUnit>().Property(item => item.Description).HasMaxLength(1000);
+        builder.Entity<Position>().Property(item => item.Description).HasMaxLength(1000);
+        builder.Entity<Team>().Property(item => item.Description).HasMaxLength(1000);
+        builder.Entity<OrgUnit>().Property(item => item.Active).HasDefaultValue(true);
+        builder.Entity<Position>().Property(item => item.Active).HasDefaultValue(true);
+        builder.Entity<Team>().Property(item => item.Active).HasDefaultValue(true);
+        builder.Entity<Team>().Property(item => item.Version).HasDefaultValue(1L);
         builder.Entity<Employee>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<OrgUnit>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
         builder.Entity<Position>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();

@@ -17,7 +17,7 @@
 @if (error != null) { <PageState Kind="error" Title="Не удалось войти" Description="@error" /> }
 <EditForm Model="Input" method="post" FormName="login" OnValidSubmit="LoginAsync">
     <DataAnnotationsValidator /><ValidationSummary />
-    <label class="field"><span>Электронная почта</span><InputText @bind-Value="Input.Login" autocomplete="username" /><ValidationMessage For="() => Input.Login" /></label>
+    <label class="field"><span>Логин</span><InputText @bind-Value="Input.Login" autocomplete="username" /><ValidationMessage For="() => Input.Login" /></label>
     <label class="field"><span>Пароль</span><InputText @bind-Value="Input.Password" type="password" autocomplete="current-password" /><ValidationMessage For="() => Input.Password" /></label>
     <label class="field"><span>Код MFA / резервный код</span><InputText @bind-Value="Input.Code" autocomplete="one-time-code" /><small>Если MFA ещё не настроена, оставьте пустым.</small></label>
     <ActionButton Type="submit" Label="Войти" />
@@ -31,12 +31,20 @@
 
     private async Task LoginAsync()
     {
-        LandErpUser? user = await Users.FindByEmailAsync(Input.Login);
+        LandErpUser? user = await Users.FindByNameAsync(Input.Login.Trim());
         if (user == null || !await Db.Employees.AnyAsync(item => item.UserId == user.Id && item.Active)
             || !(await SignIn.CheckPasswordSignInAsync(user, Input.Password, true)).Succeeded)
         {
             Input.Password = "";
             error = "Проверьте данные входа, активацию и блокировку учётной записи.";
+            return;
+        }
+
+        if (user.MustChangePassword)
+        {
+            await SignIn.SignInAsync(user, false);
+            await AccountAudit.RecordAsync(Db, user.Id, "TemporaryPasswordLogin");
+            Navigation.NavigateTo("/account/change-password", forceLoad: true);
             return;
         }
 
@@ -74,7 +82,7 @@
 
     private sealed class LoginInput
     {
-        [Required(ErrorMessage = "Укажите адрес"), EmailAddress] public string Login { get; set; } = "";
+        [Required(ErrorMessage = "Укажите логин")] public string Login { get; set; } = "";
         [Required(ErrorMessage = "Укажите пароль")] public string Password { get; set; } = "";
         public string Code { get; set; } = "";
     }

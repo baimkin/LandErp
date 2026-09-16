@@ -1,46 +1,142 @@
 @page "/organization"
-@attribute [Authorize(Policy = "organization.manage")]
+@page "/employees"
+@attribute [Authorize(Policy = "users.read")]
+@using System.ComponentModel.DataAnnotations
+@using LandErp.Application.Modules.IdentityAccess.Contracts
+@using LandErp.Application.Modules.Organization.Contracts
+@using Microsoft.JSInterop
 @inherits WorkspaceComponent
 @inject IOrganizationWorkspace Workspace
-<PageTitle>Оргструктура · LandErp</PageTitle>
-<PageHeader Title="Оргструктура" Breadcrumb="Администрирование / Организация" Description="Подразделения и должности задают ответственность. Permissions назначаются отдельно." />
-@if (Loading) { <PageState Kind="loading" Title="Загружаем оргструктуру…" /> }
-else if (Forbidden) { <PageState Kind="forbidden" Title="Нет доступа к оргструктуре" /> }
-else
+@inject NavigationManager Navigation
+@inject IJSRuntime Js
+
+<PageTitle>Организация · LandErp</PageTitle>
+@if(Loading){<PageState Kind="loading" Title="Загружаем организацию…" />}
+else if(Forbidden){<PageState Kind="forbidden" Title="Нет доступа к организации" />}
+else if(view!=null)
 {
-    @if (Error != null) { <PageState Kind="error" Title="@Error"><ActionButton Label="Повторить" OnClick="ReloadAsync" /></PageState> }
-    @if (Success != null) { <PageState Kind="success" Title="@Success" /> }
-    @if (view != null)
-    {
-        <div class="content-grid">
-            <article class="surface"><span class="kicker">@view.Name</span><h2>Подразделения</h2>
-                @if (view.Departments.Count == 0) { <p class="subtle">Добавьте первый отдел, чтобы назначить рабочую ответственность.</p> }
-                <ul>@foreach (NamedItem item in view.Departments) { <li>@item.Name</li> }</ul>
-                <EditForm Model="department" FormName="department" OnValidSubmit="AddDepartmentAsync"><DataAnnotationsValidator />
-                    <label class="field"><span>Название отдела</span><InputText @bind-Value="department.Name" /><ValidationMessage For="() => department.Name" /></label>
-                    <ActionButton Type="submit" Label="Добавить отдел" Busy="Busy" /></EditForm>
-            </article>
-            <article class="surface"><span class="kicker">Справочник</span><h2>Должности</h2>
-                <ul>@foreach (NamedItem item in view.Positions) { <li>@item.Name</li> }</ul>
-                <EditForm Model="position" FormName="position" OnValidSubmit="AddPositionAsync"><DataAnnotationsValidator />
-                    <label class="field"><span>Название должности</span><InputText @bind-Value="position.Name" /><ValidationMessage For="() => position.Name" /></label>
-                    <ActionButton Type="submit" Label="Добавить должность" Busy="Busy" /></EditForm>
-            </article>
-            <article class="surface"><span class="kicker">Видимость</span><h2>Рабочие команды</h2><ul>@foreach (NamedItem item in view.Teams) { <li>@item.Name</li> }</ul>
-                <EditForm Model="team" FormName="team" OnValidSubmit="AddTeamAsync"><DataAnnotationsValidator />
-                    <label class="field"><span>Подразделение команды</span><InputSelect @bind-Value="team.DepartmentId"><option value="">Выберите отдел</option>@foreach (NamedItem item in view.Departments) { <option value="@item.Id">@item.Name</option> }</InputSelect></label>
-                    <label class="field"><span>Название команды</span><InputText @bind-Value="team.Name" /></label><ActionButton Type="submit" Label="Добавить команду" Busy="Busy" /></EditForm>
-            </article>
-        </div>
-    }
+    @if(Error!=null){<PageState Kind="error" Title="@Error"><ActionButton Label="Обновить" OnClick="ReloadAsync" /></PageState>}
+    @if(Success!=null){<PageState Kind="success" Title="@Success" />}
+    <div class="organization-workspace">
+        <header class="organization-heading">
+            <div><span class="kicker">Администрирование / Организация</span><h1>Организация</h1><p>Структура компании, сотрудники и должности. Права доступа не смешиваются с оргструктурой.</p></div>
+            <div class="organization-heading-actions">
+                <AuthorizeView Policy="users.manage" Context="employeeManage"><button class="btn secondary" @onclick="OpenEmployeeCreate">+ Сотрудник</button></AuthorizeView>
+                <AuthorizeView Policy="organization.manage" Context="organizationManage"><button class="btn primary" @onclick="()=>OpenDepartment(null)">+ Отдел</button></AuthorizeView>
+            </div>
+        </header>
+        <section class="organization-stats">
+            <article><small>Отделы</small><strong>@view.Departments.Count(x=>x.Active)</strong><span>@view.Departments.Count(x=>!x.Active) в архиве</span></article>
+            <article><small>Команды</small><strong>@view.Teams.Count(x=>x.Active)</strong><span>в @view.Teams.Where(x=>x.Active).Select(x=>x.DepartmentId).Distinct().Count() отделах</span></article>
+            <article><small>Должности</small><strong>@view.Positions.Count(x=>x.Active)</strong><span>@view.Positions.Count(x=>x.Active&&x.EmployeeCount==0) не используется</span></article>
+            <article><small>Сотрудники</small><strong>@view.Employees.Count(x=>x.State==EmployeeState.Active)</strong><span>@view.Employees.Count(x=>x.TeamId==null) без команды</span></article>
+        </section>
+        <section class="organization-card">
+            <nav class="organization-tabs" aria-label="Разделы организации">
+                @foreach((string id,string title) in Tabs){<button class="@(activeTab==id?"active":"")" @onclick="()=>SelectTab(id)">@title</button>}
+            </nav>
+            @if(activeTab=="structure")
+            {
+                <div class="organization-toolbar"><input @bind="structureSearch" @bind:event="oninput" placeholder="Найти отдел, команду или сотрудника" /><label><InputCheckbox @bind-Value="showArchived" /> Показывать архивные</label><span></span><button class="btn quiet" @onclick="()=>expanded=true">Развернуть все</button><button class="btn quiet" @onclick="()=>expanded=false">Свернуть все</button></div>
+                <div class="organization-tree">
+                    <div class="organization-tree-head"><span>Подразделение / команда / сотрудник</span><span>Должность / люди</span><span>Руководитель</span><span>Состояние</span><span></span></div>
+                    @foreach(DepartmentView department in StructureDepartments)
+                    {
+                        bool open=expanded||openDepartments.Contains(department.Id);
+                        <article class="organization-department @(department.Active?"":"archived")">
+                            <div class="organization-tree-row department-row">
+                                <div class="organization-tree-name"><button class="tree-caret" @onclick="()=>Toggle(openDepartments,department.Id)">@(open?"⌄":"›")</button><div><strong>@department.Name</strong><small>@department.Description</small></div></div>
+                                <div><strong>@department.EmployeeCount сотрудников</strong><small>@department.TeamCount команд</small></div><div>@(department.Manager??"Не назначен")<small>руководитель отдела</small></div><div><StatusBadge Label="@(department.Active?"Активен":"В архиве")" Tone="@(department.Active?"success":"neutral")" /></div>
+                                <AuthorizeView Policy="organization.manage" Context="departmentManage"><div class="organization-row-actions">@if(department.Active){<button class="btn icon-button" title="Добавить команду" @onclick="()=>OpenTeam(null,department.Id)">＋</button>}<button class="btn icon-button" title="Изменить" @onclick="()=>OpenDepartment(department)">⋯</button><button class="btn quiet" @onclick='()=>RequestActive("department",department.Id,department.Version,!department.Active,department.Name)'>@(department.Active?"Архивировать":"Восстановить")</button></div></AuthorizeView>
+                            </div>
+                            @if(open)
+                            {
+                                <div class="organization-department-body">
+                                    @foreach(TeamView team in view.Teams.Where(x=>x.DepartmentId==department.Id&&(showArchived||x.Active)))
+                                    {
+                                        bool teamOpen=expanded||openTeams.Contains(team.Id);
+                                        <div class="organization-team">
+                                            <div class="organization-tree-row team-row"><div class="organization-tree-name"><button class="tree-caret" @onclick="()=>Toggle(openTeams,team.Id)">@(teamOpen?"⌄":"›")</button><i></i><div><strong>@team.Name</strong><small>@team.Description</small></div></div><div>@team.EmployeeCount сотрудников</div><div>@(team.Manager??department.Manager??"Не назначен")</div><div><StatusBadge Label="@(team.Active?"Активна":"В архиве")" Tone="@(team.Active?"success":"neutral")" /></div><AuthorizeView Policy="organization.manage" Context="teamManage"><div class="organization-row-actions"><button class="btn icon-button" @onclick="()=>OpenTeam(team,department.Id)">⋯</button><button class="btn quiet" @onclick='()=>RequestActive("team",team.Id,team.Version,!team.Active,team.Name)'>@(team.Active?"Архивировать":"Восстановить")</button></div></AuthorizeView></div>
+                                            @if(teamOpen){@foreach(EmployeeView employee in view.Employees.Where(x=>x.TeamId==team.Id)){<EmployeeTreeRow Employee="employee" Position="@PositionName(employee.PositionId)" Manager="@EmployeeName(employee.ManagerId)" />}}
+                                        </div>
+                                    }
+                                    @{EmployeeView[] unassigned=view.Employees.Where(x=>x.DepartmentId==department.Id&&x.TeamId==null).ToArray();}
+                                    @if(unassigned.Length>0){<div class="organization-unassigned">Без команды · @unassigned.Length</div>@foreach(EmployeeView employee in unassigned){<EmployeeTreeRow Employee="employee" Position="@PositionName(employee.PositionId)" Manager="@EmployeeName(employee.ManagerId)" />}}
+                                    @if(!view.Teams.Any(x=>x.DepartmentId==department.Id)&&unassigned.Length==0){<p class="organization-empty">В отделе пока нет сотрудников и команд.</p>}
+                                </div>
+                            }
+                        </article>
+                    }
+                    @if(StructureDepartments.Count==0){<PageState Kind="empty" Title="Ничего не найдено" Description="Измените поиск или показ архивных элементов." />}
+                </div>
+            }
+            else if(activeTab=="employees")
+            {
+                <div class="organization-toolbar"><input @bind="employeeSearch" @bind:event="oninput" placeholder="Найти сотрудника" /><select @bind="employeeDepartment"><option value="">Все отделы</option>@foreach(var department in view.Departments.Where(x=>x.Active)){<option value="@department.Id">@department.Name</option>}</select><select @bind="employeeState"><option value="">Все состояния</option>@foreach(var state in Enum.GetValues<EmployeeState>()){<option value="@state">@EmployeeStateLabel(state)</option>}</select><span></span><AuthorizeView Policy="users.manage" Context="employeeListManage"><button class="btn primary" @onclick="OpenEmployeeCreate">+ Добавить сотрудника</button></AuthorizeView></div>
+                <div class="table-wrap"><table class="data-table organization-employees"><thead><tr><th>Сотрудник</th><th>Отдел / команда</th><th>Должность</th><th>Руководитель</th><th>Состояние</th><th></th></tr></thead><tbody>
+                    @foreach(EmployeeView employee in FilteredEmployees){<tr><td><div class="organization-employee"><span>@Initials(employee.Name)</span><div><strong>@employee.Name</strong><small>@employee.Login</small></div></div></td><td>@DepartmentName(employee.DepartmentId)<small>@TeamName(employee.TeamId)</small></td><td>@PositionName(employee.PositionId)</td><td>@EmployeeName(employee.ManagerId)</td><td><StatusBadge Label="@EmployeeStateLabel(employee.State)" Tone="@EmployeeStateTone(employee.State)" />@if(employee.MustChangePassword){<small>Требуется смена пароля</small>}</td><td><AuthorizeView Policy="users.manage" Context="employeeRowManage"><button class="btn secondary" @onclick="()=>OpenEmployeeEdit(employee)">Открыть</button></AuthorizeView></td></tr>}
+                </tbody></table></div>
+                @if(FilteredEmployees.Count==0){<PageState Kind="empty" Title="Сотрудники не найдены" />}
+            }
+            else
+            {
+                <div class="organization-toolbar"><input @bind="positionSearch" @bind:event="oninput" placeholder="Найти должность" /><label><InputCheckbox @bind-Value="showArchivedPositions" /> Показывать архивные</label><span></span><AuthorizeView Policy="organization.manage" Context="positionManage"><button class="btn primary" @onclick="()=>OpenPosition(null)">+ Должность</button></AuthorizeView></div>
+                <div class="table-wrap"><table class="data-table"><thead><tr><th>Должность</th><th>Сотрудники</th><th>Используется</th><th>Состояние</th><th></th></tr></thead><tbody>
+                    @foreach(PositionView position in FilteredPositions){<tr><td><strong>@position.Name</strong><small>@position.Description</small></td><td>@position.EmployeeCount</td><td>@(position.Departments.Length==0?"—":string.Join(", ",position.Departments))</td><td><StatusBadge Label="@(position.Active?"Активна":"В архиве")" Tone="@(position.Active?"success":"neutral")" /></td><td><AuthorizeView Policy="organization.manage" Context="positionRowManage"><div class="organization-row-actions"><button class="btn secondary" @onclick="()=>OpenPosition(position)">Изменить</button><button class="btn quiet" @onclick='()=>RequestActive("position",position.Id,position.Version,!position.Active,position.Name)'>@(position.Active?"Архивировать":"Восстановить")</button></div></AuthorizeView></td></tr>}
+                </tbody></table></div>
+            }
+        </section>
+    </div>
+
+    @if(editorKind!=null){<Modal Title="@EditorTitle" OnClose="CloseEditor"><EditForm Model="organizationInput" FormName="organization-item" OnValidSubmit="SaveOrganizationItemAsync"><DataAnnotationsValidator /><ValidationSummary /><div class="form-grid">@if(editorKind=="team"){<label class="field dossier-wide"><span>Отдел</span><InputSelect @bind-Value="organizationInput.DepartmentId"><option value="">Выберите отдел</option>@foreach(var item in view.Departments.Where(x=>x.Active)){<option value="@item.Id">@item.Name</option>}</InputSelect></label>}<label class="field dossier-wide"><span>@EditorNameLabel</span><input @bind="organizationInput.Name" /></label><label class="field dossier-wide"><span>Описание</span><textarea @bind="organizationInput.Description"></textarea></label>@if(editorKind!="position"){<label class="field dossier-wide"><span>Руководитель</span><InputSelect @bind-Value="organizationInput.ManagerId"><option value="">Не назначен</option>@foreach(var employee in view.Employees.Where(x=>x.State==EmployeeState.Active)){<option value="@employee.Id">@employee.Name</option>}</InputSelect></label>}<p class="subtle dossier-wide">Используемые элементы не удаляются физически — их можно безопасно архивировать.</p><div class="form-actions"><button type="button" class="btn secondary" @onclick="CloseEditor">Отмена</button><ActionButton Type="submit" Label="Сохранить" Busy="Busy" /></div></div></EditForm></Modal>}
+
+    @if(employeeOpen){<Modal Title="@(editingEmployee==null?"Добавить сотрудника":"Сотрудник")" OnClose="CloseEmployee"><EditForm Model="employeeInput" FormName="organization-employee" OnValidSubmit="SaveEmployeeAsync"><DataAnnotationsValidator /><ValidationSummary /><div class="form-grid"><label class="field"><span>ФИО</span><input @bind="employeeInput.Name" disabled="@(editingEmployee!=null)" /></label><label class="field"><span>Логин</span><input @bind="employeeInput.Login" disabled="@(editingEmployee!=null)" /></label><label class="field"><span>Отдел</span><InputSelect @bind-Value="employeeInput.DepartmentId" @bind-Value:after="DepartmentChanged"><option value="">Не назначен</option>@foreach(var item in view.Departments.Where(x=>x.Active)){<option value="@item.Id">@item.Name</option>}</InputSelect></label><label class="field"><span>Команда</span><InputSelect @bind-Value="employeeInput.TeamId"><option value="">Без команды</option>@foreach(var item in view.Teams.Where(x=>x.Active&&x.DepartmentId==employeeInput.DepartmentId)){<option value="@item.Id">@item.Name</option>}</InputSelect></label><label class="field"><span>Должность</span><InputSelect @bind-Value="employeeInput.PositionId"><option value="">Не назначена</option>@foreach(var item in view.Positions.Where(x=>x.Active)){<option value="@item.Id">@item.Name</option>}</InputSelect></label><label class="field"><span>Руководитель</span><InputSelect @bind-Value="employeeInput.ManagerId"><option value="">Не назначен</option>@foreach(var item in view.Employees.Where(x=>x.State==EmployeeState.Active&&x.Id!=editingEmployee?.Id)){<option value="@item.Id">@item.Name</option>}</InputSelect></label><label class="check-field dossier-wide"><InputCheckbox @bind-Value="employeeInput.MustChangePassword" disabled="@(editingEmployee!=null)" /> Попросить сменить временный пароль при первом входе</label><details class="organization-access dossier-wide" open><summary>Дополнительно · доступ</summary><div class="form-grid"><label class="field"><span>Роль</span><InputSelect @bind-Value="employeeInput.RoleId"><option value="">Выберите роль</option>@foreach(var item in view.Roles){<option value="@item.Id">@item.Name</option>}</InputSelect></label><label class="field"><span>Область доступа</span><InputSelect @bind-Value="employeeInput.Scope">@foreach(var scope in Enum.GetValues<AccessScope>()){<option value="@scope">@ScopeLabel(scope)</option>}</InputSelect></label></div><p class="subtle">Должность и права — разные вещи.</p></details>@if(editingEmployee==null){<p class="organization-notice dossier-wide">При создании система сгенерирует временный пароль. После закрытия окна пароль больше не показывается.</p>}<div class="form-actions dossier-wide">@if(editingEmployee!=null){<button type="button" class="btn secondary" @onclick="ResetPasswordAsync">Сбросить пароль</button>@if(editingEmployee.State!=EmployeeState.PendingActivation){<button type="button" class="btn @(editingEmployee.State==EmployeeState.Active?"danger":"secondary")" @onclick='()=>RequestActive("employee",editingEmployee.Id,editingEmployee.EmployeeVersion,editingEmployee.State!=EmployeeState.Active,editingEmployee.Name)'>@(editingEmployee.State==EmployeeState.Active?"Отключить":"Восстановить")</button>}}<span></span><button type="button" class="btn secondary" @onclick="CloseEmployee">Отмена</button>@if(editingEmployee==null){<button type="button" class="btn quiet" @onclick="InviteEmployeeAsync">Пригласить по ссылке/email</button>}<ActionButton Type="submit" Label="@(editingEmployee==null?"Создать сотрудника":"Сохранить")" Busy="Busy" /></div></div></EditForm></Modal>}
+
+    @if(credential!=null){<Modal Title="@(credentialFromReset?"Новый временный пароль":"Сотрудник создан")" OnClose="CloseCredential"><div class="organization-credentials"><div><small>Логин</small><strong>@credential.Login</strong><button class="btn secondary" @onclick="()=>CopyAsync(credential.Login)">Копировать</button></div><div><small>Пароль</small><strong>@credential.Password</strong><button class="btn secondary" @onclick="()=>CopyAsync(credential.Password)">Копировать</button></div></div><p class="organization-notice">Временный пароль показывается один раз. В базе хранится только его hash.</p><div class="form-actions"><button class="btn secondary" @onclick="async ()=>await CopyCredentialsAsync()">Скопировать логин и пароль</button><button class="btn primary" @onclick="CloseCredential">Готово</button></div></Modal>}
+    @if(invitation!=null){<Modal Title="Приглашение создано" OnClose="()=>invitation=null"><p>Передайте ID и одноразовый код сотруднику безопасным способом. Код действует 48 часов.</p><label class="field"><span>ID приглашения</span><input value="@invitation.InvitationId" readonly /></label><label class="field"><span>Одноразовый код</span><input value="@invitation.OneTimeToken" readonly /></label><div class="form-actions"><a class="btn secondary" href="/account/activate">Страница активации</a><button class="btn primary" @onclick="()=>invitation=null">Готово</button></div></Modal>}
+    @if(activeTarget!=null){<Modal Title="@(activeTarget.Active?"Восстановить":"Подтвердите архивирование / отключение")" OnClose="()=>activeTarget=null"><p><strong>@activeTarget.Title</strong></p><p class="subtle">Скрытых переносов и каскадных изменений не будет. При активных зависимостях сервер остановит действие и попросит сначала выполнить явное переназначение.</p><div class="form-actions"><button class="btn secondary" @onclick="()=>activeTarget=null">Отмена</button><ActionButton Label="@(activeTarget.Active?"Восстановить":"Подтвердить")" Tone="@(activeTarget.Active?"primary":"danger")" OnClick="ConfirmActiveAsync" Busy="Busy" /></div></Modal>}
 }
-@code {
-    private OrganizationView? view;
-    private NamedInput department = new(); private NamedInput position = new(); private TeamInput team = new();
-    protected override async Task ReadAsync() => view = await Workspace.ReadAsync(CurrentSubject, CancellationToken.None);
-    private Task AddDepartmentAsync() => ExecuteAsync(async () => { await Workspace.CreateDepartmentAsync(CurrentSubject, department.Name, Guid.CreateVersion7().ToString(), CancellationToken.None); department = new(); });
-    private Task AddPositionAsync() => ExecuteAsync(async () => { await Workspace.CreatePositionAsync(CurrentSubject, position.Name, Guid.CreateVersion7().ToString(), CancellationToken.None); position = new(); });
-    private Task AddTeamAsync() => ExecuteAsync(async () => { await Workspace.CreateTeamAsync(CurrentSubject, team.DepartmentId ?? throw new ArgumentException("Выберите отдел"), team.Name, Guid.CreateVersion7().ToString(), CancellationToken.None); team = new(); });
-    private class NamedInput { [Required(ErrorMessage = "Укажите название"), MaxLength(200)] public string Name { get; set; } = ""; }
-    private sealed class TeamInput : NamedInput { [Required] public Guid? DepartmentId { get; set; } }
+
+@code{
+    private static readonly (string Id,string Title)[] Tabs=[("structure","Структура"),("employees","Сотрудники"),("positions","Должности")];
+    private OrganizationView? view; private string activeTab="structure"; private string structureSearch="",employeeSearch="",employeeDepartment="",employeeState="",positionSearch=""; private bool showArchived,showArchivedPositions,expanded=true;
+    private readonly HashSet<Guid> openDepartments=[]; private readonly HashSet<Guid> openTeams=[];
+    private string? editorKind; private OrganizationInput organizationInput=new(); private bool employeeOpen; private EmployeeView? editingEmployee; private EmployeeInput employeeInput=new();
+    private TemporaryCredential? credential; private bool credentialFromReset; private InvitationResult? invitation; private ActiveTarget? activeTarget;
+    private IReadOnlyList<DepartmentView> StructureDepartments=>view!.Departments.Where(x=>(showArchived||x.Active)&&MatchesStructure(x)).ToArray();
+    private IReadOnlyList<EmployeeView> FilteredEmployees=>view!.Employees.Where(x=>(employeeSearch.Length==0||x.Name.Contains(employeeSearch,StringComparison.OrdinalIgnoreCase)||x.Login.Contains(employeeSearch,StringComparison.OrdinalIgnoreCase))&&(employeeDepartment.Length==0||x.DepartmentId?.ToString()==employeeDepartment)&&(employeeState.Length==0||x.State.ToString()==employeeState)).ToArray();
+    private IReadOnlyList<PositionView> FilteredPositions=>view!.Positions.Where(x=>(showArchivedPositions||x.Active)&&(positionSearch.Length==0||x.Name.Contains(positionSearch,StringComparison.OrdinalIgnoreCase))).ToArray();
+    [SupplyParameterFromQuery(Name="tab")] public string? RequestedTab{get;set;}
+    protected override async Task OnInitializedAsync(){string path=Navigation.ToBaseRelativePath(Navigation.Uri).Split('?',2)[0];activeTab=path.Equals("employees",StringComparison.OrdinalIgnoreCase)?"employees":"structure";await base.OnInitializedAsync();}
+    protected override void OnParametersSet(){if(RequestedTab!=null&&Tabs.Any(item=>item.Id==RequestedTab))activeTab=RequestedTab;}
+    protected override async Task ReadAsync()=>view=await Workspace.ReadAsync(CurrentSubject,CancellationToken.None);
+    private void SelectTab(string value){activeTab=value;Navigation.NavigateTo("/organization?tab="+value,replace:true);}
+    private bool MatchesStructure(DepartmentView department)=>structureSearch.Length==0||department.Name.Contains(structureSearch,StringComparison.OrdinalIgnoreCase)||view!.Teams.Any(x=>x.DepartmentId==department.Id&&x.Name.Contains(structureSearch,StringComparison.OrdinalIgnoreCase))||view.Employees.Any(x=>x.DepartmentId==department.Id&&x.Name.Contains(structureSearch,StringComparison.OrdinalIgnoreCase));
+    private static void Toggle(HashSet<Guid> set,Guid id){if(!set.Add(id))set.Remove(id);}
+    private void OpenDepartment(DepartmentView? item){editorKind="department";organizationInput=item==null?new():new(){Id=item.Id,Version=item.Version,Name=item.Name,Description=item.Description,ManagerId=item.ManagerId};}
+    private void OpenTeam(TeamView? item,Guid department){editorKind="team";organizationInput=item==null?new(){DepartmentId=department}:new(){Id=item.Id,Version=item.Version,DepartmentId=item.DepartmentId,Name=item.Name,Description=item.Description,ManagerId=item.ManagerId};}
+    private void OpenPosition(PositionView? item){editorKind="position";organizationInput=item==null?new():new(){Id=item.Id,Version=item.Version,Name=item.Name,Description=item.Description};}
+    private void CloseEditor(){editorKind=null;organizationInput=new();}
+    private string EditorTitle=>organizationInput.Id==null?(editorKind=="department"?"Новый отдел":editorKind=="team"?"Новая команда":"Новая должность"):(editorKind=="department"?"Изменить отдел":editorKind=="team"?"Изменить команду":"Изменить должность");
+    private string EditorNameLabel=>editorKind=="department"?"Название отдела":editorKind=="team"?"Название команды":"Название должности";
+    private async Task SaveOrganizationItemAsync(){string kind=editorKind!;await ExecuteAsync(()=>kind=="department"?Workspace.SaveDepartmentAsync(CurrentSubject,new(organizationInput.Id,organizationInput.Version,organizationInput.Name,organizationInput.Description,organizationInput.ManagerId),Correlation(),CancellationToken.None):kind=="team"?Workspace.SaveTeamAsync(CurrentSubject,new(organizationInput.Id,organizationInput.Version,organizationInput.DepartmentId??throw new ArgumentException("Выберите отдел."),organizationInput.Name,organizationInput.Description,organizationInput.ManagerId),Correlation(),CancellationToken.None):Workspace.SavePositionAsync(CurrentSubject,new(organizationInput.Id,organizationInput.Version,organizationInput.Name,organizationInput.Description),Correlation(),CancellationToken.None));if(Success!=null)CloseEditor();}
+    private void OpenEmployeeCreate(){editingEmployee=null;employeeInput=new();employeeOpen=true;}
+    private void OpenEmployeeEdit(EmployeeView item){editingEmployee=item;employeeInput=new(){Name=item.Name,Login=item.Login,DepartmentId=item.DepartmentId,TeamId=item.TeamId,PositionId=item.PositionId,ManagerId=item.ManagerId,RoleId=item.RoleId,Scope=item.Scope,MustChangePassword=item.MustChangePassword};employeeOpen=true;}
+    private void CloseEmployee(){employeeOpen=false;editingEmployee=null;employeeInput=new();}
+    private void DepartmentChanged(){if(!view!.Teams.Any(x=>x.Id==employeeInput.TeamId&&x.DepartmentId==employeeInput.DepartmentId))employeeInput.TeamId=null;}
+    private async Task SaveEmployeeAsync(){if(editingEmployee==null){TemporaryCredential? result=null;await ExecuteAsync(async()=>result=await Workspace.CreateEmployeeAsync(CurrentSubject,new(employeeInput.Name,employeeInput.Login,employeeInput.DepartmentId,employeeInput.PositionId,employeeInput.TeamId,employeeInput.ManagerId,employeeInput.RoleId,employeeInput.Scope,employeeInput.MustChangePassword),Correlation(),CancellationToken.None));if(Success!=null){credential=result;credentialFromReset=false;CloseEmployee();}}else{EmployeeView target=editingEmployee;await ExecuteAsync(()=>Workspace.ChangeAssignmentAsync(CurrentSubject,new(target.Id,employeeInput.DepartmentId,employeeInput.PositionId,employeeInput.TeamId,employeeInput.ManagerId,employeeInput.RoleId,employeeInput.Scope,target.Version),Correlation(),CancellationToken.None));if(Success!=null)CloseEmployee();}}
+    private async Task InviteEmployeeAsync(){InvitationResult? result=null;await ExecuteAsync(async()=>result=await Workspace.InviteAsync(CurrentSubject,new(employeeInput.Name,employeeInput.Login,employeeInput.DepartmentId,employeeInput.PositionId,employeeInput.TeamId,employeeInput.ManagerId,employeeInput.RoleId,employeeInput.Scope),Correlation(),CancellationToken.None));if(Success!=null){invitation=result;CloseEmployee();}}
+    private async Task ResetPasswordAsync(){TemporaryCredential? result=null;Guid id=editingEmployee!.Id;await ExecuteAsync(async()=>result=await Workspace.ResetTemporaryPasswordAsync(CurrentSubject,id,Correlation(),CancellationToken.None));if(Success!=null){credential=result;credentialFromReset=true;CloseEmployee();}}
+    private void CloseCredential(){credential=null;credentialFromReset=false;}
+    private void RequestActive(string kind,Guid id,long version,bool active,string title){activeTarget=new(kind,id,version,active,title);}
+    private async Task ConfirmActiveAsync(){ActiveTarget target=activeTarget!;await ExecuteAsync(()=>target.Kind=="department"?Workspace.SetDepartmentActiveAsync(CurrentSubject,new(target.Id,target.Version,target.Active),Correlation(),CancellationToken.None):target.Kind=="team"?Workspace.SetTeamActiveAsync(CurrentSubject,new(target.Id,target.Version,target.Active),Correlation(),CancellationToken.None):target.Kind=="position"?Workspace.SetPositionActiveAsync(CurrentSubject,new(target.Id,target.Version,target.Active),Correlation(),CancellationToken.None):Workspace.SetEmployeeActiveAsync(CurrentSubject,new(target.Id,target.Version,target.Active),Correlation(),CancellationToken.None));if(Success!=null){activeTarget=null;CloseEmployee();}}
+    private ValueTask CopyAsync(string value)=>Js.InvokeVoidAsync("navigator.clipboard.writeText",value);
+    private ValueTask CopyCredentialsAsync()=>credential is null ? ValueTask.CompletedTask : CopyAsync($"Логин: {credential.Login}\nПароль: {credential.Password}");
+    private string DepartmentName(Guid? id)=>view!.Departments.FirstOrDefault(x=>x.Id==id)?.Name??"Не назначен"; private string TeamName(Guid? id)=>view!.Teams.FirstOrDefault(x=>x.Id==id)?.Name??"Без команды"; private string PositionName(Guid? id)=>view!.Positions.FirstOrDefault(x=>x.Id==id)?.Name??"Не назначена"; private string EmployeeName(Guid? id)=>view!.Employees.FirstOrDefault(x=>x.Id==id)?.Name??"—";
+    private static string EmployeeStateLabel(EmployeeState value)=>value switch{EmployeeState.Active=>"Активен",EmployeeState.PendingActivation=>"Ждёт активации",_=>"Отключён"}; private static string EmployeeStateTone(EmployeeState value)=>value switch{EmployeeState.Active=>"success",EmployeeState.PendingActivation=>"warning",_=>"neutral"};
+    private static string ScopeLabel(AccessScope value)=>value switch{AccessScope.Own=>"Свои",AccessScope.AssignedObjects=>"Назначенные объекты",AccessScope.Team=>"Команда",AccessScope.Department=>"Отдел",_=>"Вся организация"};
+    private static string Initials(string value)=>string.Concat(value.Split(' ',StringSplitOptions.RemoveEmptyEntries).Take(2).Select(x=>char.ToUpperInvariant(x[0]))); private static string Correlation()=>Guid.CreateVersion7().ToString();
+    private sealed class OrganizationInput{public Guid? Id{get;set;}public long? Version{get;set;}public Guid? DepartmentId{get;set;}[Required,MaxLength(200)]public string Name{get;set;}="";[MaxLength(1000)]public string Description{get;set;}="";public Guid? ManagerId{get;set;}}
+    private sealed class EmployeeInput{[Required,MaxLength(200)]public string Name{get;set;}="";[Required,MinLength(3),MaxLength(256)]public string Login{get;set;}="";public Guid? DepartmentId{get;set;}public Guid? PositionId{get;set;}public Guid? TeamId{get;set;}public Guid? ManagerId{get;set;}public Guid RoleId{get;set;}public AccessScope Scope{get;set;}=AccessScope.Own;public bool MustChangePassword{get;set;}=true;}
+    private sealed record ActiveTarget(string Kind,Guid Id,long Version,bool Active,string Title);
 }

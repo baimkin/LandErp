@@ -14,8 +14,8 @@ public static class IdentityServices
         services.AddIdentity<LandErpUser, IdentityRole<Guid>>(options =>
         {
             options.Password.RequiredLength = 12;
-            options.User.RequireUniqueEmail = true;
-            options.SignIn.RequireConfirmedEmail = true;
+            options.User.RequireUniqueEmail = false;
+            options.SignIn.RequireConfirmedEmail = false;
             options.Lockout.MaxFailedAccessAttempts = 5;
             options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
         }).AddEntityFrameworkStores<LandErpDbContext>().AddDefaultTokenProviders();

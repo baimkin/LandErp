@@ -1,0 +1,10 @@
+@using LandErp.Application.Modules.Organization.Contracts
+<div class="organization-tree-row employee-row"><div class="organization-employee"><span>@Initials(Employee.Name)</span><div><strong>@Employee.Name</strong><small>@Employee.Login</small></div></div><div>@Position</div><div>@Manager</div><div><StatusBadge Label="@State" Tone="@Tone" /></div><div></div></div>
+@code{
+    [Parameter,EditorRequired]public EmployeeView Employee{get;set;}=default!;
+    [Parameter]public string Position{get;set;}="";
+    [Parameter]public string Manager{get;set;}="";
+    private string State=>Employee.State switch{EmployeeState.Active=>"Активен",EmployeeState.PendingActivation=>"Ждёт активации",_=>"Отключён"};
+    private string Tone=>Employee.State switch{EmployeeState.Active=>"success",EmployeeState.PendingActivation=>"warning",_=>"neutral"};
+    private static string Initials(string value)=>string.Concat(value.Split(' ',StringSplitOptions.RemoveEmptyEntries).Take(2).Select(x=>char.ToUpperInvariant(x[0])));
+}

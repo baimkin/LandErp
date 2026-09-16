@@ -1,1 +1,291 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LandErp — Организация v1.3</title><style>:root{--nav:#10223A;--action:#2268B5;--ok:#14734B;--risk:#B4232D;--text:#1B2B3D;--muted:#6C7F92;--line:#DCE4EC;--line2:#EDF2F6;--bg:#F4F7FA}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px Segoe UI,Arial,sans-serif}button,input,select{font:inherit}.app{display:grid;grid-template-columns:210px 1fr;min-height:100vh}.side{background:var(--nav);color:#DCE8F5;padding:12px 8px}.brand{padding:5px 10px 18px;font-weight:700;font-size:16px}.brand small{display:block;color:#98ABC0;font-size:9px;font-weight:400}.nav{padding:8px 10px;border-radius:7px;margin:2px 0;font-size:12px}.nav.active{background:#1C4163;color:#fff}.top{height:58px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px}.top small,.user{font-size:9px;color:var(--muted)}.top b{display:block;font-size:12px;margin-top:2px}.page{max-width:1240px;margin:auto;padding:24px 28px 60px}.crumb{font-size:10px;color:#6285A9;margin-bottom:8px}.head{display:flex;justify-content:space-between;gap:20px;margin-bottom:16px}.head h1{font-size:28px;margin:0 0 5px}.head p{margin:0;color:var(--muted);font-size:12px}.actions{display:flex;gap:8px}.btn{height:36px;border:1px solid var(--line);border-radius:7px;background:#fff;padding:0 13px;color:#334B61;font-size:11px;font-weight:600;cursor:pointer}.btn.primary{background:var(--action);border-color:var(--action);color:#fff}.btn.small{height:30px;font-size:10px;padding:0 10px}.btn.icon{width:30px;padding:0}.btn.danger{color:var(--risk)}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.stat{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}.stat label{font-size:9px;color:#7A8C9D;text-transform:uppercase}.stat strong{display:block;font-size:21px;margin-top:4px}.stat span{display:block;font-size:10px;color:var(--muted);margin-top:2px}.card{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}.tabs{display:flex;border-bottom:1px solid var(--line);padding:0 14px}.tab{height:44px;border:0;border-bottom:2px solid transparent;background:none;padding:0 14px;color:#6B7E90;font-size:11px;font-weight:600;cursor:pointer}.tab.active{color:var(--action);border-color:var(--action)}.panel{display:none}.panel.active{display:block}.toolbar{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line2)}.search{flex:1;max-width:380px;height:34px;border:1px solid var(--line);border-radius:7px;padding:0 11px}.select{height:34px;border:1px solid var(--line);border-radius:7px;padding:0 9px;background:#fff}.spacer{flex:1}.list{padding:8px 14px 14px}.gh,.dr,.tr,.pr{display:grid;grid-template-columns:minmax(290px,1.8fr) 150px 150px 130px 80px;align-items:center}.gh{font-size:8.5px;text-transform:uppercase;color:#8394A4;padding:8px 12px}.dept{border:1px solid var(--line);border-radius:10px;margin-top:9px;overflow:hidden}.dr{min-height:56px;padding:0 12px;background:#fff}.dr:hover,.tr:hover,.pr:hover{background:#FAFCFE}.name b{font-size:12px}.name small,.meta small{display:block;font-size:9.5px;color:var(--muted);margin-top:3px}.meta{font-size:10.5px}.tree{display:flex;align-items:center;gap:8px}.caret{width:22px;height:24px;border:0;background:none;color:#60768B;cursor:pointer}.pill{display:inline-block;padding:5px 8px;border-radius:999px;background:#EAF7F0;color:var(--ok);font-size:9px;font-weight:700}.ra{display:flex;gap:4px;justify-content:flex-end}.tb{border-top:1px solid var(--line2);background:#FAFCFE}.tr{min-height:46px;padding:0 12px 0 34px}.dot{width:6px;height:6px;border-radius:50%;background:#7C9EBE}.people{background:#fff;border-top:1px dashed #E4EBF1}.pr{min-height:46px;padding:0 12px 0 68px}.avatar{width:25px;height:25px;border-radius:50%;background:#E8F1FA;color:#2268B5;display:grid;place-items:center;font-size:9px;font-weight:700}.person{display:flex;align-items:center;gap:9px}.un{padding:9px 12px 5px 68px;font-size:9px;color:#71869A;text-transform:uppercase;font-weight:700;border-top:1px dashed #DCE6EF}.tablewrap{padding:0 14px 14px}.table{width:100%;border-collapse:collapse}.table th{font-size:8.5px;text-transform:uppercase;color:#8394A4;text-align:left;padding:10px;border-bottom:1px solid var(--line)}.table td{padding:11px 10px;border-bottom:1px solid var(--line2);font-size:11px}.table small{display:block;color:var(--muted);font-size:9.5px;margin-top:3px}.ec{display:flex;align-items:center;gap:9px}.warn{background:#FFF4D8;color:#8B5D00}.modalback{position:fixed;inset:0;background:#0B203566;display:none;align-items:center;justify-content:center;z-index:20}.modalback.open{display:flex}.modal{width:min(650px,94vw);background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 25px 70px #0D223A33}.mh,.mf{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}.mf{border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end;gap:8px}.mb{padding:16px 18px}.mh strong{font-size:15px}.mh small{display:block;color:var(--muted);font-size:10px;margin-top:4px}.x{border:0;background:none;font-size:20px;cursor:pointer}.fg{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.field{display:block;margin-bottom:12px}.field span{display:block;font-size:10px;font-weight:600;margin-bottom:6px}.field input,.field select{width:100%;height:38px;border:1px solid var(--line);border-radius:7px;padding:0 10px}.adv{border:1px solid var(--line2);border-radius:9px;padding:10px 12px;background:#FAFCFE}.adv summary{cursor:pointer;font-size:10.5px;font-weight:650}.hint{font-size:9.5px;color:var(--muted);line-height:1.45}.cred{border:1px solid #CFE1F2;background:#F7FBFF;border-radius:10px;padding:13px}.cr{display:grid;grid-template-columns:85px 1fr auto;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #E5EEF6}.cr:last-child{border:0}.cv{font:600 13px Consolas,monospace}.notice{background:#FFF8E6;border:1px solid #F2D89B;border-radius:8px;padding:9px 10px;font-size:9.5px;color:#6F5A22;margin-top:10px}@media(max-width:900px){.app{grid-template-columns:72px 1fr}.brand,.nav{font-size:0}.stats{grid-template-columns:repeat(2,1fr)}}</style></head><body><div class="app"><aside class="side"><div class="brand">LandErp<small>Рабочий контур закупки</small></div><div class="nav">▣ Обзор</div><div class="nav">▣ Закупка</div><div class="nav active">▦ Организация</div><div class="nav">≡ Аудит</div><div class="nav">↕ Collector</div></aside><main><div class="top"><div><small>ЗАКУПКА</small><b>Земля. Данные. Решения.</b></div><div class="user">owner@landerp.local</div></div><div class="page"><div class="crumb">Администрирование / Организация</div><div class="head"><div><h1>Организация</h1><p>Структура компании, сотрудники и должности. Права доступа не смешиваются с оргструктурой.</p></div><div class="actions"><button class="btn" id="newEmp">+ Сотрудник</button><button class="btn primary" id="newDept">+ Отдел</button></div></div><div class="stats"><div class="stat"><label>Отделы</label><strong>3</strong><span>все активны</span></div><div class="stat"><label>Команды</label><strong>4</strong><span>в 2 отделах</span></div><div class="stat"><label>Должности</label><strong>4</strong><span>1 не используется</span></div><div class="stat"><label>Сотрудники</label><strong>8</strong><span>1 без команды</span></div></div><section class="card"><div class="tabs"><button class="tab active" data-tab="structure">Структура</button><button class="tab" data-tab="employees">Сотрудники</button><button class="tab" data-tab="positions">Должности</button></div><div class="panel active" id="structure"><div class="toolbar"><input class="search" placeholder="Найти отдел, команду или сотрудника"><div class="spacer"></div><button class="btn small" id="expand">Развернуть все</button><button class="btn small" id="collapse">Свернуть все</button></div><div class="list"><div class="gh"><div>Подразделение / команда / сотрудник</div><div>Должность / люди</div><div>Руководитель</div><div>Состояние</div><div></div></div><div class="dept"><div class="dr"><div class="tree"><button class="caret dc">⌄</button><div class="name"><b>Закупки</b><small>Поиск, проверка и приобретение объектов</small></div></div><div class="meta"><b>5 сотрудников</b><small>2 команды</small></div><div>Алексей Морозов</div><div><span class="pill">Активен</span></div><div class="ra"><button class="btn icon small">＋</button><button class="btn icon small">⋯</button></div></div><div class="db"><div class="tb"><div class="tr"><div class="tree"><button class="caret tc">⌄</button><span class="dot"></span><div class="name"><b>Первичный анализ</b><small>Отбор и первичная проверка</small></div></div><div>3 сотрудника</div><div>Алексей Морозов</div><div><span class="pill">Активна</span></div><div></div></div><div class="people"><div class="pr"><div class="person"><span class="avatar">АК</span><div class="name"><b>Анна Крылова</b><small>anna.krylova</small></div></div><div>Закупщик</div><div>Алексей Морозов</div><div><span class="pill">Активна</span></div><div></div></div><div class="pr"><div class="person"><span class="avatar">ДС</span><div class="name"><b>Дмитрий Соколов</b><small>dmitry.sokolov</small></div></div><div>Закупщик</div><div>Алексей Морозов</div><div><span class="pill">Активен</span></div><div></div></div></div></div><div class="tb"><div class="tr"><div class="tree"><button class="caret tc">⌄</button><span class="dot"></span><div class="name"><b>Выездная группа</b><small>Осмотры и полевые проверки</small></div></div><div>1 сотрудник</div><div>Алексей Морозов</div><div><span class="pill">Активна</span></div><div></div></div><div class="people"><div class="pr"><div class="person"><span class="avatar">ИС</span><div class="name"><b>Илья Смирнов</b><small>ilya.smirnov</small></div></div><div>Закупщик · выезды</div><div>Алексей Морозов</div><div><span class="pill">Активен</span></div><div></div></div></div></div><div class="un">Без команды · 1</div><div class="pr"><div class="person"><span class="avatar">АМ</span><div class="name"><b>Алексей Морозов</b><small>alexey.morozov</small></div></div><div>Руководитель отдела закупок</div><div>—</div><div><span class="pill">Активен</span></div><div></div></div></div></div><div class="dept"><div class="dr"><div class="tree"><button class="caret dc">›</button><div class="name"><b>Продажи</b><small>Подготовка и реализация объектов</small></div></div><div>2 сотрудника</div><div>Олег Волков</div><div><span class="pill">Активен</span></div><div class="ra"><button class="btn icon small">＋</button><button class="btn icon small">⋯</button></div></div><div class="db" style="display:none"></div></div></div></div><div class="panel" id="employees"><div class="toolbar"><input class="search" placeholder="Найти сотрудника"><select class="select"><option>Все отделы</option><option>Закупки</option><option>Продажи</option></select><select class="select"><option>Все состояния</option><option>Активные</option><option>Отключённые</option></select><div class="spacer"></div><button class="btn primary small" id="newEmp2">+ Добавить сотрудника</button></div><div class="tablewrap"><table class="table"><thead><tr><th>Сотрудник</th><th>Отдел / команда</th><th>Должность</th><th>Руководитель</th><th>Состояние</th><th></th></tr></thead><tbody><tr><td><div class="ec"><span class="avatar">АК</span><div><b>Анна Крылова</b><small>anna.krylova</small></div></div></td><td>Закупки<small>Первичный анализ</small></td><td>Закупщик</td><td>Алексей Морозов</td><td><span class="pill">Активна</span></td><td><button class="btn small editEmp">Открыть</button></td></tr><tr><td><div class="ec"><span class="avatar">АН</span><div><b>Анастасия</b><small>anastasia</small></div></div></td><td>Закупки<small>Без команды</small></td><td>Руководитель отдела закупок</td><td>—</td><td><span class="pill warn">Ждёт активации</span></td><td><button class="btn small editEmp">Открыть</button></td></tr></tbody></table></div></div><div class="panel" id="positions"><div class="toolbar"><input class="search" placeholder="Найти должность"><div class="spacer"></div><button class="btn primary small">+ Должность</button></div><div class="tablewrap"><table class="table"><thead><tr><th>Должность</th><th>Сотрудники</th><th>Используется</th><th>Состояние</th><th></th></tr></thead><tbody><tr><td><b>Закупщик</b></td><td>4</td><td>Закупки</td><td><span class="pill">Активна</span></td><td><button class="btn icon small">⋯</button></td></tr><tr><td><b>Руководитель отдела закупок</b></td><td>1</td><td>Закупки</td><td><span class="pill">Активна</span></td><td><button class="btn icon small">⋯</button></td></tr></tbody></table></div></div></section></div></main></div><div class="modalback" id="empModal"><div class="modal"><div class="mh"><div><strong id="emt">Добавить сотрудника</strong><small>Учётная запись и назначение в структуру.</small></div><button class="x close">×</button></div><div class="mb"><div class="fg"><label class="field"><span>ФИО</span><input id="en" placeholder="Иван Петров"></label><label class="field"><span>Логин</span><input id="el" placeholder="ivan.petrov"></label><label class="field"><span>Отдел</span><select><option>Закупки</option><option>Продажи</option></select></label><label class="field"><span>Команда</span><select><option>Без команды</option><option>Первичный анализ</option><option>Выездная группа</option></select></label><label class="field"><span>Должность</span><select><option>Закупщик</option><option>Руководитель отдела закупок</option></select></label><label class="field"><span>Руководитель</span><select><option>Не назначен</option><option>Алексей Морозов</option></select></label></div><label class="hint"><input type="checkbox" checked> Попросить сменить временный пароль при первом входе</label><details class="adv"><summary>Дополнительно · доступ</summary><div class="fg" style="margin-top:10px"><label class="field"><span>Роль</span><select><option>Сотрудник</option><option>Администратор</option></select></label><label class="field"><span>Область доступа</span><select><option>Только свои объекты</option><option>Команда</option><option>Отдел</option></select></label></div><div class="hint">Должность и права — разные вещи.</div></details><div class="notice">В production пароль генерируется только на сервере и показывается один раз.</div></div><div class="mf"><button class="btn close">Отмена</button><button class="btn primary" id="saveEmp">Создать сотрудника</button></div></div></div><div class="modalback" id="credModal"><div class="modal" style="width:min(560px,94vw)"><div class="mh"><div><strong>Сотрудник создан</strong><small>Скопируйте данные и передайте сотруднику.</small></div><button class="x close2">×</button></div><div class="mb"><div class="cred"><div class="cr"><span>Логин</span><span class="cv" id="cl">ivan.petrov</span><button class="btn small">Копировать</button></div><div class="cr"><span>Пароль</span><span class="cv">K7p4-Xm29-Qw8</span><button class="btn small">Копировать</button></div></div><div class="notice">Временный пароль показывается один раз. Plaintext не хранится.</div></div><div class="mf"><button class="btn">Скопировать логин и пароль</button><button class="btn primary close2">Готово</button></div></div></div><script>const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];$$('.tab').forEach(t=>t.onclick=()=>{$$('.tab,.panel').forEach(x=>x.classList.remove('active'));t.classList.add('active');$('#'+t.dataset.tab).classList.add('active')});$$('.dc').forEach(c=>c.onclick=()=>{let b=c.closest('.dept').querySelector('.db'),o=b.style.display!=='none';b.style.display=o?'none':'block';c.textContent=o?'›':'⌄'});$$('.tc').forEach(c=>c.onclick=()=>{let p=c.closest('.tb').querySelector('.people'),o=p.style.display!=='none';p.style.display=o?'none':'block';c.textContent=o?'›':'⌄'});expand.onclick=()=>{$$('.db,.people').forEach(x=>x.style.display='block');$$('.caret').forEach(x=>x.textContent='⌄')};collapse.onclick=()=>{$$('.db,.people').forEach(x=>x.style.display='none');$$('.caret').forEach(x=>x.textContent='›')};function openEmp(edit=false){emt.textContent=edit?'Сотрудник':'Добавить сотрудника';saveEmp.textContent=edit?'Сохранить':'Создать сотрудника';empModal.classList.add('open')}newEmp.onclick=newEmp2.onclick=()=>openEmp();$$('.editEmp').forEach(x=>x.onclick=()=>openEmp(true));$$('.close').forEach(x=>x.onclick=()=>empModal.classList.remove('open'));saveEmp.onclick=()=>{empModal.classList.remove('open');cl.textContent=el.value||'ivan.petrov';credModal.classList.add('open')};$$('.close2').forEach(x=>x.onclick=()=>credModal.classList.remove('open'));</script></body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LandErp — Организация v1.3</title>
+<style>
+:root{--nav:#10223A;--action:#2268B5;--ok:#14734B;--risk:#B4232D;--text:#1B2B3D;--muted:#6C7F92;--line:#DCE4EC;--line2:#EDF2F6;--bg:#F4F7FA}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px "Segoe UI",Arial,sans-serif}button,input,select{font:inherit}
+.app{display:grid;grid-template-columns:210px 1fr;min-height:100vh}.side{background:var(--nav);color:#DCE8F5;padding:12px 8px}.brand{padding:5px 10px 18px;font-weight:700;font-size:16px}.brand small{display:block;color:#98ABC0;font-size:9px;font-weight:400;margin-top:3px}.cap{font-size:9px;color:#7F95AB;font-weight:700;padding:10px 8px 6px}.nav{padding:8px 10px;border-radius:7px;margin:2px 0;font-size:12px}.nav.active{background:#1C4163;color:#fff}
+.main{min-width:0}.top{height:58px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px}.top small{font-size:9px;color:#72879A}.top b{display:block;font-size:12px;margin-top:2px}.user{font-size:10px;color:var(--muted)}
+.page{max-width:1240px;margin:auto;padding:24px 28px 60px}.crumb{font-size:10px;color:#6285A9;margin-bottom:8px}.head{display:flex;justify-content:space-between;gap:20px;margin-bottom:16px}.head h1{font-size:28px;margin:0 0 5px}.head p{margin:0;color:var(--muted);font-size:12px}.actions{display:flex;gap:8px}
+.btn{height:36px;border:1px solid var(--line);border-radius:7px;background:#fff;padding:0 13px;color:#334B61;font-size:11px;font-weight:600;cursor:pointer}.btn.primary{background:var(--action);border-color:var(--action);color:#fff}.btn.small{height:30px;font-size:10px;padding:0 10px}.btn.icon{width:30px;padding:0}.btn.danger{color:var(--risk)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.stat{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}.stat label{font-size:9px;color:#7A8C9D;text-transform:uppercase}.stat strong{display:block;font-size:21px;margin-top:4px}.stat span{display:block;font-size:10px;color:var(--muted);margin-top:2px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}.tabs{display:flex;border-bottom:1px solid var(--line);padding:0 14px}.tab{height:44px;border:0;border-bottom:2px solid transparent;background:none;padding:0 14px;color:#6B7E90;font-size:11px;font-weight:600;cursor:pointer}.tab.active{color:var(--action);border-color:var(--action)}
+.panel{display:none}.panel.active{display:block}.toolbar{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line2)}.search{flex:1;max-width:380px;height:34px;border:1px solid var(--line);border-radius:7px;padding:0 11px}.select{height:34px;border:1px solid var(--line);border-radius:7px;padding:0 9px;color:#43596D;background:#fff}.check{font-size:10px;color:var(--muted);display:flex;gap:6px;align-items:center}.spacer{flex:1}
+.list{padding:8px 14px 14px}.gridHead,.deptRow,.teamRow,.personRow{display:grid;grid-template-columns:minmax(290px,1.8fr) 150px 150px 130px 80px;align-items:center}.gridHead{font-size:8.5px;text-transform:uppercase;color:#8394A4;padding:8px 12px}.dept{border:1px solid var(--line);border-radius:10px;margin-top:9px;overflow:hidden}.deptRow{min-height:56px;padding:0 12px;background:#fff}.deptRow:hover,.teamRow:hover,.personRow:hover{background:#FAFCFE}
+.name{min-width:0}.name b{font-size:12px}.name small,.meta small{display:block;font-size:9.5px;color:var(--muted);margin-top:3px}.meta{font-size:10.5px}.pill{display:inline-block;padding:5px 8px;border-radius:999px;background:#EAF7F0;color:var(--ok);font-size:9px;font-weight:700}.rowact{display:flex;gap:4px;justify-content:flex-end}.treeName{display:flex;align-items:center;gap:8px}.caret{width:22px;height:24px;border:0;background:none;color:#60768B;font-size:15px;cursor:pointer}
+.teamBlock{border-top:1px solid var(--line2);background:#FAFCFE}.teamRow{min-height:46px;padding:0 12px 0 34px}.teamRow .name b{font-size:11px}.dot{width:6px;height:6px;border-radius:50%;background:#7C9EBE;flex:0 0 auto}
+.people{background:#fff;border-top:1px dashed #E4EBF1}.personRow{min-height:46px;padding:0 12px 0 68px}.personMain{display:flex;align-items:center;gap:9px}.avatar{width:25px;height:25px;border-radius:50%;background:#E8F1FA;color:#2268B5;display:grid;place-items:center;font-size:9px;font-weight:700;flex:0 0 auto}.personRow .name b{font-size:10.8px;font-weight:600}
+.unassigned{border-top:1px dashed #DCE6EF;background:#FFF}.unassignedTitle{font-size:9px;color:#71869A;text-transform:uppercase;letter-spacing:.04em;padding:10px 12px 5px 68px;font-weight:700}
+.empty{padding:13px 12px 13px 68px;color:var(--muted);font-size:10px;border-top:1px dashed #E4EBF1}
+.tablewrap{padding:0 14px 14px}.table{width:100%;border-collapse:collapse}.table th{font-size:8.5px;text-transform:uppercase;color:#8394A4;text-align:left;padding:10px;border-bottom:1px solid var(--line)}.table td{padding:11px 10px;border-bottom:1px solid var(--line2);font-size:11px}.table small{display:block;color:var(--muted);font-size:9.5px;margin-top:3px}.employeeCell{display:flex;align-items:center;gap:9px}.badgeWarn{background:#FFF4D8;color:#8B5D00}.subtle{color:var(--muted)}
+.modalback{position:fixed;inset:0;background:#0B203566;display:none;align-items:center;justify-content:center;z-index:20}.modalback.open{display:flex}.modal{width:520px;max-width:94vw;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 25px 70px #0D223A33}.mh,.mf{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}.mf{border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end;gap:8px}.mb{padding:16px 18px}.mh strong{font-size:15px}.mh small{display:block;color:var(--muted);font-size:10px;margin-top:4px}.x{border:0;background:none;font-size:20px;cursor:pointer}.field{display:block;margin-bottom:12px}.field span{display:block;font-size:10px;font-weight:600;margin-bottom:6px}.field input,.field select{width:100%;height:38px;border:1px solid var(--line);border-radius:7px;padding:0 10px}
+.formGrid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.field.full{grid-column:1/-1}
+.advanced{border:1px solid var(--line2);border-radius:9px;padding:10px 12px;margin-top:4px;background:#FAFCFE}
+.advanced summary{cursor:pointer;font-size:10.5px;font-weight:650;color:#415A72}.advancedBody{padding-top:10px}
+.credentials{border:1px solid #CFE1F2;background:#F7FBFF;border-radius:10px;padding:13px;margin-top:4px}
+.credRow{display:grid;grid-template-columns:90px 1fr auto;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #E5EEF6}.credRow:last-child{border-bottom:0}
+.credRow label{font-size:9px;color:var(--muted);text-transform:uppercase}.credValue{font:600 13px ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all}
+.notice{display:flex;gap:8px;align-items:flex-start;background:#FFF8E6;border:1px solid #F2D89B;border-radius:8px;padding:9px 10px;font-size:9.5px;color:#6F5A22;line-height:1.45;margin-top:10px}
+.empActions{display:flex;gap:7px;margin-right:auto}.hint{font-size:9.5px;color:var(--muted);line-height:1.45}.menu{position:fixed;display:none;min-width:160px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px;box-shadow:0 12px 30px #18324D26;z-index:30}.menu.open{display:block}.menu button{width:100%;border:0;background:none;text-align:left;padding:8px;border-radius:6px;font-size:10.5px;cursor:pointer}.menu button:hover{background:#F3F6F9}.toast{position:fixed;right:20px;bottom:20px;background:#173149;color:#fff;border-radius:8px;padding:10px 13px;font-size:10.5px;display:none}
+@media(max-width:960px){.app{grid-template-columns:72px 1fr}.brand,.cap,.nav{font-size:0}.stats{grid-template-columns:repeat(2,1fr)}.gridHead,.deptRow,.teamRow,.personRow{grid-template-columns:minmax(250px,1.8fr) 110px 120px 80px}.gridHead>*:nth-child(4),.deptRow>*:nth-child(4),.teamRow>*:nth-child(4),.personRow>*:nth-child(4){display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="side">
+ <div class="brand">LandErp<small>Рабочий контур закупки</small></div>
+ <div class="cap">РАБОЧЕЕ МЕСТО</div>
+ <div class="nav">▣ Обзор</div><div class="nav">▣ Закупка</div><div class="nav active">▦ Организация</div><div class="nav">≡ Аудит</div><div class="nav">↕ Collector</div>
+</aside>
+<main class="main">
+ <div class="top"><div><small>ЗАКУПКА</small><b>Земля. Данные. Решения.</b></div><div class="user">owner@landerp.local &nbsp; <button class="btn small">Выход</button></div></div>
+ <div class="page">
+   <div class="crumb">Администрирование / Организация</div>
+   <div class="head">
+    <div><h1>Организация</h1><p>Структура компании, сотрудники и должности. Права доступа настраиваются через назначение сотрудника, но не являются частью оргструктуры.</p></div>
+    <div class="actions"><button class="btn" id="inviteTop">+ Сотрудник</button><button class="btn primary" id="addDept">+ Отдел</button></div>
+   </div>
+
+   <div class="stats">
+    <div class="stat"><label>Отделы</label><strong>3</strong><span>все активны</span></div>
+    <div class="stat"><label>Команды</label><strong>4</strong><span>в 2 отделах</span></div>
+    <div class="stat"><label>Должности</label><strong>4</strong><span>1 не используется</span></div>
+    <div class="stat"><label>Сотрудники</label><strong>8</strong><span>1 без команды</span></div>
+   </div>
+
+   <section class="card">
+    <div class="tabs">
+      <button class="tab active" data-tab="structure">Структура</button>
+      <button class="tab" data-tab="employees">Сотрудники</button>
+      <button class="tab" data-tab="positions">Должности</button>
+    </div>
+
+    <div class="panel active" id="structure">
+      <div class="toolbar">
+        <input class="search" id="searchDept" placeholder="Найти отдел, команду или сотрудника">
+        <label class="check"><input type="checkbox" id="showArchive"> Показывать архивные</label>
+        <div class="spacer"></div><button class="btn small" id="expand">Развернуть все</button><button class="btn small" id="collapse">Свернуть все</button>
+      </div>
+      <div class="list">
+       <div class="gridHead"><div>Подразделение / команда / сотрудник</div><div>Должность / люди</div><div>Руководитель</div><div>Состояние</div><div></div></div>
+
+       <div class="dept" data-name="закупки первичный анализ выездная группа анна крылова дмитрий соколов елена петрова илья смирнов алексей морозов">
+        <div class="deptRow">
+          <div class="treeName"><button class="caret deptCaret">⌄</button><div class="name"><b>Закупки</b><small>Поиск, проверка и приобретение объектов</small></div></div>
+          <div class="meta"><b>5 сотрудников</b><small>2 команды</small></div><div class="meta">Алексей Морозов<small>руководитель отдела</small></div><div><span class="pill">Активен</span></div>
+          <div class="rowact"><button class="btn icon small addTeam">＋</button><button class="btn icon small more" data-kind="dept" data-title="Закупки">⋯</button></div>
+        </div>
+        <div class="deptBody">
+          <div class="teamBlock">
+            <div class="teamRow">
+             <div class="treeName"><button class="caret teamCaret">⌄</button><span class="dot"></span><div class="name"><b>Первичный анализ</b><small>Отбор и первичная проверка</small></div></div>
+             <div class="meta"><b>3 сотрудника</b></div><div class="meta">Алексей Морозов</div><div><span class="pill">Активна</span></div><div class="rowact"><button class="btn icon small more" data-kind="team" data-title="Первичный анализ">⋯</button></div>
+            </div>
+            <div class="people">
+             <div class="personRow"><div class="personMain"><span class="avatar">АК</span><div class="name"><b>Анна Крылова</b><small>anna@landerp.local</small></div></div><div class="meta">Закупщик</div><div class="meta">Алексей Морозов</div><div><span class="pill">Активна</span></div><div></div></div>
+             <div class="personRow"><div class="personMain"><span class="avatar">ДС</span><div class="name"><b>Дмитрий Соколов</b><small>d.sokolov@landerp.local</small></div></div><div class="meta">Закупщик</div><div class="meta">Алексей Морозов</div><div><span class="pill">Активен</span></div><div></div></div>
+             <div class="personRow"><div class="personMain"><span class="avatar">ЕП</span><div class="name"><b>Елена Петрова</b><small>e.petrova@landerp.local</small></div></div><div class="meta">Закупщик</div><div class="meta">Алексей Морозов</div><div><span class="pill">Активна</span></div><div></div></div>
+            </div>
+          </div>
+          <div class="teamBlock">
+            <div class="teamRow">
+             <div class="treeName"><button class="caret teamCaret">⌄</button><span class="dot"></span><div class="name"><b>Выездная группа</b><small>Осмотры и полевые проверки</small></div></div>
+             <div class="meta"><b>1 сотрудник</b></div><div class="meta">Алексей Морозов</div><div><span class="pill">Активна</span></div><div class="rowact"><button class="btn icon small more" data-kind="team" data-title="Выездная группа">⋯</button></div>
+            </div>
+            <div class="people">
+             <div class="personRow"><div class="personMain"><span class="avatar">ИС</span><div class="name"><b>Илья Смирнов</b><small>i.smirnov@landerp.local</small></div></div><div class="meta">Закупщик · выезды</div><div class="meta">Алексей Морозов</div><div><span class="pill">Активен</span></div><div></div></div>
+            </div>
+          </div>
+          <div class="unassigned">
+            <div class="unassignedTitle">Без команды · 1</div>
+            <div class="personRow"><div class="personMain"><span class="avatar">АМ</span><div class="name"><b>Алексей Морозов</b><small>a.morozov@landerp.local</small></div></div><div class="meta">Руководитель отдела закупок</div><div class="meta">—</div><div><span class="pill">Активен</span></div><div></div></div>
+          </div>
+        </div>
+       </div>
+
+       <div class="dept" data-name="продажи сопровождение мария кузнецова олег волков">
+        <div class="deptRow">
+          <div class="treeName"><button class="caret deptCaret">⌄</button><div class="name"><b>Продажи</b><small>Подготовка и реализация объектов</small></div></div>
+          <div class="meta"><b>2 сотрудника</b><small>1 команда</small></div><div class="meta">Олег Волков<small>руководитель отдела</small></div><div><span class="pill">Активен</span></div>
+          <div class="rowact"><button class="btn icon small addTeam">＋</button><button class="btn icon small more" data-kind="dept" data-title="Продажи">⋯</button></div>
+        </div>
+        <div class="deptBody">
+          <div class="teamBlock">
+            <div class="teamRow"><div class="treeName"><button class="caret teamCaret">⌄</button><span class="dot"></span><div class="name"><b>Сопровождение</b><small>Подготовка к продаже и сделки</small></div></div><div class="meta"><b>2 сотрудника</b></div><div class="meta">Олег Волков</div><div><span class="pill">Активна</span></div><div class="rowact"><button class="btn icon small more" data-kind="team" data-title="Сопровождение">⋯</button></div></div>
+            <div class="people">
+             <div class="personRow"><div class="personMain"><span class="avatar">МК</span><div class="name"><b>Мария Кузнецова</b><small>m.kuznetsova@landerp.local</small></div></div><div class="meta">Менеджер отдела продаж</div><div class="meta">Олег Волков</div><div><span class="pill">Активна</span></div><div></div></div>
+             <div class="personRow"><div class="personMain"><span class="avatar">ОВ</span><div class="name"><b>Олег Волков</b><small>o.volkov@landerp.local</small></div></div><div class="meta">Руководитель отдела продаж</div><div class="meta">—</div><div><span class="pill">Активен</span></div><div></div></div>
+            </div>
+          </div>
+        </div>
+       </div>
+
+       <div class="dept" data-name="маркетинг">
+        <div class="deptRow">
+          <div class="treeName"><button class="caret deptCaret">›</button><div class="name"><b>Маркетинг</b><small>Продвижение и материалы</small></div></div>
+          <div class="meta"><b>0 сотрудников</b><small>0 команд</small></div><div class="meta">Не назначен</div><div><span class="pill">Активен</span></div>
+          <div class="rowact"><button class="btn icon small addTeam">＋</button><button class="btn icon small more" data-kind="dept" data-title="Маркетинг">⋯</button></div>
+        </div>
+        <div class="deptBody" style="display:none"><div class="empty">В отделе пока нет сотрудников и команд.</div></div>
+       </div>
+      </div>
+    </div>
+
+    <div class="panel" id="employees">
+      <div class="toolbar">
+       <input class="search" id="searchEmp" placeholder="Найти сотрудника">
+       <select class="select"><option>Все отделы</option><option>Закупки</option><option>Продажи</option><option>Маркетинг</option></select>
+       <select class="select"><option>Все состояния</option><option>Активные</option><option>Ждут активации</option><option>Отключённые</option></select>
+       <div class="spacer"></div><button class="btn primary small" id="invite">+ Добавить сотрудника</button>
+      </div>
+      <div class="tablewrap"><table class="table" id="empTable">
+       <thead><tr><th>Сотрудник</th><th>Отдел / команда</th><th>Должность</th><th>Руководитель</th><th>Состояние</th><th></th></tr></thead>
+       <tbody>
+        <tr data-name="анна крылова"><td><div class="employeeCell"><span class="avatar">АК</span><div><b>Анна Крылова</b><small>anna@landerp.local</small></div></div></td><td>Закупки<small>Первичный анализ</small></td><td>Закупщик</td><td>Алексей Морозов</td><td><span class="pill">Активна</span></td><td><button class="btn small empOpen" data-name="Анна Крылова" data-login="anna@landerp.local" data-dept="Закупки" data-team="Первичный анализ" data-position="Закупщик" data-manager="Алексей Морозов">Открыть</button></td></tr>
+        <tr data-name="дмитрий соколов"><td><div class="employeeCell"><span class="avatar">ДС</span><div><b>Дмитрий Соколов</b><small>d.sokolov@landerp.local</small></div></div></td><td>Закупки<small>Первичный анализ</small></td><td>Закупщик</td><td>Алексей Морозов</td><td><span class="pill">Активен</span></td><td><button class="btn small empOpen" data-name="Дмитрий Соколов" data-login="d.sokolov@landerp.local" data-dept="Закупки" data-team="Первичный анализ" data-position="Закупщик" data-manager="Алексей Морозов">Открыть</button></td></tr>
+        <tr data-name="анастасия"><td><div class="employeeCell"><span class="avatar">АН</span><div><b>Анастасия</b><small>a@z.ru</small></div></div></td><td>Закупки<small>Без команды</small></td><td>Руководитель отдела закупок</td><td>—</td><td><span class="pill badgeWarn">Ждёт активации</span></td><td><button class="btn small empOpen" data-name="Анастасия" data-login="a@z.ru" data-dept="Закупки" data-team="" data-position="Руководитель отдела закупок" data-manager="">Открыть</button></td></tr>
+       </tbody>
+      </table></div>
+    </div>
+
+    <div class="panel" id="positions">
+      <div class="toolbar"><input class="search" id="searchPos" placeholder="Найти должность"><label class="check"><input type="checkbox"> Показывать архивные</label><div class="spacer"></div><button class="btn primary small" id="addPos">+ Должность</button></div>
+      <div class="tablewrap"><table class="table">
+       <thead><tr><th>Должность</th><th>Сотрудники</th><th>Используется</th><th>Состояние</th><th></th></tr></thead>
+       <tbody>
+        <tr><td><b>Закупщик</b><small>Рабочая должность</small></td><td>4</td><td>Закупки</td><td><span class="pill">Активна</span></td><td><button class="btn icon small more" data-kind="position" data-title="Закупщик">⋯</button></td></tr>
+        <tr><td><b>Руководитель отдела закупок</b></td><td>1</td><td>Закупки</td><td><span class="pill">Активна</span></td><td><button class="btn icon small more" data-kind="position" data-title="Руководитель отдела закупок">⋯</button></td></tr>
+        <tr><td><b>Менеджер отдела продаж</b></td><td>1</td><td>Продажи</td><td><span class="pill">Активна</span></td><td><button class="btn icon small more" data-kind="position" data-title="Менеджер отдела продаж">⋯</button></td></tr>
+        <tr><td><b>Руководитель отдела продаж</b></td><td>1</td><td>Продажи</td><td><span class="pill">Активна</span></td><td><button class="btn icon small more" data-kind="position" data-title="Руководитель отдела продаж">⋯</button></td></tr>
+       </tbody>
+      </table></div>
+    </div>
+   </section>
+ </div>
+</main>
+</div>
+
+<div class="modalback" id="editModal"><div class="modal">
+ <div class="mh"><div><strong id="mt">Новый отдел</strong><small id="ms">Добавьте подразделение в структуру.</small></div><button class="x" data-close="editModal">×</button></div>
+ <div class="mb">
+  <label class="field"><span id="ml">Название</span><input id="mi"></label>
+  <label class="field" id="deptWrap" style="display:none"><span>Отдел</span><select><option>Закупки</option><option>Продажи</option><option>Маркетинг</option></select></label>
+  <div class="hint">Используемые элементы не удаляются физически — их можно безопасно архивировать.</div>
+ </div>
+ <div class="mf"><button class="btn" data-close="editModal">Отмена</button><button class="btn primary" id="save">Сохранить</button></div>
+</div></div>
+
+
+<div class="modalback" id="employeeModal"><div class="modal" style="width:min(660px,94vw)">
+ <div class="mh"><div><strong id="employeeModalTitle">Добавить сотрудника</strong><small id="employeeModalSub">Создайте учётную запись и назначьте сотрудника в структуру.</small></div><button class="x" data-close="employeeModal">×</button></div>
+ <div class="mb">
+  <div class="formGrid">
+   <label class="field"><span>ФИО</span><input id="empName" placeholder="Иван Петров"></label>
+   <label class="field"><span>Логин</span><input id="empLogin" placeholder="ivan.petrov"></label>
+   <label class="field"><span>Отдел</span><select id="empDept"><option value="">Не назначен</option><option>Закупки</option><option>Продажи</option><option>Маркетинг</option></select></label>
+   <label class="field"><span>Команда</span><select id="empTeam"><option value="">Без команды</option><option>Первичный анализ</option><option>Выездная группа</option><option>Сопровождение</option></select></label>
+   <label class="field"><span>Должность</span><select id="empPosition"><option value="">Не назначена</option><option>Закупщик</option><option>Руководитель отдела закупок</option><option>Менеджер отдела продаж</option><option>Руководитель отдела продаж</option></select></label>
+   <label class="field"><span>Руководитель</span><select id="empManager"><option value="">Не назначен</option><option>Алексей Морозов</option><option>Олег Волков</option></select></label>
+  </div>
+  <label class="check" style="margin:2px 0 8px"><input id="forceChange" type="checkbox" checked> Попросить сменить временный пароль при первом входе</label>
+  <details class="advanced">
+   <summary>Дополнительно · доступ</summary>
+   <div class="advancedBody formGrid">
+    <label class="field"><span>Роль</span><select id="empRole"><option>Сотрудник</option><option>Администратор</option></select></label>
+    <label class="field"><span>Область доступа</span><select id="empScope"><option>Только свои объекты</option><option>Команда</option><option>Отдел</option><option>Вся организация</option></select></label>
+   </div>
+   <div class="hint">Должность и права — разные вещи. Для нового сотрудника по умолчанию используется минимальный рабочий доступ.</div>
+  </details>
+  <div class="notice">🔐 <div>При создании система сгенерирует временный пароль. После закрытия окна пароль больше не показывается; администратор сможет только выдать новый.</div></div>
+ </div>
+ <div class="mf">
+   <div class="empActions" id="editEmployeeActions" style="display:none"><button class="btn" id="resetPassword">Сбросить пароль</button><button class="btn danger" id="disableEmployee">Отключить</button></div>
+   <button class="btn" data-close="employeeModal">Отмена</button>
+   <button class="btn primary" id="saveEmployee">Создать сотрудника</button>
+ </div>
+</div></div>
+
+<div class="modalback" id="credentialsModal"><div class="modal" style="width:min(560px,94vw)">
+ <div class="mh"><div><strong>Сотрудник создан</strong><small>Передайте эти данные сотруднику в Telegram или другим безопасным способом.</small></div><button class="x" data-close="credentialsModal">×</button></div>
+ <div class="mb">
+   <div class="credentials">
+    <div class="credRow"><label>Логин</label><div class="credValue" id="createdLogin">—</div><button class="btn small copyOne" data-copy="createdLogin">Копировать</button></div>
+    <div class="credRow"><label>Пароль</label><div class="credValue" id="createdPassword">—</div><button class="btn small copyOne" data-copy="createdPassword">Копировать</button></div>
+   </div>
+   <div class="notice">⚠️ <div>Временный пароль показывается один раз. В production в базе хранится только его hash.</div></div>
+ </div>
+ <div class="mf"><button class="btn" id="copyCredentials">Скопировать логин и пароль</button><button class="btn primary" data-close="credentialsModal">Готово</button></div>
+</div></div>
+
+<div class="menu" id="menu"><button id="edit">Изменить</button><button id="archive" style="color:var(--risk)">Архивировать</button></div>
+<div class="toast" id="toast">Изменения сохранены</div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+$$(".tab").forEach(t=>t.onclick=()=>{$$(".tab").forEach(x=>x.classList.remove("active"));$$(".panel").forEach(x=>x.classList.remove("active"));t.classList.add("active");$("#"+t.dataset.tab).classList.add("active")});
+$$(".deptCaret").forEach(c=>c.onclick=()=>{let d=c.closest(".dept"),b=d.querySelector(".deptBody"),open=b.style.display!=="none";b.style.display=open?"none":"block";c.textContent=open?"›":"⌄"});
+$$(".teamCaret").forEach(c=>c.onclick=()=>{let t=c.closest(".teamBlock"),p=t.querySelector(".people"),open=p.style.display!=="none";p.style.display=open?"none":"block";c.textContent=open?"›":"⌄"});
+expand.onclick=()=>{$$(".deptBody,.people").forEach(x=>x.style.display="block");$$(".deptCaret,.teamCaret").forEach(x=>x.textContent="⌄")};
+collapse.onclick=()=>{$$(".deptBody,.people").forEach(x=>x.style.display="none");$$(".deptCaret,.teamCaret").forEach(x=>x.textContent="›")};
+searchDept.oninput=()=>{let q=searchDept.value.toLowerCase();$$(".dept").forEach(d=>d.style.display=(!q||d.dataset.name.includes(q))?"block":"none")};
+searchEmp.oninput=()=>{let q=searchEmp.value.toLowerCase();$$("#empTable tbody tr").forEach(r=>r.style.display=(!q||r.dataset.name.includes(q))?"table-row":"none")};
+
+function openModal(kind,title=""){editModal.dataset.kind=kind;mi.value=title;deptWrap.style.display=kind==="team"?"block":"none";mt.textContent=title?`Изменить ${kind==="dept"?"отдел":kind==="team"?"команду":"должность"}`:(kind==="dept"?"Новый отдел":kind==="team"?"Новая команда":"Новая должность");ms.textContent=kind==="dept"?"Подразделение верхнего уровня.":kind==="team"?"Команда относится к одному отделу.":"Должность — справочник и не задаёт права доступа.";ml.textContent=kind==="dept"?"Название отдела":kind==="team"?"Название команды":"Название должности";editModal.classList.add("open")}
+addDept.onclick=()=>openModal("dept");addPos.onclick=()=>openModal("position");$$(".addTeam").forEach(x=>x.onclick=e=>{e.stopPropagation();openModal("team")});
+
+let employeeMode="create";
+function suggestLogin(name){
+  const parts=name.trim().toLowerCase().replace(/ё/g,"е").split(/\s+/).filter(Boolean);
+  const map={"а":"a","б":"b","в":"v","г":"g","д":"d","е":"e","ж":"zh","з":"z","и":"i","й":"y","к":"k","л":"l","м":"m","н":"n","о":"o","п":"p","р":"r","с":"s","т":"t","у":"u","ф":"f","х":"h","ц":"c","ч":"ch","ш":"sh","щ":"sch","ы":"y","э":"e","ю":"yu","я":"ya","ь":"","ъ":""};
+  const tr=s=>[...s].map(c=>map[c]??c).join("").replace(/[^a-z0-9._-]/g,"");
+  if(!parts.length)return "";
+  return parts.length>1 ? `${tr(parts[0])}.${tr(parts[1])}` : tr(parts[0]);
+}
+function openEmployeeCreate(){
+  employeeMode="create"; employeeModalTitle.textContent="Добавить сотрудника"; employeeModalSub.textContent="Создайте учётную запись и назначьте сотрудника в структуру.";
+  empName.value="";empLogin.value="";empDept.value="";empTeam.value="";empPosition.value="";empManager.value="";empRole.value="Сотрудник";empScope.value="Только свои объекты";
+  editEmployeeActions.style.display="none";saveEmployee.textContent="Создать сотрудника";employeeModal.classList.add("open");setTimeout(()=>empName.focus(),30);
+}
+function openEmployeeEdit(b){
+  employeeMode="edit"; employeeModalTitle.textContent="Сотрудник"; employeeModalSub.textContent="Измените назначение или управление доступом.";
+  empName.value=b.dataset.name||"";empLogin.value=b.dataset.login||"";empDept.value=b.dataset.dept||"";empTeam.value=b.dataset.team||"";empPosition.value=b.dataset.position||"";empManager.value=b.dataset.manager||"";
+  editEmployeeActions.style.display="flex";saveEmployee.textContent="Сохранить";employeeModal.classList.add("open");
+}
+invite.onclick=inviteTop.onclick=openEmployeeCreate;
+empName.addEventListener("blur",()=>{if(employeeMode==="create"&&!empLogin.value.trim())empLogin.value=suggestLogin(empName.value)});
+$$(".empOpen").forEach(b=>b.onclick=()=>openEmployeeEdit(b));
+
+function generatePassword(){
+  const chars="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const pick=n=>Array.from({length:n},()=>chars[Math.floor(Math.random()*chars.length)]).join("");
+  return `${pick(4)}-${pick(4)}-${pick(3)}`;
+}
+function initials(name){return name.trim().split(/\s+/).slice(0,2).map(x=>x[0]?.toUpperCase()||"").join("")||"??"}
+saveEmployee.onclick=()=>{
+  const name=empName.value.trim(), login=empLogin.value.trim();
+  if(!name||!login){toast.textContent="Укажите ФИО и логин";toast.style.display="block";setTimeout(()=>toast.style.display="none",1500);return}
+  if(employeeMode==="edit"){
+    employeeModal.classList.remove("open");toast.textContent="Данные сотрудника сохранены";toast.style.display="block";setTimeout(()=>toast.style.display="none",1400);return;
+  }
+  const pass=generatePassword();
+  createdLogin.textContent=login;createdPassword.textContent=pass;
+  const tr=document.createElement("tr");tr.dataset.name=name.toLowerCase();
+  tr.innerHTML=`<td><div class="employeeCell"><span class="avatar">${initials(name)}</span><div><b>${name}</b><small>${login}</small></div></div></td><td>${empDept.value||"Не назначен"}<small>${empTeam.value||"Без команды"}</small></td><td>${empPosition.value||"Не назначена"}</td><td>${empManager.value||"—"}</td><td><span class="pill">Активен</span></td><td><button class="btn small empOpen" data-name="${name}" data-login="${login}" data-dept="${empDept.value}" data-team="${empTeam.value}" data-position="${empPosition.value}" data-manager="${empManager.value}">Открыть</button></td>`;
+  empTable.querySelector("tbody").appendChild(tr); tr.querySelector(".empOpen").onclick=e=>openEmployeeEdit(e.currentTarget);
+  employeeModal.classList.remove("open");credentialsModal.classList.add("open");
+};
+resetPassword.onclick=()=>{
+  const pass=generatePassword();createdLogin.textContent=empLogin.value.trim();createdPassword.textContent=pass;
+  employeeModal.classList.remove("open");credentialsModal.classList.add("open");
+};
+disableEmployee.onclick=()=>{employeeModal.classList.remove("open");toast.textContent="Сотрудник отключён";toast.style.display="block";setTimeout(()=>toast.style.display="none",1400)};
+function copyText(v){if(navigator.clipboard)navigator.clipboard.writeText(v);toast.textContent="Скопировано";toast.style.display="block";setTimeout(()=>toast.style.display="none",1000)}
+$$(".copyOne").forEach(b=>b.onclick=()=>copyText($("#"+b.dataset.copy).textContent));
+copyCredentials.onclick=()=>copyText(`Логин: ${createdLogin.textContent}\nПароль: ${createdPassword.textContent}`);
+
+$$("[data-close]").forEach(x=>x.onclick=()=>$("#"+x.dataset.close).classList.remove("open"));save.onclick=()=>{editModal.classList.remove("open");toast.textContent="Изменения сохранены";toast.style.display="block";setTimeout(()=>toast.style.display="none",1400)};
+let cur={};$$(".more").forEach(b=>b.onclick=e=>{e.stopPropagation();cur={kind:b.dataset.kind,title:b.dataset.title};let r=b.getBoundingClientRect();menu.style.left=Math.min(r.left-120,innerWidth-170)+"px";menu.style.top=r.bottom+5+"px";menu.classList.add("open")});document.onclick=e=>{if(!e.target.closest(".more")&&!e.target.closest("#menu"))menu.classList.remove("open")};edit.onclick=()=>{menu.classList.remove("open");openModal(cur.kind,cur.title)};archive.onclick=()=>{menu.classList.remove("open");toast.textContent="Элемент перемещён в архив";toast.style.display="block";setTimeout(()=>toast.style.display="none",1400)}
+</script>
+</body></html>

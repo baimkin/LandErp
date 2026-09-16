@@ -14,6 +14,9 @@ public sealed class OrgUnit
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
     public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    public Guid? ManagerEmployeeId { get; set; }
+    public bool Active { get; set; } = true;
     public long Version { get; set; } = 1;
 }
 
@@ -22,6 +25,8 @@ public sealed class Position
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
     public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    public bool Active { get; set; } = true;
     public long Version { get; set; } = 1;
 }
 
@@ -31,6 +36,10 @@ public sealed class Team
     public Guid OrganizationId { get; set; }
     public Guid OrgUnitId { get; set; }
     public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    public Guid? ManagerEmployeeId { get; set; }
+    public bool Active { get; set; } = true;
+    public long Version { get; set; } = 1;
 }
 
 public sealed class Employee

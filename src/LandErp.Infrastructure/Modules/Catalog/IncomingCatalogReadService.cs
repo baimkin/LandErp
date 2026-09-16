@@ -89,9 +89,9 @@ public sealed class IncomingCatalogReadService(
                 from observation in db.ListingObservations.AsNoTracking()
                 join job in db.CollectionJobs.AsNoTracking() on observation.JobId equals job.Id
                 join search in db.SearchConfigurations.AsNoTracking() on job.SearchId equals search.Id
-                join group in db.SearchGroups.AsNoTracking() on search.SearchGroupId equals group.Id
+                join searchGroup in db.SearchGroups.AsNoTracking() on search.SearchGroupId equals searchGroup.Id
                 where job.OrganizationId == context.OrganizationId && search.OrganizationId == context.OrganizationId
-                    && group.OrganizationId == context.OrganizationId && group.Active && group.Id == groupId
+                    && searchGroup.OrganizationId == context.OrganizationId && searchGroup.Active && searchGroup.Id == groupId
                 select observation.ListingId;
             query = query.Where(item => groupListingIds.Contains(item.Id));
         }

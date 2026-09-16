@@ -41,7 +41,7 @@ internal static class IncomingLandTypeClassifier
         return query.Where(item =>
             (izhs && (EF.Functions.ILike(item.Title ?? "", "%ижс%") || EF.Functions.ILike(item.Description ?? "", "%ижс%")
                 || ((EF.Functions.ILike(item.Title ?? "", "%индивидуальн%") || EF.Functions.ILike(item.Description ?? "", "%индивидуальн%"))
-                    && (EF.Functions.ILike(item.Title ?? "", "%жил%") || EF.Functions.ILike(item.Description ?? "", "%жил%"))))
+                    && (EF.Functions.ILike(item.Title ?? "", "%жил%") || EF.Functions.ILike(item.Description ?? "", "%жил%")))))
             || (snt && (EF.Functions.ILike(item.Title ?? "", "%снт%") || EF.Functions.ILike(item.Description ?? "", "%снт%")
                 || ((EF.Functions.ILike(item.Title ?? "", "%садов%") || EF.Functions.ILike(item.Description ?? "", "%садов%"))
                     && (EF.Functions.ILike(item.Title ?? "", "%товариществ%") || EF.Functions.ILike(item.Description ?? "", "%товариществ%")))))
@@ -66,7 +66,7 @@ internal static class IncomingLandTypeClassifier
                 || EF.Functions.ILike(item.Title ?? "", "%рекреац%") || EF.Functions.ILike(item.Description ?? "", "%рекреац%")
                 || EF.Functions.ILike(item.Title ?? "", "%коммерческ%") || EF.Functions.ILike(item.Description ?? "", "%коммерческ%")
                 || ((EF.Functions.ILike(item.Title ?? "", "%общественно%") || EF.Functions.ILike(item.Description ?? "", "%общественно%"))
-                    && (EF.Functions.ILike(item.Title ?? "", "%делов%") || EF.Functions.ILike(item.Description ?? "", "%делов%"))))));
+                    && (EF.Functions.ILike(item.Title ?? "", "%делов%") || EF.Functions.ILike(item.Description ?? "", "%делов%")))))));
     }
 
     private static bool IsIzhs(string text) => text.Contains("ижс", StringComparison.Ordinal)

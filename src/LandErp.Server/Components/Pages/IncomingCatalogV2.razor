@@ -55,22 +55,28 @@
             <section class="v2-surface">
                 <EditForm Model="filter" FormName="incoming-v2-filter" OnValidSubmit="ApplyFilterAsync">
                     <div class="v2-tools">
-                        <input @bind="filter.Text" placeholder="Адрес, населённый пункт, ID объявления…" aria-label="Поиск по входящим" />
-                        <InputSelect @bind-Value="filter.Source" aria-label="Источник">
+                        <div class="v2-searchbox">
+                            <span class="v2-search-icon" aria-hidden="true">⌕</span>
+                            <input value="@filter.Text" @oninput="SearchTextChanged" placeholder="Адрес, населённый пункт, ID, кадастровый номер…" aria-label="Поиск по входящим" autocomplete="off" />
+                            @if (!string.IsNullOrWhiteSpace(filter.Text))
+                            {
+                                <button type="button" class="v2-search-clear" title="Очистить поиск" aria-label="Очистить поиск" @onclick="ClearSearchAsync">×</button>
+                            }
+                        </div>
+                        <select value="@(filter.Source?.ToString() ?? "")" @onchange="SourceChangedAsync" aria-label="Источник">
                             <option value="">Все источники</option>
                             @foreach (CatalogSource source in Enum.GetValues<CatalogSource>())
                             {
                                 <option value="@source">@SourceBadge.Label(source)</option>
                             }
-                        </InputSelect>
-                        <select @bind="searchConfigurationKey" aria-label="Поисковая конфигурация">
+                        </select>
+                        <select value="@searchConfigurationKey" @onchange="SearchConfigurationChangedAsync" aria-label="Поисковая конфигурация">
                             <option value="">Все поиски</option>
                             @foreach (IncomingSearchConfigurationView search in catalogPage.SearchConfigurations)
                             {
                                 <option value="@search.Id">@search.Label</option>
                             }
                         </select>
-                        <button class="v2-btn sm" type="submit">Найти</button>
                         <button class="v2-btn sm quiet" type="button" aria-expanded="@advancedOpen" @onclick="() => advancedOpen = !advancedOpen">Фильтры</button>
                     </div>
 
@@ -81,8 +87,8 @@
                             <label><span>Возраст</span><InputSelect @bind-Value="filter.Age"><option value="Any">Любой</option><option value="Today">До суток</option><option value="ThreeDays">До 3 дней</option><option value="Week">До недели</option><option value="OlderThanWeek">Старше недели</option></InputSelect></label>
                             <label><span>Цена от, ₽</span><InputNumber @bind-Value="filter.MinPrice" /></label>
                             <label><span>Цена до, ₽</span><InputNumber @bind-Value="filter.MaxPrice" /></label>
-                            <label><span>Площадь от, м²</span><InputNumber @bind-Value="filter.MinArea" /></label>
-                            <label><span>Площадь до, м²</span><InputNumber @bind-Value="filter.MaxArea" /></label>
+                            <label><span>Площадь от, сот.</span><InputNumber @bind-Value="filter.MinAreaSotki" /></label>
+                            <label><span>Площадь до, сот.</span><InputNumber @bind-Value="filter.MaxAreaSotki" /></label>
                             <label class="v2-check"><InputCheckbox @bind-Value="filter.AttentionOnly" /> Требует внимания</label>
                             <div class="v2-advanced-actions"><button class="v2-btn sm" type="submit">Применить</button><button class="v2-btn sm quiet" type="button" @onclick="ResetFilterAsync">Сбросить</button></div>
                         </div>
@@ -109,24 +115,59 @@
                     <div class="v2-table-wrap">
                         <table class="v2-table">
                             <thead>
-                                <tr><th>Объявление</th><th>Цена</th><th>Площадь</th><th>Категория / ВРИ</th><th>Почему в очереди</th><th>Данные</th><th>Найдено</th><th>Источник</th></tr>
+                                <tr>
+                                    <th>Объявление</th>
+                                    <th><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.Price)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Price)">Цена <span>@SortIndicator(IncomingCatalogSortField.Price)</span></button></th>
+                                    <th><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.Area)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Area)">Площадь <span>@SortIndicator(IncomingCatalogSortField.Area)</span></button></th>
+                                    <th>Категория / ВРИ</th><th>Почему в очереди</th><th>Данные</th><th>Найдено</th><th>Источник</th>
+                                </tr>
                             </thead>
                             <tbody>
                                 @foreach (CatalogItemView item in catalogPage.Items)
                                 {
                                     IncomingCatalogRowRead? row = Row(item.Id);
+                                    int completeness = Math.Clamp(row?.CompletenessPercent ?? 0, 0, 100);
                                     <tr class="@RowTone(row)" @onclick="() => OpenDetailAsync(item.Id)">
                                         <td>
-                                            <div class="v2-object"><strong>@item.Title</strong><div class="v2-sub">@(item.Location ?? "Местоположение неизвестно") · @(item.ExternalId ?? "без внешнего ID")</div>@if (item.BusinessNumber != null) { <div class="v2-sub"><a href="@($"/procurement/{item.PropertyCaseId}")" @onclick:stopPropagation="true">@item.BusinessNumber</a></div> }</div>
+                                            <div class="v2-object-cell">
+                                                @if (!string.IsNullOrWhiteSpace(row?.ThumbnailUrl))
+                                                {
+                                                    <button type="button" class="v2-thumb" title="Открыть фотографии" aria-label="Открыть фотографии объявления" @onclick:stopPropagation="true" @onclick="() => OpenGalleryForItemAsync(item.Id)">
+                                                        <img src="@row!.ThumbnailUrl" alt="" loading="lazy" />
+                                                        @if (row!.PhotoCount > 1) { <span>@row.PhotoCount</span> }
+                                                    </button>
+                                                }
+                                                else
+                                                {
+                                                    <div class="v2-thumb empty" aria-hidden="true">▧</div>
+                                                }
+                                                <div class="v2-object">
+                                                    <strong>@item.Title</strong>
+                                                    <div class="v2-sub">@(item.Location ?? "Местоположение неизвестно") · @(item.ExternalId ?? "без внешнего ID")</div>
+                                                    @if (!string.IsNullOrWhiteSpace(row?.SearchConfigurationLabel) || item.BusinessNumber != null)
+                                                    {
+                                                        <div class="v2-sub v2-object-context">
+                                                            @if (!string.IsNullOrWhiteSpace(row?.SearchConfigurationLabel)) { <span>@row!.SearchConfigurationLabel</span> }
+                                                            @if (!string.IsNullOrWhiteSpace(row?.SearchConfigurationLabel) && item.BusinessNumber != null) { <span> · </span> }
+                                                            @if (item.BusinessNumber != null) { <a href="@($"/procurement/{item.PropertyCaseId}")" @onclick:stopPropagation="true">@item.BusinessNumber</a> }
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </div>
                                         </td>
                                         <td><div class="v2-price">@ProcurementLabels.Money(item.Price)</div><div class="v2-sub">@(item.PricePerSotka == null ? "за сотку неизвестно" : ProcurementLabels.Money(item.PricePerSotka) + " / сот.")</div></td>
-                                        <td>@ProcurementLabels.Area(item.AreaSquareMeters)</td>
+                                        <td><strong class="v2-area">@AreaSotki(item.AreaSquareMeters)</strong></td>
                                         @* TODO-BACKEND-INCOMING: Category/VRI is not present in current Catalog facts. *@
                                         <td data-todo-backend="TODO-BACKEND-INCOMING"><span class="v2-muted">Не указано</span></td>
                                         <td><strong class="v2-reason">@item.QueueReason</strong><div class="v2-sub">@DispositionLabel(item.Disposition)</div></td>
-                                        <td><span class="v2-badge @((row?.CompletenessPercent ?? 0) < 60 ? "warn" : "ok")">@(row?.CompletenessPercent ?? 0)%</span></td>
+                                        <td>
+                                            <div class="v2-completeness">
+                                                <span class="v2-badge @(completeness < 60 ? "warn" : "ok")">@completeness%</span>
+                                                <span class="v2-progress" aria-hidden="true"><span style="@($"width:{completeness}%")"></span></span>
+                                            </div>
+                                        </td>
                                         <td>@Age(item.ReceivedAt)<div class="v2-sub">@ProcurementLabels.Time(item.LastObservedAt ?? item.ChangedAt)</div></td>
-                                        <td><span class="v2-badge">@SourceBadge.Label(item.Source)</span>@if (!string.IsNullOrWhiteSpace(row?.SearchConfigurationLabel)) { <div class="v2-sub">@row!.SearchConfigurationLabel</div> }</td>
+                                        <td><span class="v2-badge">@SourceBadge.Label(item.Source)</span></td>
                                     </tr>
                                 }
                             </tbody>
@@ -161,7 +202,10 @@
             <section class="v2-card v2-hero">
                 @if (detailRead?.PhotoUrls.Count > 0)
                 {
-                    <div class="v2-photo"><img src="@detailRead.PhotoUrls[0]" alt="Фото объекта" /></div>
+                    <button type="button" class="v2-photo" title="Открыть галерею" @onclick="OpenDetailGallery">
+                        <img src="@detailRead.PhotoUrls[0]" alt="Фото объекта" />
+                        @if (detailRead.PhotoUrls.Count > 1) { <span class="v2-photo-count">1 / @detailRead.PhotoUrls.Count</span> }
+                    </button>
                 }
                 else
                 {
@@ -169,7 +213,7 @@
                 }
                 <div class="v2-facts">
                     <div class="v2-fact full"><label>Цена</label><strong>@ProcurementLabels.Money(detail.Item.Price)</strong></div>
-                    <div class="v2-fact"><label>Площадь</label><strong>@ProcurementLabels.Area(detail.Item.AreaSquareMeters)</strong></div>
+                    <div class="v2-fact"><label>Площадь</label><strong>@AreaSotki(detail.Item.AreaSquareMeters)</strong></div>
                     <div class="v2-fact"><label>₽ / сот.</label><strong>@ProcurementLabels.Money(detail.Item.PricePerSotka)</strong></div>
                     <div class="v2-fact"><label>Кадастровый номер</label><strong>@(detail.Item.CadastralNumber ?? "Не указан")</strong></div>
                     <div class="v2-fact"><label>Получено</label><strong>@ProcurementLabels.Time(detail.Item.ReceivedAt)</strong></div>
@@ -178,6 +222,19 @@
                     <div class="v2-fact full"><label>Поиск</label><strong>@(detailRead?.SearchConfigurationLabel ?? "Не из поисковой конфигурации")</strong></div>
                 </div>
             </section>
+
+            @if (!string.IsNullOrWhiteSpace(detail.Item.Description) || !string.IsNullOrWhiteSpace(detail.IngressComment))
+            {
+                <section class="v2-card v2-description-card">
+                    <h3>Описание объявления</h3>
+                    @if (!string.IsNullOrWhiteSpace(detail.Item.Description)) { <p class="v2-description">@detail.Item.Description</p> }
+                    @if (!string.IsNullOrWhiteSpace(detail.IngressComment))
+                    {
+                        <div class="v2-ingress-comment"><strong>Комментарий при добавлении</strong><span>@detail.IngressComment</span></div>
+                    }
+                    <p class="v2-provenance">@detail.Item.Provenance</p>
+                </section>
+            }
 
             @* TODO-BACKEND-INCOMING: short checklist has no persistence contract. State below is local to this drawer only. *@
             <section class="v2-card" data-todo-backend="TODO-BACKEND-INCOMING">
@@ -195,15 +252,8 @@
                 }
             </section>
 
-            <section class="v2-card">
-                <h3>Комментарий</h3>
-                <textarea @bind="drawerComment" placeholder="Что важно передать дальше или почему объект не подходит…"></textarea>
-                @if (detail.Item.Description != null) { <p class="v2-description">@detail.Item.Description</p> }
-                <p class="v2-provenance">@detail.Item.Provenance@if (detail.IngressComment != null) { <span> · @detail.IngressComment</span> }</p>
-            </section>
-
             <section class="v2-card v2-history">
-                <h3>История внимания</h3>
+                <h3>История изменений и решений</h3>
                 @if (detail.Events.Count == 0)
                 {
                     <p class="v2-provenance">Событий пока нет.</p>
@@ -213,23 +263,36 @@
                     <ol>@foreach (CatalogEventView item in detail.Events) { <li><strong>@EventLabel(item.Kind)</strong><span>@ProcurementLabels.Time(item.RecordedAt)</span><p>@item.Message</p></li> }</ol>
                 }
             </section>
+
+            <label class="v2-next-option">
+                <input type="checkbox" @bind="openNextAfterDecision" />
+                <span><strong>После решения открыть следующее объявление</strong><small>Ускоряет последовательный разбор входящих.</small></span>
+            </label>
         </div>
 
-        <EditForm Model="monitoring" FormName="incoming-v2-monitor" OnValidSubmit="SaveMonitoringAsync">
-            <DataAnnotationsValidator />
-            <div class="v2-monitor">
-                <div class="v2-monitor-head"><div><strong>Мониторинг цены</strong><span>Вернуть объявление во входящие, когда цена станет интересной.</span></div><span class="v2-badge violet">Условие</span></div>
-                <div class="v2-monitor-grid">
-                    <div><label>Цена объявления ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.Total" /><span>₽</span></div></div>
-                    <div class="v2-or">или</div>
-                    <div><label>Цена за сотку ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.PerSotka" /><span>₽</span></div></div>
-                    <button type="submit" class="v2-btn" disabled="@Busy">Поставить на мониторинг</button>
-                </div>
-                <div class="v2-monitor-reason"><label>Комментарий</label><InputText @bind-Value="monitoring.Reason" /></div>
-                <ValidationSummary />
-                @if (detail.Monitoring.LastEvaluatedAt != null) { <div class="v2-monitor-last">Последняя оценка @ProcurementLabels.Time(detail.Monitoring.LastEvaluatedAt): @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPrice) · @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPricePerSotka) / сот.</div> }
-            </div>
-        </EditForm>
+        <div class="v2-monitor-shell">
+            <button type="button" class="v2-monitor-toggle" aria-expanded="@monitoringOpen" @onclick="() => monitoringOpen = !monitoringOpen">
+                <span><strong>Мониторинг цены</strong><small>@MonitoringSummary()</small></span>
+                <span class="v2-monitor-chevron">@(monitoringOpen ? "⌃" : "⌄")</span>
+            </button>
+            @if (monitoringOpen)
+            {
+                <EditForm Model="monitoring" FormName="incoming-v2-monitor" OnValidSubmit="SaveMonitoringAsync">
+                    <DataAnnotationsValidator />
+                    <div class="v2-monitor">
+                        <div class="v2-monitor-grid">
+                            <div><label>Цена объявления ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.Total" /><span>₽</span></div></div>
+                            <div class="v2-or">или</div>
+                            <div><label>Цена за сотку ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.PerSotka" /><span>₽</span></div></div>
+                            <button type="submit" class="v2-btn" disabled="@Busy">Поставить на мониторинг</button>
+                        </div>
+                        <div class="v2-monitor-reason"><label>Комментарий к мониторингу</label><InputText @bind-Value="monitoring.Reason" /></div>
+                        <ValidationSummary />
+                        @if (detail.Monitoring.LastEvaluatedAt != null) { <div class="v2-monitor-last">Последняя оценка @ProcurementLabels.Time(detail.Monitoring.LastEvaluatedAt): @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPrice) · @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPricePerSotka) / сот.</div> }
+                    </div>
+                </EditForm>
+            }
+        </div>
 
         <div class="v2-drawer-foot">
             <div class="v2-classify">
@@ -255,6 +318,32 @@
             </div>
         </div>
     </aside>
+}
+
+@if (galleryPhotos.Length > 0)
+{
+    <div class="v2-gallery-overlay" role="dialog" aria-modal="true" aria-label="Галерея фотографий" tabindex="0" @onclick="CloseGallery" @onkeydown="GalleryKeyDown">
+        <div class="v2-gallery-shell" @onclick:stopPropagation="true">
+            <button type="button" class="v2-gallery-close" aria-label="Закрыть галерею" title="Закрыть" @onclick="CloseGallery">×</button>
+            @if (galleryPhotos.Length > 1)
+            {
+                <button type="button" class="v2-gallery-nav prev" aria-label="Предыдущее фото" @onclick="PreviousPhoto">‹</button>
+                <button type="button" class="v2-gallery-nav next" aria-label="Следующее фото" @onclick="NextPhoto">›</button>
+            }
+            <img class="v2-gallery-main" src="@galleryPhotos[galleryIndex]" alt="Фото объекта @(galleryIndex + 1)" />
+            <div class="v2-gallery-count">@(galleryIndex + 1) / @galleryPhotos.Length</div>
+            @if (galleryPhotos.Length > 1)
+            {
+                <div class="v2-gallery-thumbs">
+                    @for (int index = 0; index < galleryPhotos.Length; index++)
+                    {
+                        int photoIndex = index;
+                        <button type="button" class="@(photoIndex == galleryIndex ? "active" : "")" @onclick="() => galleryIndex = photoIndex"><img src="@galleryPhotos[photoIndex]" alt="" loading="lazy" /></button>
+                    }
+                </div>
+            }
+        </div>
+    </div>
 }
 
 @if (manualOpen)
@@ -333,6 +422,7 @@
 
 @code {
     private const int PageSize = 25;
+    private const int SearchDebounceMilliseconds = 400;
     private IncomingCatalogReadPage? catalogPage;
     private CatalogItemDetail? detail;
     private IncomingCatalogDetailRead? detailRead;
@@ -341,11 +431,15 @@
     private bool manualOpen;
     private bool historyDemoOpen;
     private bool advancedOpen;
+    private bool monitoringOpen;
+    private bool openNextAfterDecision = true;
     private IncomingCatalogPreset? preset;
+    private IncomingCatalogSortField sortField = IncomingCatalogSortField.ChangedAt;
+    private IncomingCatalogSortDirection sortDirection = IncomingCatalogSortDirection.Descending;
     private string searchConfigurationKey = "";
+    private int searchRevision;
     private ManualInput manual = new();
     private MonitoringInput monitoring = new();
-    private string drawerComment = "";
     private CatalogItemView? takeItem;
     private Guid? existingCaseId;
     private IReadOnlyList<CaseLinkTarget> targets = [];
@@ -354,6 +448,8 @@
     private string classificationCategory = "";
     private string classificationReason = "";
     private readonly Dictionary<string, string> checklistState = [];
+    private string[] galleryPhotos = [];
+    private int galleryIndex;
 
     private static readonly CatalogSource[] manualSources = [CatalogSource.Telegram, CatalogSource.Referral, CatalogSource.Agent, CatalogSource.DirectOwner, CatalogSource.Manual, CatalogSource.Other];
     private static readonly ChecklistItem[] checklist =
@@ -369,23 +465,97 @@
     protected override async Task ReadAsync()
     {
         Guid? searchId = Guid.TryParse(searchConfigurationKey, out Guid parsed) ? parsed : null;
-        IncomingCatalogFilter baseFilter = new(filter.Text, filter.Source, filter.Disposition, filter.Age,
-            filter.MinPrice, filter.MaxPrice, filter.MinArea, filter.MaxArea, filter.AttentionOnly, page * PageSize, PageSize);
-        catalogPage = await IncomingReads.ReadAsync(CurrentSubject, new(baseFilter, searchId, preset), CancellationToken.None);
+        IncomingCatalogFilter baseFilter = new(filter.Text.Trim(), filter.Source, filter.Disposition, filter.Age,
+            filter.MinPrice, filter.MaxPrice, ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki),
+            filter.AttentionOnly, page * PageSize, PageSize);
+        catalogPage = await IncomingReads.ReadAsync(CurrentSubject,
+            new(baseFilter, searchId, preset, sortField, sortDirection), CancellationToken.None);
     }
 
-    private Task ApplyFilterAsync() { page = 0; return ReloadAsync(); }
-    private Task ResetFilterAsync() { filter.Reset(); searchConfigurationKey = ""; preset = null; page = 0; return ReloadAsync(); }
+    private Task ApplyFilterAsync() { CancelSearchDebounce(); page = 0; return ReloadAsync(); }
+
+    private Task ResetFilterAsync()
+    {
+        CancelSearchDebounce();
+        filter.Reset();
+        searchConfigurationKey = "";
+        preset = null;
+        sortField = IncomingCatalogSortField.ChangedAt;
+        sortDirection = IncomingCatalogSortDirection.Descending;
+        page = 0;
+        return ReloadAsync();
+    }
+
     private Task PreviousAsync() { page--; return ReloadAsync(); }
     private Task NextAsync() { page++; return ReloadAsync(); }
 
     private Task SelectPresetAsync(IncomingCatalogPreset? value)
     {
+        CancelSearchDebounce();
         preset = value;
         filter.Disposition = CatalogDisposition.Incoming;
         page = 0;
         return ReloadAsync();
     }
+
+    private Task SearchTextChanged(ChangeEventArgs args)
+    {
+        filter.Text = args.Value?.ToString() ?? "";
+        int revision = ++searchRevision;
+        _ = DebouncedSearchAsync(revision);
+        return Task.CompletedTask;
+    }
+
+    private async Task DebouncedSearchAsync(int revision)
+    {
+        await Task.Delay(SearchDebounceMilliseconds);
+        if (revision != searchRevision) return;
+        page = 0;
+        await InvokeAsync(ReloadAsync);
+    }
+
+    private Task ClearSearchAsync()
+    {
+        CancelSearchDebounce();
+        filter.Text = "";
+        page = 0;
+        return ReloadAsync();
+    }
+
+    private Task SourceChangedAsync(ChangeEventArgs args)
+    {
+        CancelSearchDebounce();
+        string value = args.Value?.ToString() ?? "";
+        filter.Source = Enum.TryParse(value, true, out CatalogSource source) ? source : null;
+        page = 0;
+        return ReloadAsync();
+    }
+
+    private Task SearchConfigurationChangedAsync(ChangeEventArgs args)
+    {
+        CancelSearchDebounce();
+        searchConfigurationKey = args.Value?.ToString() ?? "";
+        page = 0;
+        return ReloadAsync();
+    }
+
+    private Task ToggleSortAsync(IncomingCatalogSortField field)
+    {
+        if (sortField == field)
+            sortDirection = sortDirection == IncomingCatalogSortDirection.Descending
+                ? IncomingCatalogSortDirection.Ascending : IncomingCatalogSortDirection.Descending;
+        else
+        {
+            sortField = field;
+            sortDirection = IncomingCatalogSortDirection.Descending;
+        }
+        page = 0;
+        return ReloadAsync();
+    }
+
+    private string SortIndicator(IncomingCatalogSortField field) => sortField != field ? "↕"
+        : sortDirection == IncomingCatalogSortDirection.Ascending ? "↑" : "↓";
+    private string SortClass(IncomingCatalogSortField field) => sortField == field ? "active" : "";
 
     private IncomingCatalogRowRead? Row(Guid id) => catalogPage != null && catalogPage.Rows.TryGetValue(id, out IncomingCatalogRowRead? row) ? row : null;
 
@@ -399,13 +569,43 @@
             PerSotka = detail.Monitoring.TargetPricePerSotka,
             Reason = detail.Item.QueueReason
         };
-        drawerComment = "";
+        monitoringOpen = false;
         checklistState.Clear();
         foreach (ChecklistItem item in checklist) checklistState[item.Key] = "unknown";
     }
 
-    private void CloseDetail() { detail = null; detailRead = null; }
+    private void CloseDetail() { CloseGallery(); detail = null; detailRead = null; monitoringOpen = false; }
     private void DrawerKeyDown(KeyboardEventArgs args) { if (args.Key == "Escape") CloseDetail(); }
+
+    private async Task OpenGalleryForItemAsync(Guid id)
+    {
+        IncomingCatalogDetailRead read = detailRead != null && detail?.Item.Id == id
+            ? detailRead : await IncomingReads.ReadDetailAsync(CurrentSubject, id, CancellationToken.None);
+        OpenGallery(read.PhotoUrls);
+    }
+
+    private void OpenDetailGallery()
+    {
+        if (detailRead != null) OpenGallery(detailRead.PhotoUrls);
+    }
+
+    private void OpenGallery(IReadOnlyList<string> photos)
+    {
+        string[] usable = photos.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
+        if (usable.Length == 0) return;
+        galleryPhotos = usable;
+        galleryIndex = 0;
+    }
+
+    private void CloseGallery() { galleryPhotos = []; galleryIndex = 0; }
+    private void PreviousPhoto() { if (galleryPhotos.Length > 0) galleryIndex = (galleryIndex - 1 + galleryPhotos.Length) % galleryPhotos.Length; }
+    private void NextPhoto() { if (galleryPhotos.Length > 0) galleryIndex = (galleryIndex + 1) % galleryPhotos.Length; }
+    private void GalleryKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape") CloseGallery();
+        else if (args.Key == "ArrowLeft") PreviousPhoto();
+        else if (args.Key == "ArrowRight") NextPhoto();
+    }
 
     private async Task CreateManualAsync()
     {
@@ -433,15 +633,21 @@
     private async Task SaveMonitoringAsync()
     {
         Guid id = detail!.Item.Id;
+        int currentIndex = CurrentItemIndex(id);
+        Guid? preferredNextId = NextItemId(id);
         await ExecuteAsync(() => Workspace.SetMonitoringAsync(CurrentSubject,
             new(id, detail.Item.Version, monitoring.Total, monitoring.PerSotka, monitoring.Reason), Guid.CreateVersion7().ToString(), CancellationToken.None));
-        if (Success != null) await OpenDetailAsync(id);
+        if (Success != null)
+        {
+            if (openNextAfterDecision) await OpenNextAfterDecisionAsync(id, currentIndex, preferredNextId);
+            else await OpenDetailAsync(id);
+        }
     }
 
     private void OpenClassification(CatalogDisposition value)
     {
         classification = value;
-        classificationReason = drawerComment;
+        classificationReason = "";
         classificationCategory = value switch
         {
             CatalogDisposition.Dismissed => "Другое",
@@ -454,10 +660,49 @@
     private async Task ClassifyAsync()
     {
         Guid id = detail!.Item.Id;
+        int currentIndex = CurrentItemIndex(id);
+        Guid? preferredNextId = NextItemId(id);
         string reason = BuildClassificationReason();
         await ExecuteAsync(() => Workspace.SetDispositionAsync(CurrentSubject,
             new(id, detail.Item.Version, classification, reason), Guid.CreateVersion7().ToString(), CancellationToken.None));
-        if (Success != null) { classificationOpen = false; await OpenDetailAsync(id); }
+        if (Success != null)
+        {
+            classificationOpen = false;
+            if (openNextAfterDecision) await OpenNextAfterDecisionAsync(id, currentIndex, preferredNextId);
+            else await OpenDetailAsync(id);
+        }
+    }
+
+    private async Task OpenNextAfterDecisionAsync(Guid handledId, int previousIndex, Guid? preferredNextId)
+    {
+        if (catalogPage == null) { CloseDetail(); return; }
+        if (preferredNextId != null && catalogPage.Items.Any(item => item.Id == preferredNextId.Value))
+        {
+            await OpenDetailAsync(preferredNextId.Value);
+            return;
+        }
+
+        bool handledStillPresent = catalogPage.Items.Any(item => item.Id == handledId);
+        if (!handledStillPresent && previousIndex >= 0 && previousIndex < catalogPage.Items.Count)
+        {
+            await OpenDetailAsync(catalogPage.Items[previousIndex].Id);
+            return;
+        }
+        CloseDetail();
+    }
+
+    private int CurrentItemIndex(Guid id)
+    {
+        if (catalogPage == null) return -1;
+        for (int index = 0; index < catalogPage.Items.Count; index++)
+            if (catalogPage.Items[index].Id == id) return index;
+        return -1;
+    }
+
+    private Guid? NextItemId(Guid id)
+    {
+        int index = CurrentItemIndex(id);
+        return catalogPage != null && index >= 0 && index + 1 < catalogPage.Items.Count ? catalogPage.Items[index + 1].Id : null;
     }
 
     private string BuildClassificationReason()
@@ -483,6 +728,14 @@
     private void SetCheckIssue(string key) => SetCheck(key, "issue");
     private void SetCheckUnknown(string key) => SetCheck(key, "unknown");
     private string CheckClass(string key, string state) => checklistState.GetValueOrDefault(key, "unknown") == state ? state : "";
+
+    private string MonitoringSummary()
+    {
+        List<string> parts = [];
+        if (monitoring.Total != null) parts.Add($"до {ProcurementLabels.Money(monitoring.Total)}");
+        if (monitoring.PerSotka != null) parts.Add($"до {ProcurementLabels.Money(monitoring.PerSotka)} / сот.");
+        return parts.Count == 0 ? "Настроить условие возврата по цене" : string.Join(" или ", parts);
+    }
 
     private static string RowTone(IncomingCatalogRowRead? row) => row?.RowState switch
     {
@@ -514,10 +767,10 @@
 
     private static string EventLabel(CatalogEventKind kind) => kind switch
     {
-        CatalogEventKind.SourceChanged => "Источник изменился",
-        CatalogEventKind.MonitoringStarted => "Начат мониторинг",
-        CatalogEventKind.MonitoringTriggered => "Порог достигнут",
-        CatalogEventKind.Classified => "Классификация",
+        CatalogEventKind.SourceChanged => "Данные объявления изменились",
+        CatalogEventKind.MonitoringStarted => "Поставлено на мониторинг",
+        CatalogEventKind.MonitoringTriggered => "Порог мониторинга достигнут",
+        CatalogEventKind.Classified => "Принято решение",
         _ => "PropertyCase возобновлён"
     };
 
@@ -526,6 +779,10 @@
         TimeSpan age = DateTimeOffset.UtcNow - value;
         return age.TotalHours < 24 ? $"{Math.Max(0, (int)age.TotalHours)} ч назад" : $"{(int)age.TotalDays} дн. назад";
     }
+
+    private static decimal? ToSquareMeters(decimal? sotki) => sotki == null ? null : sotki.Value * 100m;
+    private static string AreaSotki(decimal? squareMeters) => squareMeters == null ? "Площадь неизвестна" : $"{squareMeters.Value / 100m:0.##} сот.";
+    private void CancelSearchDebounce() => searchRevision++;
 
     private sealed record ChecklistItem(string Key, string Title, string Description);
 
@@ -537,10 +794,10 @@
         public CatalogAgeRange Age { get; set; }
         public decimal? MinPrice { get; set; }
         public decimal? MaxPrice { get; set; }
-        public decimal? MinArea { get; set; }
-        public decimal? MaxArea { get; set; }
+        public decimal? MinAreaSotki { get; set; }
+        public decimal? MaxAreaSotki { get; set; }
         public bool AttentionOnly { get; set; }
-        public void Reset() { Text = ""; Source = null; Disposition = CatalogDisposition.Incoming; Age = CatalogAgeRange.Any; MinPrice = MaxPrice = MinArea = MaxArea = null; AttentionOnly = false; }
+        public void Reset() { Text = ""; Source = null; Disposition = CatalogDisposition.Incoming; Age = CatalogAgeRange.Any; MinPrice = MaxPrice = MinAreaSotki = MaxAreaSotki = null; AttentionOnly = false; }
     }
 
     private sealed class MonitoringInput

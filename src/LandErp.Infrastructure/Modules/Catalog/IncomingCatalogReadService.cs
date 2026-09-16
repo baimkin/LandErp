@@ -21,7 +21,7 @@ public sealed class IncomingCatalogReadService(
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         IncomingCatalogFilter baseFilter = filter.Base;
-        Validate(baseFilter);
+        Validate(baseFilter, filter.SortField, filter.SortDirection);
 
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         IQueryable<Listing> organizationItems = db.Listings.AsNoTracking()
@@ -46,9 +46,21 @@ public sealed class IncomingCatalogReadService(
             await incomingItems.CountAsync(item => returnedFromMonitoringIds.Contains(item.Id), cancellationToken));
 
         IQueryable<Listing> query = organizationItems;
-        if (baseFilter.Text.Length > 0)
-            query = query.Where(item => (item.Title ?? "").Contains(baseFilter.Text) || (item.Location ?? "").Contains(baseFilter.Text)
-                || (item.ExternalId ?? "").Contains(baseFilter.Text) || (item.CadastralNumber ?? "").Contains(baseFilter.Text));
+        string[] searchTerms = baseFilter.Text.Trim()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToArray();
+        foreach (string term in searchTerms)
+        {
+            string pattern = $"%{term}%";
+            query = query.Where(item =>
+                EF.Functions.ILike(item.Title ?? "", pattern)
+                || EF.Functions.ILike(item.Location ?? "", pattern)
+                || EF.Functions.ILike(item.ExternalId ?? "", pattern)
+                || EF.Functions.ILike(item.CadastralNumber ?? "", pattern)
+                || EF.Functions.ILike(item.SellerName ?? "", pattern));
+        }
         if (baseFilter.Source != null) query = query.Where(item => item.Source == baseFilter.Source);
         if (baseFilter.Disposition != null) query = query.Where(item => item.Disposition == baseFilter.Disposition);
         if (baseFilter.AttentionOnly) query = query.Where(item => item.AttentionRequired);
@@ -87,8 +99,21 @@ public sealed class IncomingCatalogReadService(
         };
 
         int total = await query.CountAsync(cancellationToken);
-        Listing[] items = await query.OrderByDescending(item => item.ChangedAt).ThenBy(item => item.Id)
-            .Skip(baseFilter.Offset).Take(baseFilter.Size).ToArrayAsync(cancellationToken);
+        IOrderedQueryable<Listing> ordered = (filter.SortField, filter.SortDirection) switch
+        {
+            (IncomingCatalogSortField.Price, IncomingCatalogSortDirection.Ascending) => query
+                .OrderBy(item => item.Price == null).ThenBy(item => item.Price).ThenBy(item => item.Id),
+            (IncomingCatalogSortField.Price, _) => query
+                .OrderBy(item => item.Price == null).ThenByDescending(item => item.Price).ThenBy(item => item.Id),
+            (IncomingCatalogSortField.Area, IncomingCatalogSortDirection.Ascending) => query
+                .OrderBy(item => item.AreaSquareMeters == null).ThenBy(item => item.AreaSquareMeters).ThenBy(item => item.Id),
+            (IncomingCatalogSortField.Area, _) => query
+                .OrderBy(item => item.AreaSquareMeters == null).ThenByDescending(item => item.AreaSquareMeters).ThenBy(item => item.Id),
+            (IncomingCatalogSortField.ChangedAt, IncomingCatalogSortDirection.Ascending) => query
+                .OrderBy(item => item.ChangedAt).ThenBy(item => item.Id),
+            _ => query.OrderByDescending(item => item.ChangedAt).ThenBy(item => item.Id)
+        };
+        Listing[] items = await ordered.Skip(baseFilter.Offset).Take(baseFilter.Size).ToArrayAsync(cancellationToken);
         Guid[] ids = items.Select(item => item.Id).ToArray();
 
         var linked = await (from link in db.PropertyCaseSourceLinks.AsNoTracking()
@@ -125,8 +150,9 @@ public sealed class IncomingCatalogReadService(
             flagsByItem.TryGetValue(item.Id, out var flags);
             bool priceChanged = flags?.PriceChanged ?? false;
             bool returned = flags?.Returned ?? false;
+            string[] photos = PhotoUrls(item.PhotosJson);
             rows[item.Id] = new(item.Id, search?.SearchId, search?.Label, Completeness(item),
-                RowState(item, priceChanged, returned), priceChanged, returned);
+                RowState(item, priceChanged, returned), priceChanged, returned, photos.FirstOrDefault(), photos.Length);
             return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId);
         }).ToArray();
 
@@ -203,9 +229,10 @@ public sealed class IncomingCatalogReadService(
     private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
         ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
 
-    private static void Validate(IncomingCatalogFilter filter)
+    private static void Validate(IncomingCatalogFilter filter, IncomingCatalogSortField sortField, IncomingCatalogSortDirection sortDirection)
     {
         if (filter.Text.Length > 200 || filter.Offset < 0 || filter.Size is < 1 or > 100 || !Enum.IsDefined(filter.Age)
+            || !Enum.IsDefined(sortField) || !Enum.IsDefined(sortDirection)
             || filter.MinPrice < 0 || filter.MaxPrice < 0 || filter.MinAreaSquareMeters < 0 || filter.MaxAreaSquareMeters < 0
             || filter.MinPrice > filter.MaxPrice || filter.MinAreaSquareMeters > filter.MaxAreaSquareMeters)
             throw new ArgumentException("Некорректный диапазон фильтра входящих.");

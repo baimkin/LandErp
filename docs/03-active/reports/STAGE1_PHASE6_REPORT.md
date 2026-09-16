@@ -56,13 +56,13 @@ Employee и audit для credential/state операций объединены 
 | CRUD структуры, dependency-safe archive, audit, scopes | green |
 | Clean PostgreSQL chain from zero, rollback `0`, reapply, comments/runtime isolation | green, 1/1 |
 | `Database.HasPendingModelChanges()` | `false` |
+| Ручной owner smoke-test: три вкладки, CRUD структуры, временный пароль, назначения, reset, deactivate/restore, archive dependency guard | green, принят владельцем 2026-09-16 |
 
 По прямому решению владельца browser automation не запускалась и не является gate
-Phase 6. UI оставлен для ручного owner smoke-test.
+Phase 6. Предусмотренный ручной owner smoke-test выполнен и принят владельцем.
 
 ## Известные ограничения
 
-- Ручной owner smoke-test адаптивного UI ещё не выполнен.
 - Email-доставка приглашений не подключена: существующий одноразовый код передаётся
   сотруднику администратором по безопасному каналу.
 - Физическое удаление организационных сущностей намеренно отсутствует; используется

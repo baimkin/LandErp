@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using LandErp.Collector.Contracts.V1;
 using Microsoft.Data.Sqlite;
 using Microsoft.Playwright;
 
@@ -25,6 +26,7 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
     private CancellationTokenSource? cancellation;
     private TaskCompletionSource userReady = Signal(true);
     private bool userPaused;
+    private bool serverManaged;
     private string? batch;
     public bool IsRunning { get; private set; }
     public event EventHandler? Changed;
@@ -34,10 +36,10 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
     private static TaskCompletionSource Signal(bool ready)
     { TaskCompletionSource signal = new(TaskCreationOptions.RunContinuationsAsynchronously); if (ready) signal.SetResult(); return signal; }
 
-    public Task StartAsync(CollectionSettings settings, bool force = false, string? onlyLinkId = null)
+    public Task StartAsync(CollectionSettings settings, bool force = false, string? onlyLinkId = null, bool serverManaged = false)
     {
         if (IsRunning) throw new InvalidOperationException("Сбор уже выполняется.");
-        settings.Validate(); batch = store.StartBatch(settings, force, onlyLinkId: onlyLinkId); cancellation?.Dispose(); cancellation = new(); IsRunning = true;
+        settings.Validate(); this.serverManaged = serverManaged; batch = store.StartBatch(settings, force, onlyLinkId: onlyLinkId); cancellation?.Dispose(); cancellation = new(); IsRunning = true;
         lock (sync) { userPaused = false; userReady = Signal(true); foreach (SourceControl source in sources.Values) { source.Blocked = false; source.VerificationJobs.Clear(); source.Ready = Signal(true); } }
         Completion = RunAsync(batch, settings, cancellation.Token);
         return Completion;
@@ -97,7 +99,10 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                 catch (SqliteException) { cancellation?.Cancel(); throw; }
                 catch (Exception ex) when (ex is PlaywrightException or IOException or InvalidOperationException or ArgumentException or TimeoutException)
                 {
-                    store.SetState(job, JobState.Failed, (ex is CollectionActionException ? ex.Message : "Ошибка " + ex.GetType().Name) + "; результаты до ошибки сохранены");
+                    string code = ExceptionReason(ex);
+                    Finish(job, JobState.Failed, CollectionCompletionKind.SourceError, code,
+                        (ex is CollectionActionException ? ex.Message : "Ошибка " + ex.GetType().Name) + "; результаты до ошибки сохранены",
+                        [], false, false, 0);
                     if (settings.ErrorPolicy == ErrorPolicy.PauseSource)
                     {
                         Block(job, name, "Ошибка источника: проверьте вкладку");
@@ -122,13 +127,14 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
         int number = job.Page;
         string effectiveSearch = page.CurrentUrl;
         HashSet<string> visited = new(StringComparer.Ordinal) { page.CurrentUrl };
+        HashSet<string> jobWarnings = new(StringComparer.Ordinal);
         while (number <= job.Limit)
         {
             Dictionary<string, ListingObservation> gathered = new(StringComparer.Ordinal);
             HashSet<string> pageWarnings = new(StringComparer.Ordinal);
             MapScope? map = null;
             string? lastMapDiagnostic = null;
-            bool settled = false; string? prior = null; Stopwatch stable = Stopwatch.StartNew(), wait = Stopwatch.StartNew();
+            bool settled = false, lastLoading = true; int stableRounds = 0; Stopwatch stable = Stopwatch.StartNew(), wait = Stopwatch.StartNew();
             for (int step = 0; step < settings.MaxScrollSteps; step++)
             {
                 await ReadyAsync(job.Source, token).ConfigureAwait(false);
@@ -138,6 +144,12 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                     string detail = LocalJson.Write(snapshot.Diagnostic);
                     if (detail != lastMapDiagnostic) diagnostics?.Write(job, number, "Диагностика карты", "Снимок", detail: detail, count: snapshot.Listings.Length);
                     lastMapDiagnostic = detail;
+                }
+                lastLoading = snapshot.Loading;
+                if (snapshot.Kind == PageKind.RateLimited && serverManaged)
+                {
+                    Finish(job, JobState.Failed, CollectionCompletionKind.RateLimited, "", "Источник временно ограничил запросы",
+                        snapshot.Warnings, false, false, stableRounds); return;
                 }
                 if (snapshot.Kind is PageKind.Captcha or PageKind.AuthenticationRequired or PageKind.RateLimited)
                 {
@@ -149,18 +161,27 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                 {
                     if (snapshot.Loading || wait.Elapsed.TotalSeconds < settings.LoadWaitSeconds)
                     { await Task.Delay(250, token).ConfigureAwait(false); continue; }
+                    if (serverManaged)
+                    {
+                        Finish(job, JobState.Failed, CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSearchUrl,
+                            "Карта: " + (unconfirmed.ZoneError ?? "контур зоны не подтверждён"), snapshot.Warnings, false, false, stableRounds);
+                        return;
+                    }
                     Block(job, job.Owner!, "Карта: " + (unconfirmed.ZoneError ?? "контур зоны не получен; восстановите выделение"));
                     await ReadyAsync(job.Source, token).ConfigureAwait(false);
                     stable.Restart(); wait.Restart(); continue;
                 }
                 map = snapshot.Map;
                 if (SearchUrls.IsDetail(page.CurrentUrl, job.Source))
-                { store.SetState(job, JobState.Failed, "Ссылка сохранена, но парсер отдельного объявления пока не реализован"); return; }
+                { Finish(job, JobState.Failed, CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSearchUrl,
+                    "Ссылка сохранена, но парсер отдельного объявления пока не реализован", [], false, false, stableRounds); return; }
                 if (snapshot.Kind == PageKind.Unknown && gathered.Count == 0 && wait.Elapsed.TotalSeconds < settings.LoadWaitSeconds)
                 { await Task.Delay(250, token).ConfigureAwait(false); continue; }
                 if (snapshot.Kind != PageKind.SearchResults)
                 {
-                    store.SetState(job, JobState.Failed, snapshot.Kind + ": страница не является успешной выдачей");
+                    Finish(job, JobState.Failed, CollectionCompletionKind.SourceError,
+                        snapshot.Kind == PageKind.SourceError ? CollectionResultReasonCodes.SourceUnavailable : CollectionResultReasonCodes.InvalidSourceResponse,
+                        snapshot.Kind + ": страница не является успешной выдачей", snapshot.Warnings, false, false, stableRounds);
                     if (settings.ErrorPolicy == ErrorPolicy.PauseSource)
                     { Block(job, job.Owner!, snapshot.Kind.ToString()); await ReadyAsync(job.Source, token).ConfigureAwait(false); }
                     return;
@@ -169,61 +190,107 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                 {
                     diagnostics?.Write(job, number, "Проверка адреса", "Несовпадение", expectedUrl: effectiveSearch, actualUrl: page.CurrentUrl,
                         detail: "Номер страницы или фильтры отличаются; источник изменения неизвестен");
-                    store.SetState(job, JobState.Failed, "Номер страницы или фильтры изменились; сравнение адресов записано в журнал"); return;
+                    Finish(job, JobState.Failed, CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSearchUrl,
+                        "Номер страницы или фильтры изменились; сравнение адресов записано в журнал", [], false, false, stableRounds); return;
                 }
                 effectiveSearch = page.CurrentUrl;
                 await ReadyAsync(job.Source, token).ConfigureAwait(false);
+                int before = gathered.Count;
                 foreach (ListingObservation item in snapshot.Listings) gathered[item.ExternalId] = item;
-                foreach (string warning in snapshot.Warnings) pageWarnings.Add(warning);
-                string fingerprint = snapshot.Layout + string.Join('|', snapshot.Listings.Select(x => LocalJson.Write(x with { ObservedAtUtc = DateTimeOffset.UnixEpoch })));
-                if (fingerprint != prior) { stable.Restart(); wait.Restart(); prior = fingerprint; }
-                if (snapshot.Loading) stable.Restart();
+                foreach (string warning in snapshot.Warnings) { pageWarnings.Add(warning); jobWarnings.Add(warning); }
+                if (gathered.Count > before || snapshot.Loading) { stableRounds = 0; stable.Restart(); wait.Restart(); }
+                else stableRounds++;
                 if (!await SaveAsync(job, number, page.CurrentUrl, gathered.Values.ToArray(), false, null,
                     pageWarnings.Count == 0 ? map is null ? "Частичный снимок" : $"Карта: {gathered.Count} / {map.ExpectedCount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"}; порций {map.ResponseBatches}" : string.Join("; ", pageWarnings), map, snapshot.Changes)) return;
-                if (map is not null && map.ResponseBatches >= job.Limit && (!map.ExpectedCount.HasValue || gathered.Count < map.ExpectedCount))
-                { store.SetState(job, JobState.LimitReached, $"Карта: предел {job.Limit} порций; сохранено {gathered.Count} / {map.ExpectedCount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"}; сбор неполный"); return; }
                 Changed?.Invoke(this, EventArgs.Empty);
                 await ReadyAsync(job.Source, token).ConfigureAwait(false);
                 bool bottom = await ActionAsync(job, page, number, "Прокрутка", () => page.WheelAsync(settings, token), token).ConfigureAwait(false);
                 if (!bottom) { stable.Restart(); wait.Restart(); }
-                if (bottom && !snapshot.Loading && stable.Elapsed.TotalSeconds >= settings.StabilitySeconds) { settled = true; break; }
-                if (bottom && wait.Elapsed.TotalSeconds >= settings.LoadWaitSeconds && stable.Elapsed.TotalSeconds < settings.StabilitySeconds) break;
+                if (bottom && !snapshot.Loading && stableRounds >= 3 && stable.Elapsed.TotalSeconds >= settings.StabilitySeconds) { settled = true; break; }
                 await Task.Delay(settings.ScrollPauseMilliseconds, token).ConfigureAwait(false);
             }
-            if (!settled) { store.SetState(job, JobState.Failed, "ScrollLimitIncomplete: частичная страница будет прочитана заново"); return; }
+            if (!settled)
+            {
+                string code = lastLoading ? CollectionResultReasonCodes.LoadingInterrupted : CollectionResultReasonCodes.EndNotConfirmed;
+                CollectionCompletionKind kind = gathered.Count > 0 ? CollectionCompletionKind.Partial : CollectionCompletionKind.SourceError;
+                if (lastMapDiagnostic is not null)
+                    diagnostics?.Write(job, number, "Диагностика карты", "Итог", detail: lastMapDiagnostic, count: gathered.Count);
+                string progress = map?.ExpectedCount is int hint ? $"{gathered.Count} / {hint}" : gathered.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                Finish(job, JobState.Failed, kind, code, $"Прокрутка не подтвердила конец выдачи; сохранено {progress}; полезные данные сохранены",
+                    jobWarnings, false, !lastLoading, stableRounds); return;
+            }
             await ReadyAsync(job.Source, token).ConfigureAwait(false);
             PageObservation final = await ActionAsync(job, page, number, "Контроль выдачи", () => page.ReadAsync(token), token).ConfigureAwait(false);
             if (final.Diagnostic is not null) diagnostics?.Write(job, number, "Диагностика карты", "Итог", detail: LocalJson.Write(final.Diagnostic), count: final.Listings.Length);
-            if (final.Loading) { store.SetState(job, JobState.Failed, "LoadingIncomplete: загрузка ещё продолжается"); return; }
+            if (final.Loading)
+            {
+                CollectionCompletionKind kind = gathered.Count > 0 ? CollectionCompletionKind.Partial : CollectionCompletionKind.SourceError;
+                Finish(job, JobState.Failed, kind, CollectionResultReasonCodes.LoadingInterrupted,
+                    "Загрузка не завершилась; полезные данные сохранены", jobWarnings, false, false, stableRounds); return;
+            }
             if (final.Kind != PageKind.SearchResults)
             {
+                if (final.Kind == PageKind.RateLimited && serverManaged)
+                { Finish(job, JobState.Failed, CollectionCompletionKind.RateLimited, "", "Источник временно ограничил запросы", final.Warnings, false, false, stableRounds); return; }
                 if (final.Kind is PageKind.Captcha or PageKind.AuthenticationRequired or PageKind.RateLimited)
                 { Block(job, job.Owner!, final.Kind.ToString()); await ReadyAsync(job.Source, token).ConfigureAwait(false); continue; }
-                store.SetState(job, JobState.Failed, final.Kind.ToString()); return;
+                Finish(job, JobState.Failed, CollectionCompletionKind.SourceError,
+                    final.Kind == PageKind.SourceError ? CollectionResultReasonCodes.SourceUnavailable : CollectionResultReasonCodes.InvalidSourceResponse,
+                    final.Kind.ToString(), final.Warnings, false, false, stableRounds); return;
             }
             if (final.Map is { ZoneConfirmed: false })
-            { Block(job, job.Owner!, "Карта: зона сбросилась или изменилась"); await ReadyAsync(job.Source, token).ConfigureAwait(false); continue; }
+            {
+                if (serverManaged)
+                { Finish(job, JobState.Failed, CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSearchUrl,
+                    "Карта: зона сбросилась или изменилась", final.Warnings, false, true, stableRounds); return; }
+                Block(job, job.Owner!, "Карта: зона сбросилась или изменилась"); await ReadyAsync(job.Source, token).ConfigureAwait(false); continue;
+            }
             map = final.Map;
             foreach (ListingObservation item in final.Listings) gathered[item.ExternalId] = item;
             if (!await SaveAsync(job, number, page.CurrentUrl, gathered.Values.ToArray(), false, null, "Контрольный частичный снимок", map, final.Changes)) return;
-            if (map is not null && (!map.ExpectedCount.HasValue || gathered.Count != map.ExpectedCount.Value))
-            { store.SetState(job, JobState.Failed, $"Карта: неполный сбор {gathered.Count} / {map.ExpectedCount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"}; свежесть не подтверждена"); return; }
-            foreach (string warning in final.Warnings) pageWarnings.Add(warning);
-            if (pageWarnings.Count > 0)
-            { store.SetState(job, JobState.Failed, "Ошибки карточек: " + string.Join("; ", pageWarnings)); return; }
+            foreach (string warning in final.Warnings) { pageWarnings.Add(warning); jobWarnings.Add(warning); }
+            if (pageWarnings.Count > 0 && !serverManaged)
+            {
+                Finish(job, JobState.Failed, CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSourceResponse,
+                    "Ошибки карточек: " + string.Join("; ", pageWarnings), pageWarnings, false, true, stableRounds); return;
+            }
             Pagination next = await ActionAsync(job, page, number, "Поиск следующей страницы", () => page.NextAsync(token), token).ConfigureAwait(false);
-            if (next.Kind == NextKind.UnknownInvalid) { store.SetState(job, JobState.Failed, next.Reason ?? "Пагинация не распознана"); return; }
-            if (next.Kind == NextKind.Next && (next.Url is null || !visited.Add(next.Url))) { store.SetState(job, JobState.Failed, "PAGINATION_CYCLE"); return; }
+            if (next.Kind == NextKind.UnknownInvalid) { Finish(job, JobState.Failed, CollectionCompletionKind.SourceError,
+                CollectionResultReasonCodes.LayoutChanged, next.Reason ?? "Пагинация не распознана", jobWarnings, false, true, stableRounds); return; }
+            if (next.Kind == NextKind.Next && (next.Url is null || !visited.Add(next.Url))) { Finish(job, JobState.Failed,
+                CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSourceResponse, "PAGINATION_CYCLE", jobWarnings, false, true, stableRounds); return; }
             await ReadyAsync(job.Source, token).ConfigureAwait(false);
             if (!await SaveAsync(job, number, page.CurrentUrl, gathered.Values.ToArray(), true, next, next.Reason ?? "Страница завершена", map)) return;
             Changed?.Invoke(this, EventArgs.Empty);
-            if (next.Kind == NextKind.End) { store.SetState(job, JobState.Completed, map is null ? "Достигнут конец выдачи" : $"Карта: собрано {gathered.Count} / {map.ExpectedCount}; правый список завершён"); return; }
-            if (number == job.Limit) { store.SetState(job, JobState.LimitReached, "Достигнут настроенный предел страниц"); return; }
+            if (next.Kind == NextKind.End) { Finish(job, JobState.Completed, CollectionCompletionKind.Success, "",
+                map is null ? "Достигнут конец выдачи" : $"Карта: собрано {gathered.Count}; подсказка источника {map.ExpectedCount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "нет"}; правый список завершён",
+                jobWarnings, true, true, stableRounds); return; }
+            if (number == job.Limit) { Finish(job, JobState.LimitReached, CollectionCompletionKind.LimitReached,
+                CollectionResultReasonCodes.PageLimitReached, "Достигнут настроенный предел страниц", jobWarnings, false, true, stableRounds); return; }
             await NavigateAsync(job.Source, settings.PageIntervalSeconds, () => ActionAsync(job, page, number + 1, "Переход на следующую страницу",
                 async () => { await page.FollowAsync(next, token).ConfigureAwait(false); return true; }, token, next.Url), token).ConfigureAwait(false);
             effectiveSearch = page.CurrentUrl;
             number++;
         }
+    }
+    private bool Finish(CollectionJob job, JobState state, CollectionCompletionKind kind, string code,
+        string message, IEnumerable<string> warnings, bool endReached, bool loadingCompleted, int stableRounds)
+    {
+        string[] safeWarnings = warnings.Where(IsMachineCode).Distinct(StringComparer.Ordinal).Take(20).ToArray();
+        bool finished = store.Finish(job, state, message,
+            new(kind, endReached, loadingCompleted, Math.Max(0, stableRounds), code, safeWarnings));
+        Changed?.Invoke(this, EventArgs.Empty); return finished;
+    }
+    private static bool IsMachineCode(string value) => value.Length is > 0 and <= 64
+        && value.All(character => char.IsAsciiLetterUpper(character) || char.IsDigit(character) || character == '_');
+    private static string ExceptionReason(Exception exception)
+    {
+        Exception cause = exception is CollectionActionException { InnerException: not null } action ? action.InnerException! : exception;
+        if (cause is TimeoutException || cause is PlaywrightException && cause.Message.Contains("Timeout", StringComparison.OrdinalIgnoreCase))
+            return CollectionResultReasonCodes.NetworkTimeout;
+        if (cause is ArgumentException) return CollectionResultReasonCodes.InvalidSearchUrl;
+        if (cause is IOException or PlaywrightException) return CollectionResultReasonCodes.SourceUnavailable;
+        return CollectionResultReasonCodes.InvalidSourceResponse;
     }
     private async Task<bool> SaveAsync(CollectionJob job, int number, string url, ListingObservation[] listings,
         bool completed, Pagination? pagination, string reason, MapScope? map = null, ListingObservation[]? changes = null)

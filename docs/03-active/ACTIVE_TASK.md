@@ -1,5 +1,11 @@
 # Активная задача LandErp
 
+> **Additive Collection V1 для Parser завершён:** [GATE-PARSER-COLLECTION-V1-ADDITIVE.md](GATE-PARSER-COLLECTION-V1-ADDITIVE.md),
+> ветка `codex/parser-additive-contract`, база `ee8b5f3`. Добавлены partial outcome,
+> coverage, machine reasons, сохранение полезных данных и возврат в auto-claim loop.
+> Browser tests исключены. [Отчёт](reports/PARSER_COLLECTION_V1_ADDITIVE_REPORT.md).
+> Ниже — завершённые этапы.
+
 > **Завершён follow-up по надёжности результатов Collection:** ветка
 > `codex/collectors-scheduling-ux`. Добавлены частичный результат, факты полноты,
 > ограниченные серверные повторы, явное внимание оператора и сохранение данных при

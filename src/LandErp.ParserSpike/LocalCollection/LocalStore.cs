@@ -22,7 +22,7 @@ public sealed class LocalStore : IJobSource, IResultSink
         using SqliteConnection db = Open();
         long version = Convert.ToInt64(Scalar(db, null, "PRAGMA user_version"), CultureInfo.InvariantCulture);
         if (version > 3) throw new InvalidOperationException("DATABASE_VERSION_NEWER: база создана более новой версией приложения.");
-        if (version == 3) return;
+        if (version == 3) { CreateCompletionTable(db, null); return; }
         if (Convert.ToInt64(Scalar(db, null, "SELECT count(*) FROM sqlite_master WHERE type='table'"), CultureInfo.InvariantCulture) > 0)
         {
             MigrationBackup = Path + ".backup-" + DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture) + ".sqlite";
@@ -48,11 +48,13 @@ public sealed class LocalStore : IJobSource, IResultSink
                 """);
             CreateMapTables(db, tx);
             CreateWorkspaceTables(db, tx);
+            CreateCompletionTable(db, tx);
             Exec(db, tx, "PRAGMA user_version=3"); tx.Commit(); return;
         }
         if (version == 2)
         {
             CreateWorkspaceTables(db, tx);
+            CreateCompletionTable(db, tx);
             Exec(db, tx, "PRAGMA user_version=3"); tx.Commit(); return;
         }
         Exec(db, tx, """
@@ -84,6 +86,7 @@ public sealed class LocalStore : IJobSource, IResultSink
         ImportLegacy(db, tx);
         CreateMapTables(db, tx);
         CreateWorkspaceTables(db, tx);
+        CreateCompletionTable(db, tx);
         Exec(db, tx, "PRAGMA user_version=3");
         tx.Commit();
         Exec(db, null, "PRAGMA journal_mode=WAL");
@@ -116,6 +119,9 @@ public sealed class LocalStore : IJobSource, IResultSink
               SELECT id,NULL,'Manual',NULL,'[]','Europe/Moscow',1,NULL,1 FROM local_links;
             """);
     }
+
+    private static void CreateCompletionTable(SqliteConnection db, SqliteTransaction? tx)
+        => Exec(db, tx, "CREATE TABLE IF NOT EXISTS local_job_completion(job_id TEXT PRIMARY KEY,json TEXT NOT NULL)");
     public MapScope? ReadMapScope(string jobId)
     {
         using SqliteConnection db = Open();
@@ -452,6 +458,21 @@ public sealed class LocalStore : IJobSource, IResultSink
         using SqliteConnection db = Open();
         return Exec(db, null, "UPDATE local_jobs SET state=$state,reason=$reason WHERE id=$id AND token=$token AND owner=$owner AND state IN ('Running','AwaitingManualAction','PausedByUser')",
             ("$state", state.ToString()), ("$reason", reason), ("$id", job.Id), ("$token", job.Token), ("$owner", job.Owner)) == 1;
+    }
+    public bool Finish(CollectionJob job, JobState state, string reason, CollectionCompletionFacts facts)
+    {
+        using SqliteConnection db = Open(); using SqliteTransaction tx = db.BeginTransaction();
+        int changed = Exec(db, tx, "UPDATE local_jobs SET state=$state,reason=$reason WHERE id=$id AND token=$token AND owner=$owner AND state IN ('Running','AwaitingManualAction','PausedByUser')",
+            ("$state", state.ToString()), ("$reason", reason), ("$id", job.Id), ("$token", job.Token), ("$owner", job.Owner));
+        if (changed == 1) Exec(db, tx, "INSERT INTO local_job_completion VALUES($job,$json) ON CONFLICT(job_id) DO UPDATE SET json=excluded.json",
+            ("$job", job.Id), ("$json", LocalJson.Write(facts)));
+        tx.Commit(); return changed == 1;
+    }
+    public CollectionCompletionFacts? Completion(string jobId)
+    {
+        using SqliteConnection db = Open();
+        string? json = Scalar(db, null, "SELECT json FROM local_job_completion WHERE job_id=$job", ("$job", jobId)) as string;
+        return json is null ? null : LocalJson.Read<CollectionCompletionFacts>(json);
     }
     public void RecoverInterrupted()
     {

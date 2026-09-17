@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace LandErp.ParserSpike.ServerIntegration;
 
 public sealed record PendingDelivery(long Sequence, CollectionResult Result, int Attempts);
-public sealed record LocalServerWork(CollectionWork Work, string? LocalJobId);
+public sealed record LocalServerWork(CollectionWork Work, string? LocalJobId, string ResultReasonCode = "");
 
 /// <summary>Delivery is committed before network use; acknowledgement is committed only after a matching receipt.</summary>
 public sealed class ServerOutbox

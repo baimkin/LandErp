@@ -1,5 +1,6 @@
 param([ValidateSet('Server','Worker')][string]$Service = 'Server', [string]$DotnetPath = 'dotnet',
-    [string]$SettingsPath = '', [string]$LegacyFilesRoot = '', [string]$ListenUrl = 'https://localhost:7240')
+    [string]$SettingsPath = '', [string]$LegacyFilesRoot = '', [string]$ListenUrl = 'https://localhost:7240',
+    [string]$ArtifactsPath = '')
 $ErrorActionPreference = 'Stop'
 $stageRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $stageRoot
@@ -18,7 +19,9 @@ try {
     if ($Service -eq 'Server' -and (Test-Path -LiteralPath (Join-Path $stageRoot 'local-data/yandex-disk/settings.json'))) {
         . (Join-Path $PSScriptRoot 'Import-YandexDiskConnection.ps1')
     }
-    & $DotnetPath run --project "src/LandErp.$Service" -c Release --no-build --no-launch-profile
+    $stageRunArguments = @('run', '--project', "src/LandErp.$Service", '-c', 'Release', '--no-build', '--no-launch-profile')
+    if ($ArtifactsPath) { $stageRunArguments += @('--artifacts-path', [IO.Path]::GetFullPath($ArtifactsPath)) }
+    & $DotnetPath @stageRunArguments
     if ($LASTEXITCODE -ne 0) { throw 'Local host stopped with an error; connection values were not printed' }
 } finally {
     $env:Storage__YandexDisk__Token = $storagePreviousToken

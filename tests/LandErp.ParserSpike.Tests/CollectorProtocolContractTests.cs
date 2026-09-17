@@ -48,6 +48,32 @@ public sealed class CollectorProtocolContractTests
     }
 
     [TestMethod]
+    public void LegacyResultRemainsReadableAndCoverageIsAdditive()
+    {
+        Guid resultId = Guid.CreateVersion7(), jobId = Guid.CreateVersion7(), leaseId = Guid.CreateVersion7();
+        string legacy = $$"""{"resultId":"{{resultId}}","jobId":"{{jobId}}","leaseId":"{{leaseId}}","outcome":"SourceError","observations":[],"final":true}""";
+
+        CollectionResult old = JsonSerializer.Deserialize<CollectionResult>(legacy, CollectionJson.Options)!;
+        Assert.AreEqual(CollectionOutcome.SourceError, old.Outcome);
+        Assert.AreEqual("", old.ReasonCode);
+        Assert.IsNull(old.Warnings);
+        Assert.IsNull(old.Coverage);
+
+        CollectionResult current = old with
+        {
+            Outcome = CollectionOutcome.Success,
+            ReasonCode = CollectionResultReasonCodes.CountHintMismatch,
+            Warnings = [CollectionResultReasonCodes.CountHintMismatch],
+            Coverage = new(38, 51, true, true, 3, 1, 10, 6)
+        };
+        CollectionResult copy = JsonSerializer.Deserialize<CollectionResult>(
+            JsonSerializer.Serialize(current, CollectionJson.Options), CollectionJson.Options)!;
+        Assert.AreEqual(38, copy.Coverage!.UniqueObserved);
+        Assert.AreEqual(51, copy.Coverage.SourceCountHint);
+        Assert.AreEqual(CollectionResultReasonCodes.CountHintMismatch, copy.Warnings!.Single());
+    }
+
+    [TestMethod]
     public void ServerSearchCommandCarriesOneLinkAndChosenServerGroup()
     {
         Guid groupId = Guid.CreateVersion7();

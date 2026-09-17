@@ -16,14 +16,17 @@ public sealed record AgentView(Guid Id, string Name, bool Enabled, bool Online, 
 public sealed record AgentConnectionCode(Guid AgentId, string ActivationSecret, DateTimeOffset ExpiresAt);
 public sealed record CollectionRunView(Guid JobId, string? Agent, string State, DateTimeOffset CreatedAt,
     DateTimeOffset? ScheduledFor, DateTimeOffset? CompletedAt, string ResultCode, int ProcessedCount,
-    int AcceptedCount, int NewListingsCount, int ChangedListingsCount);
+    int AcceptedCount, int NewListingsCount, int ChangedListingsCount, string ReasonCode, string[] Warnings,
+    CollectionCoverage? Coverage, int RetryAttempt, DateTimeOffset? RetryAt, bool AttentionRequired);
 public sealed record SearchView(Guid Id, string Label, CatalogSource Source, string Url, int MaxPages,
     Guid? GroupId, string Group, string Schedule, CollectionScheduleKind ScheduleKind, int? IntervalMinutes,
     string[] FixedTimes, bool Enabled, DateTimeOffset? NextRunAt, long Revision, CollectionRunView? LastRun);
 public sealed record SearchGroupView(Guid Id, string Name, int SortOrder, bool Active, long Revision, int SearchCount);
 public sealed record CollectionJobView(Guid Id, Guid SearchId, string Label, string? Agent, string State,
     DateTimeOffset CreatedAt, DateTimeOffset? ScheduledFor, DateTimeOffset? LeaseExpiresAt, DateTimeOffset? CompletedAt,
-    string ResultCode, int ProcessedCount, int AcceptedCount, int NewListingsCount, int ChangedListingsCount);
+    string ResultCode, int ProcessedCount, int AcceptedCount, int NewListingsCount, int ChangedListingsCount,
+    string ReasonCode, string[] Warnings, CollectionCoverage? Coverage, int RetryAttempt, DateTimeOffset? RetryAt,
+    bool AttentionRequired);
 public sealed record CollectionSchedulerHealthView(string State, DateTimeOffset? LastStartedAt,
     DateTimeOffset? LastSucceededAt, DateTimeOffset? LastFailedAt, int LastQueuedCount, string LastFailureCode);
 public sealed record CollectionAdminView(IReadOnlyList<AgentView> Agents, IReadOnlyList<SearchGroupView> Groups,

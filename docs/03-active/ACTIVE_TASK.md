@@ -1,5 +1,12 @@
 # Активная задача LandErp
 
+> **Завершён follow-up по надёжности результатов Collection:** ветка
+> `codex/collectors-scheduling-ux`. Добавлены частичный результат, факты полноты,
+> ограниченные серверные повторы, явное внимание оператора и сохранение данных при
+> ошибочном завершении. Новая forward migration — двадцатая в цепочке. Release build
+> и целевые небраузерные тесты пройдены; браузерные тесты по решению владельца не
+> запускались. [Отчёт](reports/COLLECTION_RESULT_RECOVERY_REPORT.md).
+
 > **Доработка по запросу владельца реализована:** [GATE-COLLECTORS-SCHEDULING-UX.md](GATE-COLLECTORS-SCHEDULING-UX.md), ветка `codex/collectors-scheduling-ux`. Исправления аудита расписаний и экрана Parser, Release build, 22/22 целевых теста; локальный Server + Worker запущены. [Отчёт](reports/COLLECTORS_SCHEDULING_UX_REPORT.md). Ожидается ручная визуальная приёмка. Браузерные тесты не запускались. Ниже — история предыдущих этапов.
 
 > **Активная работа:** [GATE-INTEGRATE-PARSER-UI-STORAGE.md](GATE-INTEGRATE-PARSER-UI-STORAGE.md), ветка `codex/integrate-parser-ui-storage`. Владелец 17 сентября 2026 года явно разрешил локальные коммиты и слияние завершённых Parser/UI, Яндекс Диска и исправления прав документов. Объединение и 116 целевых тестов завершены; Server запущен на https://localhost:7240 для ручной приёмки. Evidence: [INTEGRATED_PARSER_UI_STORAGE_REPORT.md](reports/INTEGRATED_PARSER_UI_STORAGE_REPORT.md). Required reading и проверки — в Gate. Main, push и production apply не входят. Следующие записи — исторический контекст.

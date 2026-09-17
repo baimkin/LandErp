@@ -381,8 +381,7 @@ public sealed class OverviewService(
         DateTimeOffset? lastNew = await db.Listings.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId)
             .MaxAsync(item => (DateTimeOffset?)item.ReceivedAt, cancellationToken);
         int attention = await db.CollectionJobs.AsNoTracking().CountAsync(item => item.OrganizationId == context.OrganizationId
-            && item.CreatedAt >= attentionSince && (item.State == CollectionJobState.AwaitingManualAction
-                || item.State == CollectionJobState.Failed || item.State == CollectionJobState.Interrupted), cancellationToken);
+            && item.CreatedAt >= attentionSince && item.RequiresOperatorAttention, cancellationToken);
         List<OverviewCollectionStatus> statuses =
         [
             new(OverviewSeverity.Info, "Последний успешный сбор", lastSuccess == null ? "ещё не выполнялся" : RelativeTime(lastSuccess, now), "/collectors")

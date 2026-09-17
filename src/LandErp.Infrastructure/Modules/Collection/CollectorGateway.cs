@@ -38,6 +38,13 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         search.Url = command.Url; search.MaxPages = command.MaxPages; search.SearchGroupId = command.GroupId; search.Enabled = command.Enabled;
         string zone = await db.Organizations.Where(o => o.Id == agent.OrganizationId).Select(o => o.BusinessTimeZone).SingleAsync(cancellationToken);
         CollectionScheduleRules.Apply(search, Schedule(command.Schedule), time.GetUtcNow(), zone);
+        if (!search.Enabled)
+        {
+            ServerCollectionJob[] retries = await db.CollectionJobs
+                .Where(item => item.SearchId == search.Id && item.RetryAt != null)
+                .ToArrayAsync(cancellationToken);
+            foreach (ServerCollectionJob retry in retries) retry.RetryAt = null;
+        }
         AddMachineAudit(db, agent, "CollectionSearchUpdatedByParser", "SearchConfiguration", search.Id,
             new { search.Label, search.Enabled, search.SearchGroupId, search.ScheduleKind }, Guid.CreateVersion7());
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return SearchView(search);
@@ -72,6 +79,8 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         // A repeated click or lost response must not create another active job.
         if (!await db.CollectionJobs.AnyAsync(j => j.SearchId == search.Id && (j.State == CollectionJobState.Pending || j.State == CollectionJobState.Leased), cancellationToken))
         {
+            ServerCollectionJob[] retries = await db.CollectionJobs.Where(item => item.SearchId == search.Id && item.RetryAt != null).ToArrayAsync(cancellationToken);
+            foreach (ServerCollectionJob retry in retries) retry.RetryAt = null;
             ServerCollectionJob job = new() { Id = DataConventions.NewId(), OrganizationId = agent.OrganizationId, SearchId = search.Id, CreatedAt = time.GetUtcNow() };
             db.CollectionJobs.Add(job);
             AddMachineAudit(db, agent, "CollectionJobQueuedByParser", "CollectionJob", job.Id, new { job.SearchId }, Guid.CreateVersion7());
@@ -271,8 +280,10 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
     public async Task<CollectionReceipt> AcceptAsync(AgentCredential credential, CollectionResult result, CancellationToken cancellationToken)
     {
         if (result.ResultId == Guid.Empty || result.Observations == null || result.Observations.Length > 25 || !Enum.IsDefined(result.Outcome)
-            || !result.Final && result.Outcome != CollectionOutcome.Success)
+            || !result.Final && (result.Outcome != CollectionOutcome.Success || result.Coverage != null
+                || !string.IsNullOrEmpty(result.ReasonCode) || result.Warnings is { Length: > 0 }))
             throw new ArgumentException("COLLECTION_RESULT_INVALID");
+        ValidateFinalResult(result);
         foreach (ObservationEnvelope envelope in result.Observations)
         {
             if (envelope == null || string.IsNullOrWhiteSpace(envelope.ObservationKey) || envelope.ObservationKey.Length > 128)
@@ -380,14 +391,31 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             {
                 CollectionOutcome.Success => CollectionJobState.Completed,
                 CollectionOutcome.LimitReached => CollectionJobState.LimitReached,
-                CollectionOutcome.Captcha or CollectionOutcome.AuthenticationRequired or CollectionOutcome.RateLimited => CollectionJobState.AwaitingManualAction,
+                CollectionOutcome.Partial => CollectionJobState.Partial,
+                CollectionOutcome.RateLimited => CollectionJobState.RateLimited,
+                CollectionOutcome.Captcha or CollectionOutcome.AuthenticationRequired => CollectionJobState.AwaitingManualAction,
                 CollectionOutcome.Interrupted => CollectionJobState.Interrupted,
                 _ => CollectionJobState.Failed
             };
-            job.ResultCode = result.Outcome.ToString(); job.CompletedAt = time.GetUtcNow();
-            bool attention = result.Outcome is CollectionOutcome.Captcha or CollectionOutcome.AuthenticationRequired or CollectionOutcome.RateLimited;
-            agent.RuntimeState = attention ? AgentRuntimeState.AwaitingManualAction : AgentRuntimeState.Idle;
-            agent.AttentionCode = attention ? result.Outcome.ToString() : "";
+            DateTimeOffset completedAt = time.GetUtcNow();
+            job.ResultCode = result.Outcome.ToString(); job.ReasonCode = result.ReasonCode; job.CompletedAt = completedAt;
+            job.WarningsJson = JsonSerializer.Serialize((result.Warnings ?? []).Distinct(StringComparer.Ordinal).ToArray(), CollectionJson.Options);
+            job.CoverageJson = result.Coverage == null ? null : JsonSerializer.Serialize(result.Coverage, CollectionJson.Options);
+            CollectionRetryDecision retry = CollectionRetryPolicy.Decide(result.Outcome, result.ReasonCode, job.RetryAttempt);
+            job.RetryAt = retry.Delay is null ? null : completedAt.Add(retry.Delay.Value);
+            job.RequiresOperatorAttention = retry.AttentionRequired;
+            if (result.Outcome is CollectionOutcome.Success or CollectionOutcome.LimitReached)
+            {
+                search.ConsecutiveFailures = 0;
+                ServerCollectionJob[] resolved = await db.CollectionJobs
+                    .Where(item => item.SearchId == search.Id && item.RequiresOperatorAttention)
+                    .ToArrayAsync(cancellationToken);
+                foreach (ServerCollectionJob previous in resolved) previous.RequiresOperatorAttention = false;
+            }
+            else search.ConsecutiveFailures++;
+            bool manualAction = result.Outcome is CollectionOutcome.Captcha or CollectionOutcome.AuthenticationRequired;
+            agent.RuntimeState = manualAction ? AgentRuntimeState.AwaitingManualAction : AgentRuntimeState.Idle;
+            agent.AttentionCode = manualAction ? string.IsNullOrEmpty(result.ReasonCode) ? result.Outcome.ToString() : result.ReasonCode : "";
             ApplyProgress(agent, null);
         }
         CollectionReceipt receipt = new(result.ResultId, result.Final ? job.State.ToString() : "Accepted", accepted, duplicates);
@@ -402,6 +430,21 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         });
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return receipt;
+    }
+
+    private static void ValidateFinalResult(CollectionResult result)
+    {
+        if (!result.Final) return;
+        if (result.ReasonCode.Length > 64 || result.ReasonCode.Any(character => !(char.IsAsciiLetterUpper(character) || char.IsDigit(character) || character == '_'))
+            || result.Warnings is { Length: > 20 } || (result.Warnings ?? []).Any(warning => string.IsNullOrWhiteSpace(warning)
+                || warning.Length > 64 || warning.Any(character => !(char.IsAsciiLetterUpper(character) || char.IsDigit(character) || character == '_'))))
+            throw new ArgumentException("COLLECTION_RESULT_REASON_INVALID");
+        if (result.Coverage is not { } coverage) return;
+        if (coverage.UniqueObserved < 0 || coverage.SourceCountHint < 0 || coverage.StableRounds < 0
+            || coverage.CompletedPages < 0 || coverage.RequestedPageLimit is < 1 or > 100
+            || coverage.CompletedPages > coverage.RequestedPageLimit || coverage.ResponseBatches < 0
+            || result.Outcome == CollectionOutcome.Success && (!coverage.EndReached || !coverage.LoadingCompleted))
+            throw new ArgumentException("COLLECTION_COVERAGE_INVALID");
     }
 
     private void EnsureLease(ServerCollectionJob job, Guid agentId, Guid lease, bool acceptingResult)

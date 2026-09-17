@@ -325,6 +325,92 @@ public sealed class CollectionPoolTests
         Assert.AreEqual(1, await db.CollectionJobs.CountAsync(item => item.SearchId == search.Id));
     }
 
+    [TestMethod]
+    public async Task PartialResultsRetryBoundedlyAndLaterSuccessResetsAttention()
+    {
+        await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
+        await using (LandErpDbContext migrator = sandbox.Context())
+        {
+            await migrator.Database.MigrateAsync();
+            Assert.IsFalse(migrator.Database.HasPendingModelChanges());
+        }
+        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
+        Guid ownerId = await IdentityOrganizationTests.BootstrapAsync(bootstrap, "owner-partial-collection@test.invalid", "Partial collection");
+        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerId);
+        await sandbox.GrantRuntimeAsync();
+        await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
+        IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
+        TestClock clock = new(); Subject owner = new(ownerId, true);
+        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        AgentCredential agent = await CreateRegisteredAsync(administration, factory, clock, owner, "Recovery parser", ListingSource.Avito);
+        await administration.CreateSearchAsync(owner, new("Recovery", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 10), "recovery", CancellationToken.None);
+        Guid searchId = (await administration.ReadAsync(owner, CancellationToken.None)).Searches.Single().Id;
+        await administration.EnqueueAsync(owner, searchId, "recovery", CancellationToken.None);
+        CollectorGateway gateway = new(factory, clock); CollectionScheduler scheduler = new(factory, clock);
+        TimeSpan[] delays = [TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(45)];
+
+        for (int attempt = 0; attempt <= delays.Length; attempt++)
+        {
+            CollectionWork work = (await gateway.ClaimAsync(agent, CancellationToken.None))!;
+            ObservationEnvelope[] observations = attempt == 0
+                ? [new("partial-one", new ListingData
+                {
+                    Source = ListingSource.Avito, ExternalId = "10001",
+                    Url = "https://www.avito.ru/moskva/zemelnye_uchastki/partial_10001",
+                    ObservedAt = clock.GetUtcNow(), AdapterVersion = "test", Provenance = "Partial test",
+                    Title = new(FieldPresence.Present, "Частично полученное объявление")
+                })]
+                : [];
+            CollectionResult partial = new(Guid.CreateVersion7(), work.JobId, work.LeaseId, CollectionOutcome.Partial,
+                observations, true, CollectionResultReasonCodes.LoadingInterrupted, [],
+                new(1, 10, false, false, 0, 0, 10));
+            await gateway.AcceptAsync(agent, partial, CancellationToken.None);
+
+            await using (LandErpDbContext db = await factory.CreateDbContextAsync())
+            {
+                ServerCollectionJob saved = await db.CollectionJobs.AsNoTracking().SingleAsync(item => item.Id == work.JobId);
+                Assert.AreEqual(CollectionJobState.Partial, saved.State);
+                Assert.AreEqual(attempt, saved.RetryAttempt);
+                Assert.AreEqual(attempt == delays.Length, saved.RequiresOperatorAttention);
+                Assert.AreEqual(attempt < delays.Length ? clock.GetUtcNow().Add(delays[attempt]) : null, saved.RetryAt);
+            }
+            if (attempt == delays.Length) break;
+            clock.Advance(delays[attempt]);
+            Assert.AreEqual(1, await scheduler.RunDueAsync(CancellationToken.None));
+        }
+
+        CollectionAdminView failed = await administration.ReadAsync(owner, CancellationToken.None);
+        Assert.AreEqual(1, failed.AttentionJobs);
+        Assert.AreEqual(1, failed.Jobs.Sum(item => item.AcceptedCount));
+        Assert.AreEqual(4, failed.Jobs.Count);
+        Assert.AreEqual("", failed.Agents.Single().AttentionCode);
+        Assert.AreEqual(AgentRuntimeState.Idle, failed.Agents.Single().RuntimeState);
+        await using (LandErpDbContext failedDb = await factory.CreateDbContextAsync())
+            Assert.AreEqual(4, (await failedDb.SearchConfigurations.SingleAsync()).ConsecutiveFailures);
+
+        await administration.EnqueueAsync(owner, searchId, "manual-recovery", CancellationToken.None);
+        CollectionWork recovery = (await gateway.ClaimAsync(agent, CancellationToken.None))!;
+        CollectionResult invalid = new(Guid.CreateVersion7(), recovery.JobId, recovery.LeaseId, CollectionOutcome.Success, [], true,
+            Coverage: new(38, 51, false, true, 3, 1, 10, 6));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => gateway.AcceptAsync(agent, invalid, CancellationToken.None));
+        CollectionResult success = invalid with
+        {
+            ResultId = Guid.CreateVersion7(), ReasonCode = CollectionResultReasonCodes.CountHintMismatch,
+            Warnings = [CollectionResultReasonCodes.CountHintMismatch], Coverage = invalid.Coverage! with { EndReached = true }
+        };
+        await gateway.AcceptAsync(agent, success, CancellationToken.None);
+
+        CollectionAdminView recovered = await administration.ReadAsync(owner, CancellationToken.None);
+        Assert.AreEqual(0, recovered.AttentionJobs);
+        Assert.AreEqual("Completed", recovered.Searches.Single().LastRun!.State);
+        Assert.AreEqual(38, recovered.Searches.Single().LastRun!.Coverage!.UniqueObserved);
+        Assert.AreEqual(CollectionResultReasonCodes.CountHintMismatch, recovered.Searches.Single().LastRun!.Warnings.Single());
+        await using LandErpDbContext finalDb = await factory.CreateDbContextAsync();
+        Assert.AreEqual(0, (await finalDb.SearchConfigurations.SingleAsync()).ConsecutiveFailures);
+        Assert.AreEqual(1, await finalDb.Listings.CountAsync());
+    }
+
     private static async Task<AgentCredential> CreateRegisteredAsync(CollectionAdministration administration,
         IDbContextFactory<LandErpDbContext> factory, TimeProvider clock, Subject owner, string name, ListingSource source)
     {

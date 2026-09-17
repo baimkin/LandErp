@@ -106,6 +106,23 @@ attention state после повторной проверки страницы.
 - Точный повтор ResultId с тем же payload возвращает сохранённый receipt.
 - JobId + LeaseId выполняют fencing.
 - Final delivery завершает Job; `final=false` допустим только для успешной порции.
+- Финальный результат может быть `Success`, `LimitReached`, `Partial`, `RateLimited`,
+  `SourceError`, `Interrupted`, `Captcha` или `AuthenticationRequired`. Уже собранные
+  observations принимаются и сохраняются также при неуспешном финальном исходе.
+- Additive optional поля финального результата: `ReasonCode`, `Warnings` и
+  `Coverage` (`UniqueObserved`, необязательный `SourceCountHint`, `EndReached`,
+  `LoadingCompleted`, `StableRounds`, `CompletedPages`, `RequestedPageLimit`,
+  необязательный `ResponseBatches`). Счётчик источника является подсказкой, а не
+  условием бесконечной прокрутки; полноту определяют факты завершения загрузки.
+- `Success` с переданным `Coverage` требует `EndReached=true` и
+  `LoadingCompleted=true`. Несовпадение `SourceCountHint` передаётся предупреждением
+  `COUNT_HINT_MISMATCH`, но само по себе не превращает завершённый сбор в ошибку.
+- Server, а не Parser, управляет дополнительными попытками: `Partial` и
+  `SourceError` повторяются через 5/15/45 минут, `RateLimited` — через
+  30/90 минут/4 часа, `Interrupted` — через 2/10/30 минут. Обычное расписание
+  поиска при этом сохраняется. После исчерпания попыток либо при CAPTCHA,
+  необходимости авторизации, неверной ссылке или изменившейся разметке Job
+  требует внимания оператора.
 - `RESULT_SUPERSEDED` — единственное явное разрешение пометить локальную delivery
   terminal Superseded; generic 403/409 не разрешает удалять payload.
 - Permanent failure одного Job не блокирует deliveries других Jobs.

@@ -5,7 +5,7 @@ namespace LandErp.Collector.Contracts.V1;
 
 public enum ListingSource { Avito, Cian }
 public enum FieldPresence { NotInspected, Absent, Empty, Present, ParseFailed }
-public enum CollectionOutcome { Unknown, Success, Captcha, AuthenticationRequired, RateLimited, SourceError, Interrupted, LimitReached }
+public enum CollectionOutcome { Unknown, Success, Captcha, AuthenticationRequired, RateLimited, SourceError, Interrupted, LimitReached, Partial }
 public enum AgentRuntimeState { Idle, Claiming, Parsing, AwaitingManualAction, Delivering, Paused, Recovering }
 public enum SourceRuntimeState { Ready, Captcha, AuthenticationRequired, RateLimited, SourceError, Unknown }
 public enum CollectionProgressPhase { Preparing, OpeningPage, ReadingPage, SavingPage, WaitingForUser, PreparingResult, DeliveringResult }
@@ -22,9 +22,27 @@ public sealed record AgentActivationReceipt(Guid AgentId, string Credential, int
 public sealed record CollectionWork(Guid JobId, Guid LeaseId, DateTimeOffset LeaseExpiresAt,
     ListingSource Source, string SearchUrl, int MaxPages, string Label);
 public sealed record ObservationEnvelope(string ObservationKey, ListingData Data);
+public sealed record CollectionCoverage(int UniqueObserved, int? SourceCountHint, bool EndReached,
+    bool LoadingCompleted, int StableRounds, int CompletedPages, int RequestedPageLimit, int? ResponseBatches = null);
 public sealed record CollectionResult(Guid ResultId, Guid JobId, Guid LeaseId, CollectionOutcome Outcome,
-    ObservationEnvelope[] Observations, bool Final);
+    ObservationEnvelope[] Observations, bool Final, string ReasonCode = "", string[]? Warnings = null,
+    CollectionCoverage? Coverage = null);
 public sealed record CollectionReceipt(Guid ResultId, string Status, int Accepted, int Duplicates);
+
+public static class CollectionResultReasonCodes
+{
+    public const string CountHintMismatch = "COUNT_HINT_MISMATCH";
+    public const string EndNotConfirmed = "END_NOT_CONFIRMED";
+    public const string LoadingInterrupted = "LOADING_INTERRUPTED";
+    public const string NetworkTimeout = "NETWORK_TIMEOUT";
+    public const string SourceUnavailable = "SOURCE_UNAVAILABLE";
+    public const string LayoutChanged = "LAYOUT_CHANGED";
+    public const string InvalidSearchUrl = "INVALID_SEARCH_URL";
+    public const string InvalidSourceResponse = "INVALID_SOURCE_RESPONSE";
+    public const string PageLimitReached = "PAGE_LIMIT_REACHED";
+    public const string AgentInterrupted = "AGENT_INTERRUPTED";
+    public const string LeaseExpiredOrReplaced = "LEASE_EXPIRED_OR_REPLACED";
+}
 
 /// <summary>Public listing fields only. Browser state, cookies and raw HTTP/HTML are outside the contract.</summary>
 public sealed record ListingData

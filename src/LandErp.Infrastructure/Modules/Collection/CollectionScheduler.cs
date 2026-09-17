@@ -20,6 +20,32 @@ public sealed class CollectionScheduler(IDbContextFactory<LandErpDbContext> fact
                 await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
                 await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
                 DateTimeOffset now = time.GetUtcNow();
+                var retryable = await db.CollectionJobs.FromSqlInterpolated($"""
+                    SELECT * FROM collection.jobs
+                    WHERE retry_at IS NOT NULL AND retry_at<={now}
+                    ORDER BY retry_at LIMIT 1 FOR UPDATE SKIP LOCKED
+                    """).ToListAsync(cancellationToken);
+                if (retryable.Count != 0)
+                {
+                    ServerCollectionJob previous = retryable[0];
+                    SearchConfiguration retrySearch = await db.SearchConfigurations.SingleAsync(item => item.Id == previous.SearchId, cancellationToken);
+                    bool activeRetry = await db.CollectionJobs.AnyAsync(item => item.SearchId == previous.SearchId
+                        && (item.State == CollectionJobState.Pending || item.State == CollectionJobState.Leased), cancellationToken);
+                    previous.RetryAt = null;
+                    if (retrySearch.Enabled && !activeRetry && !await db.CollectionJobs.AnyAsync(item => item.RetryOfJobId == previous.Id, cancellationToken))
+                    {
+                        db.CollectionJobs.Add(new ServerCollectionJob
+                        {
+                            Id = DataConventions.NewId(), OrganizationId = previous.OrganizationId, SearchId = previous.SearchId,
+                            State = CollectionJobState.Pending, CreatedAt = now, RetryAttempt = previous.RetryAttempt + 1,
+                            RetryOfJobId = previous.Id
+                        });
+                        created++;
+                    }
+                    await db.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    continue;
+                }
                 var due = await db.SearchConfigurations.FromSqlInterpolated($"""
                     SELECT * FROM collection.search_configurations
                     WHERE enabled=true AND next_run_at IS NOT NULL AND next_run_at<={now}
@@ -37,6 +63,8 @@ public sealed class CollectionScheduler(IDbContextFactory<LandErpDbContext> fact
                     (item.State == CollectionJobState.Pending || item.State == CollectionJobState.Leased), cancellationToken);
                 if (!active && !await db.CollectionJobs.AnyAsync(item => item.SearchId == search.Id && item.ScheduledFor == scheduledFor, cancellationToken))
                 {
+                    ServerCollectionJob[] retries = await db.CollectionJobs.Where(item => item.SearchId == search.Id && item.RetryAt != null).ToArrayAsync(cancellationToken);
+                    foreach (ServerCollectionJob retry in retries) retry.RetryAt = null;
                     db.CollectionJobs.Add(new ServerCollectionJob { Id = DataConventions.NewId(), OrganizationId = search.OrganizationId,
                         SearchId = search.Id, State = CollectionJobState.Pending, CreatedAt = now, ScheduledFor = scheduledFor });
                     created++;

@@ -1,7 +1,7 @@
 # PropertyCase V2 — отчёт checkpoint 1
 
-Дата: 2026-09-17  
-Ветка: `codex/property-case-v2-implementation`  
+Дата: 2026-09-17
+Ветка: `codex/property-case-v2-implementation`
 База: `533440c`
 
 ## Выполнено

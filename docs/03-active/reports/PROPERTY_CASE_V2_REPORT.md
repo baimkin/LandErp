@@ -1,9 +1,10 @@
 # Gate PropertyCase V2 — итоговый отчёт
 
-**Дата:** 2026-09-17  
-**Ветка:** `codex/property-case-v2-implementation`  
-**База:** `533440c`  
-**Commit:** не создан; изменения находятся в отдельном worktree  
+**Дата:** 2026-09-17
+**Ветка:** `codex/property-case-v2-implementation`
+**База:** `533440c`
+**Feature commit:** `e9050cc`
+**Integration commit:** `477cffe`
 **Статус:** Partial — реализация и автоматические проверки завершены, ручная визуальная приёмка владельцем не выполнена
 
 ## 1. Результат

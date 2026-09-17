@@ -28,14 +28,17 @@ public sealed record CollectionSchedulerHealthView(string State, DateTimeOffset?
     DateTimeOffset? LastSucceededAt, DateTimeOffset? LastFailedAt, int LastQueuedCount, string LastFailureCode);
 public sealed record CollectionAdminView(IReadOnlyList<AgentView> Agents, IReadOnlyList<SearchGroupView> Groups,
     IReadOnlyList<SearchView> Searches, IReadOnlyList<CollectionJobView> Jobs, int ActiveSearches, int PendingJobs,
-    int AttentionJobs, int OnlineAgents, int BusyAgents, CollectionSchedulerHealthView Scheduler);
+    int AttentionJobs, int OnlineAgents, int BusyAgents, CollectionSchedulerHealthView Scheduler,
+    string BusinessTimeZone = "Europe/Moscow");
 public sealed record CollectionSchedule(CollectionScheduleKind Kind, int? IntervalMinutes = null, string[]? FixedTimes = null);
 public sealed record CreateSearch(string Label, CatalogSource Source, string Url, int MaxPages,
-    Guid? SearchGroupId = null, CollectionSchedule? Schedule = null);
+    Guid? SearchGroupId = null, CollectionSchedule? Schedule = null, bool RunImmediately = false);
 public sealed record UpdateSearch(Guid Id, long ExpectedVersion, string Label, CatalogSource Source, string Url,
     int MaxPages, Guid? SearchGroupId, CollectionSchedule Schedule, bool Enabled);
 public interface ICollectionAdministration
 {
+    Task<DateTimeOffset?> PreviewScheduleAsync(Subject subject, CollectionSchedule schedule, Guid? searchId,
+        bool enabled, CancellationToken cancellationToken);
     Task<CollectionAdminView> ReadAsync(Subject subject, CancellationToken cancellationToken);
     Task<AgentCredential> CreateAgentAsync(Subject subject, string name, bool canManageSearches, string correlationId, CancellationToken cancellationToken);
     Task SetAgentSearchManagementAsync(Subject subject, Guid agentId, long expectedVersion, bool allowed, string correlationId, CancellationToken cancellationToken);

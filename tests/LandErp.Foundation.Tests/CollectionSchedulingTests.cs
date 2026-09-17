@@ -185,6 +185,30 @@ public sealed class CollectionSchedulingTests
             search.Id, "read-only", CancellationToken.None));
     }
 
+    [TestMethod]
+    public async Task ArchivedSearchCanBeEditedButMustMoveBeforeReenabling()
+    {
+        await using var f = await SchedulingFixture.CreateAsync("archive-edit@test.invalid", new(2026, 9, 17, 5, 0, 0, TimeSpan.Zero));
+        Guid groupId = await f.Admin.CreateGroupAsync(f.Owner, "Архив", 0, "group", default);
+        await f.Admin.CreateSearchAsync(f.Owner, new("Ссылка", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 10, groupId), "create", default);
+        var search = (await f.Admin.ReadAsync(f.Owner, default)).Searches.Single();
+        await f.Admin.UpdateSearchAsync(f.Owner, new(search.Id, search.Revision, search.Label, search.Source,
+            search.Url, 10, groupId, new(CollectionScheduleKind.Manual), false), "pause", default);
+        var view = await f.Admin.ReadAsync(f.Owner, default);
+        await f.Admin.ArchiveGroupAsync(f.Owner, groupId, view.Groups.Single().Revision, "archive", default);
+        search = view.Searches.Single();
+        var edit = new UpdateSearch(search.Id, search.Revision, "Исправленное имя", search.Source, search.Url,
+            10, groupId, new(CollectionScheduleKind.Manual), false);
+        await f.Admin.UpdateSearchAsync(f.Owner, edit, "edit", default);
+        var saved = (await f.Admin.ReadAsync(f.Owner, default)).Searches.Single();
+        Assert.AreEqual("Исправленное имя", saved.Label);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => f.Admin.UpdateSearchAsync(f.Owner,
+            edit with { ExpectedVersion = saved.Revision, Enabled = true }, "enable-archive", default));
+        await f.Admin.UpdateSearchAsync(f.Owner, edit with { ExpectedVersion = saved.Revision, Enabled = true, SearchGroupId = null }, "move", default);
+        Assert.IsTrue((await f.Admin.ReadAsync(f.Owner, default)).Searches.Single().Enabled);
+    }
+
     private sealed class SchedulingFixture : IAsyncDisposable
     {
         private readonly PostgresSandbox sandbox;
@@ -236,5 +260,78 @@ public sealed class CollectionSchedulingTests
             allowed.Contains(permission, StringComparer.Ordinal)
                 ? Task.FromResult(context)
                 : Task.FromException<AccessContext>(new AccessDeniedException());
+    }
+
+    [TestMethod]
+    public async Task ImmediateFirstRunKeepsTwoDailySlotsAndInvalidCreateLeavesNoRows()
+    {
+        DateTimeOffset start = new(2026, 9, 17, 14, 0, 0, TimeSpan.Zero); // 17:00 Moscow
+        await using var f = await SchedulingFixture.CreateAsync("first-run@test.invalid", start);
+        var schedule = new CollectionSchedule(CollectionScheduleKind.FixedTimes, FixedTimes: ["09:00", "16:00"]);
+        await f.Admin.CreateSearchAsync(f.Owner, new("Первый сбор", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 10, Schedule: schedule, RunImmediately: true), "create", default);
+        var view = await f.Admin.ReadAsync(f.Owner, default);
+        Assert.AreEqual("Europe/Moscow", view.BusinessTimeZone);
+        Assert.AreEqual(1, view.PendingJobs);
+        Assert.AreEqual(new DateTimeOffset(2026, 9, 18, 6, 0, 0, TimeSpan.Zero), view.Searches.Single().NextRunAt);
+        Assert.IsNull(view.Jobs.Single().ScheduledFor);
+        Assert.IsNull(view.Jobs.Single().Agent);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => f.Admin.CreateSearchAsync(f.Owner,
+            new("Некорректный", CatalogSource.Avito, "https://www.avito.ru/moskva/zemelnye_uchastki", 10,
+                Schedule: new(CollectionScheduleKind.Interval), RunImmediately: true), "invalid", default));
+        await using var db = await f.Factory.CreateDbContextAsync();
+        Assert.AreEqual(1, await db.SearchConfigurations.CountAsync());
+        Assert.AreEqual(1, await db.CollectionJobs.CountAsync());
+    }
+
+    [TestMethod]
+    public async Task MetadataEditPreservesOverdueBoundaryAndPreviewDoesNotWrite()
+    {
+        DateTimeOffset start = new(2026, 9, 17, 5, 0, 0, TimeSpan.Zero);
+        await using var f = await SchedulingFixture.CreateAsync("preserve-run@test.invalid", start);
+        var schedule = new CollectionSchedule(CollectionScheduleKind.Interval, 60);
+        await f.Admin.CreateSearchAsync(f.Owner, new("Исходный", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 10, Schedule: schedule), "create", default);
+        var search = (await f.Admin.ReadAsync(f.Owner, default)).Searches.Single();
+        f.Clock.Advance(TimeSpan.FromHours(2));
+        var preview = await f.Admin.PreviewScheduleAsync(f.Owner, schedule, search.Id, true, default);
+        Assert.AreEqual(start.AddHours(1), preview, "An overdue run must not be silently postponed.");
+        await f.Admin.UpdateSearchAsync(f.Owner, new(search.Id, search.Revision, "Новое название", search.Source,
+            search.Url, 20, null, schedule, true), "rename", default);
+        var updated = (await f.Admin.ReadAsync(f.Owner, default)).Searches.Single();
+        Assert.AreEqual(preview, updated.NextRunAt);
+        var changedPreview = await f.Admin.PreviewScheduleAsync(f.Owner, new(CollectionScheduleKind.Interval, 120), search.Id, true, default);
+        Assert.AreEqual(start.AddHours(4), changedPreview);
+        Assert.AreEqual(preview, (await f.Admin.ReadAsync(f.Owner, default)).Searches.Single().NextRunAt);
+        await f.Admin.UpdateSearchAsync(f.Owner, new(updated.Id, updated.Revision, updated.Label, updated.Source,
+            updated.Url, updated.MaxPages, null, schedule, false), "pause", default);
+        var paused = (await f.Admin.ReadAsync(f.Owner, default)).Searches.Single();
+        Assert.IsNull(paused.NextRunAt);
+        await f.Admin.UpdateSearchAsync(f.Owner, new(paused.Id, paused.Revision, paused.Label, paused.Source,
+            paused.Url, paused.MaxPages, null, schedule, true), "resume", default);
+        Assert.AreEqual(start.AddHours(3), (await f.Admin.ReadAsync(f.Owner, default)).Searches.Single().NextRunAt);
+    }
+
+    [TestMethod]
+    public async Task DailyNineAndSixteenSkipDuplicateWhilePendingAndRecoverOneMissedSlot()
+    {
+        await using var f = await SchedulingFixture.CreateAsync("two-slots@test.invalid", new(2026, 9, 17, 5, 0, 0, TimeSpan.Zero));
+        await f.Admin.CreateSearchAsync(f.Owner, new("Два раза", CatalogSource.Cian, "https://www.cian.ru/cat.php", 10,
+            Schedule: new(CollectionScheduleKind.FixedTimes, FixedTimes: ["16:00", "09:00"])), "create", default);
+        var scheduler = new CollectionScheduler(f.Factory, f.Clock);
+        f.Clock.Advance(TimeSpan.FromHours(1));
+        Assert.AreEqual(1, await scheduler.RunDueAsync(default));
+        Assert.AreEqual(new DateTimeOffset(2026, 9, 17, 13, 0, 0, TimeSpan.Zero),
+            (await f.Admin.ReadAsync(f.Owner, default)).Searches.Single().NextRunAt);
+        f.Clock.Advance(TimeSpan.FromHours(7));
+        Assert.AreEqual(0, await scheduler.RunDueAsync(default), "Pending work prevents a second active job.");
+        await using (var db = await f.Factory.CreateDbContextAsync())
+        {
+            (await db.CollectionJobs.SingleAsync()).State = CollectionJobState.Completed;
+            await db.SaveChangesAsync();
+        }
+        f.Clock.Advance(TimeSpan.FromDays(3));
+        Assert.AreEqual(1, await scheduler.RunDueAsync(default), "Only one catch-up job after downtime.");
+        Assert.AreEqual(0, await scheduler.RunDueAsync(default));
     }
 }

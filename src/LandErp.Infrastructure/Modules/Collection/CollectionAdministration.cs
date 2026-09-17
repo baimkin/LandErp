@@ -59,8 +59,10 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
         int attention = lastBySearch.Values.Count(item => item.Job.State is CollectionJobState.AwaitingManualAction or CollectionJobState.Failed or CollectionJobState.Interrupted);
         CollectionSchedulerStatus? scheduler = await db.CollectionSchedulerStatuses.AsNoTracking().SingleOrDefaultAsync(item => item.Id == 1, cancellationToken);
         CollectionSchedulerHealthView schedulerView = Scheduler(scheduler, now);
+        string businessTimeZone = await db.Organizations.Where(item => item.Id == context.OrganizationId)
+            .Select(item => item.BusinessTimeZone).SingleAsync(cancellationToken);
         return new(agents, groups, searches, jobs, searches.Count(item => item.Enabled), pending, attention,
-            agents.Count(item => item.Online), activeJobs.Length, schedulerView);
+            agents.Count(item => item.Online), activeJobs.Length, schedulerView, businessTimeZone);
     }
     public async Task<AgentCredential> CreateAgentAsync(Subject subject, string name, bool canManageSearches, string correlationId, CancellationToken cancellationToken)
     {
@@ -116,6 +118,23 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
             new { agent.Name, CanManageSearches = allowed }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
     }
+    public async Task<DateTimeOffset?> PreviewScheduleAsync(Subject subject, CollectionSchedule schedule, Guid? searchId,
+        bool enabled, CancellationToken cancellationToken)
+    {
+        AccessContext context = await RequireAsync(subject, Permissions.CollectionManage, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        string zone = await db.Organizations.Where(x => x.Id == context.OrganizationId)
+            .Select(x => x.BusinessTimeZone).SingleAsync(cancellationToken);
+        SearchConfiguration search = searchId.HasValue
+            ? await db.SearchConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.Id == searchId && x.OrganizationId == context.OrganizationId, cancellationToken)
+                ?? throw new AccessDeniedException()
+            : new SearchConfiguration();
+        bool preserve = searchId.HasValue && search.Enabled == enabled;
+        search.Enabled = enabled;
+        CollectionScheduleRules.Apply(search, schedule, time.GetUtcNow(), zone, preserve);
+        return search.NextRunAt;
+    }
+
     public async Task CreateSearchAsync(Subject subject, CreateSearch command, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await RequireAsync(subject, Permissions.CollectionManage, cancellationToken);
@@ -128,6 +147,16 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
             Label = OrganizationWorkspace.ValidateName(command.Label), Source = command.Source, Url = command.Url, MaxPages = command.MaxPages, SearchGroupId = command.SearchGroupId };
         CollectionScheduleRules.Apply(search, command.Schedule, time.GetUtcNow(), zone);
         db.SearchConfigurations.Add(search);
+        // One SaveChanges transaction persists both the search and its optional first job.
+        // A failed validation/save cannot leave an orphan search or enqueue twice.
+        if (command.RunImmediately)
+        {
+            ServerCollectionJob job = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
+                SearchId = search.Id, CreatedAt = time.GetUtcNow(), State = CollectionJobState.Pending };
+            db.CollectionJobs.Add(job);
+            OrganizationWorkspace.AddAudit(db, context, subject, "CollectionJobQueued", "CollectionJob", job.Id,
+                new { job.SearchId, job.AgentId }, correlationId);
+        }
         OrganizationWorkspace.AddAudit(db, context, subject, "CollectionSearchCreated", "SearchConfiguration", search.Id,
             new { search.Label, search.Source, search.MaxPages }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
@@ -139,11 +168,16 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         SearchConfiguration search = await db.SearchConfigurations.SingleOrDefaultAsync(item => item.Id == command.Id && item.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
         if (search.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException();
-        if (command.SearchGroupId != null && !await db.SearchGroups.AnyAsync(item => item.Id == command.SearchGroupId && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken)) throw new AccessDeniedException();
+        if (command.SearchGroupId != null && !await db.SearchGroups.AnyAsync(item => item.Id == command.SearchGroupId &&
+            item.OrganizationId == context.OrganizationId && (item.Active || item.Id == search.SearchGroupId), cancellationToken)) throw new AccessDeniedException();
+        if (command.Enabled && command.SearchGroupId != null && !await db.SearchGroups.AnyAsync(item =>
+            item.Id == command.SearchGroupId && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken))
+            throw new ArgumentException("Чтобы включить поиск, перенесите его из архива в действующую группу или выберите «Без группы».");
+        bool sameEnabled = search.Enabled == command.Enabled;
         search.Label = OrganizationWorkspace.ValidateName(command.Label); search.Source = command.Source; search.Url = command.Url;
         search.MaxPages = command.MaxPages; search.SearchGroupId = command.SearchGroupId; search.Enabled = command.Enabled;
         string zone = await db.Organizations.Where(item => item.Id == context.OrganizationId).Select(item => item.BusinessTimeZone).SingleAsync(cancellationToken);
-        CollectionScheduleRules.Apply(search, command.Schedule, time.GetUtcNow(), zone);
+        CollectionScheduleRules.Apply(search, command.Schedule, time.GetUtcNow(), zone, preserveNextRun: sameEnabled);
         OrganizationWorkspace.AddAudit(db, context, subject, "CollectionSearchUpdated", "SearchConfiguration", search.Id, new { search.Enabled, search.ScheduleKind }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
     }

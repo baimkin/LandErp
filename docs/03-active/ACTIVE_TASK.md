@@ -1,5 +1,7 @@
 # Активная задача LandErp
 
+> **Доработка по запросу владельца реализована:** [GATE-COLLECTORS-SCHEDULING-UX.md](GATE-COLLECTORS-SCHEDULING-UX.md), ветка `codex/collectors-scheduling-ux`. Исправления аудита расписаний и экрана Parser, Release build, 22/22 целевых теста; локальный Server + Worker запущены. [Отчёт](reports/COLLECTORS_SCHEDULING_UX_REPORT.md). Ожидается ручная визуальная приёмка. Браузерные тесты не запускались. Ниже — история предыдущих этапов.
+
 > **Активная работа:** [GATE-INTEGRATE-PARSER-UI-STORAGE.md](GATE-INTEGRATE-PARSER-UI-STORAGE.md), ветка `codex/integrate-parser-ui-storage`. Владелец 17 сентября 2026 года явно разрешил локальные коммиты и слияние завершённых Parser/UI, Яндекс Диска и исправления прав документов. Объединение и 116 целевых тестов завершены; Server запущен на https://localhost:7240 для ручной приёмки. Evidence: [INTEGRATED_PARSER_UI_STORAGE_REPORT.md](reports/INTEGRATED_PARSER_UI_STORAGE_REPORT.md). Required reading и проверки — в Gate. Main, push и production apply не входят. Следующие записи — исторический контекст.
 
 > **Яндекс Диск:** [GATE-YANDEX-DISK-STORAGE.md](GATE-YANDEX-DISK-STORAGE.md), реализован и проверен: [отчёт](reports/YANDEX_DISK_STORAGE_REPORT.md), 13 целевых тестов включая реальный Диск.

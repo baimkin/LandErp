@@ -7,15 +7,17 @@ namespace LandErp.Infrastructure.Modules.Collection;
 
 internal static class CollectionScheduleRules
 {
-    public static void Apply(SearchConfiguration search, CollectionSchedule? schedule, DateTimeOffset now, string timeZoneId)
+    public static void Apply(SearchConfiguration search, CollectionSchedule? schedule, DateTimeOffset now, string timeZoneId,
+        bool preserveNextRun = false)
     {
+        var previous = (search.ScheduleKind, search.IntervalMinutes, search.FixedTimesJson, search.NextRunAt);
         schedule ??= new(CollectionScheduleKind.Manual);
         search.ScheduleKind = schedule.Kind;
         search.IntervalMinutes = null;
         search.FixedTimesJson = "[]";
         if (schedule.Kind == CollectionScheduleKind.Interval)
         {
-            if (schedule.IntervalMinutes is < 5 or > 10080) throw new ArgumentException("Интервал должен быть от 5 минут до 7 дней.");
+            if (schedule.IntervalMinutes is null or < 5 or > 10080) throw new ArgumentException("Интервал должен быть от 5 минут до 7 дней.");
             search.IntervalMinutes = schedule.IntervalMinutes;
         }
         else if (schedule.Kind == CollectionScheduleKind.FixedTimes)
@@ -26,7 +28,12 @@ internal static class CollectionScheduleRules
             search.FixedTimesJson = JsonSerializer.Serialize(values);
         }
         else if (schedule.Kind != CollectionScheduleKind.Manual) throw new ArgumentException("Тип расписания не поддерживается.");
-        search.NextRunAt = search.Enabled ? Next(search, now, timeZoneId) : null;
+        // Editing a label/group must not postpone an already due run. Schedule changes
+        // and re-enabling explicitly calculate a new boundary.
+        bool unchanged = previous.ScheduleKind == search.ScheduleKind &&
+            previous.IntervalMinutes == search.IntervalMinutes && previous.FixedTimesJson == search.FixedTimesJson;
+        search.NextRunAt = !search.Enabled ? null : preserveNextRun && unchanged
+            ? previous.NextRunAt : Next(search, now, timeZoneId);
     }
 
     public static DateTimeOffset? Next(SearchConfiguration search, DateTimeOffset after, string timeZoneId)

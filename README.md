@@ -28,9 +28,12 @@ Blazor Server и PostgreSQL. Первый контур закупки включ
    откройте `https://localhost:7240`, войдите и настройте authenticator MFA.
    При необходимости доверьте локальный сертификат штатной командой
    `dotnet dev-certs https --trust` через выбранный SDK.
-5. Worker запускается независимо:
+5. Локальный launcher Server также запускает Worker расписаний и останавливает
+   свой Worker при завершении Server. На странице «Поиски и парсинг» проверьте
+   состояние «Расписания: работает». Для запуска только сайта предусмотрен
+   параметр `-ServerOnly`. Worker также можно запустить независимо:
    `./scripts/Start-Local.ps1 -Service Worker -DotnetPath ./artifacts/stage1/dotnet/dotnet.exe`.
-   Это host skeleton без будущих jobs.
+   Он проверяет сроки каждые 30 секунд и ставит задания в общую очередь.
 
 Credentials не передавайте аргументами команд и не сохраняйте в истории терминала.
 Runtime использует отдельную роль без DDL; history разрешает только SELECT/INSERT.

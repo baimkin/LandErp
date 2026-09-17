@@ -120,6 +120,7 @@ internal static class ModelConventions
         ["State"] = "Состояние работы: Pending ожидает выдачи; Leased действует до LeaseExpiresAt; Completed/LimitReached завершены; ручная проверка/ошибка/прерывание не являются успешной пустой выдачей.",
         ["CredentialHash"] = "SHA-256 verifier высокоэнтропийного credential Collector. Открытый token показывается только при создании.",
         ["Capabilities"] = "Источники, которые поддерживает установленная версия Collector; неподдерживаемая работа не выдаётся.",
+        ["CanManageSearches"] = "Разрешено ли этому Parser создавать группы и поиски своей организации через ограниченный machine API.",
         ["VersionText"] = "Версия установленного приложения Collector; не concurrency token.",
         ["LastHeartbeatAt"] = "Последний принятый heartbeat UTC; online означает enabled и связь не старше трёх минут.",
         ["AgentId"] = "Локальное приложение Collector, которому разрешена работа или которое доставило наблюдение.",

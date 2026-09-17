@@ -20,8 +20,39 @@ public sealed class ServerOutbox
             CREATE TABLE IF NOT EXISTS server_outbox(sequence INTEGER PRIMARY KEY AUTOINCREMENT,result_id TEXT NOT NULL UNIQUE,
               json TEXT NOT NULL,acked INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,last_code TEXT NOT NULL DEFAULT 'Pending');
             CREATE TABLE IF NOT EXISTS server_work(id INTEGER PRIMARY KEY CHECK(id=1),json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS server_identity(id INTEGER PRIMARY KEY CHECK(id=1),origin TEXT NOT NULL,agent_id TEXT NOT NULL);
             """;
         command.ExecuteNonQuery();
+        EnsureColumn(db, "server_outbox", "terminal_state", "TEXT NOT NULL DEFAULT ''");
+    }
+    public void Bind(ServerConnection connection, bool allowUnboundData)
+    {
+        using SqliteConnection db = Open(); using SqliteTransaction transaction = db.BeginTransaction();
+        string? ownerOrigin = null;
+        string? ownerAgent = null;
+        using SqliteCommand read = Command(db, transaction, "SELECT origin,agent_id FROM server_identity WHERE id=1");
+        using SqliteDataReader reader = read.ExecuteReader();
+        if (reader.Read())
+        {
+            ownerOrigin = reader.GetString(0);
+            ownerAgent = reader.GetString(1);
+        }
+        reader.Close();
+        long data = Convert.ToInt64(Scalar(db, transaction,
+            "SELECT (SELECT count(*) FROM server_outbox WHERE acked=0)+(SELECT count(*) FROM server_work)"), System.Globalization.CultureInfo.InvariantCulture);
+        bool hasOwner = ownerOrigin != null && ownerAgent != null;
+        bool matches = ownerOrigin == connection.Origin.AbsoluteUri && ownerAgent == connection.AgentId.ToString();
+        if (matches) return;
+        if (data > 0 && hasOwner)
+            throw new InvalidOperationException("Есть незавершённое задание или результаты для другого Server или Parser.");
+        if (data > 0 && !hasOwner && !allowUnboundData)
+            throw new InvalidOperationException("Нельзя определить владельца прежней очереди доставки. Восстановите старое подключение.");
+        using SqliteCommand insert = Command(db, transaction, """
+            INSERT INTO server_identity VALUES(1,$origin,$agent)
+            ON CONFLICT(id) DO UPDATE SET origin=excluded.origin,agent_id=excluded.agent_id
+            """,
+            ("$origin", connection.Origin.AbsoluteUri), ("$agent", connection.AgentId.ToString()));
+        insert.ExecuteNonQuery(); transaction.Commit();
     }
     public void SaveWork(LocalServerWork? work)
     {
@@ -64,28 +95,32 @@ public sealed class ServerOutbox
         while (reader.Read()) { CollectionResult value = JsonSerializer.Deserialize<CollectionResult>(reader.GetString(0), CollectionJson.Options)!; if (value.JobId == job && value.LeaseId == lease) return true; }
         return false;
     }
-    public void RecordAttempt(PendingDelivery delivery, string code, bool acknowledged)
+    public void RecordAttempt(PendingDelivery delivery, string code, bool acknowledged, string terminalState = "")
     {
         using SqliteConnection db = Open(); using SqliteCommand command = db.CreateCommand();
-        command.CommandText = "UPDATE server_outbox SET attempts=attempts+1,last_code=$code,acked=$acked WHERE sequence=$sequence AND result_id=$id";
+        command.CommandText = "UPDATE server_outbox SET attempts=attempts+1,last_code=$code,acked=$acked,terminal_state=$terminal WHERE sequence=$sequence AND result_id=$id";
         command.Parameters.AddWithValue("$code", code); command.Parameters.AddWithValue("$acked", acknowledged ? 1 : 0);
+        command.Parameters.AddWithValue("$terminal", terminalState);
         command.Parameters.AddWithValue("$sequence", delivery.Sequence); command.Parameters.AddWithValue("$id", delivery.Result.ResultId.ToString()); command.ExecuteNonQuery();
     }
     public void SupersedeLease(Guid job, Guid lease)
     {
         foreach (PendingDelivery pending in Pending().Where(item => item.Result.JobId == job && item.Result.LeaseId != lease))
-            RecordAttempt(pending, "SupersededLeaseLocalDataRetained", true);
+            RecordAttempt(pending, "SupersededLeaseLocalDataRetained", true, "Superseded");
     }
     public async Task FlushAsync(ServerAdapter adapter, CancellationToken token)
     {
         RecoverRejectedPhotoPayloads();
+        ServerDeliveryException? firstPermanent = null;
+        HashSet<Guid> blockedJobs = [];
         foreach (PendingDelivery delivery in Pending())
         {
+            if (blockedJobs.Contains(delivery.Result.JobId)) continue;
             try
             {
                 CollectionReceipt receipt = await adapter.SendResultAsync(delivery.Result, token).ConfigureAwait(false);
                 if (receipt.ResultId != delivery.Result.ResultId) throw new ServerDeliveryException("INVALID_RECEIPT", false);
-                RecordAttempt(delivery, receipt.Status, true);
+                RecordAttempt(delivery, receipt.Status, true, "Acknowledged");
             }
             catch (ServerDeliveryException exception)
             {
@@ -96,9 +131,12 @@ public sealed class ServerOutbox
                     await FlushAsync(adapter, token).ConfigureAwait(false);
                     return;
                 }
-                throw; // Retry later with exactly the same immutable delivery, never silently discard.
+                if (exception.Retryable) throw; // A transport failure can affect every following delivery.
+                blockedJobs.Add(delivery.Result.JobId);
+                firstPermanent ??= exception;
             }
         }
+        if (firstPermanent != null) throw firstPermanent;
     }
     private void RecoverRejectedPhotoPayloads()
     {
@@ -140,4 +178,19 @@ public sealed class ServerOutbox
         transaction.Commit();
     }
     private SqliteConnection Open() { SqliteConnection db = new(connection); db.Open(); return db; }
+    private static void EnsureColumn(SqliteConnection db, string table, string column, string declaration)
+    {
+        using SqliteCommand info = db.CreateCommand(); info.CommandText = "PRAGMA table_info(" + table + ")";
+        using SqliteDataReader reader = info.ExecuteReader(); bool exists = false;
+        while (reader.Read()) if (reader.GetString(1) == column) exists = true;
+        reader.Close();
+        if (!exists) { using SqliteCommand alter = db.CreateCommand(); alter.CommandText = "ALTER TABLE " + table + " ADD COLUMN " + column + " " + declaration; alter.ExecuteNonQuery(); }
+    }
+    private static object? Scalar(SqliteConnection db, SqliteTransaction transaction, string sql)
+    { using SqliteCommand command = Command(db, transaction, sql); return command.ExecuteScalar(); }
+    private static SqliteCommand Command(SqliteConnection db, SqliteTransaction transaction, string sql, params (string Name, object Value)[] args)
+    {
+        SqliteCommand command = db.CreateCommand(); command.Transaction = transaction; command.CommandText = sql;
+        foreach (var (name, value) in args) command.Parameters.AddWithValue(name, value); return command;
+    }
 }

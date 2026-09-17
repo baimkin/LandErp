@@ -30,7 +30,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
         var activeJobs = await (from job in db.CollectionJobs join search in db.SearchConfigurations on job.SearchId equals search.Id
             where job.OrganizationId == context.OrganizationId && job.State == CollectionJobState.Leased select new { job.AgentId, search.Label }).ToArrayAsync(cancellationToken);
         var agents = rawAgents.Select(item => { var current = activeJobs.FirstOrDefault(job => job.AgentId == item.Id); bool online = item.Enabled && item.LastHeartbeatAt >= onlineSince;
-            return new AgentView(item.Id, item.Name, item.Enabled, online, item.VersionText, item.Capabilities, item.LastHeartbeatAt, item.Version,
+            return new AgentView(item.Id, item.Name, item.Enabled, online, item.CanManageSearches, item.VersionText, item.Capabilities, item.LastHeartbeatAt, item.Version,
                 !item.Enabled ? "Отозван" : current != null ? "Выполняет сбор" : online ? "Готов" : "Нет связи", current?.Label); }).ToArray();
         var groups = await db.SearchGroups.Where(item => item.OrganizationId == context.OrganizationId).OrderBy(item => item.SortOrder).ThenBy(item => item.Name)
             .Select(item => new SearchGroupView(item.Id, item.Name, item.SortOrder, item.Active, item.Version,
@@ -51,15 +51,16 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
         return new(agents, groups, searches, jobs, searches.Count(item => item.Enabled), jobs.Count(item => item.State == "Pending"),
             jobs.Count(item => item.State is "AwaitingManualAction" or "Failed" or "Interrupted"));
     }
-    public async Task<AgentCredential> CreateAgentAsync(Subject subject, string name, string correlationId, CancellationToken cancellationToken)
+    public async Task<AgentCredential> CreateAgentAsync(Subject subject, string name, bool canManageSearches, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await RequireAsync(subject, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         CollectorAgent agent = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
-            Name = OrganizationWorkspace.ValidateName(name), CredentialHash = CollectorGateway.Hash(token) };
+            Name = OrganizationWorkspace.ValidateName(name), CredentialHash = CollectorGateway.Hash(token), CanManageSearches = canManageSearches };
         db.CollectorAgents.Add(agent);
-        OrganizationWorkspace.AddAudit(db, context, subject, "CollectorAgentCreated", "CollectorAgent", agent.Id, new { agent.Name }, correlationId);
+        OrganizationWorkspace.AddAudit(db, context, subject, "CollectorAgentCreated", "CollectorAgent", agent.Id,
+            new { agent.Name, agent.CanManageSearches }, correlationId);
         await db.SaveChangesAsync(cancellationToken); return new(agent.Id, token);
     }
     public async Task RevokeAgentAsync(Subject subject, Guid agentId, long expectedVersion, string correlationId, CancellationToken cancellationToken)
@@ -71,6 +72,19 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
         if (agent.Version != expectedVersion) throw new DbUpdateConcurrencyException();
         agent.Enabled = false;
         OrganizationWorkspace.AddAudit(db, context, subject, "CollectorAgentRevoked", "CollectorAgent", agent.Id, new { agent.Enabled }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+    public async Task SetAgentSearchManagementAsync(Subject subject, Guid agentId, long expectedVersion, bool allowed,
+        string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await RequireAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        CollectorAgent agent = await db.CollectorAgents.SingleOrDefaultAsync(item => item.Id == agentId
+            && item.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
+        if (agent.Version != expectedVersion) throw new DbUpdateConcurrencyException();
+        agent.CanManageSearches = allowed;
+        OrganizationWorkspace.AddAudit(db, context, subject, "CollectorSearchManagementChanged", "CollectorAgent", agent.Id,
+            new { agent.Name, CanManageSearches = allowed }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
     }
     public async Task CreateSearchAsync(Subject subject, CreateSearch command, string correlationId, CancellationToken cancellationToken)

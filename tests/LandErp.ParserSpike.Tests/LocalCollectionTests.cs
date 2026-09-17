@@ -50,6 +50,46 @@ public sealed class LocalCollectionTests
     }
 
     [TestMethod]
+    public void LocalGroupsAndSchedulesStayLocalAndAdvanceDeterministically()
+    {
+        LocalStore store = new(Database());
+        LocalGroup group = store.SaveGroup("Другой проект", 10);
+        SearchLink link = store.SaveLink("Scheduled", Avito, selected: false);
+        DateTimeOffset beforeFirstRun = new(2026, 9, 17, 5, 59, 0, TimeSpan.Zero);
+        DateTimeOffset firstRun = new(2026, 9, 17, 6, 0, 0, TimeSpan.Zero);
+        LocalScheduledLink saved = store.SaveSchedule(link.Id, group.Id,
+            new(LocalScheduleKind.FixedTimes, FixedTimes: ["09:00", "18:00"]), now: beforeFirstRun);
+
+        Assert.AreEqual(group.Id, saved.GroupId);
+        Assert.AreEqual(firstRun, saved.NextRunAt);
+        Assert.AreEqual(1, store.DueLinks(firstRun).Length);
+        store.MarkScheduleDispatched(link.Id, saved.Revision, firstRun);
+        Assert.AreEqual(new DateTimeOffset(2026, 9, 17, 15, 0, 0, TimeSpan.Zero), store.ScheduledLinks().Single().NextRunAt);
+
+        LocalScheduledLink manual = store.SaveSchedule(link.Id, null, new(LocalScheduleKind.Manual), now: firstRun);
+        Assert.IsNull(manual.GroupId);
+        Assert.IsNull(manual.NextRunAt);
+        Assert.AreEqual("Другой проект", store.Groups().Single().Name);
+    }
+
+    [TestMethod]
+    public void ServerWorkLinkIsDurableButHiddenFromLocalLinksGroupsAndSchedules()
+    {
+        LocalStore store = new(Database());
+        SearchLink local = store.SaveLink("Локальная задача", Avito, selected: false);
+        LocalGroup group = store.SaveGroup("Только локально", 10);
+        store.SaveSchedule(local.Id, group.Id, new(LocalScheduleKind.Interval, IntervalMinutes: 60));
+
+        SearchLink server = store.EnsureServerWorkLink("Работа Server", Avito, SourceSite.Avito);
+        string batch = store.StartBatch(new(), force: true, onlyLinkId: server.Id);
+
+        Assert.IsTrue(server.Archived);
+        Assert.AreEqual(local.Id, store.Links().Single().Id);
+        Assert.AreEqual(group.Id, store.ScheduledLinks().Single().GroupId);
+        Assert.AreEqual(server.Id, store.Jobs(batch).Single().LinkId);
+    }
+
+    [TestMethod]
     public async Task TwentyLinksTenSelectedAreClaimedOnceAcrossSixWorkers()
     {
         LocalStore store = new(Database());
@@ -118,7 +158,7 @@ public sealed class LocalCollectionTests
         Assert.AreEqual("Legacy", modern.ReadListings(new()).Rows[0].Observation.Provenance);
         Assert.AreEqual(1, legacy.ReadListings().Length); Assert.IsNull(new LocalStore(path).MigrationBackup);
         using SqliteConnection db = new("Data Source=" + path); db.Open();
-        using SqliteCommand cmd = db.CreateCommand(); cmd.CommandText = "PRAGMA user_version=3"; cmd.ExecuteNonQuery();
+        using SqliteCommand cmd = db.CreateCommand(); cmd.CommandText = "PRAGMA user_version=4"; cmd.ExecuteNonQuery();
         Assert.ThrowsExactly<InvalidOperationException>(() => new LocalStore(path));
     }
 

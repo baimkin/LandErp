@@ -1,9 +1,12 @@
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using LandErp.ParserSpike.LocalCollection;
+using LandErp.ParserSpike.ServerIntegration;
+using LandErp.Collector.Contracts.V1;
 using Microsoft.Win32;
 
 namespace LandErp.ParserSpike.Desktop;
@@ -28,6 +31,16 @@ public partial class WorkspaceWindow : Window
         if (controller == null || serverCommand) return;
         serverCommand = true;
         try { await action(); ServerStatusText.Text = controller.Server?.Status ?? "Server подключён"; }
+        catch (ServerDeliveryException exception)
+        {
+            ServerStatusText.Text = exception.Code switch
+            {
+                CollectorErrorCodes.SearchPermissionRequired => "В ERP для этого Parser нужно включить право «Разрешить добавление».",
+                CollectorErrorCodes.AgentUnauthorized => "Подключение отозвано или ключ изменён. Вставьте новый код подключения из ERP.",
+                "SERVER_UNAVAILABLE" or "SERVER_TIMEOUT" => "Server сейчас недоступен. Локальные данные сохранены; повторите позже.",
+                _ => "Server отклонил действие: " + exception.Code
+            };
+        }
         catch (Exception) { ServerStatusText.Text = "Server действие не выполнено. Проверьте локальные настройки/HTTPS и повторите. Local mode и данные сохранены."; }
         finally { serverCommand = false; }
     }
@@ -42,8 +55,55 @@ public partial class WorkspaceWindow : Window
         }
         finally { serverCommand = false; }
     }
-    private async void StartServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () => { await controller!.ConnectServerAsync(); await controller.Server!.StartWorkAsync(CancellationToken.None); await RefreshAsync(); });
+    private async void StartServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () =>
+    {
+        if (controller!.Mode != ParserOperatingMode.Server) throw new InvalidOperationException("Переключите режим на «Через Server».");
+        await controller.ConnectServerAsync(); await controller.Server!.StartWorkAsync(CancellationToken.None); await RefreshAsync();
+    });
     private async void DeliverServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () => { await controller!.ConnectServerAsync(); await controller.Server!.DeliverAsync(CancellationToken.None); });
+    private async void RefreshServerWorkspaceClick(object sender, RoutedEventArgs e) => await ServerActionAsync(RefreshServerWorkspaceAsync);
+    private async Task RefreshServerWorkspaceAsync()
+    {
+        await controller!.ConnectServerAsync();
+        CollectorWorkspace workspace = await controller.Server!.ReadWorkspaceAsync(CancellationToken.None);
+        ServerGroupInput.ItemsSource = workspace.Groups.Where(item => item.Active).ToArray();
+        ServerSearchesGrid.ItemsSource = workspace.Searches;
+        ServerStatusText.Text = "Серверные группы и поиски обновлены.";
+    }
+    private async void AddServerGroupClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () =>
+    {
+        if (controller!.Mode != ParserOperatingMode.Server) throw new InvalidOperationException("Переключите режим на «Через Server».");
+        await controller.ConnectServerAsync();
+        await controller.Server!.CreateGroupAsync(new(Guid.CreateVersion7(), ServerGroupName.Text, 100), CancellationToken.None);
+        ServerGroupName.Clear(); await RefreshServerWorkspaceAsync();
+    });
+    private async void AddLinkToServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () =>
+    {
+        if (controller!.Mode != ParserOperatingMode.Server) throw new InvalidOperationException("Переключите режим на «Через Server».");
+        if (LinksGrid.SelectedItem is not SearchLink link) throw new InvalidOperationException("Сначала выберите одну локальную ссылку.");
+        CollectorGroupView? group = ServerGroupInput.SelectedItem as CollectorGroupView;
+        CollectorScheduleDefinition schedule = ServerSchedule();
+        MessageBoxResult confirmation = MessageBox.Show(this,
+            $"Добавить на Server только ссылку «{link.Label}»?\n\nЛокальная группа, расписание, история и результаты переданы не будут.",
+            "Добавление ссылки на Server", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (confirmation != MessageBoxResult.Yes) return;
+        await controller.ConnectServerAsync();
+        await controller.Server!.CreateSearchAsync(new(Guid.CreateVersion7(), link.Label,
+            Enum.Parse<ListingSource>(link.Source.ToString()), link.Url, controller.Store.Settings().MaxPages, group?.Id, schedule), CancellationToken.None);
+        await RefreshServerWorkspaceAsync();
+    });
+    private CollectorScheduleDefinition ServerSchedule()
+    {
+        CollectorScheduleKind kind = (CollectorScheduleKind)ServerScheduleKindInput.SelectedIndex;
+        string value = ServerScheduleValueInput.Text.Trim();
+        return kind switch
+        {
+            CollectorScheduleKind.Manual => new(kind),
+            CollectorScheduleKind.Interval when int.TryParse(value, out int minutes) => new(kind, IntervalMinutes: minutes),
+            CollectorScheduleKind.FixedTimes => new(kind, FixedTimes: value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)),
+            _ => throw new ArgumentException("Для интервала укажите количество минут.")
+        };
+    }
     public WorkspaceWindow() : this(null) { }
     public WorkspaceWindow(WorkspaceController? controller)
     {
@@ -55,7 +115,18 @@ public partial class WorkspaceWindow : Window
                 string root = WorkspaceController.WorkspaceRoot();
                 this.controller ??= new WorkspaceController(Path.Combine(root, "local-data", "spike-002.sqlite"), Path.Combine(root, "browser-profiles"));
                 ShowSettings(this.controller.Store.Settings());
+                ModeInput.SelectedIndex = this.controller.Mode == ParserOperatingMode.Local ? 0 : 1;
                 this.controller.Runner.ManualActionRequired += OnNotice;
+                if (this.controller.Mode == ParserOperatingMode.Server && this.controller.SavedServerConnection() != null)
+                {
+                    try
+                    {
+                        await this.controller.ConnectServerAsync();
+                        ServerStatusText.Text = "Сохранённое подключение восстановлено. Ожидаем задания Server.";
+                    }
+                    catch (Exception exception) when (exception is ServerDeliveryException or InvalidOperationException or HttpRequestException)
+                    { ServerStatusText.Text = "Автоподключение пока не выполнено. Проверьте Server или вставьте новый код подключения."; }
+                }
                 await RefreshAsync(); refresh.Start();
             }
             catch (Exception ex) when (ex is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
@@ -64,7 +135,8 @@ public partial class WorkspaceWindow : Window
         refresh.Tick += async (_, _) =>
         {
             await RefreshAsync(false);
-            if (!serverCommand && !serverTick && this.controller?.Server is { } server)
+            if (!serverCommand && this.controller is not null) await this.controller.TickLocalScheduleAsync(CancellationToken.None);
+            if (!serverCommand && !serverTick && this.controller?.Mode == ParserOperatingMode.Server && this.controller.Server is { } server)
             {
                 serverTick = true;
                 try { await server.TickAsync(CancellationToken.None); ServerStatusText.Text = server.Status; }
@@ -97,7 +169,14 @@ public partial class WorkspaceWindow : Window
         try
         {
             var data = await Task.Run(() => (Links: controller.Store.Links(), Jobs: controller.Store.Jobs()));
-            if (all) { LinksGrid.ItemsSource = data.Links; FilterLink.ItemsSource = data.Links; await FindAsync(); }
+            if (all)
+            {
+                LinksGrid.ItemsSource = data.Links; FilterLink.ItemsSource = data.Links;
+                LocalGroup[] groups = controller.Store.Groups();
+                LocalGroupsGrid.ItemsSource = groups; ScheduleGroupInput.ItemsSource = groups.Where(item => item.Active).ToArray();
+                ScheduleLinkInput.ItemsSource = data.Links; LocalSchedulesGrid.ItemsSource = controller.Store.ScheduledLinks();
+                await FindAsync();
+            }
             string? id = (JobsGrid.SelectedItem as CollectionJob)?.Id ?? selectedJob;
             JobsGrid.ItemsSource = data.Jobs;
             if (id is not null) JobsGrid.SelectedItem = data.Jobs.FirstOrDefault(x => x.Id == id);
@@ -191,8 +270,54 @@ public partial class WorkspaceWindow : Window
         await controller.OpenManualAsync(link);
         StatusText.Text = "Поиск открыт. Сбор начнётся по кнопке «Обработать отмеченные».";
     });
+    private void CaptureManualClick(object sender, RoutedEventArgs e)
+    {
+        if (controller?.CurrentManualSearch() is not { } current)
+        { StatusText.Text = "Сначала откройте сохранённый поиск и настройте фильтры или область в браузере."; return; }
+        UrlInput.Text = current.Url; SourceInput.SelectedIndex = current.Source == SourceSite.Avito ? 1 : 2;
+        StatusText.Text = "Текущая ссылка взята из браузера. Проверьте название, затем сохраните её.";
+    }
+    private async void AddLocalGroupClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    {
+        await Task.Run(() => controller!.Store.SaveGroup(LocalGroupName.Text, controller.Store.Groups().Length * 10));
+        LocalGroupName.Clear(); await RefreshAsync(); StatusText.Text = "Локальная группа сохранена только на этом компьютере.";
+    });
+    private async void SaveLocalScheduleClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    {
+        if (ScheduleLinkInput.SelectedItem is not SearchLink link) throw new InvalidOperationException("Выберите ссылку.");
+        string? groupId = (ScheduleGroupInput.SelectedItem as LocalGroup)?.Id;
+        LocalScheduleKind kind = (LocalScheduleKind)ScheduleKindInput.SelectedIndex;
+        string value = ScheduleValueInput.Text.Trim();
+        LocalSchedule schedule = kind switch
+        {
+            LocalScheduleKind.Manual => new(kind),
+            LocalScheduleKind.Interval when int.TryParse(value, out int minutes) => new(kind, IntervalMinutes: minutes),
+            LocalScheduleKind.FixedTimes => new(kind, FixedTimes: value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)),
+            _ => throw new ArgumentException("Для интервала укажите количество минут.")
+        };
+        await Task.Run(() => controller!.Store.SaveSchedule(link.Id, groupId, schedule));
+        await RefreshAsync(); StatusText.Text = "Локальное расписание сохранено. Оно работает только в режиме «Локально».";
+    });
+    private void ModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (controller == null || ModeInput.SelectedIndex < 0) return;
+        ParserOperatingMode requested = ModeInput.SelectedIndex == 0 ? ParserOperatingMode.Local : ParserOperatingMode.Server;
+        try
+        {
+            controller.SetMode(requested);
+            StatusText.Text = requested == ParserOperatingMode.Local
+                ? "Локальный режим: группы, расписания и результаты принадлежат этому компьютеру."
+                : "Режим Server: задания и расписания принадлежат LandErp Server.";
+        }
+        catch (InvalidOperationException exception)
+        {
+            ModeInput.SelectedIndex = controller.Mode == ParserOperatingMode.Local ? 0 : 1;
+            StatusText.Text = exception.Message;
+        }
+    }
     private async void StartClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
     {
+        if (controller!.Mode != ParserOperatingMode.Local) throw new InvalidOperationException("Переключите режим на «Локально».");
         if (starting || controller!.Runner.IsRunning) return;
         starting = true; StartButton.IsEnabled = false;
         try

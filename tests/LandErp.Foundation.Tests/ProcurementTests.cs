@@ -325,7 +325,7 @@ public sealed class ProcurementTests
         {
             CollectionAdministration administration = new(Factory, Access, TimeProvider.System);
             CollectorGateway gateway = new(Factory, TimeProvider.System);
-            AgentCredential agent = await administration.CreateAgentAsync(Owner, "Phase 1 Collector", "test", CancellationToken.None);
+            AgentCredential agent = await administration.CreateAgentAsync(Owner, "Phase 1 Collector", false, "test", CancellationToken.None);
             await gateway.RegisterAsync(agent, new(1, "phase1", [ListingSource.Avito, ListingSource.Cian]), CancellationToken.None);
             foreach (ListingSource source in new[] { ListingSource.Avito, ListingSource.Cian })
             {

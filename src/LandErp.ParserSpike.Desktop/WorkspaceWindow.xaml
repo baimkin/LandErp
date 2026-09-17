@@ -11,6 +11,8 @@
   <StackPanel DockPanel.Dock="Top">
    <TextBlock Text="Сохранённые поиски → очередь → результаты" FontSize="23" FontWeight="SemiBold" Margin="3,0,0,10"/>
    <WrapPanel>
+    <TextBlock Text="Режим" VerticalAlignment="Center" Margin="3"/>
+    <ComboBox x:Name="ModeInput" Width="150" Margin="3" SelectionChanged="ModeChanged"><ComboBoxItem Content="Локально"/><ComboBoxItem Content="Через Server"/></ComboBox>
     <Button x:Name="StartButton" Content="Обработать отмеченные" Click="StartClick"/>
     <CheckBox x:Name="ForceInput" Content="Начать заново, игнорируя свежесть" VerticalAlignment="Center" Margin="10"/>
     <Button Content="Пауза" Click="PauseClick"/><Button Content="Продолжить" Click="ResumeClick"/><Button Content="Остановить" Click="StopClick"/>
@@ -29,7 +31,7 @@
       <ComboBox x:Name="SourceInput" Grid.Column="2" SelectedIndex="0" Margin="3"><ComboBoxItem Content="Авто"/><ComboBoxItem Content="Avito"/><ComboBoxItem Content="Cian"/></ComboBox>
       <Button x:Name="AddButton" Grid.Column="3" Content="Добавить / сохранить" Click="AddClick"/>
      </Grid>
-     <WrapPanel Grid.Row="1"><Button Content="Отметить все" Click="SelectAllClick"/><Button Content="Снять отметки" Click="ClearSelectionClick"/><Button Content="Редактировать выбранную" Click="EditClick"/><Button Content="Включить / отключить" Click="EnableClick"/><Button Content="Архивировать" Click="ArchiveClick"/><Button Content="Открыть поиск вручную" Click="OpenClick"/></WrapPanel>
+     <WrapPanel Grid.Row="1"><Button Content="Отметить все" Click="SelectAllClick"/><Button Content="Снять отметки" Click="ClearSelectionClick"/><Button Content="Редактировать выбранную" Click="EditClick"/><Button Content="Включить / отключить" Click="EnableClick"/><Button Content="Архивировать" Click="ArchiveClick"/><Button Content="Открыть поиск вручную" Click="OpenClick"/><Button Content="Взять ссылку из браузера" Click="CaptureManualClick"/></WrapPanel>
      <DataGrid Grid.Row="2" x:Name="LinksGrid">
       <DataGrid.Columns>
        <DataGridTemplateColumn Header="Собирать" Width="85"><DataGridTemplateColumn.CellTemplate><DataTemplate><CheckBox IsChecked="{Binding Selected, Mode=OneWay}" Click="SelectClick" HorizontalAlignment="Center"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
@@ -41,6 +43,20 @@
       <DataGridTextColumn Header="Источник" Binding="{Binding Source}" Width="80"/><DataGridTextColumn Header="Состояние" Binding="{Binding DisplayState}" Width="150"/><DataGridTextColumn Header="Страница" Binding="{Binding Page}" Width="75"/><DataGridTextColumn Header="Предел" Binding="{Binding Limit}" Width="60"/><DataGridTextColumn Header="Вкладка" Binding="{Binding Owner}" Width="90"/><DataGridTextColumn Header="Причина" Binding="{Binding Reason}" Width="*"/>
      </DataGrid.Columns></DataGrid>
      <DataGrid Grid.Row="5" x:Name="JournalGrid" Margin="0,8,0,0"><DataGrid.Columns><DataGridTextColumn Header="Страница" Binding="{Binding Page}"/><DataGridTextColumn Header="Объявления" Binding="{Binding Count}"/><DataGridTextColumn Header="Новые" Binding="{Binding NewCount}"/><DataGridTextColumn Header="Повторные" Binding="{Binding RepeatCount}"/><DataGridCheckBoxColumn Header="Завершена" Binding="{Binding Completed}"/><DataGridTextColumn Header="Результат" Binding="{Binding Reason}" Width="*"/><DataGridTextColumn Header="Время" Binding="{Binding Time}" Width="200"/></DataGrid.Columns></DataGrid>
+    </Grid>
+   </TabItem>
+   <TabItem Header="Группы и расписания">
+    <Grid Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="2*"/></Grid.RowDefinitions>
+     <WrapPanel><TextBlock Text="Новая локальная группа" VerticalAlignment="Center"/><TextBox x:Name="LocalGroupName" Width="240"/><Button Content="Добавить группу" Click="AddLocalGroupClick"/></WrapPanel>
+     <DataGrid Grid.Row="1" x:Name="LocalGroupsGrid"><DataGrid.Columns><DataGridTextColumn Header="Группа" Binding="{Binding Name}" Width="*"/><DataGridTextColumn Header="Порядок" Binding="{Binding SortOrder}" Width="100"/><DataGridCheckBoxColumn Header="Активна" Binding="{Binding Active}" Width="90"/></DataGrid.Columns></DataGrid>
+     <WrapPanel Grid.Row="2" Margin="0,10,0,6">
+      <TextBlock Text="Ссылка" VerticalAlignment="Center"/><ComboBox x:Name="ScheduleLinkInput" Width="230" DisplayMemberPath="Label" Margin="3"/>
+      <TextBlock Text="Группа" VerticalAlignment="Center"/><ComboBox x:Name="ScheduleGroupInput" Width="190" DisplayMemberPath="Name" Margin="3"/>
+      <TextBlock Text="Расписание" VerticalAlignment="Center"/><ComboBox x:Name="ScheduleKindInput" Width="140" SelectedIndex="0" Margin="3"><ComboBoxItem Content="Вручную"/><ComboBoxItem Content="Интервал"/><ComboBoxItem Content="По времени"/></ComboBox>
+      <TextBox x:Name="ScheduleValueInput" Width="170" ToolTip="Интервал в минутах либо время через запятую: 09:00, 18:00"/>
+      <Button Content="Сохранить расписание" Click="SaveLocalScheduleClick"/>
+     </WrapPanel>
+     <DataGrid Grid.Row="3" x:Name="LocalSchedulesGrid"><DataGrid.Columns><DataGridTextColumn Header="Ссылка" Binding="{Binding Link.Label}" Width="220"/><DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="180"/><DataGridTextColumn Header="Тип" Binding="{Binding Schedule.Kind}" Width="110"/><DataGridTextColumn Header="Следующий запуск" Binding="{Binding NextRunAt}" Width="210"/><DataGridTextColumn Header="URL" Binding="{Binding Link.Url}" Width="*"/></DataGrid.Columns></DataGrid>
     </Grid>
    </TabItem>
    <TabItem Header="Сохранённые объявления">
@@ -69,12 +85,17 @@
     </StackPanel><DataGrid x:Name="SettingsGrid" IsReadOnly="False" CanUserSortColumns="False"><DataGrid.Columns><DataGridTextColumn Header="Параметр" Binding="{Binding Label}" IsReadOnly="True" Width="*"/><DataGridTextColumn Header="Значение" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="150"/><DataGridTextColumn Header="Допустимые значения" Binding="{Binding Bounds}" IsReadOnly="True" Width="200"/></DataGrid.Columns></DataGrid></DockPanel>
    </TabItem>
    <TabItem Header="LandErp Server">
-    <StackPanel Margin="16">
+    <Grid Margin="16"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <StackPanel>
      <TextBlock Text="Подключение к LandErp" FontSize="20" FontWeight="SemiBold"/>
      <TextBlock Margin="0,12" TextWrapping="Wrap" Text="Нажмите «Подключить сервер», введите адрес сервера, ID сборщика и ключ доступа из ERP. Настройки сохранятся локально. Самостоятельный сбор доступен независимо от сервера."/>
-     <WrapPanel><Button Content="Подключить сервер" Click="ConnectServerClick"/><Button Content="Получить задание и начать сбор" Click="StartServerClick"/><Button Content="Повторить доставку" Click="DeliverServerClick"/></WrapPanel>
+     <WrapPanel><Button Content="Подключить сервер" Click="ConnectServerClick"/><Button Content="Обновить группы" Click="RefreshServerWorkspaceClick"/><Button Content="Получить задание и начать сбор" Click="StartServerClick"/><Button Content="Повторить доставку" Click="DeliverServerClick"/></WrapPanel>
      <TextBlock x:Name="ServerStatusText" Margin="0,12" TextWrapping="Wrap" Text="Сервер не подключён. Нажмите «Подключить сервер» для настройки."/>
     </StackPanel>
+     <WrapPanel Grid.Row="1" Margin="0,8"><TextBlock Text="Новая серверная группа" VerticalAlignment="Center"/><TextBox x:Name="ServerGroupName" Width="230"/><Button Content="Создать на Server" Click="AddServerGroupClick"/></WrapPanel>
+     <WrapPanel Grid.Row="2" Margin="0,8"><TextBlock Text="Выберите локальную ссылку во вкладке «Ссылки и очередь», затем серверную группу" VerticalAlignment="Center"/><ComboBox x:Name="ServerGroupInput" Width="210" DisplayMemberPath="Name" Margin="6"/><ComboBox x:Name="ServerScheduleKindInput" Width="130" SelectedIndex="0" Margin="3"><ComboBoxItem Content="Вручную"/><ComboBoxItem Content="Интервал"/><ComboBoxItem Content="По времени"/></ComboBox><TextBox x:Name="ServerScheduleValueInput" Width="150" ToolTip="Минуты либо 09:00, 18:00"/><Button Content="Добавить выбранную ссылку на Server" Click="AddLinkToServerClick"/></WrapPanel>
+     <DataGrid Grid.Row="3" x:Name="ServerSearchesGrid"><DataGrid.Columns><DataGridTextColumn Header="Название" Binding="{Binding Label}" Width="200"/><DataGridTextColumn Header="Источник" Binding="{Binding Source}" Width="90"/><DataGridTextColumn Header="Расписание" Binding="{Binding Schedule.Kind}" Width="120"/><DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="*"/></DataGrid.Columns></DataGrid>
+    </Grid>
    </TabItem>
   </TabControl>
  </DockPanel>

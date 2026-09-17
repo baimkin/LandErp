@@ -8,7 +8,8 @@ namespace LandErp.ParserSpike.ServerIntegration;
 public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, ServerOutbox outbox, ServerAdapter adapter) : IAsyncDisposable
 {
     private readonly SemaphoreSlim commands = new(1, 1);
-    private DateTimeOffset lastHeartbeat;
+    private DateTimeOffset nextPoll;
+    private int emptyClaims;
     public string Status { get; private set; } = "Server mode подключён. Local mode доступен независимо.";
     public LocalServerWork? CurrentWork => outbox.ReadWork();
 
@@ -22,7 +23,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             LocalServerWork? old = outbox.ReadWork();
             if (old?.LocalJobId != null) PrepareResult(old);
             try { await outbox.FlushAsync(adapter, token).ConfigureAwait(false); }
-            catch (ServerDeliveryException exception) when (exception.Code == "WORK_OR_IDEMPOTENCY_CONFLICT")
+            catch (ServerDeliveryException exception) when (exception.Code == CollectorErrorCodes.LeaseExpiredOrReplaced)
             { /* Reclaim below; all local observations remain available. */ }
             if (outbox.Pending().Length == 0) { outbox.SaveWork(null); old = null; }
             CollectionWork? work = await adapter.ClaimAsync(token).ConfigureAwait(false);
@@ -36,26 +37,31 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
                 await outbox.FlushAsync(adapter, token).ConfigureAwait(false); outbox.SaveWork(null);
                 Status = "Сохранённый результат доставлен после обновления lease."; return;
             }
-            outbox.SaveWork(new(work, null));
-            SourceSite source = Enum.Parse<SourceSite>(work.Source.ToString());
-            string key = SearchUrls.Normalize(work.SearchUrl, source).Key;
-            SearchLink? link = store.Links().FirstOrDefault(item => item.Enabled && SearchUrls.Normalize(item.Url, item.Source).Key == key);
-            link ??= store.SaveLink(work.Label, work.SearchUrl, selected: false, manualSource: source);
-            CollectionSettings settings = store.Settings() with { MaxPages = work.MaxPages };
-            _ = runner.StartAsync(settings, force: true, onlyLinkId: link.Id);
-            CollectionJob local = store.Jobs(runner.BatchId).Single();
-            outbox.SaveWork(new(work, local.Id)); lastHeartbeat = DateTimeOffset.UtcNow;
-            Status = "Разрешённая работа запущена локально. CAPTCHA и авторизация — вручную.";
+            StartClaimedWork(work, token);
         }
         finally { commands.Release(); }
     }
     public async Task TickAsync(CancellationToken token)
     {
-        if (DateTimeOffset.UtcNow - lastHeartbeat < TimeSpan.FromSeconds(45) || !await commands.WaitAsync(0, token).ConfigureAwait(false)) return;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (now < nextPoll || !await commands.WaitAsync(0, token).ConfigureAwait(false)) return;
         try
         {
-            lastHeartbeat = DateTimeOffset.UtcNow;
             LocalServerWork? work = outbox.ReadWork();
+            if (work == null && outbox.Pending().Length == 0 && !runner.IsRunning)
+            {
+                await adapter.RegisterAsync(token).ConfigureAwait(false);
+                CollectionWork? claimed = await adapter.ClaimAsync(token).ConfigureAwait(false);
+                if (claimed == null)
+                {
+                    emptyClaims = Math.Min(emptyClaims + 1, 5);
+                    int delay = Math.Min(120, 5 * (1 << emptyClaims)) + Random.Shared.Next(0, 5);
+                    nextPoll = now.AddSeconds(delay);
+                    Status = "Подключено. Ожидаем новое задание."; return;
+                }
+                emptyClaims = 0;
+                StartClaimedWork(claimed, token); return;
+            }
             if (work?.LocalJobId != null && !runner.IsRunning)
             {
                 PrepareResult(work); await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
@@ -69,11 +75,44 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
                         : job.Reason.Contains("Authentication", StringComparison.OrdinalIgnoreCase) ? CollectionOutcome.AuthenticationRequired
                         : job.Reason.Contains("RateLimited", StringComparison.OrdinalIgnoreCase) ? CollectionOutcome.RateLimited : CollectionOutcome.Unknown
                     : null;
-                await adapter.HeartbeatAsync(work == null ? new() : new(work.Work.JobId, work.Work.LeaseId, status), token).ConfigureAwait(false);
+                SourceRuntimeState? sourceState = job == null ? null : job.State == JobState.AwaitingManualAction
+                    ? status switch
+                    {
+                        CollectionOutcome.Captcha => SourceRuntimeState.Captcha,
+                        CollectionOutcome.AuthenticationRequired => SourceRuntimeState.AuthenticationRequired,
+                        CollectionOutcome.RateLimited => SourceRuntimeState.RateLimited,
+                        _ => SourceRuntimeState.Unknown
+                    }
+                    : SourceRuntimeState.Ready;
+                PageJournal[] journal = job == null ? [] : store.Journal(job.Id);
+                CollectionProgress? progress = job == null ? null : new(job.Page, job.Limit, journal.Sum(item => item.Count), null,
+                    job.State == JobState.AwaitingManualAction ? CollectionProgressPhase.WaitingForUser : CollectionProgressPhase.ReadingPage,
+                    journal.Length == 0 ? null : journal.Max(item => item.Time));
+                AgentRuntimeState runtime = work == null ? AgentRuntimeState.Idle
+                    : job?.State == JobState.AwaitingManualAction ? AgentRuntimeState.AwaitingManualAction : AgentRuntimeState.Parsing;
+                await adapter.HeartbeatAsync(work == null ? new(RuntimeState: runtime)
+                    : new(work.Work.JobId, work.Work.LeaseId, status, runtime, sourceState, progress), token).ConfigureAwait(false);
+                nextPoll = now.AddSeconds(45);
             }
         }
-        catch (ServerDeliveryException exception) { Status = exception.Message + ". Локальный сбор и результаты сохранены. Повторите доставку/получение работы."; }
+        catch (ServerDeliveryException exception)
+        {
+            nextPoll = now.AddSeconds(15 + Random.Shared.Next(0, 6));
+            Status = exception.Message + ". Локальный сбор и результаты сохранены. Повторите доставку/получение работы.";
+        }
         finally { commands.Release(); }
+    }
+    private void StartClaimedWork(CollectionWork work, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        outbox.SaveWork(new(work, null));
+        SourceSite source = Enum.Parse<SourceSite>(work.Source.ToString());
+        SearchLink link = store.EnsureServerWorkLink(work.Label, work.SearchUrl, source);
+        CollectionSettings settings = store.Settings() with { MaxPages = work.MaxPages };
+        _ = runner.StartAsync(settings, force: true, onlyLinkId: link.Id);
+        CollectionJob local = store.Jobs(runner.BatchId).Single();
+        outbox.SaveWork(new(work, local.Id)); nextPoll = DateTimeOffset.UtcNow.AddSeconds(45);
+        Status = "Разрешённая работа запущена локально. CAPTCHA и авторизация — вручную.";
     }
     public async Task DeliverAsync(CancellationToken token)
     {
@@ -86,6 +125,24 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             if (!runner.IsRunning) outbox.SaveWork(null);
             Status = "Очередь доставки обработана. Локальные данные сохранены.";
         }
+        finally { commands.Release(); }
+    }
+    public async Task<CollectorWorkspace> ReadWorkspaceAsync(CancellationToken token)
+    {
+        await commands.WaitAsync(token).ConfigureAwait(false);
+        try { return await adapter.ReadWorkspaceAsync(token).ConfigureAwait(false); }
+        finally { commands.Release(); }
+    }
+    public async Task<CollectorGroupView> CreateGroupAsync(CreateCollectorGroup command, CancellationToken token)
+    {
+        await commands.WaitAsync(token).ConfigureAwait(false);
+        try { return await adapter.CreateGroupAsync(command, token).ConfigureAwait(false); }
+        finally { commands.Release(); }
+    }
+    public async Task<CollectorSearchView> CreateSearchAsync(CreateCollectorSearch command, CancellationToken token)
+    {
+        await commands.WaitAsync(token).ConfigureAwait(false);
+        try { return await adapter.CreateSearchAsync(command, token).ConfigureAwait(false); }
         finally { commands.Release(); }
     }
     private void PrepareResult(LocalServerWork work)

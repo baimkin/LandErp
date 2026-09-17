@@ -10,6 +10,42 @@ public enum JobState { Pending, Running, PausedByUser, AwaitingManualAction, Fai
 public enum PageKind { SearchResults, Captcha, AuthenticationRequired, RateLimited, SourceError, Unknown }
 public enum NextKind { Next, End, UnknownInvalid }
 public enum ErrorPolicy { Continue, PauseSource }
+public enum LocalScheduleKind { Manual, Interval, FixedTimes }
+
+public sealed record LocalGroup(string Id, string Name, int SortOrder, bool Active, long Revision);
+
+public sealed record LocalSchedule(
+    LocalScheduleKind Kind,
+    int? IntervalMinutes = null,
+    string[]? FixedTimes = null,
+    string TimeZoneId = "Europe/Moscow",
+    bool Enabled = true)
+{
+    public void Validate()
+    {
+        if (!Enum.IsDefined(Kind)) throw new ArgumentOutOfRangeException(nameof(Kind));
+        if (string.IsNullOrWhiteSpace(TimeZoneId) || TimeZoneId.Length > 100) throw new ArgumentException("LOCAL_SCHEDULE_TIME_ZONE_INVALID");
+        _ = TimeZoneInfo.FindSystemTimeZoneById(TimeZoneId);
+        if (Kind == LocalScheduleKind.Interval && IntervalMinutes is < 5 or > 10080)
+            throw new ArgumentOutOfRangeException(nameof(IntervalMinutes));
+        if (Kind != LocalScheduleKind.Interval && IntervalMinutes != null) throw new ArgumentException("LOCAL_SCHEDULE_INTERVAL_UNEXPECTED");
+        string[] times = FixedTimes ?? [];
+        if (Kind == LocalScheduleKind.FixedTimes && (times.Length is < 1 or > 12
+            || times.Distinct(StringComparer.Ordinal).Count() != times.Length
+            || times.Any(value => !TimeOnly.TryParseExact(value, "HH:mm", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out _))))
+            throw new ArgumentException("LOCAL_SCHEDULE_FIXED_TIMES_INVALID");
+        if (Kind != LocalScheduleKind.FixedTimes && times.Length != 0) throw new ArgumentException("LOCAL_SCHEDULE_FIXED_TIMES_UNEXPECTED");
+    }
+}
+
+public sealed record LocalScheduledLink(
+    SearchLink Link,
+    string? GroupId,
+    string GroupName,
+    LocalSchedule Schedule,
+    DateTimeOffset? NextRunAt,
+    long Revision);
 
 /// <summary>Text observations retain absence separately from legacy fields whose presence was never recorded.</summary>
 public sealed record TextValue(Presence Presence, string? Raw)

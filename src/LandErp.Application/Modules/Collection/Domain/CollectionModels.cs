@@ -11,6 +11,7 @@ public sealed class CollectorAgent
     public bool Enabled { get; set; } = true;
     public string VersionText { get; set; } = "";
     public string Capabilities { get; set; } = "";
+    public bool CanManageSearches { get; set; }
     public DateTimeOffset? RegisteredAt { get; set; }
     public DateTimeOffset? LastHeartbeatAt { get; set; }
     public long Version { get; set; } = 1;

@@ -147,10 +147,70 @@ public sealed class CollectionPoolTests
         }
     }
 
+    [TestMethod]
+    public async Task ParserSearchManagementRequiresPermissionIsIdempotentAndClaimResumesCurrentLease()
+    {
+        await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
+        await using (LandErpDbContext migrator = sandbox.Context()) await migrator.Database.MigrateAsync();
+        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
+        Guid ownerId = await IdentityOrganizationTests.BootstrapAsync(bootstrap, "owner-parser-workspace@test.invalid", "Parser workspace");
+        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerId);
+        await sandbox.GrantRuntimeAsync();
+        await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
+        IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
+        TestClock clock = new();
+        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        Subject owner = new(ownerId, true);
+        AgentCredential restricted = await administration.CreateAgentAsync(owner, "Restricted parser", false, "parser-workspace", CancellationToken.None);
+        AgentCredential manager = await administration.CreateAgentAsync(owner, "Managing parser", true, "parser-workspace", CancellationToken.None);
+        CollectorGateway gateway = new(factory, clock);
+        await gateway.RegisterAsync(restricted, new(1, "universal", [ListingSource.Avito]), CancellationToken.None);
+        await gateway.RegisterAsync(manager, new(1, "universal", [ListingSource.Avito]), CancellationToken.None);
+
+        CollectorProtocolException denied = await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
+            gateway.ReadWorkspaceAsync(restricted, CancellationToken.None));
+        Assert.AreEqual(CollectorErrorCodes.SearchPermissionRequired, denied.Code);
+
+        Guid groupCommand = Guid.CreateVersion7();
+        CollectorGroupView group = await gateway.CreateGroupAsync(manager,
+            new(groupCommand, "Из Parser", 30), CancellationToken.None);
+        CollectorGroupView replayedGroup = await gateway.CreateGroupAsync(manager,
+            new(groupCommand, "Из Parser", 30), CancellationToken.None);
+        Assert.AreEqual(group.Id, replayedGroup.Id);
+
+        Guid searchCommand = Guid.CreateVersion7();
+        CreateCollectorSearch createSearch = new(searchCommand, "Карта из Parser", ListingSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 3, group.Id,
+            new(CollectorScheduleKind.Manual));
+        CollectorSearchView search = await gateway.CreateSearchAsync(manager, createSearch, CancellationToken.None);
+        CollectorSearchView replayedSearch = await gateway.CreateSearchAsync(manager, createSearch, CancellationToken.None);
+        Assert.AreEqual(search.Id, replayedSearch.Id);
+        CollectorWorkspace workspace = await gateway.ReadWorkspaceAsync(manager, CancellationToken.None);
+        Assert.AreEqual(1, workspace.Groups.Length);
+        Assert.AreEqual(1, workspace.Searches.Length);
+
+        await administration.EnqueueAsync(owner, search.Id, "parser-workspace", CancellationToken.None);
+        CollectionWork firstClaim = (await gateway.ClaimAsync(manager, CancellationToken.None))!;
+        CollectionWork resumedClaim = (await gateway.ClaimAsync(manager, CancellationToken.None))!;
+        Assert.AreEqual(firstClaim.JobId, resumedClaim.JobId);
+        Assert.AreEqual(firstClaim.LeaseId, resumedClaim.LeaseId);
+
+        await gateway.HeartbeatAsync(manager, new(firstClaim.JobId, firstClaim.LeaseId,
+            RuntimeState: AgentRuntimeState.AwaitingManualAction, SourceState: SourceRuntimeState.Captcha), CancellationToken.None);
+        await gateway.HeartbeatAsync(manager, new(firstClaim.JobId, firstClaim.LeaseId,
+            RuntimeState: AgentRuntimeState.Parsing, SourceState: SourceRuntimeState.Ready), CancellationToken.None);
+
+        await using LandErpDbContext db = await factory.CreateDbContextAsync();
+        Assert.AreEqual(SourceRuntimeState.Ready.ToString(),
+            await db.CollectionJobs.Where(item => item.Id == firstClaim.JobId).Select(item => item.ResultCode).SingleAsync());
+        Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.Action == "CollectionSearchGroupCreatedByParser"));
+        Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.Action == "CollectionSearchCreatedByParser"));
+    }
+
     private static async Task<AgentCredential> CreateRegisteredAsync(CollectionAdministration administration,
         IDbContextFactory<LandErpDbContext> factory, TimeProvider clock, Subject owner, string name, ListingSource source)
     {
-        AgentCredential credential = await administration.CreateAgentAsync(owner, name, "pool", CancellationToken.None);
+        AgentCredential credential = await administration.CreateAgentAsync(owner, name, false, "pool", CancellationToken.None);
         CollectorGateway gateway = new(factory, clock);
         await gateway.RegisterAsync(credential, new(1, "phase2a", [source]), CancellationToken.None);
         return credential;

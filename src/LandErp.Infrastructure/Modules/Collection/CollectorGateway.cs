@@ -1,9 +1,12 @@
 using LandErp.Application.Foundation;
 using LandErp.Application.Modules.Catalog.Domain;
+using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Collection.Contracts;
 using LandErp.Application.Modules.Collection.Domain;
+using LandErp.Application.Modules.IdentityAccess.Domain;
 using LandErp.Collector.Contracts.V1;
 using LandErp.Infrastructure.Modules.Catalog;
+using LandErp.Infrastructure.Modules.Organization;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
@@ -15,6 +18,80 @@ namespace LandErp.Infrastructure.Modules.Collection;
 /// <summary>Short database transactions serialize each agent and fence expired work. No browser dependencies.</summary>
 public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory, TimeProvider time) : ICollectorGateway
 {
+    public async Task<CollectorWorkspace> ReadWorkspaceAsync(AgentCredential credential, CancellationToken cancellationToken)
+    {
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        CollectorAgent agent = await AuthenticateAsync(db, credential, cancellationToken);
+        if (!agent.CanManageSearches) throw new CollectorProtocolException(CollectorErrorCodes.SearchPermissionRequired);
+        CollectorGroupView[] groups = await db.SearchGroups.Where(item => item.OrganizationId == agent.OrganizationId)
+            .OrderBy(item => item.SortOrder).ThenBy(item => item.Name)
+            .Select(item => new CollectorGroupView(item.Id, item.Name, item.SortOrder, item.Active, item.Version))
+            .ToArrayAsync(cancellationToken);
+        SearchConfiguration[] values = await db.SearchConfigurations.Where(item => item.OrganizationId == agent.OrganizationId)
+            .OrderBy(item => item.Label).ToArrayAsync(cancellationToken);
+        CollectorSearchView[] searches = values.Select(SearchView).ToArray();
+        return new(groups, searches, [CollectorFeatures.SearchRead, CollectorFeatures.SearchManage]);
+    }
+
+    public async Task<CollectorGroupView> CreateGroupAsync(AgentCredential credential, CreateCollectorGroup command, CancellationToken cancellationToken)
+    {
+        if (command.CommandId == Guid.Empty || command.SortOrder is < 0 or > 10000) throw new ArgumentException("COLLECTOR_GROUP_INVALID");
+        string name = OrganizationWorkspace.ValidateName(command.Name);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        CollectorAgent agent = await AuthenticateAsync(db, credential, cancellationToken);
+        if (!agent.CanManageSearches) throw new CollectorProtocolException(CollectorErrorCodes.SearchPermissionRequired);
+        SearchGroup? existing = await db.SearchGroups.SingleOrDefaultAsync(item => item.Id == command.CommandId, cancellationToken);
+        if (existing != null)
+        {
+            if (existing.OrganizationId != agent.OrganizationId || existing.Name != name || existing.SortOrder != command.SortOrder)
+                throw new CollectorProtocolException(CollectorErrorCodes.IdempotencyConflict);
+            await transaction.CommitAsync(cancellationToken);
+            return new(existing.Id, existing.Name, existing.SortOrder, existing.Active, existing.Version);
+        }
+        SearchGroup group = new() { Id = command.CommandId, OrganizationId = agent.OrganizationId, Name = name,
+            SortOrder = command.SortOrder, RecordedAt = time.GetUtcNow() };
+        db.SearchGroups.Add(group);
+        db.SearchGroupMarketSettings.Add(new() { Id = DataConventions.NewId(), OrganizationId = agent.OrganizationId,
+            SearchGroupId = group.Id, PeriodDays = 30, AllowedPropertyTypes = Enum.GetNames<IncomingLandType>() });
+        AddMachineAudit(db, agent, "CollectionSearchGroupCreatedByParser", "SearchGroup", group.Id,
+            new { group.Name, group.SortOrder }, command.CommandId);
+        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return new(group.Id, group.Name, group.SortOrder, group.Active, group.Version);
+    }
+
+    public async Task<CollectorSearchView> CreateSearchAsync(AgentCredential credential, CreateCollectorSearch command, CancellationToken cancellationToken)
+    {
+        if (command.CommandId == Guid.Empty || command.MaxPages is < 1 or > 100 || command.Url.Length > 2000
+            || !ContractRules.IsSourceUrl(command.Url, command.Source)) throw new ArgumentException("COLLECTOR_SEARCH_INVALID");
+        string label = OrganizationWorkspace.ValidateName(command.Label);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        CollectorAgent agent = await AuthenticateAsync(db, credential, cancellationToken);
+        if (!agent.CanManageSearches) throw new CollectorProtocolException(CollectorErrorCodes.SearchPermissionRequired);
+        SearchConfiguration? existing = await db.SearchConfigurations.SingleOrDefaultAsync(item => item.Id == command.CommandId, cancellationToken);
+        if (existing != null)
+        {
+            if (existing.OrganizationId != agent.OrganizationId || existing.Label != label || existing.Url != command.Url)
+                throw new CollectorProtocolException(CollectorErrorCodes.IdempotencyConflict);
+            await transaction.CommitAsync(cancellationToken); return SearchView(existing);
+        }
+        if (command.GroupId != null && !await db.SearchGroups.AnyAsync(item => item.Id == command.GroupId
+            && item.OrganizationId == agent.OrganizationId && item.Active, cancellationToken))
+            throw new CollectorProtocolException(CollectorErrorCodes.WorkNotAllowed);
+        string zone = await db.Organizations.Where(item => item.Id == agent.OrganizationId)
+            .Select(item => item.BusinessTimeZone).SingleAsync(cancellationToken);
+        SearchConfiguration search = new() { Id = command.CommandId, OrganizationId = agent.OrganizationId,
+            Label = label, Source = MapSource(command.Source), Url = command.Url, MaxPages = command.MaxPages,
+            SearchGroupId = command.GroupId };
+        CollectionScheduleRules.Apply(search, Schedule(command.Schedule), time.GetUtcNow(), zone);
+        db.SearchConfigurations.Add(search);
+        AddMachineAudit(db, agent, "CollectionSearchCreatedByParser", "SearchConfiguration", search.Id,
+            new { search.Label, search.Source, search.MaxPages, search.SearchGroupId, search.ScheduleKind }, command.CommandId);
+        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return SearchView(search);
+    }
+
     public async Task RegisterAsync(AgentCredential credential, AgentRegistration registration, CancellationToken cancellationToken)
     {
         if (registration.ContractVersion != 1 || string.IsNullOrWhiteSpace(registration.Version) || registration.Version.Length > 32
@@ -32,7 +109,12 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
 
     public async Task HeartbeatAsync(AgentCredential credential, AgentHeartbeat heartbeat, CancellationToken cancellationToken)
     {
-        if (heartbeat.SourceStatus != null && !Enum.IsDefined(heartbeat.SourceStatus.Value)) throw new ArgumentException("SOURCE_STATUS_INVALID");
+        if (heartbeat.SourceStatus != null && !Enum.IsDefined(heartbeat.SourceStatus.Value)
+            || heartbeat.RuntimeState != null && !Enum.IsDefined(heartbeat.RuntimeState.Value)
+            || heartbeat.SourceState != null && !Enum.IsDefined(heartbeat.SourceState.Value)
+            || heartbeat.Progress is { } progress && (!Enum.IsDefined(progress.Phase) || progress.Page is < 0
+                || progress.MaxPages is < 1 or > 100 || progress.ProcessedCount < 0 || progress.TotalCount < 0))
+            throw new ArgumentException("HEARTBEAT_STATE_INVALID");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         CollectorAgent agent = await AuthenticateAsync(db, credential, cancellationToken);
@@ -42,7 +124,8 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             ServerCollectionJob job = await LockedJobAsync(db, heartbeat.JobId ?? Guid.Empty, agent.Id, cancellationToken);
             EnsureLease(job, heartbeat.LeaseId ?? Guid.Empty);
             job.LeaseExpiresAt = time.GetUtcNow().AddMinutes(3);
-            if (heartbeat.SourceStatus != null) job.ResultCode = heartbeat.SourceStatus.Value.ToString();
+            if (heartbeat.SourceState != null) job.ResultCode = heartbeat.SourceState.Value.ToString();
+            else if (heartbeat.SourceStatus != null) job.ResultCode = heartbeat.SourceStatus.Value.ToString();
         }
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
     }
@@ -54,6 +137,18 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         CollectorAgent agent = await AuthenticateAsync(db, credential, cancellationToken);
         if (agent.RegisteredAt == null) throw new CollectorProtocolException("REGISTRATION_REQUIRED");
         DateTimeOffset now = time.GetUtcNow();
+        List<ServerCollectionJob> currentJobs = await db.CollectionJobs
+            .Where(item => item.AgentId == agent.Id && item.State == CollectionJobState.Leased && item.LeaseExpiresAt > now)
+            .OrderBy(item => item.CreatedAt).ToListAsync(cancellationToken);
+        if (currentJobs.Count > 1) throw new CollectorProtocolException(CollectorErrorCodes.AgentBusy);
+        if (currentJobs.Count == 1)
+        {
+            ServerCollectionJob current = currentJobs[0];
+            SearchConfiguration currentSearch = await db.SearchConfigurations.SingleAsync(item => item.Id == current.SearchId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return new(current.Id, current.LeaseId!.Value, current.LeaseExpiresAt!.Value, CollectorSource(currentSearch.Source),
+                currentSearch.Url, currentSearch.MaxPages, currentSearch.Label);
+        }
         string[] capabilities = agent.Capabilities.Split(',', StringSplitOptions.RemoveEmptyEntries);
         // Shared work is assigned only here. SKIP LOCKED prevents two compatible agents leasing the same job.
         var jobs = await db.CollectionJobs.FromSqlInterpolated($"""
@@ -224,6 +319,21 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         return agent;
     }
     internal static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+    private void AddMachineAudit(LandErpDbContext db, CollectorAgent agent, string action, string type, Guid objectId,
+        object changes, Guid commandId) => db.AuditEvents.Add(new AuditEvent
+        {
+            Id = DataConventions.NewId(), OrganizationId = agent.OrganizationId, ActorId = agent.Id,
+            Action = action, ObjectType = type, ObjectId = objectId,
+            Changes = JsonSerializer.Serialize(changes), CorrelationId = commandId.ToString(), RecordedAt = time.GetUtcNow()
+        });
+
+    private static CollectorSearchView SearchView(SearchConfiguration search) => new(search.Id, search.Label,
+        CollectorSource(search.Source), search.Url, search.MaxPages, search.SearchGroupId,
+        new((CollectorScheduleKind)search.ScheduleKind, search.IntervalMinutes,
+            JsonSerializer.Deserialize<string[]>(search.FixedTimesJson) ?? []), search.Enabled, search.Version);
+    private static CollectionSchedule Schedule(CollectorScheduleDefinition schedule) => new(
+        (CollectionScheduleKind)schedule.Kind, schedule.IntervalMinutes, schedule.FixedTimes);
 
     private static CatalogSource MapSource(ListingSource source) => source switch
     {

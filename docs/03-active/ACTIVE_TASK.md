@@ -1,5 +1,7 @@
 # Активная задача LandErp
 
+> **Активная работа с 17 сентября 2026 года:** Universal Parser по прямому запросу владельца. Канонический bounded plan: [`PARSER_UNIVERSAL_PRODUCT_PLAN.md`](PARSER_UNIVERSAL_PRODUCT_PLAN.md), протокол: [`COLLECTOR_SERVER_PROTOCOL_V1.md`](../05-collection/COLLECTOR_SERVER_PROTOCOL_V1.md), ветка: `codex/universal-parser`. Разрешены изменения самостоятельного Parser и необходимых Collector Server contracts/endpoints по checkpoints плана. Локальные группы и история автоматически на Server не переносятся; допускается только явное добавление одной выбранной ссылки с выбором server group и подтверждением. Production apply, live Avito/Cian, merge/rebase/force-push не разрешены. Старый указатель Stage 1 ниже сохраняется как исторический контекст и не ограничивает эту отдельно утверждённую работу.
+
 > **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–7 завершены и приняты владельцем**; Phase 8 `Operational Overview` реализована и ожидает приёмки владельцем, evidence: [`STAGE1_PHASE8_REPORT.md`](reports/STAGE1_PHASE8_REPORT.md). Рабочая ветка: `codex/stage1-phase8-overview`. Визуальный authority: [`landerp_overview_v1_4_market_per_group_production_fonts.html`](../14-ui-kit/prototypes/landerp_overview_v1_4_market_per_group_production_fonts.html). Phase 9 не начинать. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
 
 ## P0 — обязательная следующая задача перед дальнейшим развитием

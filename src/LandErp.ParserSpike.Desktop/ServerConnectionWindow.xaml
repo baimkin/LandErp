@@ -6,6 +6,9 @@
  <StackPanel Margin="24">
   <TextBlock Text="Подключение к серверу" FontSize="22" FontWeight="SemiBold" Foreground="#10223a"/>
   <TextBlock Margin="0,8,0,18" TextWrapping="Wrap" Text="Введите данные сборщика, созданного в ERP. После успешного подключения настройки сохранятся на этом компьютере."/>
+  <Label Target="{Binding ElementName=ConnectionCodeBox}" Content="Код подключения"/>
+  <TextBox x:Name="ConnectionCodeBox" AutomationProperties.Name="Код подключения" Padding="8" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="70"/>
+  <TextBlock Margin="0,6,0,12" TextWrapping="Wrap" Foreground="#63758b" Text="Вставьте один код из ERP. Поля ниже остаются для диагностики и старых подключений."/>
   <Label Target="{Binding ElementName=AddressBox}" Content="Адрес сервера"/>
   <TextBox x:Name="AddressBox" AutomationProperties.Name="Адрес сервера" Padding="8" Text="https://localhost:7240/"/>
   <Label Target="{Binding ElementName=AgentBox}" Content="ID сборщика" Margin="0,8,0,0"/>

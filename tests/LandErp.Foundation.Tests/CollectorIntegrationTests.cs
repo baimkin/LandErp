@@ -31,7 +31,7 @@ public sealed class CollectorIntegrationTests
         IAccessControl access = services.GetRequiredService<IAccessControl>();
         CollectionAdministration admin = new(factory,access,TimeProvider.System);
         Subject owner = new(userId,true);
-        AgentCredential credential = await admin.CreateAgentAsync(owner,"Control Collector","test",CancellationToken.None);
+        AgentCredential credential = await admin.CreateAgentAsync(owner,"Control Collector",false,"test",CancellationToken.None);
         await admin.CreateSearchAsync(owner,new("Control Avito",LandErp.Application.Modules.Catalog.Domain.CatalogSource.Avito,"https://www.avito.ru/moskva/zemelnye_uchastki",1),"test",CancellationToken.None);
         Guid searchId=(await admin.ReadAsync(owner,CancellationToken.None)).Searches.Single().Id;
         await admin.EnqueueAsync(owner,searchId,"test",CancellationToken.None);
@@ -62,7 +62,7 @@ public sealed class CollectorIntegrationTests
             Assert.IsNotNull(coordinator.CurrentWork); CollectionWork work=coordinator.CurrentWork.Work;
             await runner.Completion!;
             Assert.AreEqual(1L,local.ReadListings(new()).Total);
-            Assert.IsFalse(local.Links().Single().Selected,"Server work must not select Local mode links.");
+            Assert.AreEqual(0, local.Links().Length, "Server work links must stay hidden from the Local workspace.");
             await coordinator.DeliverAsync(CancellationToken.None);
             Assert.AreEqual(0,outbox.Pending().Length);
             ListingData data=ServerCoordinator.Map(local.ReadListings(new()).Rows.Single().Observation);

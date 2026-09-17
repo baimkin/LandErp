@@ -21,8 +21,8 @@ public sealed class LocalStore : IJobSource, IResultSink
         connectionString = new SqliteConnectionStringBuilder { DataSource = Path, Pooling = false, DefaultTimeout = 10 }.ToString();
         using SqliteConnection db = Open();
         long version = Convert.ToInt64(Scalar(db, null, "PRAGMA user_version"), CultureInfo.InvariantCulture);
-        if (version > 2) throw new InvalidOperationException("DATABASE_VERSION_NEWER: база создана более новой версией приложения.");
-        if (version == 2) return;
+        if (version > 3) throw new InvalidOperationException("DATABASE_VERSION_NEWER: база создана более новой версией приложения.");
+        if (version == 3) return;
         if (Convert.ToInt64(Scalar(db, null, "SELECT count(*) FROM sqlite_master WHERE type='table'"), CultureInfo.InvariantCulture) > 0)
         {
             MigrationBackup = Path + ".backup-" + DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture) + ".sqlite";
@@ -47,7 +47,13 @@ public sealed class LocalStore : IJobSource, IResultSink
                 CREATE INDEX local_observation_job ON local_observations(job_id,source,external_id);
                 """);
             CreateMapTables(db, tx);
-            Exec(db, tx, "PRAGMA user_version=2"); tx.Commit(); return;
+            CreateWorkspaceTables(db, tx);
+            Exec(db, tx, "PRAGMA user_version=3"); tx.Commit(); return;
+        }
+        if (version == 2)
+        {
+            CreateWorkspaceTables(db, tx);
+            Exec(db, tx, "PRAGMA user_version=3"); tx.Commit(); return;
         }
         Exec(db, tx, """
             CREATE TABLE local_settings (id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -77,7 +83,8 @@ public sealed class LocalStore : IJobSource, IResultSink
             """);
         ImportLegacy(db, tx);
         CreateMapTables(db, tx);
-        Exec(db, tx, "PRAGMA user_version=2");
+        CreateWorkspaceTables(db, tx);
+        Exec(db, tx, "PRAGMA user_version=3");
         tx.Commit();
         Exec(db, null, "PRAGMA journal_mode=WAL");
     }
@@ -91,6 +98,22 @@ public sealed class LocalStore : IJobSource, IResultSink
             INSERT OR REPLACE INTO local_sightings SELECT job_id,link_id,pass_id,page,source,external_id,id FROM local_observations ORDER BY observed_at,rowid;
             CREATE INDEX local_sighting_link ON local_sightings(link_id,source,external_id);
             CREATE INDEX local_sighting_pass ON local_sightings(pass_id,page);
+            """);
+    }
+
+    private static void CreateWorkspaceTables(SqliteConnection db, SqliteTransaction tx)
+    {
+        Exec(db, tx, """
+            CREATE TABLE local_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,sort_order INTEGER NOT NULL,
+              active INTEGER NOT NULL,revision INTEGER NOT NULL);
+            CREATE UNIQUE INDEX local_group_name ON local_groups(name COLLATE NOCASE);
+            CREATE TABLE local_link_schedules(link_id TEXT PRIMARY KEY,group_id TEXT,kind TEXT NOT NULL,
+              interval_minutes INTEGER,fixed_times TEXT NOT NULL,time_zone_id TEXT NOT NULL,enabled INTEGER NOT NULL,
+              next_run_at TEXT,revision INTEGER NOT NULL,
+              FOREIGN KEY(link_id) REFERENCES local_links(id),FOREIGN KEY(group_id) REFERENCES local_groups(id));
+            CREATE INDEX local_schedule_due ON local_link_schedules(enabled,next_run_at);
+            INSERT INTO local_link_schedules(link_id,group_id,kind,interval_minutes,fixed_times,time_zone_id,enabled,next_run_at,revision)
+              SELECT id,NULL,'Manual',NULL,'[]','Europe/Moscow',1,NULL,1 FROM local_links;
             """);
     }
     public MapScope? ReadMapScope(string jobId)
@@ -184,7 +207,118 @@ public sealed class LocalStore : IJobSource, IResultSink
             selected=excluded.selected,enabled=excluded.enabled,revision=local_links.revision+CASE WHEN local_links.canonical<>excluded.canonical THEN 1 ELSE 0 END
             """, ("$id", linkId), ("$label", label.Length == 0 ? new Uri(safe.Url).Host : label), ("$url", safe.Url), ("$key", safe.Key),
             ("$source", safe.Source.ToString()), ("$selected", selected ? 1 : 0), ("$enabled", enabled ? 1 : 0));
+        Exec(db, tx, """
+            INSERT OR IGNORE INTO local_link_schedules(link_id,group_id,kind,interval_minutes,fixed_times,time_zone_id,enabled,next_run_at,revision)
+            VALUES($id,NULL,'Manual',NULL,'[]','Europe/Moscow',1,NULL,1)
+            """, ("$id", linkId));
         tx.Commit(); return Links().Single(x => x.Id == linkId);
+    }
+
+    /// <summary>Server jobs use a hidden durable link so their recovery data never appears in the Local workspace.</summary>
+    public SearchLink EnsureServerWorkLink(string label, string url, SourceSite source)
+    {
+        NormalizedSearch safe = SearchUrls.Normalize(url, source);
+        string linkId = "server-" + Hash(safe.Key)[..32];
+        using SqliteConnection db = Open(); using SqliteTransaction tx = db.BeginTransaction();
+        Exec(db, tx, """
+            INSERT INTO local_links VALUES($id,$label,$url,$key,$source,0,1,1,1)
+            ON CONFLICT(id) DO UPDATE SET label=excluded.label,url=excluded.url,canonical=excluded.canonical,
+              source=excluded.source,selected=0,enabled=1,archived=1,
+              revision=local_links.revision+CASE WHEN local_links.canonical<>excluded.canonical THEN 1 ELSE 0 END
+            """, ("$id", linkId), ("$label", label.Trim().Length == 0 ? new Uri(safe.Url).Host : label.Trim()),
+            ("$url", safe.Url), ("$key", safe.Key), ("$source", safe.Source.ToString()));
+        Exec(db, tx, """
+            INSERT OR IGNORE INTO local_link_schedules(link_id,group_id,kind,interval_minutes,fixed_times,time_zone_id,enabled,next_run_at,revision)
+            VALUES($id,NULL,'Manual',NULL,'[]','Europe/Moscow',0,NULL,1)
+            """, ("$id", linkId));
+        tx.Commit();
+        return ReadLink(linkId, includeArchived: true) ?? throw new InvalidOperationException("SERVER_WORK_LINK_NOT_SAVED");
+    }
+
+    public LocalGroup SaveGroup(string name, int sortOrder, string? id = null, bool active = true, long? expectedRevision = null)
+    {
+        string value = name.Trim();
+        if (value.Length is < 1 or > 200 || value.Any(char.IsControl)) throw new ArgumentException("LOCAL_GROUP_NAME_INVALID");
+        string groupId = id ?? Guid.CreateVersion7().ToString();
+        using SqliteConnection db = Open(); using SqliteTransaction tx = db.BeginTransaction();
+        if (id == null)
+            Exec(db, tx, "INSERT INTO local_groups VALUES($id,$name,$sort,$active,1)",
+                ("$id", groupId), ("$name", value), ("$sort", sortOrder), ("$active", active ? 1 : 0));
+        else
+        {
+            if (expectedRevision == null) throw new ArgumentException("LOCAL_GROUP_REVISION_REQUIRED");
+            int changed = Exec(db, tx, "UPDATE local_groups SET name=$name,sort_order=$sort,active=$active,revision=revision+1 WHERE id=$id AND revision=$revision",
+                ("$id", groupId), ("$name", value), ("$sort", sortOrder), ("$active", active ? 1 : 0), ("$revision", expectedRevision.Value));
+            if (changed != 1) throw new InvalidOperationException("LOCAL_GROUP_CHANGED");
+        }
+        tx.Commit(); return Groups().Single(item => item.Id == groupId);
+    }
+
+    public LocalGroup[] Groups()
+    {
+        using SqliteConnection db = Open(); using SqliteCommand command = Command(db, null,
+            "SELECT id,name,sort_order,active,revision FROM local_groups ORDER BY sort_order,name COLLATE NOCASE");
+        using SqliteDataReader reader = command.ExecuteReader(); List<LocalGroup> groups = [];
+        while (reader.Read()) groups.Add(new(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetBoolean(3), reader.GetInt64(4)));
+        return groups.ToArray();
+    }
+
+    public LocalScheduledLink SaveSchedule(string linkId, string? groupId, LocalSchedule schedule, long? expectedRevision = null,
+        DateTimeOffset? now = null)
+    {
+        schedule.Validate();
+        using SqliteConnection db = Open(); using SqliteTransaction tx = db.BeginTransaction();
+        if (Convert.ToInt64(Scalar(db, tx, "SELECT count(*) FROM local_links WHERE id=$id AND archived=0", ("$id", linkId)), CultureInfo.InvariantCulture) != 1)
+            throw new ArgumentException("LOCAL_LINK_NOT_FOUND");
+        if (groupId != null && Convert.ToInt64(Scalar(db, tx, "SELECT count(*) FROM local_groups WHERE id=$id AND active=1", ("$id", groupId)), CultureInfo.InvariantCulture) != 1)
+            throw new ArgumentException("LOCAL_GROUP_NOT_FOUND");
+        long revision = Convert.ToInt64(Scalar(db, tx, "SELECT revision FROM local_link_schedules WHERE link_id=$id", ("$id", linkId)), CultureInfo.InvariantCulture);
+        if (expectedRevision != null && expectedRevision != revision) throw new InvalidOperationException("LOCAL_SCHEDULE_CHANGED");
+        DateTimeOffset? next = schedule.Enabled ? LocalScheduleRules.Next(schedule, now ?? DateTimeOffset.UtcNow) : null;
+        int changed = Exec(db, tx, """
+            UPDATE local_link_schedules SET group_id=$group,kind=$kind,interval_minutes=$interval,fixed_times=$times,
+              time_zone_id=$zone,enabled=$enabled,next_run_at=$next,revision=revision+1 WHERE link_id=$id AND revision=$revision
+            """, ("$group", groupId), ("$kind", schedule.Kind.ToString()), ("$interval", schedule.IntervalMinutes),
+            ("$times", LocalJson.Write(schedule.FixedTimes ?? [])), ("$zone", schedule.TimeZoneId), ("$enabled", schedule.Enabled ? 1 : 0),
+            ("$next", next == null ? null : Time(next.Value)), ("$id", linkId), ("$revision", revision));
+        if (changed != 1) throw new InvalidOperationException("LOCAL_SCHEDULE_CHANGED");
+        tx.Commit(); return ScheduledLinks().Single(item => item.Link.Id == linkId);
+    }
+
+    public LocalScheduledLink[] ScheduledLinks()
+    {
+        using SqliteConnection db = Open(); using SqliteCommand command = Command(db, null, """
+            SELECT l.id,l.label,l.url,l.source,l.selected,l.enabled,l.revision,l.archived,
+              s.group_id,COALESCE(g.name,''),s.kind,s.interval_minutes,s.fixed_times,s.time_zone_id,s.enabled,s.next_run_at,s.revision
+            FROM local_links l JOIN local_link_schedules s ON s.link_id=l.id
+            LEFT JOIN local_groups g ON g.id=s.group_id WHERE l.archived=0 ORDER BY COALESCE(g.sort_order,2147483647),l.rowid
+            """);
+        using SqliteDataReader reader = command.ExecuteReader(); List<LocalScheduledLink> links = [];
+        while (reader.Read())
+        {
+            SearchLink link = new(reader.GetString(0), reader.GetString(1), reader.GetString(2), Enum.Parse<SourceSite>(reader.GetString(3)),
+                reader.GetBoolean(4), reader.GetBoolean(5), reader.GetInt32(6), reader.GetBoolean(7));
+            LocalSchedule schedule = new(Enum.Parse<LocalScheduleKind>(reader.GetString(10)), reader.IsDBNull(11) ? null : reader.GetInt32(11),
+                LocalJson.Read<string[]>(reader.GetString(12)), reader.GetString(13), reader.GetBoolean(14));
+            links.Add(new(link, reader.IsDBNull(8) ? null : reader.GetString(8), reader.GetString(9), schedule,
+                reader.IsDBNull(15) ? null : DateTimeOffset.Parse(reader.GetString(15), CultureInfo.InvariantCulture), reader.GetInt64(16)));
+        }
+        return links.ToArray();
+    }
+
+    public LocalScheduledLink[] DueLinks(DateTimeOffset now) => ScheduledLinks()
+        .Where(item => item.Link.Enabled && item.Schedule.Enabled && item.NextRunAt != null && item.NextRunAt <= now)
+        .ToArray();
+
+    public void MarkScheduleDispatched(string linkId, long expectedRevision, DateTimeOffset now)
+    {
+        LocalScheduledLink current = ScheduledLinks().Single(item => item.Link.Id == linkId);
+        if (current.Revision != expectedRevision) throw new InvalidOperationException("LOCAL_SCHEDULE_CHANGED");
+        DateTimeOffset? next = LocalScheduleRules.Next(current.Schedule, now);
+        using SqliteConnection db = Open();
+        int changed = Exec(db, null, "UPDATE local_link_schedules SET next_run_at=$next,revision=revision+1 WHERE link_id=$id AND revision=$revision",
+            ("$next", next == null ? null : Time(next.Value)), ("$id", linkId), ("$revision", expectedRevision));
+        if (changed != 1) throw new InvalidOperationException("LOCAL_SCHEDULE_CHANGED");
     }
     public SearchLink[] Links()
     {
@@ -192,6 +326,15 @@ public sealed class LocalStore : IJobSource, IResultSink
         using SqliteDataReader r = cmd.ExecuteReader(); List<SearchLink> result = [];
         while (r.Read()) result.Add(new(r.GetString(0), r.GetString(1), r.GetString(2), Enum.Parse<SourceSite>(r.GetString(3)), r.GetBoolean(4), r.GetBoolean(5), r.GetInt32(6), r.GetBoolean(7)));
         return result.ToArray();
+    }
+    private SearchLink? ReadLink(string id, bool includeArchived)
+    {
+        using SqliteConnection db = Open(); using SqliteCommand command = Command(db, null,
+            "SELECT id,label,url,source,selected,enabled,revision,archived FROM local_links WHERE id=$id AND ($all=1 OR archived=0)",
+            ("$id", id), ("$all", includeArchived ? 1 : 0));
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? new(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+            Enum.Parse<SourceSite>(reader.GetString(3)), reader.GetBoolean(4), reader.GetBoolean(5), reader.GetInt32(6), reader.GetBoolean(7)) : null;
     }
     public void SelectLink(string id, bool selected)
     { using SqliteConnection db = Open(); Exec(db, null, "UPDATE local_links SET selected=$selected WHERE id=$id", ("$selected", selected ? 1 : 0), ("$id", id)); }
@@ -206,7 +349,9 @@ public sealed class LocalStore : IJobSource, IResultSink
     {
         settings.Validate(); DateTimeOffset time = now ?? DateTimeOffset.UtcNow;
         // Server mode targets one permitted search without changing Local mode selection/settings.
-        SearchLink[] links = Links().Where(x => x.Enabled && (onlyLinkId == null ? x.Selected : x.Id == onlyLinkId)).ToArray();
+        SearchLink[] links = onlyLinkId == null
+            ? Links().Where(x => x.Enabled && x.Selected).ToArray()
+            : ReadLink(onlyLinkId, includeArchived: true) is { Enabled: true } single ? [single] : [];
         if (links.Length == 0) throw new InvalidOperationException("Отметьте хотя бы одну ссылку.");
         string batch = Guid.NewGuid().ToString("D");
         using SqliteConnection db = Open(); using SqliteTransaction tx = db.BeginTransaction();

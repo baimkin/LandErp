@@ -20,6 +20,15 @@ public partial class ServerConnectionWindow : Window
     {
         if (connecting) return;
         ErrorText.Text = "";
+        if (!string.IsNullOrWhiteSpace(ConnectionCodeBox.Text))
+        {
+            try
+            {
+                ServerConnection decoded = ServerConnection.FromConnectionCode(ConnectionCodeBox.Text.Trim());
+                AddressBox.Text = decoded.Origin.AbsoluteUri; AgentBox.Text = decoded.AgentId.ToString(); KeyBox.Password = decoded.Token;
+            }
+            catch (ArgumentException) { ErrorText.Text = "Код подключения повреждён или создан несовместимой версией ERP."; return; }
+        }
         if (!Uri.TryCreate(AddressBox.Text.Trim(), UriKind.Absolute, out Uri? origin)
             || origin.Scheme != Uri.UriSchemeHttps || origin.UserInfo.Length != 0
             || origin.AbsolutePath != "/" || origin.Query.Length != 0 || origin.Fragment.Length != 0)

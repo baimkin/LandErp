@@ -20,6 +20,12 @@ internal static class CollectorEndpoints
         { await gateway.HeartbeatAsync(Credentials(http), request, token); return Results.Ok(new { status = "online" }); });
         group.MapPost("/work/claim", async (HttpContext http, ICollectorGateway gateway, CancellationToken token) =>
         { CollectionWork? work = await gateway.ClaimAsync(Credentials(http), token); return work == null ? Results.NoContent() : Results.Ok(work); });
+        group.MapPost("/workspace", async (HttpContext http, ICollectorGateway gateway, CancellationToken token) =>
+            Results.Ok(await gateway.ReadWorkspaceAsync(Credentials(http), token)));
+        group.MapPost("/workspace/groups", async (HttpContext http, CreateCollectorGroup request, ICollectorGateway gateway, CancellationToken token) =>
+            Results.Ok(await gateway.CreateGroupAsync(Credentials(http), request, token)));
+        group.MapPost("/workspace/searches", async (HttpContext http, CreateCollectorSearch request, ICollectorGateway gateway, CancellationToken token) =>
+            Results.Ok(await gateway.CreateSearchAsync(Credentials(http), request, token)));
         group.MapPost("/results", async (HttpContext http, CollectionResult request, ICollectorGateway gateway, CancellationToken token) =>
             Results.Ok(await gateway.AcceptAsync(Credentials(http), request, token)));
     }

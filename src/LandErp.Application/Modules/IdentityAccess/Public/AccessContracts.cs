@@ -8,6 +8,7 @@ public sealed record AccessContext(Guid EmployeeId, Guid OrganizationId, Guid? D
 
 public interface IAccessControl
 {
+    Task<AccessContext> ResolveAsync(Subject subject, CancellationToken cancellationToken);
     Task<AccessContext> RequireAsync(Subject subject, string permission, CancellationToken cancellationToken);
 }
 

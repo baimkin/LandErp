@@ -10,19 +10,12 @@ public sealed partial class ProcurementQueueV2ReadService
 {
     private static IQueryable<Row> VisibleCases(LandErpDbContext db, AccessContext context)
     {
-        IQueryable<Row> rows = from item in db.PropertyCases.AsNoTracking()
+        IQueryable<PropertyCase> cases = ProcurementVisibility.Apply(db.PropertyCases.AsNoTracking(), db, context);
+        IQueryable<Row> rows = from item in cases
                                join assignment in db.WorkAssignments.AsNoTracking() on item.AssignmentId equals assignment.Id
                                join task in db.WorkTasks.AsNoTracking() on item.WorkTaskId equals task.Id
-                               where item.OrganizationId == context.OrganizationId
                                select new Row { Case = item, Assignment = assignment, Task = task };
-        return context.Scope switch
-        {
-            AccessScope.Organization => rows,
-            AccessScope.Department => rows.Where(row => context.DepartmentId != null && row.Case.DepartmentId == context.DepartmentId),
-            AccessScope.Team => rows.Where(row => context.TeamId != null && row.Case.TeamId == context.TeamId),
-            AccessScope.AssignedObjects => rows.Where(row => row.Assignment.EmployeeId == context.EmployeeId),
-            _ => rows.Where(row => row.Case.ManagerEmployeeId == context.EmployeeId)
-        };
+        return rows;
     }
 
     private static IQueryable<Row> WhereSourceChanged(IQueryable<Row> query, LandErpDbContext db) =>

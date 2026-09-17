@@ -86,9 +86,11 @@ else if(catalogPage!=null)
 @if(classificationOpen){<Modal Title="@DispositionLabel(classification)" OnClose="() => classificationOpen=false"><label class="field"><span>Причина / подтверждение</span><InputTextArea @bind-Value="classificationReason" /></label><div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => classificationOpen=false" /><ActionButton Label="Подтвердить" Busy="Busy" OnClick="ClassifyAsync" /></div></Modal>}
 
 @code {
+    [Parameter, SupplyParameterFromQuery(Name="manual")] public bool OpenManual { get; set; }
     private const int PageSize=25;
     private IncomingCatalogPage? catalogPage; private CatalogItemDetail? detail; private readonly FilterInput filter=new(); private int page;
-    private bool manualOpen; private ManualInput manual=new(); private MonitoringInput monitoring=new();
+    private bool manualOpen; private bool queryInitialized; private ManualInput manual=new(); private MonitoringInput monitoring=new();
+    protected override void OnParametersSet(){if(queryInitialized)return;manualOpen=OpenManual;queryInitialized=true;}
     private CatalogItemView? takeItem; private Guid? existingCaseId; private IReadOnlyList<CaseLinkTarget> targets=[];
     private bool classificationOpen; private CatalogDisposition classification; private string classificationReason="";
     private static readonly CatalogSource[] manualSources=[CatalogSource.Telegram,CatalogSource.Referral,CatalogSource.Agent,CatalogSource.DirectOwner,CatalogSource.Manual,CatalogSource.Other];

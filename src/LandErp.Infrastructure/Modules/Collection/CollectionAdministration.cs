@@ -1,5 +1,6 @@
 using LandErp.Application.Foundation;
 using LandErp.Application.Modules.Catalog.Domain;
+using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Collection.Contracts;
 using LandErp.Application.Modules.Collection.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
@@ -109,7 +110,13 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
         if (sortOrder is < 0 or > 10000) throw new ArgumentException("Порядок группы должен быть от 0 до 10000.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         SearchGroup group = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, Name = OrganizationWorkspace.ValidateName(name), SortOrder = sortOrder, RecordedAt = time.GetUtcNow() };
-        db.SearchGroups.Add(group); OrganizationWorkspace.AddAudit(db, context, subject, "CollectionSearchGroupCreated", "SearchGroup", group.Id, new { group.Name, group.SortOrder }, correlationId);
+        db.SearchGroups.Add(group);
+        db.SearchGroupMarketSettings.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, SearchGroupId = group.Id,
+            PeriodDays = 30, AllowedPropertyTypes = Enum.GetNames<IncomingLandType>()
+        });
+        OrganizationWorkspace.AddAudit(db, context, subject, "CollectionSearchGroupCreated", "SearchGroup", group.Id, new { group.Name, group.SortOrder }, correlationId);
         await db.SaveChangesAsync(cancellationToken); return group.Id;
     }
     public async Task ArchiveGroupAsync(Subject subject, Guid groupId, long expectedVersion, string correlationId, CancellationToken cancellationToken)

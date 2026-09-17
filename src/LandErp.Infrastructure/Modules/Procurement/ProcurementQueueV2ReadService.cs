@@ -44,6 +44,7 @@ public sealed partial class ProcurementQueueV2ReadService(
         IQueryable<Row> query = string.IsNullOrWhiteSpace(filter.Stage)
             ? visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired")
             : visible.Where(row => row.Case.StageId == filter.Stage);
+        if (filter.MineOnly) query = query.Where(row => row.Assignment.EmployeeId == context.EmployeeId);
 
         string text = filter.Text.Trim();
         if (text.Length > 0)

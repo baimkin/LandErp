@@ -21,7 +21,8 @@ public sealed record ProcurementQueueV2Filter(
     ProcurementQueueV2Sort Sort = ProcurementQueueV2Sort.RecordedAt,
     bool Descending = true,
     int Offset = 0,
-    int Size = 30);
+    int Size = 30,
+    bool MineOnly = false);
 
 public sealed record ProcurementQueueV2Summary(int InWork, int DueToday, int Overdue, int SourceChanged, int Returned);
 public sealed record ProcurementQueueV2Assignee(Guid Id, string Name);

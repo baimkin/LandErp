@@ -308,7 +308,7 @@ public sealed class ProcurementTests
             {
                 Id = id,
                 OrganizationId = OrganizationId,
-                BusinessNumber = "PC-INDEPENDENT",
+                BusinessNumber = "PC-INDEPENDENT-" + id.ToString("N").ToUpperInvariant(),
                 WorkingTitle = title,
                 FactsProvenance = "Direct import",
                 DepartmentId = DepartmentA,

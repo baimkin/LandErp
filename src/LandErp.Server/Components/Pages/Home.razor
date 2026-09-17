@@ -1,12 +1,175 @@
 @page "/"
 @attribute [Authorize]
-<PageTitle>LandErp</PageTitle>
-<PageHeader Title="Рабочий контур" Description="Объекты закупки, решения и ответственность команды." />
-<div class="content-grid">
-    <AuthorizeView Policy="@Permissions.QueueRead" Context="procurement"><article class="surface"><span class="kicker">Закупка</span><h2>Очередь объектов</h2><p>Проверьте новые объявления, изменения и возвраты руководителя.</p><a class="btn primary" href="/procurement">Открыть очередь закупки</a></article></AuthorizeView>
-    <AuthorizeView Policy="@Permissions.UsersRead" Context="employees">
-    <article class="surface"><span class="kicker">Администрирование</span><h2>Организация</h2><p>Структура, сотрудники, должности и области доступа находятся в едином разделе.</p><a class="btn primary" href="/organization">Открыть организацию</a></article>
-    </AuthorizeView>
-    <AuthorizeView Policy="@Permissions.AuditRead" Context="audit"><article class="surface"><span class="kicker">История</span><h2>Действия сохраняются</h2><p>Критичные изменения имеют автора и время.</p><a class="btn secondary" href="/audit">Посмотреть аудит</a></article></AuthorizeView>
-</div>
-<AuthorizeView Policy="@Permissions.QueueRead" Context="notifications"><LandErp.Server.Components.Procurement.Notifications /></AuthorizeView>
+@using System.Globalization
+@using LandErp.Application.Modules.Catalog.Contracts
+@using LandErp.Application.Modules.Overview.Contracts
+@inherits WorkspaceComponent
+@inject IOverviewService Overview
+
+<PageTitle>Обзор · LandErp</PageTitle>
+
+<section class="overview-page">
+    <header class="overview-heading">
+        <div><span class="overview-crumb">LandErp / Обзор</span><h1>Обзор</h1><p>Что происходит в закупке прямо сейчас и где требуется ваше внимание.</p></div>
+        @if (view != null)
+        {
+            <div class="overview-actions">
+                @foreach (OverviewQuickAction action in view.QuickActions.Where(item => item.Key is "incoming" or "queue" or "add"))
+                { <a class="overview-btn @(action.Primary ? "primary" : "")" href="@action.Url">@action.Label</a> }
+            </div>
+        }
+    </header>
+
+    @if (Loading)
+    { <div class="overview-state"><strong>Загружаем оперативную картину…</strong><span>Собираем показатели в разрешённой области данных.</span></div> }
+    else if (Forbidden)
+    { <div class="overview-state risk"><strong>Рабочие данные недоступны</strong><span>Проверьте назначение и область доступа.</span></div> }
+    else if (view != null)
+    {
+        @if (Error != null) { <div class="overview-state risk"><strong>@Error</strong><button class="overview-btn small" type="button" @onclick="ReloadAsync">Повторить</button></div> }
+        @if (Success != null) { <div class="overview-state success"><strong>@Success</strong></div> }
+
+        @if (view.CanViewProcurement)
+        {
+            <div class="overview-stats">
+                <article class="overview-stat"><label>Новые входящие</label><strong>@view.NewIncoming.Value</strong><span>@view.NewIncoming.Caption</span></article>
+                <article class="overview-stat"><label>В закупке</label><strong>@view.ActiveProcurement.Value</strong><span>@view.ActiveProcurement.Caption</span></article>
+                <article class="overview-stat attention"><label>Требуют внимания</label><strong>@view.Attention.Value</strong><span>@view.Attention.Caption</span></article>
+                <article class="overview-stat waiting"><label>Ждут решения</label><strong>@view.WaitingDecision.Value</strong><span>@view.WaitingDecision.Caption</span></article>
+            </div>
+
+            <section class="overview-card market-card">
+                <div class="overview-card-head market-card-head"><div><h2>Рынок по группам поиска</h2><p>Медианная и средняя цена за сотку. Каждая группа рассчитывается по своим параметрам.</p></div><button class="overview-btn small" type="button" @onclick="OpenAllGroupsAsync">Посмотреть все группы</button></div>
+                <div class="market-table">
+                    <div class="market-header"><div>Группа поиска</div><div>Медиана</div><div>Средняя</div><div>Выборка</div><div></div></div>
+                    @if (view.Market.Items.Count == 0) { <div class="overview-empty">Активных групп поиска пока нет.</div> }
+                    @foreach (MarketGroupRow row in view.Market.Items)
+                    {
+                        <div class="market-row" @key="row.SearchGroupId">
+                            <div class="market-name"><b>@row.Name</b><small>@SettingsText(row.Settings)</small></div>
+                            <div class="market-price">@Price(row.MedianPricePerSotka)<small>за сотку</small></div>
+                            <div class="market-price">@Price(row.AveragePricePerSotka)<small>за сотку</small></div>
+                            <div class="market-sample"><b>@row.IncludedCount объявл.</b><small>@ExcludedText(row)</small></div>
+                            @if (row.CanManage) { <button class="market-settings" type="button" title="Настроить группу" aria-label="Настроить @row.Name" @onclick="() => OpenSettings(row)">⚙</button> } else { <span></span> }
+                        </div>
+                    }
+                </div>
+                <footer class="market-foot"><span><strong>Параметры индивидуальны:</strong> период, типы участков и ценовые границы задаются отдельно для каждой группы.</span><span>Показаны @view.Market.Items.Count из @view.Market.Total групп.</span></footer>
+            </section>
+
+            <div class="overview-layout">
+                <div class="overview-column">
+                    <section class="overview-card">
+                        <div class="overview-card-head"><div><h2>Требует внимания</h2><p>Сначала то, что может задержать закупку или потерять объект.</p></div><span class="overview-meta">@view.AttentionTotal событий</span></div>
+                        <div class="overview-rows">
+                            @if (view.AttentionItems.Count == 0) { <div class="overview-empty success-text">Срочных действий нет.</div> }
+                            @foreach (OverviewAttentionItem item in view.AttentionItems)
+                            { <a class="attention-row" href="@item.Url" @key="item.Key"><span class="attention-icon @Severity(item.Severity)">@SeverityIcon(item.Severity)</span><span class="attention-main"><b>@item.Title</b><small>@item.Reason</small></span><span class="attention-side"><strong>@item.Age</strong>@item.Action</span><span class="row-arrow">›</span></a> }
+                        </div>
+                    </section>
+
+                    <section class="overview-card">
+                        <div class="overview-card-head"><div><h2>Закупка сейчас</h2><p>Состояние текущего потока от входящих до покупки.</p></div><a class="overview-btn small" href="/procurement-v2">Открыть очередь</a></div>
+                        <div class="overview-flow">
+                            @foreach (OverviewStageItem stage in view.ProcurementStages)
+                            { <a class="overview-stage" href="@stage.Url" @key="stage.Key"><label>@stage.Label</label><strong>@stage.Count</strong><span>@stage.Caption</span><i><em style="width:@(stage.Percent)%"></em></i></a> }
+                        </div>
+                    </section>
+
+                    <section class="overview-card">
+                        <div class="overview-card-head"><div><h2>Моя работа</h2><p>Ближайшие действия, назначения и уведомления по вашим объектам.</p></div><a class="overview-btn small" href="/procurement-v2?mine=true">Все мои объекты</a></div>
+                        <div class="work-rows">
+                            @if (view.MyWork.Count == 0) { <div class="overview-empty">Назначенных действий и новых уведомлений нет.</div> }
+                            @foreach (OverviewWorkItem item in view.MyWork)
+                            { <a class="work-row" href="@item.Url" @key="item.Key"><span class="work-object"><b>@item.ObjectTitle</b><small>@item.Context</small></span><span class="work-task"><b>@item.Action</b><small>@item.Detail</small></span><span class="work-deadline @Due(item.DueState)">@item.Deadline</span><span class="row-arrow">›</span></a> }
+                        </div>
+                        @if (view.MyWorkTotal > view.MyWork.Count) { <div class="bounded-note">Показаны @view.MyWork.Count из @view.MyWorkTotal записей.</div> }
+                    </section>
+                </div>
+
+                <div class="overview-column">
+                    @if (view.Collection != null)
+                    {
+                        <section class="overview-card">
+                            <div class="overview-card-head"><div><h2>Сбор данных</h2><p>Коротко о состоянии поисков и сбора данных.</p></div><a class="overview-btn small" href="@view.Collection.ManagementUrl">Управление</a></div>
+                            <div class="collection-metrics"><div><label>Сборщики</label><b>@view.Collection.OnlineCollectors / @view.Collection.EnabledCollectors</b><small>на связи</small></div><div><label>Поиски</label><b>@view.Collection.ActiveSearches</b><small>активны</small></div><div><label>Сегодня</label><b>@view.Collection.ProcessedToday</b><small>обработано</small></div></div>
+                            <div class="collection-statuses">@foreach (OverviewCollectionStatus status in view.Collection.Statuses) { <a href="@status.Url"><i class="@Severity(status.Severity)"></i><b>@status.Label</b><span>@status.Value</span></a> }</div>
+                        </section>
+                    }
+                    @if (view.QuickActions.Count > 0)
+                    { <section class="overview-card"><div class="overview-card-head"><div><h2>Быстрые действия</h2><p>То, что используется чаще всего.</p></div></div><div class="quick-actions">@foreach (OverviewQuickAction action in view.QuickActions) { <a class="overview-btn @(action.Primary ? "primary" : "")" href="@action.Url">@action.Label</a> }</div><p class="quick-note">Организация, аудит и техническое управление сбором данных остаются в левом меню.</p></section> }
+                    @if (view.Team.Count > 0)
+                    { <section class="overview-card"><div class="overview-card-head"><div><h2>Команда закупки</h2><p>Только то, что помогает понять загрузку прямо сейчас.</p></div></div><div class="team-list">@foreach (OverviewTeamMember member in view.Team) { <div><i class="@(member.OverdueCases > 0 ? "warning" : "")"></i><b>@member.Name</b><span>@member.ActiveCases объектов@(member.OverdueCases > 0 ? $" · {member.OverdueCases} просрочено" : "")</span></div> }</div>@if (view.TeamTotal > view.Team.Count) { <div class="bounded-note">Показаны @view.Team.Count из @view.TeamTotal сотрудников.</div> }</section> }
+                </div>
+            </div>
+        }
+        else { <div class="overview-state"><strong>Нет доступного рабочего контура</strong><span>На странице появятся блоки, соответствующие вашим permissions и области данных.</span></div> }
+    }
+</section>
+
+@if (allGroupsOpen)
+{
+    <div class="overview-modal-shade" role="presentation" @onclick="CloseAllGroups">
+        <section class="overview-modal wide" role="dialog" aria-modal="true" aria-labelledby="all-groups-title" @onclick:stopPropagation="true">
+            <header><div><h3 id="all-groups-title">Все группы поиска</h3><p>Полный список рыночных показателей с индивидуальными параметрами расчёта.</p></div><button type="button" class="modal-close" aria-label="Закрыть" @onclick="CloseAllGroups">×</button></header>
+            <div class="modal-content flush">
+                <div class="groups-toolbar"><input value="@marketText" @oninput="e => marketText = e.Value?.ToString() ?? string.Empty" @onkeydown="SearchKeyDown" placeholder="Поиск по названию группы…" aria-label="Поиск по группам" /><select value="@marketSort" @onchange="MarketSortChanged"><option value="Name">По названию</option><option value="MedianDescending">Медиана: по убыванию</option><option value="MedianAscending">Медиана: по возрастанию</option><option value="SampleDescending">По размеру выборки</option></select><button class="overview-btn small" type="button" @onclick="ReloadAllGroupsAsync">Найти</button></div>
+                @if (allGroupsLoading) { <div class="overview-empty">Загружаем группы…</div> }
+                else if (allGroups != null)
+                {
+                    <div class="all-groups-header"><div>Группа поиска</div><div>Параметры расчёта</div><div>Медиана</div><div>Средняя</div><div>Выборка</div><div></div></div>
+                    @if (allGroups.Items.Count == 0) { <div class="overview-empty">Группы по заданному поиску не найдены.</div> }
+                    @foreach (MarketGroupRow row in allGroups.Items)
+                    { <div class="all-groups-row" @key="row.SearchGroupId"><div class="market-name"><b>@row.Name</b></div><div class="config-text">@SettingsText(row.Settings)</div><div class="market-price">@Price(row.MedianPricePerSotka)<small>за сотку</small></div><div class="market-price">@Price(row.AveragePricePerSotka)<small>за сотку</small></div><div class="market-sample"><b>@row.IncludedCount объявл.</b><small>@ExcludedText(row)</small></div>@if (row.CanManage) { <button class="market-settings" type="button" aria-label="Настроить @row.Name" @onclick="() => OpenSettings(row)">⚙</button> } else { <span></span> }</div> }
+                    <footer class="groups-pager"><span>Показано @allGroups.Items.Count из @allGroups.Total групп</span><div><button class="overview-btn small" type="button" disabled="@(allGroups.Offset == 0)" @onclick="PreviousGroupsAsync">‹</button><button class="overview-btn small" type="button" disabled="@(allGroups.Offset + allGroups.Size >= allGroups.Total)" @onclick="NextGroupsAsync">›</button></div></footer>
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@if (settingsOpen && settingsRow != null)
+{
+    <div class="overview-modal-shade secondary" role="presentation" @onclick="CloseSettings">
+        <section class="overview-modal" role="dialog" aria-modal="true" aria-labelledby="market-settings-title" @onclick:stopPropagation="true">
+            <header><div><h3 id="market-settings-title">Настройка рыночных показателей</h3><p>@settingsRow.Name · параметры расчёта выбранной группы</p></div><button type="button" class="modal-close" aria-label="Закрыть" @onclick="CloseSettings">×</button></header>
+            <div class="modal-content">
+                <div class="settings-field"><label>Период данных</label><div class="period-buttons">@foreach (int days in Periods) { <button type="button" class="@(draft.PeriodDays == days ? "active" : "")" @onclick="() => draft.PeriodDays = days">@days дней</button> }</div></div>
+                <div class="settings-field"><label>Типы участков</label><div class="type-checks">@foreach ((IncomingLandType Type, string Label) option in TypeOptions) { <label><input type="checkbox" checked="@draft.Types.Contains(option.Type)" @onchange="e => ToggleType(option.Type, e.Value as bool? == true)" /> @option.Label</label> }</div><small>В расчёт группы попадут только объявления выбранных source-derived типов.</small></div>
+                <div class="settings-field"><label>Цена за сотку — допустимый диапазон</label><div class="price-range"><div><span><input type="number" min="0" step="50000" @bind="draft.Min" /><em>₽/сот.</em></span><small>Ниже — исключить из расчёта.</small></div><div><span><input type="number" min="0" step="50000" @bind="draft.Max" /><em>₽/сот.</em></span><small>Выше — исключить из расчёта.</small></div></div></div>
+            </div>
+            <footer class="modal-actions"><button class="overview-btn small" type="button" @onclick="ResetSettings">Сбросить</button><div><button class="overview-btn small" type="button" @onclick="CloseSettings">Отмена</button><button class="overview-btn small primary" type="button" disabled="@Busy" @onclick="ApplySettingsAsync">Применить</button></div></footer>
+        </section>
+    </div>
+}
+
+@code {
+    private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru-RU");
+    private static readonly int[] Periods = [7, 30, 90, 180];
+    private static readonly (IncomingLandType Type, string Label)[] TypeOptions = [(IncomingLandType.Izhs,"ИЖС"),(IncomingLandType.Lph,"ЛПХ"),(IncomingLandType.Snt,"СНТ"),(IncomingLandType.Dnp,"ДНП"),(IncomingLandType.Gardening,"Садоводство"),(IncomingLandType.Kfh,"КФХ"),(IncomingLandType.Industrial,"Промназначение"),(IncomingLandType.Other,"Другие")];
+    private OverviewView? view; private MarketGroupPage? allGroups; private bool allGroupsOpen; private bool allGroupsLoading;
+    private string marketText=""; private MarketGroupSort marketSort; private int marketOffset; private bool settingsOpen;
+    private MarketGroupRow? settingsRow; private SettingsDraft draft=new();
+    protected override async Task ReadAsync()=>view=await Overview.ReadAsync(CurrentSubject,CancellationToken.None);
+    private async Task OpenAllGroupsAsync(){allGroupsOpen=true;marketOffset=0;await ReloadAllGroupsAsync();}
+    private void CloseAllGroups()=>allGroupsOpen=false;
+    private async Task ReloadAllGroupsAsync(){allGroupsLoading=true;try{allGroups=await Overview.ReadMarketGroupsAsync(CurrentSubject,new(marketText,marketSort,marketOffset,20),CancellationToken.None);}finally{allGroupsLoading=false;}}
+    private async Task SearchKeyDown(KeyboardEventArgs args){if(args.Key=="Enter"){marketOffset=0;await ReloadAllGroupsAsync();}}
+    private async Task MarketSortChanged(ChangeEventArgs args){Enum.TryParse(args.Value?.ToString(),out marketSort);marketOffset=0;await ReloadAllGroupsAsync();}
+    private async Task PreviousGroupsAsync(){marketOffset=Math.Max(0,marketOffset-20);await ReloadAllGroupsAsync();}
+    private async Task NextGroupsAsync(){marketOffset+=20;await ReloadAllGroupsAsync();}
+    private void OpenSettings(MarketGroupRow row){settingsRow=row;draft=new(row.Settings);settingsOpen=true;}
+    private void CloseSettings()=>settingsOpen=false;
+    private void ResetSettings()=>draft=new(){PeriodDays=30,Types=Enum.GetValues<IncomingLandType>().ToHashSet()};
+    private void ToggleType(IncomingLandType type,bool value){if(value)draft.Types.Add(type);else draft.Types.Remove(type);}
+    private async Task ApplySettingsAsync(){if(settingsRow==null)return;await ExecuteAsync(async()=>{await Overview.SaveMarketSettingsAsync(CurrentSubject,new(settingsRow.SearchGroupId,settingsRow.Settings.Version,draft.PeriodDays,draft.Types.ToArray(),draft.Min,draft.Max),Guid.NewGuid().ToString("N"),CancellationToken.None);if(allGroupsOpen)await ReloadAllGroupsAsync();settingsOpen=false;});}
+    private static string Severity(OverviewSeverity severity)=>severity switch{OverviewSeverity.Critical=>"risk",OverviewSeverity.Warning=>"warning",_=>"info"};
+    private static string SeverityIcon(OverviewSeverity severity)=>severity switch{OverviewSeverity.Critical=>"!",OverviewSeverity.Warning=>"↩",_=>"+"};
+    private static string Due(OverviewDueState state)=>state switch{OverviewDueState.Overdue=>"overdue",OverviewDueState.Today=>"today",_=>""};
+    private static string Price(decimal? value)=>value==null?"Нет данных":value.Value.ToString("N0",Russian)+" ₽";
+    private static string ExcludedText(MarketGroupRow row)=>row.FakeExcludedCount==0?$"{row.ExcludedCount} отсечено":$"{row.ExcludedCount} отсечено · {row.FakeExcludedCount} фейк";
+    private static string SettingsText(SearchGroupMarketSettingsView settings){string types=string.Join(" · ",settings.AllowedPropertyTypes.Select(TypeLabel));string range=settings.MinPricePerSotka==null&&settings.MaxPricePerSotka==null?"без ценовых границ":$"{Compact(settings.MinPricePerSotka)}–{Compact(settings.MaxPricePerSotka)} ₽/сот.";return $"{types} · {settings.PeriodDays} дн. · {range}";}
+    private static string TypeLabel(IncomingLandType type)=>TypeOptions.First(item=>item.Type==type).Label;
+    private static string Compact(decimal? value)=>value==null?"∞":value>=1_000_000m?(value.Value/1_000_000m).ToString("0.##",Russian)+" млн":(value.Value/1_000m).ToString("0",Russian)+" тыс.";
+    private sealed class SettingsDraft{public SettingsDraft(){}public SettingsDraft(SearchGroupMarketSettingsView source){PeriodDays=source.PeriodDays;Types=source.AllowedPropertyTypes.ToHashSet();Min=source.MinPricePerSotka;Max=source.MaxPricePerSotka;}public int PeriodDays{get;set;}=30;public HashSet<IncomingLandType> Types{get;set;}=[];public decimal? Min{get;set;}public decimal? Max{get;set;}}
+}

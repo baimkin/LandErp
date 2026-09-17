@@ -386,6 +386,8 @@
 }
 
 @code {
+    [Parameter, SupplyParameterFromQuery(Name = "stage")] public string? InitialStage { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "mine")] public bool MineOnly { get; set; }
     private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
     private ProcurementQueueV2Page? queuePage;
     private ProcurementQueueV2Detail? detail;
@@ -399,6 +401,7 @@
     private string assigneeFilter = "";
     private bool dueTodayOnly;
     private bool overdueOnly;
+    private bool queryInitialized;
     private int offset;
     private const int PageSize = 30;
 
@@ -406,6 +409,13 @@
     private ProcurementAction decisionAction;
     private bool negotiationOpen;
     private NegotiationDraft negotiation = new();
+
+    protected override void OnParametersSet()
+    {
+        if (queryInitialized) return;
+        stageFilter = InitialStage ?? "";
+        queryInitialized = true;
+    }
 
     protected override async Task ReadAsync()
     {
@@ -418,7 +428,7 @@
     {
         Guid? assignee = Guid.TryParse(assigneeFilter, out Guid assigneeId) ? assigneeId : null;
         return new(search, stageFilter, assignee, null, false, dueTodayOnly, overdueOnly,
-            ProcurementQueueV2CheckFilter.Any, ProcurementQueueV2Sort.RecordedAt, true, offset, PageSize);
+            ProcurementQueueV2CheckFilter.Any, ProcurementQueueV2Sort.RecordedAt, true, offset, PageSize, MineOnly);
     }
 
     private bool HasFilters => search.Length > 0 || stageFilter.Length > 0 || assigneeFilter.Length > 0 || dueTodayOnly || overdueOnly;

@@ -6,6 +6,18 @@ namespace LandErp.Infrastructure.Modules.IdentityAccess;
 
 public sealed class AccessControl(IDbContextFactory<LandErpDbContext> factory) : IAccessControl
 {
+    public async Task<AccessContext> ResolveAsync(Subject subject, CancellationToken cancellationToken)
+    {
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        var assignment = await (from employee in db.Employees
+                                join value in db.EmployeeAssignments on employee.Id equals value.EmployeeId
+                                where employee.UserId == subject.UserId && employee.Active
+                                select new { employee.Id, employee.OrganizationId, value.OrgUnitId, value.TeamId, value.Scope })
+            .SingleOrDefaultAsync(cancellationToken);
+        return assignment == null ? throw new AccessDeniedException()
+            : new(assignment.Id, assignment.OrganizationId, assignment.OrgUnitId, assignment.TeamId, assignment.Scope);
+    }
+
     public async Task<AccessContext> RequireAsync(Subject subject, string permission, CancellationToken cancellationToken)
     {
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);

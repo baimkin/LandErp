@@ -3,6 +3,8 @@ using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Foundation.Files;
 using LandErp.Infrastructure.Foundation.Files;
 using LandErp.Infrastructure.Modules.Catalog;
+using LandErp.Application.Modules.Overview.Contracts;
+using LandErp.Infrastructure.Modules.Overview;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -27,6 +29,7 @@ public static class ProcurementServices
         services.AddScoped<IIncomingCatalogReadService, IncomingCatalogReadService>();
         services.AddScoped<IIncomingFilterPresetService, IncomingFilterPresetService>();
         services.AddScoped<IProcurementQueueV2ReadService, ProcurementQueueV2ReadService>();
+        services.AddScoped<IOverviewService, OverviewService>();
         return services;
     }
 }

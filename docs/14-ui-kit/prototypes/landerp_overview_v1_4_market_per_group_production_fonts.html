@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LandErp — Обзор v1.4 · Рыночные показатели</title>
+<style>
+:root{
+  --nav:#10223A; --nav-active:#1C4163; --action:#2268B5;
+  --bg:#F4F7FA; --card:#FFFFFF; --line:#DCE4EC; --line2:#EDF2F6;
+  --text:#1B2B3D; --muted:#6C7F92; --ok:#14734B; --warn:#9A6200; --risk:#B4232D;
+  --ok-bg:#EAF7F0; --warn-bg:#FFF5DF; --risk-bg:#FCEAEC; --info-bg:#EAF2FB;
+
+  /* Production typography override */
+  --fs-h1:28px;
+  --fs-table-th:11px;
+  --fs-table-td:13px;
+  --fs-object-title:13.5px;
+  --fs-drawer-header:18px;
+  --fs-card-title:15px;
+  --fs-fact-label:10px;
+  --fs-fact-value:14px;
+  --fs-negotiation:12.5px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px "Segoe UI",Arial,sans-serif}
+button,input,select{font:inherit}
+.app{display:grid;grid-template-columns:210px minmax(0,1fr);min-height:100vh}
+.side{background:var(--nav);color:#DCE8F5;padding:12px 8px;display:flex;flex-direction:column}
+.brand{padding:5px 10px 18px;font-weight:700;font-size:16px}
+.brand small{display:block;color:#98ABC0;font-size:10px;font-weight:400;margin-top:3px}
+.cap{font-size:10px;color:#7F95AB;font-weight:700;padding:10px 8px 6px}
+.nav{padding:8px 10px;border-radius:7px;margin:2px 0;font-size:13px}
+.nav.active{background:var(--nav-active);color:#fff}
+.sidefoot{margin-top:auto;padding:14px 10px 4px;color:#8AA0B5;font-size:10px}
+
+.main{min-width:0}
+.top{height:54px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 clamp(16px,2vw,30px)}
+.top small{font-size:10px;color:#72879A}
+.top b{display:block;font-size:13px;margin-top:2px}
+.user{font-size:12px;color:var(--muted)}
+.page{width:100%;max-width:none;margin:0;padding:clamp(16px,1.7vw,26px) clamp(16px,2.1vw,34px) 60px}
+.crumb{font-size:11px;color:#6285A9;margin-bottom:8px}
+.head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:16px}
+.head h1{font-size:var(--fs-h1);margin:0 0 6px}
+.head p{margin:0;color:var(--muted);font-size:var(--fs-negotiation)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.btn{height:34px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:0 12px;color:#334B61;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:#BFCEDB;background:#FAFCFE}
+.btn.primary{background:var(--action);border-color:var(--action);color:#fff}
+.btn.primary:hover{background:#1D5CA2}
+.btn.small{height:30px;font-size:12px;padding:0 10px}
+.btn.iconOnly{width:30px;padding:0;display:grid;place-items:center;font-size:14px}
+
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px;position:relative;min-width:0}
+.stat label{display:block;font-size:var(--fs-fact-label);color:#7A8C9D;text-transform:uppercase;font-weight:600}
+.stat strong{display:block;font-size:22px;margin-top:5px}
+.stat span{display:block;font-size:12px;color:var(--muted);margin-top:3px}
+.stat.attn{box-shadow:inset -4px 0 0 var(--risk)}
+.stat.wait{box-shadow:inset -4px 0 0 var(--warn)}
+
+.layout{display:grid;grid-template-columns:minmax(0,1.52fr) minmax(320px,.88fr);gap:12px}
+.column{display:grid;gap:12px;align-content:start;min-width:0}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;min-width:0}
+.cardHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:14px 15px;border-bottom:1px solid var(--line2)}
+.cardHead h2{margin:0;font-size:var(--fs-card-title);line-height:1.25}
+.cardHead p{margin:4px 0 0;color:var(--muted);font-size:11.5px;line-height:1.45}
+.cardHead .meta{font-size:12px;color:var(--muted)}
+
+.rows{padding:0 14px}
+.row{display:grid;grid-template-columns:30px minmax(0,1fr) minmax(120px,150px) 20px;gap:10px;align-items:center;min-height:62px;border-bottom:1px solid var(--line2)}
+.row:last-child{border-bottom:0}
+.icon{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-size:12px;font-weight:700}
+.icon.risk{background:var(--risk-bg);color:var(--risk)}
+.icon.warn{background:var(--warn-bg);color:var(--warn)}
+.icon.info{background:var(--info-bg);color:var(--action)}
+.mainText b{display:block;font-size:var(--fs-object-title);line-height:1.3}
+.mainText small{display:block;font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.35}
+.sideText{font-size:var(--fs-negotiation);color:#546A7D;line-height:1.35}
+.sideText strong{display:block;font-size:13px}
+.arrow{color:#7A90A3;text-align:right;font-size:16px}
+
+.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;padding:14px}
+.stage{border:1px solid var(--line);border-radius:10px;padding:11px;min-width:0}
+.stage label{display:block;font-size:var(--fs-fact-label);color:#7A8C9D;text-transform:uppercase;font-weight:600}
+.stage strong{display:block;font-size:20px;margin-top:5px}
+.stage span{display:block;font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.35}
+.bar{height:4px;background:#E8EEF4;border-radius:999px;margin-top:9px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--action);border-radius:999px}
+
+.workRows{padding:0 14px}
+.work{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) 118px 20px;gap:12px;align-items:center;min-height:60px;border-bottom:1px solid var(--line2)}
+.work:last-child{border-bottom:0}
+.obj b,.task b{display:block;font-size:var(--fs-object-title);line-height:1.3}
+.obj small,.task small{display:block;font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.35}
+.deadline{font-size:var(--fs-negotiation)}
+.deadline.today{color:var(--warn);font-weight:700}
+.deadline.over{color:var(--risk);font-weight:700}
+
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;padding:14px 14px 8px}
+.mini{border:1px solid var(--line);border-radius:10px;padding:11px;min-width:0}
+.mini label{display:block;font-size:var(--fs-fact-label);color:#7A8C9D;text-transform:uppercase;font-weight:600}
+.mini b{display:block;font-size:var(--fs-fact-value);margin-top:5px}
+.mini small{display:block;font-size:11.5px;color:var(--muted);margin-top:3px}
+
+.statusList{padding:0 14px 13px}
+.status{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:39px;border-top:1px solid var(--line2)}
+.status:first-child{border-top:0}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.dot.warn{background:var(--warn)}
+.dot.risk{background:var(--risk)}
+.status b{font-size:13px}
+.status span{font-size:12px;color:var(--muted)}
+
+.quick{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px}
+.quick .btn{text-align:left;height:38px;font-size:12.5px}
+.note{padding:0 14px 14px;color:var(--muted);font-size:11.5px;line-height:1.45}
+
+.teamList{padding:4px 14px 14px}
+.teamRow{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:42px;border-top:1px solid var(--line2)}
+.teamRow:first-child{border-top:0}
+.teamRow b{font-size:13px}
+.teamRow span{font-size:12px;color:var(--muted)}
+
+/* Compact market metrics */
+.marketCard{margin-bottom:12px}
+.marketCard .cardHead{padding:11px 14px}
+.marketHeadRight{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.marketTable{padding:0 14px 4px}
+.marketHeader,.marketRow{display:grid;grid-template-columns:minmax(260px,1.7fr) minmax(120px,.68fr) minmax(120px,.68fr) minmax(105px,.58fr) 34px;gap:12px;align-items:center}
+.marketHeader{min-height:31px;color:#7A8C9D;font-size:var(--fs-table-th);text-transform:uppercase;font-weight:700;border-bottom:1px solid var(--line2)}
+.marketRow{min-height:50px;border-bottom:1px solid var(--line2);font-size:var(--fs-table-td)}
+.marketRow:last-child{border-bottom:0}
+.marketName b{display:block;font-size:var(--fs-object-title);line-height:1.25}
+.marketName small{display:block;margin-top:2px;color:var(--muted);font-size:10.5px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.priceValue b{font-size:14px;line-height:1.2}
+.priceValue small,.sample small{display:block;margin-top:2px;color:var(--muted);font-size:10px}
+.sample b{font-size:13px}
+.marketSettingsBtn{width:28px;height:28px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#60788E;display:grid;place-items:center;cursor:pointer;font-size:14px;padding:0}
+.marketSettingsBtn:hover{border-color:#AFC3D4;background:#F8FBFE;color:#245F9D}
+.marketFoot{padding:5px 14px 9px;display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:10.5px;line-height:1.35}
+.marketFoot strong{color:#425A70}
+.noData{color:#9A6200;font-size:12px;font-weight:600}
+
+/* Modals */
+.modalShade{position:fixed;inset:0;background:rgba(16,34,58,.34);display:none;align-items:center;justify-content:center;padding:20px;z-index:40}
+.modalShade.open{display:flex}
+.modalShade.secondary{z-index:55;background:rgba(16,34,58,.20)}
+.modal{width:min(600px,100%);max-height:88vh;background:#fff;border:1px solid var(--line);border-radius:15px;box-shadow:0 24px 60px rgba(16,34,58,.20);overflow:hidden;display:flex;flex-direction:column}
+.modal.wide{width:min(1180px,calc(100vw - 40px))}
+.modalHead{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:16px 18px;border-bottom:1px solid var(--line2);flex:0 0 auto}
+.modalHead h3{margin:0;font-size:var(--fs-drawer-header);line-height:1.25}
+.modalHead p{margin:4px 0 0;color:var(--muted);font-size:11.5px;line-height:1.4}
+.closeBtn{border:0;background:transparent;color:#71879B;font-size:22px;line-height:1;cursor:pointer;padding:0 2px}
+.modalBody{padding:15px 18px 4px;overflow:auto}
+.modalBody.flush{padding:0 18px 14px}
+.field{margin-bottom:15px}
+.field>label{display:block;font-size:var(--fs-fact-label);color:#71879B;text-transform:uppercase;font-weight:700;margin-bottom:7px}
+.segmented{display:flex;gap:6px;flex-wrap:wrap}
+.segmented button{height:32px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:0 11px;color:#40586E;font-size:12.5px;font-weight:600;cursor:pointer}
+.segmented button.active{background:var(--info-bg);border-color:#AFCDEB;color:#174E85}
+.checks{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.check{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:9px;padding:9px 10px;font-size:12.5px;color:#40586E;cursor:pointer}
+.check input{margin:0}
+.rangeFields{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.inputWrap{position:relative}
+.inputWrap input{width:100%;height:36px;border:1px solid var(--line);border-radius:8px;padding:0 62px 0 10px;color:#334B61;outline:none;font-size:13px}
+.inputWrap span{position:absolute;right:10px;top:10px;color:#8293A3;font-size:10px}
+.fieldHelp{margin-top:6px;color:var(--muted);font-size:10.5px;line-height:1.4}
+.modalFoot{display:flex;justify-content:space-between;gap:10px;padding:13px 18px 16px;border-top:1px solid var(--line2);flex:0 0 auto}
+.modalFoot .right{display:flex;gap:8px}
+
+.allGroupsToolbar{display:grid;grid-template-columns:minmax(220px,1fr) 190px;gap:10px;padding:12px 0}
+.toolbarInput,.toolbarSelect{height:36px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#334B61;padding:0 11px;font-size:12.5px;outline:none}
+.allGroupsHeader,.allGroupsRow{display:grid;grid-template-columns:minmax(240px,1.45fr) minmax(260px,1.25fr) 125px 125px 100px 34px;gap:12px;align-items:center}
+.allGroupsHeader{height:34px;border-top:1px solid var(--line2);border-bottom:1px solid var(--line2);color:#7A8C9D;font-size:var(--fs-table-th);font-weight:700;text-transform:uppercase;position:sticky;top:0;background:#fff;z-index:1}
+.allGroupsRow{min-height:55px;border-bottom:1px solid var(--line2);font-size:var(--fs-table-td)}
+.allGroupsRow:last-child{border-bottom:0}
+.allGroupsName b{display:block;font-size:var(--fs-object-title);line-height:1.25}
+.allGroupsName small,.configText{display:block;color:var(--muted);font-size:10.5px;margin-top:2px;line-height:1.3}
+.allGroupsMeta{padding:10px 0 0;color:var(--muted);font-size:11px}
+
+@media (max-width:1250px){
+  .app{grid-template-columns:72px minmax(0,1fr)}
+  .brand,.cap,.nav{font-size:0}
+  .brand:before{content:'LE';font-size:15px;font-weight:800}
+  .nav:before{content:'•';font-size:16px}
+  .sidefoot{display:none}
+  .marketHeader,.marketRow{grid-template-columns:minmax(230px,1.5fr) minmax(110px,.7fr) minmax(110px,.7fr) minmax(95px,.6fr) 34px}
+}
+@media (max-width:980px){
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .layout{grid-template-columns:1fr}
+  .head{align-items:stretch;flex-direction:column}
+  .actions{justify-content:flex-start}
+  .allGroupsHeader,.allGroupsRow{grid-template-columns:minmax(210px,1.2fr) minmax(230px,1.1fr) 110px 110px 90px 34px}
+}
+@media (max-width:760px){
+  .app{grid-template-columns:1fr}
+  .side{display:none}
+  .page{padding:14px 12px 42px}
+  .top{padding:0 12px}
+  .user{display:none}
+  .stats{grid-template-columns:1fr 1fr;gap:8px}
+  .stat{padding:11px 12px}
+  .marketCard .cardHead{align-items:stretch;flex-direction:column}
+  .marketHeadRight{justify-content:flex-start}
+  .marketHeader{display:none}
+  .marketRow{grid-template-columns:minmax(0,1fr) auto 30px;gap:10px;padding:8px 0;min-height:0}
+  .marketName{grid-column:1/2}
+  .priceValue:nth-child(2){grid-column:1/2}
+  .priceValue:nth-child(3){grid-column:2/3;grid-row:2}
+  .sample{grid-column:1/3}
+  .marketSettingsBtn{grid-column:3;grid-row:1/3}
+  .marketFoot{align-items:flex-start;flex-direction:column}
+  .flow{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .quick{grid-template-columns:1fr}
+  .row,.work{grid-template-columns:30px minmax(0,1fr)}
+  .row .sideText,.row .arrow,.work .deadline,.work .arrow{display:none}
+  .metrics{grid-template-columns:1fr}
+  .checks{grid-template-columns:1fr}
+  .rangeFields{grid-template-columns:1fr}
+  .modalShade{padding:10px}
+  .modal.wide{width:100%}
+  .allGroupsToolbar{grid-template-columns:1fr}
+  .allGroupsHeader{display:none}
+  .allGroupsRow{grid-template-columns:minmax(0,1fr) 34px;gap:8px;padding:10px 0}
+  .allGroupsName,.configText,.allGroupsRow .priceValue,.allGroupsRow .sample{grid-column:1}
+  .allGroupsRow .marketSettingsBtn{grid-column:2;grid-row:1/3}
+}
+@media (max-width:480px){
+  .stats{grid-template-columns:1fr}
+  .head h1{font-size:26px}
+  .actions .btn{flex:1 1 100%}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">LandErp<small>Рабочий контур закупки</small></div>
+    <div class="cap">РАБОЧЕЕ МЕСТО</div>
+    <div class="nav active">▣ Обзор</div>
+    <div class="nav">▣ Закупка</div>
+    <div class="nav">▦ Организация</div>
+    <div class="nav">≡ Аудит</div>
+    <div class="nav">↕ Сбор данных</div>
+    <div class="sidefoot">Локальный контур</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div><small>ЗАКУПКА</small><b>Земля. Данные. Решения.</b></div>
+      <div class="user">owner@landerp.local &nbsp; <button class="btn small">Выход</button></div>
+    </div>
+
+    <div class="page">
+      <div class="crumb">LandErp / Обзор</div>
+
+      <div class="head">
+        <div>
+          <h1>Обзор</h1>
+          <p>Что происходит в закупке прямо сейчас и где требуется ваше внимание.</p>
+        </div>
+        <div class="actions">
+          <button class="btn">Открыть входящие</button>
+          <button class="btn">Очередь закупки</button>
+          <button class="btn primary">+ Добавить предложение</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><label>Новые входящие</label><strong>17</strong><span>+6 со вчера</span></div>
+        <div class="stat"><label>В закупке</label><strong>12</strong><span>5 на глубокой проверке</span></div>
+        <div class="stat attn"><label>Требуют внимания</label><strong>4</strong><span>2 просрочены</span></div>
+        <div class="stat wait"><label>Ждут решения</label><strong>2</strong><span>руководителя закупок</span></div>
+      </div>
+
+
+
+      <section class="card marketCard">
+        <div class="cardHead">
+          <div>
+            <h2>Рынок по группам поиска</h2>
+            <p>Медианная и средняя цена за сотку. Каждая группа рассчитывается по своим параметрам.</p>
+          </div>
+          <div class="marketHeadRight">
+            <button class="btn small" id="openAllGroups">Посмотреть все группы</button>
+          </div>
+        </div>
+        <div class="marketTable">
+          <div class="marketHeader">
+            <div>Группа поиска</div>
+            <div>Медиана</div>
+            <div>Средняя</div>
+            <div>Выборка</div>
+            <div></div>
+          </div>
+          <div id="marketRows"></div>
+        </div>
+        <div class="marketFoot">
+          <span><strong>Параметры индивидуальны:</strong> период, типы участков и ценовые границы задаются отдельно для каждой группы.</span>
+          <span id="marketFootMeta">Показаны 5 групп.</span>
+        </div>
+      </section>
+
+      <div class="layout">
+        <div class="column">
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Требует внимания</h2>
+                <p>Сначала то, что может задержать закупку или потерять объект.</p>
+              </div>
+              <div class="meta">4 события</div>
+            </div>
+            <div class="rows">
+              <div class="row">
+                <div class="icon risk">!</div>
+                <div class="mainText"><b>Химки, Фирсановка · №0248</b><small>Нет следующего действия уже 4 дня</small></div>
+                <div class="sideText"><strong>Просрочено</strong>назначить следующий шаг</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="row">
+                <div class="icon warn">↩</div>
+                <div class="mainText"><b>Королёв · №0261</b><small>Руководитель вернул объект на уточнение цены</small></div>
+                <div class="sideText"><strong>Сегодня</strong>связаться с продавцом</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="row">
+                <div class="icon warn">⚙</div>
+                <div class="mainText"><b>Поиск «Королёв · ИЖС до 15 млн»</b><small>Сбор данных требует ручного действия</small></div>
+                <div class="sideText"><strong>Сейчас</strong>проверить парсер</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="row">
+                <div class="icon info">+</div>
+                <div class="mainText"><b>7 новых предложений с высоким приоритетом</b><small>Цена и локация проходят базовые фильтры</small></div>
+                <div class="sideText"><strong>Новые</strong>посмотреть входящие</div>
+                <div class="arrow">›</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Закупка сейчас</h2>
+                <p>Состояние текущего потока от входящих до покупки.</p>
+              </div>
+              <button class="btn small">Открыть очередь</button>
+            </div>
+            <div class="flow">
+              <div class="stage"><label>Входящие</label><strong>17</strong><span>новых предложений</span><div class="bar"><i style="width:100%"></i></div></div>
+              <div class="stage"><label>В работе</label><strong>12</strong><span>объектов в работе</span><div class="bar"><i style="width:71%"></i></div></div>
+              <div class="stage"><label>Глубокая проверка</label><strong>5</strong><span>юридическая проверка</span><div class="bar"><i style="width:42%"></i></div></div>
+              <div class="stage"><label>Решение</label><strong>2</strong><span>ждут руководителя</span><div class="bar"><i style="width:17%"></i></div></div>
+              <div class="stage"><label>Куплено</label><strong>3</strong><span>за последние 30 дней</span><div class="bar"><i style="width:25%"></i></div></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Моя работа</h2>
+                <p>Ближайшие действия по объектам, за которые вы отвечаете.</p>
+              </div>
+              <button class="btn small">Все мои объекты</button>
+            </div>
+            <div class="workRows">
+              <div class="work">
+                <div class="obj"><b>Солнечногорск · №0254</b><small>Переговоры · продавец на связи</small></div>
+                <div class="task"><b>Позвонить продавцу</b><small>Уточнить возможность снижения до 11,8 млн</small></div>
+                <div class="deadline today">Сегодня · 17:00</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="work">
+                <div class="obj"><b>Истра · №0260</b><small>Первичная проверка</small></div>
+                <div class="task"><b>Проверить Росреестр</b><small>Кадастровый номер уже найден</small></div>
+                <div class="deadline">Завтра</div>
+                <div class="arrow">›</div>
+              </div>
+              <div class="work">
+                <div class="obj"><b>Химки · №0248</b><small>Глубокая проверка</small></div>
+                <div class="task"><b>Назначить следующее действие</b><small>Объект без движения</small></div>
+                <div class="deadline over">Просрочено</div>
+                <div class="arrow">›</div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="column">
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Сбор данных</h2>
+                <p>Коротко о состоянии поисков и сбора данных.</p>
+              </div>
+              <button class="btn small">Управление</button>
+            </div>
+            <div class="metrics">
+              <div class="mini"><label>Сборщики</label><b>3 / 3</b><small>работают</small></div>
+              <div class="mini"><label>Поиски</label><b>28</b><small>активны</small></div>
+              <div class="mini"><label>Сегодня</label><b>642</b><small>обработано</small></div>
+            </div>
+            <div class="statusList">
+              <div class="status"><span class="dot"></span><b>Avito</b><span>успешно · 14:32</span></div>
+              <div class="status"><span class="dot warn"></span><b>Королёв · ИЖС до 15 млн</b><span>требует внимания</span></div>
+              <div class="status"><span class="dot"></span><b>Последний новый объект</b><span>14:28</span></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Быстрые действия</h2>
+                <p>То, что используется чаще всего.</p>
+              </div>
+            </div>
+            <div class="quick">
+              <button class="btn">+ Добавить предложение</button>
+              <button class="btn">Открыть входящие</button>
+              <button class="btn">Очередь закупки</button>
+              <button class="btn">Мои объекты</button>
+            </div>
+            <div class="note">Организация, аудит и техническое управление сбором данных остаются в левом меню и не дублируются здесь отдельными карточками.</div>
+          </section>
+
+          <section class="card">
+            <div class="cardHead">
+              <div>
+                <h2>Команда закупки</h2>
+                <p>Только то, что помогает понять загрузку прямо сейчас.</p>
+              </div>
+            </div>
+            <div class="teamList">
+              <div class="teamRow"><span class="dot"></span><b>Алексей Морозов</b><span>4 объекта</span></div>
+              <div class="teamRow"><span class="dot"></span><b>Анна Крылова</b><span>3 объекта</span></div>
+              <div class="teamRow"><span class="dot warn"></span><b>Дмитрий Соколов</b><span>5 объектов · 1 просрочен</span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+
+<div class="modalShade" id="allGroupsModal" aria-hidden="true">
+  <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="allGroupsTitle">
+    <div class="modalHead">
+      <div>
+        <h3 id="allGroupsTitle">Все группы поиска</h3>
+        <p>Полный список рыночных показателей. Параметры расчёта настраиваются отдельно для каждой группы.</p>
+      </div>
+      <button class="closeBtn" data-close="allGroupsModal" aria-label="Закрыть">×</button>
+    </div>
+    <div class="modalBody flush">
+      <div class="allGroupsToolbar">
+        <input class="toolbarInput" id="groupsSearch" placeholder="Поиск по названию группы…">
+        <select class="toolbarSelect" id="groupsSort">
+          <option value="name">По названию</option>
+          <option value="medianDesc">Медиана: по убыванию</option>
+          <option value="medianAsc">Медиана: по возрастанию</option>
+          <option value="sampleDesc">По размеру выборки</option>
+        </select>
+      </div>
+      <div class="allGroupsHeader">
+        <div>Группа поиска</div>
+        <div>Параметры расчёта</div>
+        <div>Медиана</div>
+        <div>Средняя</div>
+        <div>Выборка</div>
+        <div></div>
+      </div>
+      <div id="allGroupsRows"></div>
+      <div class="allGroupsMeta" id="allGroupsMeta"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modalShade secondary" id="groupSettingsModal" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="groupSettingsTitle">
+    <div class="modalHead">
+      <div>
+        <h3 id="groupSettingsTitle">Настройка рыночных показателей</h3>
+        <p id="groupSettingsSubtitle">Параметры расчёта выбранной группы.</p>
+      </div>
+      <button class="closeBtn" data-close="groupSettingsModal" aria-label="Закрыть">×</button>
+    </div>
+    <div class="modalBody">
+      <div class="field">
+        <label>Период данных</label>
+        <div class="segmented" id="periodButtons">
+          <button data-days="7">7 дней</button>
+          <button data-days="30">30 дней</button>
+          <button data-days="90">90 дней</button>
+          <button data-days="180">180 дней</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Типы участков</label>
+        <div class="checks">
+          <label class="check"><input type="checkbox" value="ИЖС"> ИЖС</label>
+          <label class="check"><input type="checkbox" value="ЛПХ"> ЛПХ</label>
+          <label class="check"><input type="checkbox" value="СНТ"> СНТ / ДНП</label>
+        </div>
+        <div class="fieldHelp">В расчёт этой группы попадут только объявления выбранных типов.</div>
+      </div>
+      <div class="field">
+        <label>Цена за сотку — допустимый диапазон</label>
+        <div class="rangeFields">
+          <div>
+            <div class="inputWrap"><input id="minPrice" type="number" min="0" step="50000"><span>₽/сот.</span></div>
+            <div class="fieldHelp">Ниже — исключить как подозрительно дешёвые.</div>
+          </div>
+          <div>
+            <div class="inputWrap"><input id="maxPrice" type="number" min="0" step="50000"><span>₽/сот.</span></div>
+            <div class="fieldHelp">Выше — исключить как нетипично дорогие.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modalFoot">
+      <button class="btn small" id="resetGroupSettings">Сбросить</button>
+      <div class="right">
+        <button class="btn small" data-close="groupSettingsModal">Отмена</button>
+        <button class="btn small primary" id="applyGroupSettings">Применить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const groups = [
+    {name:'Химки · Фирсановка / Сходня', search:'до 35 млн · северо-запад', base:1080000, settings:{days:30,types:['ИЖС'],min:250000,max:2500000}},
+    {name:'Истра · западное направление', search:'до 22 млн · запад', base:535000, settings:{days:90,types:['ИЖС','ЛПХ'],min:220000,max:1600000}},
+    {name:'Солнечногорск · север', search:'до 18 млн · север', base:430000, settings:{days:60,types:['ИЖС','ЛПХ'],min:180000,max:1200000}},
+    {name:'Королёв / Щёлково', search:'до 20 млн · северо-восток', base:745000, settings:{days:30,types:['ИЖС'],min:300000,max:1800000}},
+    {name:'Одинцово · запад', search:'до 30 млн · запад', base:880000, settings:{days:90,types:['ИЖС'],min:350000,max:2500000}},
+    {name:'Красногорск · Новорижское', search:'до 40 млн · запад', base:1250000, settings:{days:30,types:['ИЖС','ЛПХ'],min:450000,max:3200000}},
+    {name:'Мытищи · Осташковское', search:'до 25 млн · северо-восток', base:690000, settings:{days:90,types:['ИЖС','ЛПХ'],min:280000,max:1800000}},
+    {name:'Пушкинский округ', search:'до 18 млн · северо-восток', base:510000, settings:{days:180,types:['ИЖС','СНТ'],min:160000,max:1400000}},
+    {name:'Дмитров · север', search:'до 15 млн · север', base:390000, settings:{days:90,types:['ИЖС','ЛПХ','СНТ'],min:120000,max:950000}},
+    {name:'Зеленоград и окрестности', search:'до 24 млн · северо-запад', base:610000, settings:{days:30,types:['ИЖС'],min:250000,max:1550000}}
+  ];
+
+  const types=['ИЖС','ЛПХ','СНТ'];
+  const factors=[.52,.67,.74,.81,.87,.91,.95,.98,1,1.02,1.05,1.08,1.12,1.17,1.23,1.31,1.42,1.58,1.76,2.15,.39,.84,1.27,1.01,1.1,1.36,.71,1.19,.93,1.48];
+  const data=[];
+  groups.forEach((g,gi)=>{
+    factors.forEach((f,i)=>data.push({
+      group:gi,
+      type:types[(i+gi*2)%types.length],
+      daysAgo:(i*11+gi*7)%178+1,
+      price:Math.round(g.base*f/5000)*5000
+    }));
+  });
+
+  const fmt=v=>new Intl.NumberFormat('ru-RU').format(Math.round(v));
+  const median=arr=>{const a=[...arr].sort((x,y)=>x-y);if(!a.length)return null;const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2};
+  const compactMoney=v=>v>=1000000?(v/1000000).toFixed(v%1000000===0?0:2).replace('.',',')+' млн':Math.round(v/1000)+' тыс.';
+  const settingsText=s=>`${s.types.length?s.types.join(' · '):'без типов'} · ${s.days} дн. · ${compactMoney(s.min)}–${compactMoney(s.max)} ₽/сот.`;
+
+  function calc(index){
+    const s=groups[index].settings;
+    const period=data.filter(x=>x.group===index && x.daysAgo<=s.days && s.types.includes(x.type));
+    const used=period.filter(x=>x.price>=s.min && x.price<=s.max);
+    return {
+      median:median(used.map(x=>x.price)),
+      avg:used.length?used.reduce((a,x)=>a+x.price,0)/used.length:null,
+      used:used.length,
+      excluded:period.length-used.length
+    };
+  }
+
+  const priceCell=v=>v==null?'<span class="noData">Нет данных</span>':`<b>${fmt(v)} ₽</b><small>за сотку</small>`;
+
+  function compactRow(index){
+    const g=groups[index],c=calc(index);
+    return `<div class="marketRow">
+      <div class="marketName"><b>${g.name}</b><small>${settingsText(g.settings)}</small></div>
+      <div class="priceValue">${priceCell(c.median)}</div>
+      <div class="priceValue">${priceCell(c.avg)}</div>
+      <div class="sample"><b>${c.used} объявл.</b><small>${c.excluded} отсечено</small></div>
+      <button class="marketSettingsBtn" data-settings="${index}" title="Настроить группу" aria-label="Настроить ${g.name}">⚙</button>
+    </div>`;
+  }
+
+  function renderCompact(){
+    document.getElementById('marketRows').innerHTML=[0,1,2,3,4].map(compactRow).join('');
+    const shown=[0,1,2,3,4].map(calc);
+    const used=shown.reduce((a,c)=>a+c.used,0),excluded=shown.reduce((a,c)=>a+c.excluded,0);
+    document.getElementById('marketFootMeta').textContent=`Показаны 5 из ${groups.length} групп · ${used} объявл. в расчёте · ${excluded} отсечено`;
+  }
+
+  const allGroupsModal=document.getElementById('allGroupsModal');
+  const settingsModal=document.getElementById('groupSettingsModal');
+  const search=document.getElementById('groupsSearch');
+  const sort=document.getElementById('groupsSort');
+
+  function openModal(el){el.classList.add('open');el.setAttribute('aria-hidden','false')}
+  function closeModal(el){el.classList.remove('open');el.setAttribute('aria-hidden','true')}
+
+  function renderAllGroups(){
+    const q=search.value.trim().toLowerCase();
+    let indexes=groups.map((_,i)=>i).filter(i=>(groups[i].name+' '+groups[i].search).toLowerCase().includes(q));
+    indexes.sort((a,b)=>{
+      const ca=calc(a),cb=calc(b);
+      if(sort.value==='medianDesc') return (cb.median??-1)-(ca.median??-1);
+      if(sort.value==='medianAsc') return (ca.median??Number.MAX_SAFE_INTEGER)-(cb.median??Number.MAX_SAFE_INTEGER);
+      if(sort.value==='sampleDesc') return cb.used-ca.used;
+      return groups[a].name.localeCompare(groups[b].name,'ru');
+    });
+    document.getElementById('allGroupsRows').innerHTML=indexes.map(i=>{
+      const g=groups[i],c=calc(i);
+      return `<div class="allGroupsRow">
+        <div class="allGroupsName"><b>${g.name}</b><small>${g.search}</small></div>
+        <div class="configText">${settingsText(g.settings)}</div>
+        <div class="priceValue">${priceCell(c.median)}</div>
+        <div class="priceValue">${priceCell(c.avg)}</div>
+        <div class="sample"><b>${c.used} объявл.</b><small>${c.excluded} отсечено</small></div>
+        <button class="marketSettingsBtn" data-settings="${i}" title="Настроить группу" aria-label="Настроить ${g.name}">⚙</button>
+      </div>`;
+    }).join('');
+    document.getElementById('allGroupsMeta').textContent=`Показано групп: ${indexes.length} из ${groups.length}`;
+  }
+
+  document.getElementById('openAllGroups').addEventListener('click',()=>{renderAllGroups();openModal(allGroupsModal)});
+  search.addEventListener('input',renderAllGroups);
+  sort.addEventListener('change',renderAllGroups);
+
+  let editIndex=null;
+  let draft=null;
+  function syncSettingsUI(){
+    document.querySelectorAll('#periodButtons button').forEach(b=>b.classList.toggle('active',Number(b.dataset.days)===draft.days));
+    document.querySelectorAll('#groupSettingsModal .checks input').forEach(c=>c.checked=draft.types.includes(c.value));
+    document.getElementById('minPrice').value=draft.min;
+    document.getElementById('maxPrice').value=draft.max;
+  }
+  function openSettings(index){
+    editIndex=index;
+    const g=groups[index];
+    draft={days:g.settings.days,types:[...g.settings.types],min:g.settings.min,max:g.settings.max};
+    document.getElementById('groupSettingsSubtitle').textContent=g.name+' · '+g.search;
+    syncSettingsUI();
+    openModal(settingsModal);
+  }
+
+  document.addEventListener('click',e=>{
+    const btn=e.target.closest('[data-settings]');
+    if(btn) openSettings(Number(btn.dataset.settings));
+    const close=e.target.closest('[data-close]');
+    if(close){const modal=document.getElementById(close.dataset.close);if(modal)closeModal(modal)}
+  });
+  [allGroupsModal,settingsModal].forEach(modal=>modal.addEventListener('click',e=>{if(e.target===modal)closeModal(modal)}));
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(settingsModal.classList.contains('open'))closeModal(settingsModal);else if(allGroupsModal.classList.contains('open'))closeModal(allGroupsModal)}});
+
+  document.querySelectorAll('#periodButtons button').forEach(b=>b.addEventListener('click',()=>{draft.days=Number(b.dataset.days);syncSettingsUI()}));
+  document.querySelectorAll('#groupSettingsModal .checks input').forEach(c=>c.addEventListener('change',()=>{draft.types=[...document.querySelectorAll('#groupSettingsModal .checks input:checked')].map(x=>x.value)}));
+  document.getElementById('resetGroupSettings').addEventListener('click',()=>{draft={days:30,types:['ИЖС'],min:250000,max:2500000};syncSettingsUI()});
+  document.getElementById('applyGroupSettings').addEventListener('click',()=>{
+    draft.types=[...document.querySelectorAll('#groupSettingsModal .checks input:checked')].map(x=>x.value);
+    draft.min=Math.max(0,Number(document.getElementById('minPrice').value)||0);
+    draft.max=Math.max(0,Number(document.getElementById('maxPrice').value)||0);
+    if(draft.min>draft.max){const t=draft.min;draft.min=draft.max;draft.max=t}
+    groups[editIndex].settings={days:draft.days,types:[...draft.types],min:draft.min,max:draft.max};
+    renderCompact();
+    renderAllGroups();
+    closeModal(settingsModal);
+  });
+
+  renderCompact();
+})();
+</script>
+
+</body>
+</html>

@@ -25,6 +25,13 @@ internal static class CollectionMappings
         builder.Entity<SearchGroup>().ToTable("search_groups", "collection");
         builder.Entity<SearchGroup>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<SearchGroup>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
+        builder.Entity<SearchGroupMarketSettings>().ToTable("search_group_market_settings", "collection");
+        builder.Entity<SearchGroupMarketSettings>().Property(item => item.AllowedPropertyTypes).HasColumnType("text[]");
+        builder.Entity<SearchGroupMarketSettings>().Property(item => item.MinPricePerSotka).HasPrecision(19, 4);
+        builder.Entity<SearchGroupMarketSettings>().Property(item => item.MaxPricePerSotka).HasPrecision(19, 4);
+        builder.Entity<SearchGroupMarketSettings>().HasOne<SearchGroup>().WithOne().HasForeignKey<SearchGroupMarketSettings>(item => item.SearchGroupId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<SearchGroupMarketSettings>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<SearchGroupMarketSettings>().HasIndex(item => new { item.OrganizationId, item.SearchGroupId }).IsUnique();
         builder.Entity<ServerCollectionJob>().ToTable("jobs", "collection");
         builder.Entity<ServerCollectionJob>().Property(item => item.State).HasConversion<string>();
         builder.Entity<ServerCollectionJob>().HasOne<CollectorAgent>().WithMany().HasForeignKey(item => item.AgentId).OnDelete(DeleteBehavior.Restrict);

@@ -665,10 +665,16 @@ Scope: `audit.read` + organization-level visibility enforced server-side.
 - Collection health без raw statuses;
 - permission-aware quick actions;
 - team block только при разрешённом scope;
+- `Рынок по группам поиска`: индивидуальные для каждой Search Group период 7/30/90/180 дней,
+  разрешённые source-derived типы и включительные границы цены за сотку;
+- market sample считается server-side по уникальным source listings группы за период,
+  независимо от текущего workflow/disposition; `Fake` всегда исключается отдельно,
+  остальные type/price exclusions входят в `ExcludedCount`;
+- compact список ограничен, полный список paged/filterable и использует те же сохранённые настройки;
 - counts/rows переиспользуют module predicates/query services и не реализуют scope заново;
 - materialized projections только при измеренной необходимости.
 
-**Exit gate:** Overview counts совпадают с source module queries при том же `AccessContext`; foreign organization data invisible.
+**Exit gate:** Overview counts совпадают с source module queries при том же `AccessContext`; rows/actions соблюдают permission/scope; foreign organization data invisible; списки bounded; market median/average/counts считаются на сервере по индивидуальной конфигурации группы без дублей source listing.
 
 ---
 

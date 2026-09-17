@@ -17,7 +17,7 @@
             <span class="nav-item nav-item-disabled" aria-disabled="true" title="Раздел ещё не подключён"><span class="nav-icon" aria-hidden="true">▦</span><span>Проекты и финансы</span></span>
 
             <p class="nav-label">Система</p>
-            <AuthorizeView Policy="searches.manage"><NavLink class="nav-item" href="/collectors" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">⌁</span><span>Мониторинг Agent</span></NavLink></AuthorizeView>
+            <AuthorizeView Policy="collection.read"><NavLink class="nav-item" href="/collectors" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">⌁</span><span>Поиски и парсинг</span></NavLink></AuthorizeView>
             <AuthorizeView Policy="users.read"><NavLink class="nav-item" href="/organization" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">▦</span><span>Организация</span></NavLink></AuthorizeView>
             <AuthorizeView Policy="audit.read"><NavLink class="nav-item" href="/audit" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">≡</span><span>Аудит</span></NavLink></AuthorizeView>
         </nav>

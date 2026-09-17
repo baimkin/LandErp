@@ -25,8 +25,10 @@ public static class Permissions
     public const string RolesManage = "roles.manage";
     public const string AuditRead = "audit.read";
     public const string AgentsManage = "agents.manage";
+    public const string CollectionRead = "collection.read";
     public const string CollectionManage = "searches.manage";
     public const string QueueRead = "manager_queue.read";
     public const string ManagerDecide = "manager_decisions.create";
     public const string HeadDecide = "procurement_approvals.decide";
+    public const string PurchaseConfirm = "procurement_purchase.confirm";
 }

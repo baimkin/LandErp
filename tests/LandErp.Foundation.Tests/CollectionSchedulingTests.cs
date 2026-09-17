@@ -54,6 +54,10 @@ public sealed class CollectionSchedulingTests
         await using LandErpDbContext db = await fixture.Factory.CreateDbContextAsync();
         Assert.AreEqual(start.AddMinutes(5), (await db.CollectionJobs.AsNoTracking().SingleAsync()).ScheduledFor);
         Assert.AreEqual(start.AddMinutes(10), (await db.SearchConfigurations.AsNoTracking().SingleAsync()).NextRunAt);
+        CollectionAdminView view = await fixture.Admin.ReadAsync(fixture.Owner, CancellationToken.None);
+        Assert.AreEqual("Работает", view.Scheduler.State);
+        Assert.AreEqual(start.AddMinutes(5), view.Scheduler.LastSucceededAt);
+        Assert.AreEqual(1, view.Scheduler.LastQueuedCount);
     }
 
     [TestMethod]
@@ -132,6 +136,55 @@ public sealed class CollectionSchedulingTests
         await Assert.ThrowsExactlyAsync<ArgumentException>(() => admin.EnqueueAsync(owner, interval.Id, "duplicate", CancellationToken.None));
     }
 
+    [TestMethod]
+    public async Task ManagementReadUsesExactAggregatesStructuredLastRunAndSeparateReadPermission()
+    {
+        DateTimeOffset start = new(2026, 9, 15, 8, 0, 0, TimeSpan.Zero);
+        await using SchedulingFixture fixture = await SchedulingFixture.CreateAsync("collection-read@test.invalid", start);
+        await fixture.Admin.CreateSearchAsync(fixture.Owner, new("Read model", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 2), "read", CancellationToken.None);
+        SearchView search = (await fixture.Admin.ReadAsync(fixture.Owner, CancellationToken.None)).Searches.Single();
+        Guid organizationId;
+        await using (LandErpDbContext db = await fixture.Factory.CreateDbContextAsync())
+        {
+            organizationId = (await db.SearchConfigurations.AsNoTracking().SingleAsync()).OrganizationId;
+            db.CollectionJobs.Add(new()
+            {
+                Id = Guid.CreateVersion7(), OrganizationId = organizationId, SearchId = search.Id,
+                State = CollectionJobState.Pending, CreatedAt = start.AddDays(-10)
+            });
+            db.CollectionJobs.Add(new()
+            {
+                Id = Guid.CreateVersion7(), OrganizationId = organizationId, SearchId = search.Id,
+                State = CollectionJobState.Failed, ResultCode = "SourceError", CreatedAt = start.AddDays(-2), CompletedAt = start.AddDays(-2)
+            });
+            for (int index = 0; index < 101; index++)
+            {
+                db.CollectionJobs.Add(new()
+                {
+                    Id = Guid.CreateVersion7(), OrganizationId = organizationId, SearchId = search.Id,
+                    State = CollectionJobState.Completed, ResultCode = "Success", CreatedAt = start.AddMinutes(index),
+                    CompletedAt = start.AddMinutes(index), ProcessedCount = index, NewListingsCount = index == 100 ? 3 : 0,
+                    ChangedListingsCount = index == 100 ? 2 : 0
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        AccessContext organization = new(Guid.CreateVersion7(), organizationId, null, null, AccessScope.Organization);
+        CollectionAdministration readOnly = new(fixture.Factory,
+            new RestrictedAccess(organization, Permissions.CollectionRead), fixture.Clock);
+        CollectionAdminView view = await readOnly.ReadAsync(new(Guid.CreateVersion7(), true), CancellationToken.None);
+        Assert.AreEqual(1, view.PendingJobs, "Pending KPI must not depend on the 100-row history window.");
+        Assert.IsFalse(view.Jobs.Any(item => item.State == "Pending"));
+        Assert.AreEqual(0, view.AttentionJobs, "A later successful run resolves an older failed-run attention signal.");
+        Assert.IsNotNull(view.Searches.Single().LastRun);
+        Assert.AreEqual(3, view.Searches.Single().LastRun!.NewListingsCount);
+        Assert.AreEqual(2, view.Searches.Single().LastRun!.ChangedListingsCount);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => readOnly.EnqueueAsync(new(Guid.CreateVersion7(), true),
+            search.Id, "read-only", CancellationToken.None));
+    }
+
     private sealed class SchedulingFixture : IAsyncDisposable
     {
         private readonly PostgresSandbox sandbox;
@@ -174,5 +227,14 @@ public sealed class CollectionSchedulingTests
     {
         public override DateTimeOffset GetUtcNow() => now;
         public void Advance(TimeSpan value) => now += value;
+    }
+
+    private sealed class RestrictedAccess(AccessContext context, params string[] allowed) : IAccessControl
+    {
+        public Task<AccessContext> ResolveAsync(Subject subject, CancellationToken cancellationToken) => Task.FromResult(context);
+        public Task<AccessContext> RequireAsync(Subject subject, string permission, CancellationToken cancellationToken) =>
+            allowed.Contains(permission, StringComparer.Ordinal)
+                ? Task.FromResult(context)
+                : Task.FromException<AccessContext>(new AccessDeniedException());
     }
 }

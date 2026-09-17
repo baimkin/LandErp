@@ -1,4 +1,6 @@
 using LandErp.Application.Foundation;
+using LandErp.Application.Modules.IdentityAccess.Contracts;
+using LandErp.Collector.Contracts.V1;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -22,6 +24,7 @@ public sealed class PostgresTests
     {
         await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
         await using LandErpDbContext context = sandbox.Context();
+        int expectedMigrations = context.Database.GetMigrations().Count();
         Assert.IsFalse(context.Database.HasPendingModelChanges());
         string sql = context.GetService<IMigrator>().GenerateScript();
         Assert.IsTrue(sql.Contains("COMMENT ON TABLE", StringComparison.Ordinal));
@@ -31,10 +34,32 @@ public sealed class PostgresTests
         Assert.IsFalse(await readiness.IsReadyAsync(CancellationToken.None));
         await context.GetService<IMigrator>().MigrateAsync("20260914160628_IdentityOrganization");
         Assert.IsFalse(await readiness.IsReadyAsync(CancellationToken.None), "Partial schema must not report ready.");
+        await context.GetService<IMigrator>().MigrateAsync("20260917094153_Phase8OperationalOverview");
+        Guid existingOrganization = Guid.CreateVersion7();
+        Guid existingAgent = Guid.CreateVersion7();
+        Guid existingRole = Guid.CreateVersion7();
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO organization.organizations (id,name,business_time_zone)
+            VALUES ({existingOrganization},'Upgrade test','Europe/Moscow');
+            INSERT INTO identity.roles (id,name,normalized_name,concurrency_stamp)
+            VALUES ({existingRole},'Existing collection administrator','EXISTING COLLECTION ADMINISTRATOR','upgrade');
+            INSERT INTO identity.permissions (id,description)
+            VALUES ({Permissions.AgentsManage},'Existing Collector management permission');
+            INSERT INTO identity.role_permissions (role_id,permission_id)
+            VALUES ({existingRole},{Permissions.AgentsManage});
+            INSERT INTO collection.agents
+                (id,organization_id,name,credential_hash,enabled,version_text,capabilities,registered_at,last_heartbeat_at,version)
+            VALUES ({existingAgent},{existingOrganization},'Existing Parser','',true,'1.0','Avito',NULL,NULL,1);
+            """);
         await context.Database.MigrateAsync();
         await context.Database.MigrateAsync();
-        Assert.AreEqual(15, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        context.ChangeTracker.Clear();
+        Assert.AreEqual(expectedMigrations, (await context.Database.GetAppliedMigrationsAsync()).Count());
         Assert.AreEqual(0, (await context.Database.GetPendingMigrationsAsync()).Count());
+        Assert.AreEqual(AgentRuntimeState.Idle,
+            (await context.CollectorAgents.SingleAsync(item => item.Id == existingAgent)).RuntimeState);
+        Assert.IsTrue(await context.RolePermissions.AnyAsync(item => item.RoleId == existingRole
+            && item.PermissionId == Permissions.CollectionRead));
         Assert.IsTrue(await readiness.IsReadyAsync(CancellationToken.None));
 
         await using NpgsqlConnection connection = new(sandbox.MigratorConnection);
@@ -111,7 +136,7 @@ public sealed class PostgresTests
         await context.GetService<IMigrator>().MigrateAsync("0");
         Assert.AreEqual(0, (await context.Database.GetAppliedMigrationsAsync()).Count());
         await context.Database.MigrateAsync();
-        Assert.AreEqual(15, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.AreEqual(expectedMigrations, (await context.Database.GetAppliedMigrationsAsync()).Count());
     }
 
     [TestMethod]

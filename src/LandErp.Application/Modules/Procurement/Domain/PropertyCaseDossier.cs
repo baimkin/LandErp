@@ -6,6 +6,7 @@ public enum CaseCheckLevel { Quick, Deep }
 public enum CaseCheckStatus { Planned, InProgress, Passed, Issue, Blocked }
 public enum CaseAttachmentKind { Photo, Document, Video, Audio, Link }
 public enum CaseAttachmentOwner { Case, Negotiation, Check, Inspection, InspectionItem }
+public enum CaseDocumentStatus { Missing, Requested, Received, Verified }
 public enum CaseFactField { Title, Price, AreaSquareMeters, Location, CadastralNumber }
 public enum InspectionAnswerType { Boolean, Number, Percentage, Choice, Text }
 public enum InspectionStatus { Draft, Completed }
@@ -65,11 +66,29 @@ public sealed class CaseAttachment
     public Guid? CheckId { get; set; }
     public Guid? InspectionId { get; set; }
     public Guid? InspectionItemId { get; set; }
+    public Guid? DocumentRequirementId { get; set; }
     public CaseAttachmentKind Kind { get; set; }
     public string Label { get; set; } = "";
     public string Description { get; set; } = "";
     public Guid ActorEmployeeId { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
+}
+
+public sealed class CaseDocumentRequirement
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public Guid PropertyCaseId { get; set; }
+    public string Code { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string Description { get; set; } = "";
+    public string ExpectedSource { get; set; } = "";
+    public CaseDocumentStatus Status { get; set; }
+    public DateTimeOffset? DueAt { get; set; }
+    public string Note { get; set; } = "";
+    public Guid UpdatedByEmployeeId { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public long Version { get; set; } = 1;
 }
 
 public sealed class CaseCheckTemplateItem

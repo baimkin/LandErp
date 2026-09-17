@@ -1,122 +1,144 @@
 # Collector ↔ Server protocol V1
 
-**Статус:** активный контракт универсального Parser
+**Статус:** активный контракт универсального Parser и server authority
 **Дата:** 17 сентября 2026 года
-**Граница:** самостоятельный Parser и LandErp Server по ADR-007
+**Transport:** HTTPS JSON
+**Base path:** `/api/collector/v1`
 
-## 1. Режимы Parser
+## 1. Граница ответственности
 
-Parser использует один browser/parser pipeline и работает в одном из двух режимов:
+Server является единственным владельцем и валидатором server groups, searches,
+schedules, общей очереди Job, lease/fencing и данных Catalog. Организация всегда
+определяется только по авторизованному Parser token; organization id из body не
+принимается.
 
-- **Локально** — группы, ссылки, расписания, очередь и результаты принадлежат этому компьютеру. Локальные ссылки могут относиться к любым поддерживаемым задачам, не только к LandErp или земле.
-- **Через Server** — группы, поиски и расписания принадлежат Server. Parser получает готовую работу из общего пула, сохраняет результат локально до подтверждения и отправляет его Server.
+Локальный Parser владеет browser/source adapters, локальными группами и заданиями
+Local mode, browser state, SQLite и durable outbox. Parser не подключается к
+PostgreSQL и не создаёт ERP workflow, Catalog items или Job напрямую.
 
-Переключение режима не переносит данные. Незавершённая работа сначала безопасно завершается или останавливается. Browser profiles остаются локальными в обоих режимах.
+Локальному Parser разрешено явно создать server group или search через machine
+API только если конкретному Parser выдано `CanManageSearches`. Разрешение по
+умолчанию выключено; пользователь с `agents.manage` включает и отзывает его на
+Server. Server выполняет валидацию, аудит, rate limiting и idempotency.
 
-## 2. Явное добавление локальной ссылки на Server
+## 2. Режимы Parser и перенос
 
-Автоматической синхронизации нет. Пользователь выбирает одну локальную ссылку и нажимает «Добавить ссылку на Server». Перед сохранением он:
+- **Локально** — группы, ссылки, расписания, очередь и результаты принадлежат
+  компьютеру.
+- **Через Server** — группы, поиски, расписания, очередь и результаты принадлежат
+  Server; Parser только исполняет полученную работу и доставляет наблюдения.
 
-1. видит точный URL, источник и лимит;
-2. выбирает существующую серверную группу либо создаёт серверную группу при наличии права;
-3. задаёт серверное расписание;
-4. подтверждает создание.
+Переключение режима не переносит данные автоматически. Пользователь может явно
+добавить одну выбранную локальную ссылку на Server: проверить URL/источник/лимит,
+выбрать или создать server group, задать server schedule и подтвердить команду.
+Локальная группа, история, результаты и задания при этом не переносятся.
 
-Локальная ссылка после этого остаётся локальной. Локальная группа, локальное расписание, задания, история и результаты не передаются. Server предотвращает повтор команды по `CommandId` и проверяет дубликат поиска по своим правилам.
+## 3. Одноразовое подключение
 
-## 3. Владение и права
+Пользователь с `agents.manage` создаёт Parser и получает код
+`LDP1.<base64url>`. Payload содержит HTTPS origin Server, AgentId и одноразовый
+64-hex activation secret. Код действует 15 минут и показывается один раз.
 
-- Server — единственный владелец server groups/searches/schedules и server jobs.
-- Parser — владелец локальных групп, локальных расписаний, browser state и SQLite outbox.
-- Machine credential разрешает выполнение работы. Управление server searches требует отдельного granted feature `searches.manage`; чтение — `searches.read`.
-- Parser не создаёт ERP workflow, Catalog items или jobs напрямую. Создание/изменение server search приводит к работе только через server scheduler/manual run.
+Parser вызывает `POST /activation` с AgentId, activation secret, machine name,
+contract version, версией приложения и capabilities. Server хранит только
+SHA-256 verifier и один раз возвращает постоянную 64-hex machine credential.
+Parser атомарно сохраняет её через Windows DPAPI CurrentUser до запуска цикла.
+Повторная активация тем же кодом запрещена; при потере ответа пользователь
+отзывает identity и создаёт новый код.
 
-## 4. Подключение
+Legacy AgentId + credential сохраняет совместимость через `/registration`.
 
-Пользователь вводит один connection envelope. Он содержит версию формата, HTTPS origin Server, AgentId и постоянный machine token. Server показывает envelope только один раз при создании или перевыпуске Parser. Поэтому весь код является секретом и передаётся тем же защищённым способом, что прежний token.
+## 4. Аутентификация
 
-Parser проверяет версию, HTTPS origin без user-info/query/fragment, AgentId и длину token, выполняет registration и немедленно защищает credential через Windows DPAPI CurrentUser. Отдельный activation endpoint и хранение recoverable token на Server в первой версии не вводятся.
+Все операции кроме `/activation` передают:
 
-Существующий ручной ввод Server URL + AgentId + token сохраняется как диагностический совместимый путь V1.
+- `Authorization: Bearer <credential>`;
+- `X-LandErp-Agent-Id: <AgentId>`.
 
-## 5. Существующий runtime V1
+Server находит Parser по этим данным и из записи Parser получает организацию и
+права. Credential, activation secret, cookies и auth headers не попадают в логи,
+audit, diagnostics или обычный UI.
 
-Базовый путь: `/api/collector/v1`.
+## 5. Operations
 
-| Операция | Назначение |
+| Операция | Назначение / условие |
 |---|---|
+| `POST /activation` | Одноразовый обмен кода на credential |
 | `POST /registration` | Версия и capabilities |
-| `POST /heartbeat` | Liveness, lease и additive runtime state/progress |
-| `POST /work/claim` | Получить одну совместимую работу; `204` означает отсутствие работы |
+| `POST /heartbeat` | Liveness, lease, runtime state и progress |
+| `POST /work/claim` | Одна совместимая работа; `204` — работы нет |
 | `POST /results` | Идемпотентная порционная и final доставка |
+| `POST /workspace` | Server groups/searches; требуется `CanManageSearches` |
+| `POST /workspace/groups` | Создать server group; требуется `CanManageSearches` |
+| `POST /workspace/searches` | Создать server search/schedule; требуется `CanManageSearches` |
 
-Authentication после подключения: `Authorization: Bearer <token>` и `X-LandErp-Agent-Id`. Только HTTPS.
+Control-команды содержат `CommandId`. Точный повтор возвращает ранее созданный
+объект; несовместимый повтор даёт `IDEMPOTENCY_CONFLICT`. DTO находятся в
+`LandErp.Collector.Contracts.V1`; внутренние ERP entities наружу не выдаются.
 
-Новые control operations для server mode:
+## 6. Claim и один активный Job
 
-| Операция | Право |
-|---|---|
-| `POST /workspace` — получить groups/searches | `searches.read` |
-| `POST /workspace/groups` — создать group | `searches.manage` |
-| `POST /workspace/searches` — создать search и schedule | `searches.manage` |
+Один Parser имеет максимум один действующий lease. Повторный Claim возвращает ту
+же работу. Назначение выполняет только Server с блокировкой Agent и очереди;
+совместимость определяется зарегистрированными capabilities. Expired lease может
+быть выдан другому Parser. Локальный и server режимы используют общий локальный
+диспетчер, поэтому одновременно два сбора не запускаются.
 
-DTO находятся в `LandErp.Collector.Contracts.V1`; Server не отдаёт внутренние ERP entities. Изменение существующих записей зарезервировано контрактом и будет добавлено отдельным endpoint после появления соответствующего сценария в Parser UI.
+## 7. Heartbeat и progress
 
-## 6. Автономный цикл
+Старые `JobId`, `LeaseId`, `SourceStatus` сохраняются. Additive optional поля:
 
-После подключения Parser выполняет:
+- `RuntimeState`: Idle, Claiming, Parsing, AwaitingManualAction, Delivering,
+  Paused, Recovering;
+- `SourceState`: Ready, Captcha, AuthenticationRequired, RateLimited,
+  SourceError, Unknown;
+- `Progress`: page, maxPages, processedCount, totalCount, phase,
+  lastUsefulActionAt (UTC).
 
-`Idle → Claiming → Parsing → Delivering → Idle`.
+`null` означает «значение не передано». `SourceState=Ready` явно очищает прежнее
+attention state после повторной проверки страницы. Heartbeat продлевает только
+действующий lease и не завершает Job.
 
-При `204` он повторяет Claim с bounded backoff и jitter. Один Agent имеет не более одного действующего server lease. Повторный Claim при действующем lease возвращает ту же работу или `AGENT_BUSY`; он не выдаёт второй Job.
+## 8. Results, lease и recovery
 
-Local и Server используют общий локальный диспетчер запуска: параллельный запуск двух режимов запрещён. Ручная настройка ссылки в браузере сама по себе не запускает сбор.
-
-## 7. Heartbeat и ручная проверка
-
-Старые поля `JobId`, `LeaseId`, `SourceStatus` сохраняются. Additive поля:
-
-- `RuntimeState`: Idle, Claiming, Parsing, AwaitingManualAction, Delivering, Paused, Recovering;
-- `SourceState`: Ready, Captcha, AuthenticationRequired, RateLimited, SourceError, Unknown;
-- `Progress`: page, maxPages, processedCount, известный total, phase, lastUsefulActionAt.
-
-`null` означает «значение не передано». `SourceState=Ready` явно снимает прежнюю CAPTCHA/auth/rate-limit индикацию после того, как Parser повторно проверил страницу. Heartbeat не завершает Job.
-
-## 8. Lease и outbox
-
-- ResultId создаётся до первой отправки и не меняется при неоднозначном сетевом результате.
-- Точный повтор принятого ResultId возвращает прежний receipt, даже если lease позже истёк.
-- Исходный JSON сохраняется для диагностики.
-- `Superseded` — отдельное локальное terminal-состояние, а не server acknowledgement.
-- Перенос сохранённого результата на новый lease того же Job создаёт новые deliveries атомарно и сохраняет связь с исходными.
+- ResultId создаётся до отправки и не меняется при неоднозначном результате.
+- Не более 25 observations передаётся за запрос.
+- Точный повтор ResultId с тем же payload возвращает сохранённый receipt.
+- JobId + LeaseId выполняют fencing.
+- Final delivery завершает Job; `final=false` допустим только для успешной порции.
+- `RESULT_SUPERSEDED` — единственное явное разрешение пометить локальную delivery
+  terminal Superseded; generic 403/409 не разрешает удалять payload.
 - Permanent failure одного Job не блокирует deliveries других Jobs.
 - Outbox partition привязан к Server origin и AgentId.
 
-Если работу получил другой Agent, старый Parser прекращает browser execution на безопасной границе, сохраняет уже полученные данные и ожидает точного server reconciliation. `WORK_NOT_ALLOWED` сам по себе недостаточен для удаления или supersede результата.
-
 ## 9. Ошибки
 
-Parser читает `code` из RFC Problem Details и использует HTTP status только как fallback. Ответ не попадает в пользовательский текст или логи целиком.
+Ответ — RFC Problem Details со стабильным `code`, `correlationId` и `retryable`.
+Parser принимает решение по `code`, HTTP status использует как fallback.
 
-| Категория | Действие Parser |
+| Code | Действие |
 |---|---|
-| network/timeout/5xx/429 | повтор неизменного запроса с backoff |
+| `ACTIVATION_INVALID`, `ACTIVATION_EXPIRED`, `ACTIVATION_USED` | запросить новый код |
 | `AGENT_UNAUTHORIZED` | остановить server loop и запросить подключение |
-| `REGISTRATION_REQUIRED` | registration и один повтор операции |
-| `AGENT_BUSY` | восстановить текущую работу, не брать новую |
-| `LEASE_EXPIRED_OR_REPLACED` | reconciliation; данные сохранить |
-| `IDEMPOTENCY_CONFLICT` | изолировать delivery; ResultId не менять |
-| `OBSERVATION_KEY_CONFLICT` | изолировать delivery; observation key не менять |
-| validation/source/permission | остановить только затронутую команду |
+| `REGISTRATION_REQUIRED` | registration и один повтор |
+| `SEARCH_PERMISSION_REQUIRED` | запретить control-команду; данные не менять |
+| `AGENT_MULTIPLE_ACTIVE_WORK` / `AGENT_BUSY` | не брать вторую работу, оператору |
+| `LEASE_EXPIRED`, `LEASE_REPLACED` | reconciliation и новый Claim |
+| `RESULT_SUPERSEDED` | сохранить payload, terminal Superseded |
+| `IDEMPOTENCY_CONFLICT`, `OBSERVATION_KEY_CONFLICT` | изолировать delivery/команду |
+| `WORK_NOT_ALLOWED`, `WORK_NOT_ACTIVE` | остановить затронутую операцию |
+| network/timeout/5xx/429 или `retryable=true` | повтор неизменного запроса с backoff |
 
-Технический code доступен в диагностике. Основной UI показывает действие человека понятным текстом.
+## 10. Совместимость и безопасность
 
-## 10. Совместимость и критерии
+- Старый heartbeat без новых полей допустим.
+- Новые optional поля остаются в V1; breaking change требует новой версии.
+- Local mode не требует control operations.
+- Server не содержит browser/Playwright/source parsing; Parser не получает
+  PostgreSQL credentials или внутренние ERP entities.
+- CAPTCHA/auth решает человек; автоматический обход запрещён.
+- Rate limit применяется ко всему machine API.
 
-- Старый heartbeat без новых полей остаётся допустимым.
-- Новый Parser не требует control operations для Local mode.
-- Server игнорирует отсутствующие optional runtime fields.
-- Breaking change требует нового contract version; новые optional поля остаются в V1.
-- Server не содержит browser/Playwright/source parsing, Parser не подключается к PostgreSQL.
-
-Протокол считается реализованным после contract serialization tests, старый/new compatibility tests, проверки кода подключения, one-active-lease concurrency test, CAPTCHA→Ready test и crash tests переходов outbox.
+Критерии реализации: serialization/compatibility tests, проверка одноразового
+подключения, permission/idempotency/audit tests для group/search, one-active-job
+concurrency, CAPTCHA→Ready, recovery/outbox и объединённые PostgreSQL tests.

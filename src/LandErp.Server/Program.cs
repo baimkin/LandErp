@@ -70,8 +70,8 @@ builder.Services.AddAuthorization(options =>
 {
     foreach (string permission in new[] { Permissions.UsersRead, Permissions.UsersManage,
         Permissions.OrganizationManage, Permissions.RolesManage, Permissions.AuditRead,
-        Permissions.AgentsManage, Permissions.CollectionManage, Permissions.QueueRead,
-        Permissions.ManagerDecide, Permissions.HeadDecide })
+        Permissions.AgentsManage, Permissions.CollectionRead, Permissions.CollectionManage, Permissions.QueueRead,
+        Permissions.ManagerDecide, Permissions.HeadDecide, Permissions.PurchaseConfirm })
     {
         options.AddPolicy(permission, policy => policy.RequireAuthenticatedUser().AddRequirements(new PermissionRequirement(permission)));
     }
@@ -79,6 +79,16 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = 429;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        await Results.Problem(statusCode: 429, title: "Повторите запрос позже",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = "RETRY_LATER", ["retryable"] = true,
+                ["correlationId"] = context.HttpContext.TraceIdentifier
+            }).ExecuteAsync(context.HttpContext);
+    };
     options.AddPolicy("collector", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
         { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -176,4 +186,5 @@ static AuditQuery ParseAuditQuery(IQueryCollection values)
     int pageSize = int.TryParse(values["pageSize"], out int sizeValue) ? sizeValue : 30;
     return new(from, to, actor, values["module"], category, values["search"], page, pageSize);
 }
+
 await app.RunAsync();

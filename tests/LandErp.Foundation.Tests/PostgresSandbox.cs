@@ -77,11 +77,11 @@ internal sealed class PostgresSandbox : IAsyncDisposable
             + $"GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA identity,organization TO \"{RuntimeRole}\"; "
             + $"GRANT DELETE ON identity.user_roles TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON SCHEMA collection,catalog TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_groups,collection.search_group_market_settings,collection.search_configurations,collection.jobs,catalog.listings TO \"{RuntimeRole}\"; "
+            + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_groups,collection.search_group_market_settings,collection.search_configurations,collection.jobs,collection.scheduler_status,catalog.listings TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations,catalog.events TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON SCHEMA workflow,procurement TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT ON workflow.stages TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,procurement.case_checks,procurement.case_check_template_items,procurement.inspection_template_items,procurement.site_inspections,procurement.site_inspection_items,foundation.notifications,foundation.stored_files TO \"{RuntimeRole}\"; "
+            + $"GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,procurement.case_checks,procurement.case_check_template_items,procurement.case_document_requirements,procurement.inspection_template_items,procurement.site_inspections,procurement.site_inspection_items,foundation.notifications,foundation.stored_files TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT,INSERT ON workflow.transitions,workflow.approvals,foundation.business_timeline,procurement.negotiations,procurement.case_attachments,procurement.case_fact_revisions TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA procurement TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA identity,organization TO \"{RuntimeRole}\";", DatabaseName);

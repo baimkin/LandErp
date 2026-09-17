@@ -1,6 +1,20 @@
 # Активная задача LandErp
 
-> **Активная работа с 17 сентября 2026 года:** Universal Parser по прямому запросу владельца. Канонический bounded plan: [`PARSER_UNIVERSAL_PRODUCT_PLAN.md`](PARSER_UNIVERSAL_PRODUCT_PLAN.md), протокол: [`COLLECTOR_SERVER_PROTOCOL_V1.md`](../05-collection/COLLECTOR_SERVER_PROTOCOL_V1.md), ветка: `codex/universal-parser`. Разрешены изменения самостоятельного Parser и необходимых Collector Server contracts/endpoints по checkpoints плана. Локальные группы и история автоматически на Server не переносятся; допускается только явное добавление одной выбранной ссылки с выбором server group и подтверждением. Production apply, live Avito/Cian, merge/rebase/force-push не разрешены. Старый указатель Stage 1 ниже сохраняется как исторический контекст и не ограничивает эту отдельно утверждённую работу.
+> **Завершённый Gate от 17 сентября 2026 года по прямому запросу владельца:**
+> [`GATE-COLLECTORS-V1-3-UI.md`](GATE-COLLECTORS-V1-3-UI.md) — законченный экран
+> `/collectors` по макету «Поиски и парсинг v1.3». Ветка
+> `codex/collectors-v1-3-ui`, база — проверенный интеграционный HEAD `5b254b9`.
+> Server остаётся authority; Parser получает право создавать группы и поиски только
+> при включённом `CanManageSearches`. Страницы закупки и ParserSpike не изменять.
+> Browser/visual tests не выполнялись по решению владельца. Реализация и проверки
+> завершены; владелец разрешил приёмку и локальное слияние 17 сентября 2026 года.
+> Ручная визуальная проверка остаётся рекомендуемым следующим шагом. Evidence:
+> [`COLLECTORS_V1_3_UI_REPORT.md`](reports/COLLECTORS_V1_3_UI_REPORT.md).
+> Интеграция слита в локальный `main`; push не выполнялся.
+
+> Предыдущая интеграция Collector Server Management + Universal Parser +
+> PropertyCase V2 завершена в `5b254b9`; evidence:
+> [`INTEGRATED_SERVER_PROPERTY_V2_REPORT.md`](reports/INTEGRATED_SERVER_PROPERTY_V2_REPORT.md).
 
 > **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–7 завершены и приняты владельцем**; Phase 8 `Operational Overview` реализована и ожидает приёмки владельцем, evidence: [`STAGE1_PHASE8_REPORT.md`](reports/STAGE1_PHASE8_REPORT.md). Рабочая ветка: `codex/stage1-phase8-overview`. Визуальный authority: [`landerp_overview_v1_4_market_per_group_production_fonts.html`](../14-ui-kit/prototypes/landerp_overview_v1_4_market_per_group_production_fonts.html). Phase 9 не начинать. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
 

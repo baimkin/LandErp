@@ -34,6 +34,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<SearchGroupMarketSettings> SearchGroupMarketSettings => Set<SearchGroupMarketSettings>();
     public DbSet<ServerCollectionJob> CollectionJobs => Set<ServerCollectionJob>();
     public DbSet<CollectionDelivery> CollectionDeliveries => Set<CollectionDelivery>();
+    public DbSet<CollectionSchedulerStatus> CollectionSchedulerStatuses => Set<CollectionSchedulerStatus>();
     public DbSet<Listing> Listings => Set<Listing>();
     public DbSet<CatalogObservation> ListingObservations => Set<CatalogObservation>();
     public DbSet<CatalogEvent> CatalogEvents => Set<CatalogEvent>();
@@ -44,6 +45,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CaseCheckTemplateItem> CaseCheckTemplateItems => Set<CaseCheckTemplateItem>();
     public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
     public DbSet<CaseAttachment> CaseAttachments => Set<CaseAttachment>();
+    public DbSet<CaseDocumentRequirement> CaseDocumentRequirements => Set<CaseDocumentRequirement>();
     public DbSet<PropertyCaseFactRevision> PropertyCaseFactRevisions => Set<PropertyCaseFactRevision>();
     public DbSet<InspectionTemplateItem> InspectionTemplateItems => Set<InspectionTemplateItem>();
     public DbSet<SiteInspection> SiteInspections => Set<SiteInspection>();

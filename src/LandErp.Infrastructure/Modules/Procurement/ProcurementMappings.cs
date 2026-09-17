@@ -130,7 +130,20 @@ internal static class ProcurementMappings
         builder.Entity<CaseAttachment>().HasOne<CaseCheck>().WithMany().HasForeignKey(item => item.CheckId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseAttachment>().HasOne<SiteInspection>().WithMany().HasForeignKey(item => item.InspectionId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseAttachment>().HasOne<SiteInspectionItem>().WithMany().HasForeignKey(item => item.InspectionItemId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CaseAttachment>().HasOne<CaseDocumentRequirement>().WithMany().HasForeignKey(item => item.DocumentRequirementId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseAttachment>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ActorEmployeeId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<CaseDocumentRequirement>().ToTable("case_document_requirements", "procurement");
+        builder.Entity<CaseDocumentRequirement>().Property(item => item.Code).HasMaxLength(128);
+        builder.Entity<CaseDocumentRequirement>().Property(item => item.Title).HasMaxLength(512);
+        builder.Entity<CaseDocumentRequirement>().Property(item => item.Description).HasMaxLength(1000);
+        builder.Entity<CaseDocumentRequirement>().Property(item => item.ExpectedSource).HasMaxLength(256);
+        builder.Entity<CaseDocumentRequirement>().Property(item => item.Status).HasConversion<string>();
+        builder.Entity<CaseDocumentRequirement>().Property(item => item.Note).HasMaxLength(2000);
+        builder.Entity<CaseDocumentRequirement>().HasIndex(item => new { item.PropertyCaseId, item.Code }).IsUnique();
+        builder.Entity<CaseDocumentRequirement>().HasIndex(item => new { item.PropertyCaseId, item.Status });
+        builder.Entity<CaseDocumentRequirement>().HasOne<PropertyCase>().WithMany().HasForeignKey(item => item.PropertyCaseId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CaseDocumentRequirement>().HasOne<Employee>().WithMany().HasForeignKey(item => item.UpdatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<PropertyCaseFactRevision>().ToTable("case_fact_revisions", "procurement");
         builder.Entity<PropertyCaseFactRevision>().Property(item => item.Field).HasConversion<string>();

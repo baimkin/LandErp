@@ -10,6 +10,9 @@ internal static class CollectionMappings
     public static void Apply(ModelBuilder builder)
     {
         builder.Entity<CollectorAgent>().ToTable("agents", "collection");
+        builder.Entity<CollectorAgent>().Property(item => item.RuntimeState).HasConversion<string>();
+        builder.Entity<CollectorAgent>().Property(item => item.ActivationHash).HasMaxLength(64);
+        builder.Entity<CollectorAgent>().Property(item => item.AttentionCode).HasMaxLength(64);
         builder.Entity<CollectorAgent>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<SearchConfiguration>().ToTable("search_configurations", "collection");
         builder.Entity<SearchConfiguration>().Property(item => item.Source).HasConversion<string>();
@@ -41,6 +44,9 @@ internal static class CollectionMappings
         builder.Entity<CollectionDelivery>().ToTable("deliveries", "collection");
         builder.Entity<CollectionDelivery>().Property(item => item.ReceiptJson).HasColumnType("jsonb");
         builder.Entity<CollectionDelivery>().HasOne<ServerCollectionJob>().WithMany().HasForeignKey(item => item.JobId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CollectionSchedulerStatus>().ToTable("scheduler_status", "collection");
+        builder.Entity<CollectionSchedulerStatus>().Property(item => item.Id).ValueGeneratedNever();
+        builder.Entity<CollectionSchedulerStatus>().Property(item => item.LastFailureCode).HasMaxLength(64);
         builder.Entity<Listing>().ToTable("listings", "catalog");
         builder.Entity<Listing>().Property(item => item.Source).HasConversion<string>();
         builder.Entity<Listing>().Property(item => item.IngestionKind).HasConversion<string>();

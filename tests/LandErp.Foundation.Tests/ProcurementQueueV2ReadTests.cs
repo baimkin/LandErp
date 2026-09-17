@@ -1,3 +1,4 @@
+using System.Text;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
@@ -16,6 +17,85 @@ namespace LandErp.Foundation.Tests;
 public sealed class ProcurementQueueV2ReadTests
 {
     [TestMethod]
+    public async Task NegotiationHistoryInspectionReportAndAttachmentsStayCaseScoped()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(
+            includeSecondManager: false, includeTeams: false);
+        Guid caseId = await fixture.InsertIndependentCaseAsync("Объект с переговорами и осмотром");
+        Guid negotiationWithFile = Guid.Empty;
+        for (int index = 0; index < 4; index++)
+        {
+            CaseCard card = await fixture.Workspace.ReadCardAsync(fixture.Manager, caseId, CancellationToken.None);
+            Guid id = await fixture.Workspace.AddNegotiationWithIdAsync(fixture.Manager,
+                new(caseId, card.Item.CaseVersion, 5_000_000m - index * 100_000m, 4_500_000m + index * 50_000m,
+                    index == 3 ? 4_700_000m : null, index % 2 == 0 ? "Телефон" : "Встреча", "Собственник",
+                    $"Контакт {index + 1}", "Без дополнительных условий", $"Комментарий {index + 1}",
+                    "Получить документы", DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow.AddMinutes(-10 + index)),
+                $"history-{index}", CancellationToken.None);
+            if (index == 1) negotiationWithFile = id;
+        }
+
+        byte[] content = Encoding.UTF8.GetBytes("procurement-v2-material");
+        await fixture.Workspace.AddAttachmentAsync(fixture.Manager,
+            new(caseId, CaseAttachmentOwner.Negotiation, negotiationWithFile, CaseAttachmentKind.Photo,
+                "Фото от собственника", "Материал к контакту", "owner.jpg", "image/jpeg", content, null),
+            "negotiation-file", CancellationToken.None);
+
+        Guid inspectionId = await fixture.Workspace.SaveInspectionAsync(fixture.Manager,
+            new(caseId, null, null, "", "", [], false), "start-inspection", CancellationToken.None);
+        CaseCard inspectionCard = await fixture.Workspace.ReadCardAsync(fixture.Manager, caseId, CancellationToken.None);
+        InspectionItemView problemItem = inspectionCard.Inspection!.Items.First(item => item.NormalAnswer.Length > 0);
+        string abnormalAnswer = string.Equals(problemItem.NormalAnswer, "Нет", StringComparison.OrdinalIgnoreCase) ? "Да" : "Нет";
+        await fixture.Workspace.SaveInspectionAsync(fixture.Manager,
+            new(caseId, inspectionId, inspectionCard.Inspection.Version, "Нужна дополнительная проверка",
+                "Вернуться к вопросу после документов",
+                [new(problemItem.Id, problemItem.Version, InspectionItemStatus.Answered, abnormalAnswer, "Есть замечание")], false),
+            "save-inspection", CancellationToken.None);
+        await fixture.Workspace.AddAttachmentAsync(fixture.Manager,
+            new(caseId, CaseAttachmentOwner.Inspection, inspectionId, CaseAttachmentKind.Photo,
+                "Общий вид", "", "view.jpg", "image/jpeg", content, null), "inspection-photo", CancellationToken.None);
+        await fixture.Workspace.AddAttachmentAsync(fixture.Manager,
+            new(caseId, CaseAttachmentOwner.InspectionItem, problemItem.Id, CaseAttachmentKind.Audio,
+                "Комментарий инспектора", "", "note.mp3", "audio/mpeg", content, null), "inspection-audio", CancellationToken.None);
+        await fixture.Workspace.AddAttachmentAsync(fixture.Manager,
+            new(caseId, CaseAttachmentOwner.Inspection, inspectionId, CaseAttachmentKind.Document,
+                "Схема участка", "", "scheme.pdf", "application/pdf", content, null), "inspection-document", CancellationToken.None);
+
+        ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2Detail detail = await service.ReadDetailAsync(fixture.Manager, caseId, CancellationToken.None);
+        Assert.AreEqual(3, detail.Negotiations.Count, "Drawer remains a short preview.");
+        Assert.AreEqual(3, detail.Inspection.MaterialCount);
+        Assert.AreEqual(1, detail.Inspection.PhotoVideoCount);
+        Assert.AreEqual(1, detail.Inspection.AudioCount);
+        Assert.AreEqual(1, detail.Inspection.FileCount);
+
+        ProcurementNegotiationHistoryPage firstPage = await service.ReadNegotiationsAsync(
+            fixture.Manager, caseId, 0, 2, CancellationToken.None);
+        Assert.AreEqual(4, firstPage.Total);
+        Assert.AreEqual(2, firstPage.Items.Count);
+        ProcurementNegotiationHistoryPage all = await service.ReadNegotiationsAsync(
+            fixture.Manager, caseId, 0, 100, CancellationToken.None);
+        Assert.AreEqual(1, all.Items.Single(item => item.Id == negotiationWithFile).Attachments.Count);
+        Assert.AreEqual("Фото от собственника", all.Items.Single(item => item.Id == negotiationWithFile).Attachments.Single().Label);
+
+        ProcurementInspectionReport report = (await service.ReadInspectionReportAsync(
+            fixture.Manager, caseId, CancellationToken.None))!;
+        Assert.AreEqual(inspectionId, report.InspectionId);
+        Assert.AreEqual("Нужна дополнительная проверка", report.OverallConclusion);
+        Assert.AreEqual(2, report.Attachments.Count);
+        ProcurementInspectionReportItem problem = report.Items.Single(item => item.Id == problemItem.Id);
+        Assert.IsTrue(problem.Problem);
+        Assert.AreEqual(1, problem.Attachments.Count);
+        Assert.IsFalse(typeof(ProcurementQueueV2Attachment).GetProperties()
+            .Any(property => property.Name.Contains("StorageKey", StringComparison.Ordinal)));
+
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ReadNegotiationsAsync(
+            fixture.ForeignOwner, caseId, 0, 20, CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ReadInspectionReportAsync(
+            fixture.ForeignOwner, caseId, CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task NextActionPersistsProjectsAndWritesTimelineWithoutChangingCaseScope()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(includeSecondManager: true, includeTeams: false);
@@ -23,7 +103,7 @@ public sealed class ProcurementQueueV2ReadTests
         ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
         ProcurementQueueV2Detail before = await service.ReadDetailAsync(fixture.Manager, caseId, CancellationToken.None);
         Guid secondManagerId = fixture.EmployeeId("manager2-phase1@test.invalid");
-        DateTimeOffset due = DateTimeOffset.UtcNow.AddDays(3);
+        DateTimeOffset due = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.AddDays(3).ToUnixTimeMilliseconds());
 
         await fixture.Workspace.SaveNextActionAsync(fixture.Manager,
             new SaveNextAction(caseId, before.CaseVersion, before.TaskVersion, WorkTaskType.Call,

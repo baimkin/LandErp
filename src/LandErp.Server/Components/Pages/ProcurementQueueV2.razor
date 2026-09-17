@@ -1,6 +1,7 @@
 @page "/procurement-v2"
 @attribute [Authorize(Policy = "manager_queue.read")]
 @using System.Globalization
+@using LandErp.Application.Foundation.Files
 @using LandErp.Application.Modules.Catalog.Domain
 @using LandErp.Application.Modules.Procurement.Contracts
 @using LandErp.Application.Modules.Procurement.Domain
@@ -208,7 +209,7 @@
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Цена и торг</b><button class="btn" type="button" aria-disabled="true" title="Полная история цены и переговоров пока не выдаётся V2 read model">История цены и переговоров</button></div>
+                    <div class="ct"><b>Цена и торг</b><button class="btn" type="button" @onclick="OpenNegotiationsAsync">История цены и переговоров</button></div>
                     <div class="prices">
                         <div class="p"><label>Старт</label><b>@MoneyCompact(detail.StartPrice)</b></div>
                         <div class="p good"><label>Продавец</label><b>@MoneyCompact(detail.LatestSellerOffer ?? detail.CurrentSourceAsk)</b><small>@SellerPriceCaption(detail)</small></div>
@@ -227,7 +228,7 @@
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Переговоры</b><div><span class="badge info">Показано @detail.Negotiations.Count</span><button class="btn" type="button" aria-disabled="true" title="Read model отдаёт только три последних контакта">Все переговоры</button> @if (detail.CanManageDossier) { <button class="btn primary" type="button" @onclick="OpenNegotiation">+ Добавить</button> }</div></div>
+                    <div class="ct"><b>Переговоры</b><div><span class="badge info">Последние @detail.Negotiations.Count</span><button class="btn" type="button" @onclick="OpenNegotiationsAsync">Все переговоры</button> @if (detail.CanManageDossier) { <button class="btn primary" type="button" @onclick="OpenNegotiation">+ Добавить</button> }</div></div>
                     <div class="neg-summary">
                         <div class="neg-summary-main">
                             @if (detail.Negotiations.Count == 0)
@@ -279,7 +280,7 @@
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Осмотр участка</b>@if (detail.Inspection.Exists || detail.CanManageDossier) { <button class="btn" type="button" @onclick="OpenInspection">@(detail.Inspection.Exists ? "Открыть осмотр" : "Начать осмотр")</button> }</div>
+                    <div class="ct"><b>Осмотр участка</b>@if (detail.Inspection.Exists) { <button class="btn" type="button" @onclick="OpenInspectionReportAsync">Посмотреть результат</button> } else if (detail.CanManageDossier) { <button class="btn" type="button" @onclick="OpenInspectionEditor">Начать осмотр</button> }</div>
                     @if (!detail.Inspection.Exists)
                     {
                         <div class="inspection empty-inspection">
@@ -296,7 +297,9 @@
                             <div class="inspection-stats">
                                 <span class="inspection-stat"><b>@detail.Inspection.CheckedItems</b> из @detail.Inspection.TotalItems пунктов</span>
                                 <span class="inspection-stat"><b>@detail.Inspection.Problems</b> проблем</span>
-                                <span class="inspection-stat"><b>@detail.Inspection.MaterialCount</b> материалов</span>
+                                <span class="inspection-stat"><b>@detail.Inspection.PhotoVideoCount</b> фото/видео</span>
+                                <span class="inspection-stat"><b>@detail.Inspection.AudioCount</b> аудио</span>
+                                <span class="inspection-stat"><b>@detail.Inspection.FileCount</b> файлов</span>
                             </div>
                         </div>
                     }
@@ -404,12 +407,127 @@
                         <div class="field"><label>Результат</label><input @bind="negotiation.Outcome" maxlength="500" /></div>
                         <div class="field"><label>Цена продавца</label><InputNumber @bind-Value="negotiation.SellerPrice" /></div>
                         <div class="field"><label>Наше предложение</label><InputNumber @bind-Value="negotiation.BuyerOffer" /></div>
+                        <div class="field full"><label>Согласованная цена</label><InputNumber @bind-Value="negotiation.AgreedPrice" /></div>
                         <div class="field full"><label>Комментарий</label><textarea @bind="negotiation.Comment" maxlength="4000"></textarea></div>
-                        <div class="field full"><label>Вложения</label><div class="attachment-placeholder"><button class="btn" type="button" aria-disabled="true">📎 Файл</button><button class="btn" type="button" aria-disabled="true">📷 Фото</button><button class="btn" type="button" aria-disabled="true">🎙 Аудио</button></div><small>Atomic attachment save требует расширения backend-контракта.</small></div>
+                        <div class="field full"><label>Файлы, фото или аудио</label><InputFile OnChange="SelectNegotiationFiles" multiple accept="image/*,audio/*,.pdf,.txt,.csv,.docx,.xlsx" />
+                            <small>@(negotiationFiles.Count == 0 ? "Можно выбрать до 6 файлов, каждый не больше 8 МБ." : string.Join(" · ", negotiationFiles.Select(file => file.Name)))</small></div>
                     </div>
                 </div>
                 <div class="mf"><button class="btn" type="button" @onclick="CloseNegotiation">Отмена</button><button class="btn primary" type="submit" disabled="@Busy">Сохранить</button></div>
             </EditForm>
+        </div>
+    </div>
+}
+
+@if (negotiationsOpen && detail != null)
+{
+    <div class="modalBack on" @onclick="CloseNegotiations">
+        <div class="modal history-modal" @onclick:stopPropagation="true">
+            <div class="mh"><div class="grow"><b>История цены и переговоров</b><div class="sub">@detail.BusinessNumber · все зафиксированные контакты</div></div><button class="btn" type="button" @onclick="CloseNegotiations">×</button></div>
+            <div class="mb history-body">
+                @if (negotiationsLoading)
+                {
+                    <div class="modal-state">Загружаем историю…</div>
+                }
+                else if (negotiationsError != null)
+                {
+                    <div class="modal-state error">@negotiationsError</div>
+                }
+                else if (negotiationHistory?.Items.Count == 0)
+                {
+                    <div class="modal-state">Переговоров пока нет.</div>
+                }
+                else if (negotiationHistory != null)
+                {
+                    <div class="history-list">
+                        @foreach (ProcurementNegotiationHistoryItem item in negotiationHistory.Items)
+                        {
+                            <article class="history-item">
+                                <div class="history-head"><div><b>@NegotiationTitle(item)</b><span>@ShortDateTime(item.EffectiveAt) · @item.Author</span></div><span class="badge neutral">@ValueOrDash(item.Channel)</span></div>
+                                <div class="history-prices">
+                                    <span>Продавец <b>@MoneyCompact(item.SellerPrice)</b></span><span>Мы <b>@MoneyCompact(item.BuyerOffer)</b></span><span>Согласовано <b>@MoneyCompact(item.AgreedPrice)</b></span>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(item.Contact)) { <p><strong>Контакт:</strong> @item.Contact</p> }
+                                @if (!string.IsNullOrWhiteSpace(item.Outcome)) { <p><strong>Результат:</strong> @item.Outcome</p> }
+                                @if (!string.IsNullOrWhiteSpace(item.Conditions)) { <p><strong>Условия:</strong> @item.Conditions</p> }
+                                @if (!string.IsNullOrWhiteSpace(item.Comment)) { <p>@item.Comment</p> }
+                                @if (!string.IsNullOrWhiteSpace(item.NextStep)) { <p><strong>Следующий шаг:</strong> @item.NextStep · @ProcurementLabels.Time(item.NextStepDueAt)</p> }
+                                <div class="material-list">
+                                    @foreach (ProcurementQueueV2Attachment attachment in item.Attachments)
+                                    {
+                                        @if (attachment.Status == StoredFileStatus.Available)
+                                        {
+                                            <a href="/api/procurement/attachments/@attachment.Id" target="_blank" rel="noopener">@MaterialIcon(attachment.Kind) @attachment.Label ↗</a>
+                                        }
+                                        else
+                                        {
+                                            <span>@MaterialIcon(attachment.Kind) @attachment.Label · @ProcurementLabels.FileStatus(attachment.Status)</span>
+                                        }
+                                    }
+                                </div>
+                            </article>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="mf modal-pager"><span>@NegotiationHistoryCaption</span><div><button class="btn" type="button" disabled="@(negotiationHistory == null || negotiationHistory.Offset == 0 || negotiationsLoading)" @onclick="PreviousNegotiationsAsync">‹</button><button class="btn" type="button" disabled="@(negotiationHistory == null || negotiationHistory.Offset + negotiationHistory.Size >= negotiationHistory.Total || negotiationsLoading)" @onclick="NextNegotiationsAsync">›</button></div></div>
+        </div>
+    </div>
+}
+
+@if (inspectionReportOpen && detail != null)
+{
+    <div class="modalBack on" @onclick="CloseInspectionReport">
+        <div class="modal history-modal" @onclick:stopPropagation="true">
+            <div class="mh"><div class="grow"><b>Результат осмотра</b><div class="sub">@detail.BusinessNumber · read-only отчёт</div></div><button class="btn" type="button" @onclick="CloseInspectionReport">×</button></div>
+            <div class="mb history-body">
+                @if (inspectionReportLoading)
+                {
+                    <div class="modal-state">Загружаем результат осмотра…</div>
+                }
+                else if (inspectionReportError != null)
+                {
+                    <div class="modal-state error">@inspectionReportError</div>
+                }
+                else if (inspectionReport == null)
+                {
+                    <div class="modal-state">Осмотр ещё не проводился.</div>
+                }
+                else
+                {
+                    <section class="inspection-report-head">
+                        <div><span>Статус</span><b>@(inspectionReport.Status == InspectionStatus.Completed ? "Завершён" : "Черновик")</b></div>
+                        <div><span>Инспектор</span><b>@inspectionReport.Inspector</b></div>
+                        <div><span>Дата</span><b>@ShortDateTime(inspectionReport.CompletedAt ?? inspectionReport.StartedAt)</b></div>
+                    </section>
+                    @if (!string.IsNullOrWhiteSpace(inspectionReport.OverallConclusion)) { <div class="report-note"><b>Итог</b><p>@inspectionReport.OverallConclusion</p></div> }
+                    @if (!string.IsNullOrWhiteSpace(inspectionReport.PreliminaryDecision)) { <div class="report-note"><b>Предварительное решение</b><p>@inspectionReport.PreliminaryDecision</p></div> }
+                    <div class="material-list report-materials">
+                        @foreach (ProcurementQueueV2Attachment attachment in inspectionReport.Attachments)
+                        {
+                            @if (attachment.Status == StoredFileStatus.Available) { <a href="/api/procurement/attachments/@attachment.Id" target="_blank" rel="noopener">@MaterialIcon(attachment.Kind) @attachment.Label ↗</a> }
+                            else { <span>@MaterialIcon(attachment.Kind) @attachment.Label · @ProcurementLabels.FileStatus(attachment.Status)</span> }
+                        }
+                    </div>
+                    <div class="inspection-report-list">
+                        @foreach (ProcurementInspectionReportItem item in inspectionReport.Items)
+                        {
+                            <article class="inspection-report-item @(item.Problem ? "problem" : "")">
+                                <div><b>@item.Title</b><span class="badge @(item.Problem ? "warn" : item.Status == InspectionItemStatus.Answered ? "ok" : "neutral")">@InspectionStatusLabel(item)</span></div>
+                                @if (!string.IsNullOrWhiteSpace(item.Note)) { <p>@item.Note</p> }
+                                <div class="material-list">
+                                    @foreach (ProcurementQueueV2Attachment attachment in item.Attachments)
+                                    {
+                                        @if (attachment.Status == StoredFileStatus.Available) { <a href="/api/procurement/attachments/@attachment.Id" target="_blank" rel="noopener">@MaterialIcon(attachment.Kind) @attachment.Label ↗</a> }
+                                        else { <span>@MaterialIcon(attachment.Kind) @attachment.Label · @ProcurementLabels.FileStatus(attachment.Status)</span> }
+                                    }
+                                </div>
+                            </article>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="mf"><button class="btn" type="button" @onclick="CloseInspectionReport">Закрыть</button>@if (detail.CanManageDossier) { <button class="btn primary" type="button" @onclick="OpenInspectionEditor">Открыть форму осмотра</button> }</div>
         </div>
     </div>
 }
@@ -466,6 +584,17 @@
     private NextActionDraft nextAction = new();
     private bool manualCaseOpen;
     private ManualCaseDraft manualCase = new();
+    private bool negotiationsOpen;
+    private bool negotiationsLoading;
+    private string? negotiationsError;
+    private ProcurementNegotiationHistoryPage? negotiationHistory;
+    private int negotiationOffset;
+    private const int NegotiationPageSize = 20;
+    private bool inspectionReportOpen;
+    private bool inspectionReportLoading;
+    private string? inspectionReportError;
+    private ProcurementInspectionReport? inspectionReport;
+    private IReadOnlyList<IBrowserFile> negotiationFiles = [];
 
     protected override void OnParametersSet()
     {
@@ -530,9 +659,46 @@
         finally { drawerLoading = false; }
     }
 
-    private void CloseDrawer() { selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = nextActionOpen = false; }
+    private void CloseDrawer() { selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = nextActionOpen = negotiationsOpen = inspectionReportOpen = false; }
     private void OpenFullCase() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}"); }
-    private void OpenInspection() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}/inspection"); }
+    private void OpenInspectionEditor() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}/inspection"); }
+
+    private async Task OpenNegotiationsAsync()
+    {
+        if (detail == null) return;
+        negotiationOffset = 0;
+        negotiationsOpen = true;
+        await LoadNegotiationsAsync();
+    }
+
+    private async Task LoadNegotiationsAsync()
+    {
+        if (detail == null) return;
+        negotiationsLoading = true;
+        negotiationsError = null;
+        try { negotiationHistory = await ReadModel.ReadNegotiationsAsync(CurrentSubject, detail.CaseId, negotiationOffset, NegotiationPageSize, CancellationToken.None); }
+        catch (AccessDeniedException) { negotiationsError = "Нет доступа к истории переговоров."; }
+        catch (Exception) { negotiationsError = "Не удалось загрузить историю переговоров."; }
+        finally { negotiationsLoading = false; }
+    }
+
+    private void CloseNegotiations() { negotiationsOpen = false; negotiationHistory = null; negotiationsError = null; }
+    private async Task PreviousNegotiationsAsync() { negotiationOffset = Math.Max(0, negotiationOffset - NegotiationPageSize); await LoadNegotiationsAsync(); }
+    private async Task NextNegotiationsAsync() { if (negotiationHistory != null && negotiationOffset + NegotiationPageSize < negotiationHistory.Total) { negotiationOffset += NegotiationPageSize; await LoadNegotiationsAsync(); } }
+
+    private async Task OpenInspectionReportAsync()
+    {
+        if (detail == null) return;
+        inspectionReportOpen = true;
+        inspectionReportLoading = true;
+        inspectionReportError = null;
+        try { inspectionReport = await ReadModel.ReadInspectionReportAsync(CurrentSubject, detail.CaseId, CancellationToken.None); }
+        catch (AccessDeniedException) { inspectionReportError = "Нет доступа к результату осмотра."; }
+        catch (Exception) { inspectionReportError = "Не удалось загрузить результат осмотра."; }
+        finally { inspectionReportLoading = false; }
+    }
+
+    private void CloseInspectionReport() { inspectionReportOpen = false; inspectionReport = null; inspectionReportError = null; }
 
     private void OpenManualCase()
     {
@@ -582,10 +748,13 @@
     {
         if (detail == null || !detail.CanManageDossier) return;
         negotiation = new() { Effective = ProcurementLabels.LocalInput(DateTimeOffset.UtcNow) };
+        negotiationFiles = [];
         negotiationOpen = true;
     }
 
-    private void CloseNegotiation() => negotiationOpen = false;
+    private void CloseNegotiation() { negotiationOpen = false; negotiationFiles = []; }
+
+    private void SelectNegotiationFiles(InputFileChangeEventArgs args) => negotiationFiles = args.GetMultipleFiles(int.MaxValue).Take(6).ToArray();
 
     private void OpenNextAction()
     {
@@ -620,15 +789,33 @@
         if (detail == null) return;
         Guid caseId = detail.CaseId;
         long version = detail.CaseVersion;
+        Guid? negotiationId = null;
         await ExecuteAsync(async () =>
         {
+            List<PendingAttachment> pending = [];
+            foreach (IBrowserFile file in negotiationFiles)
+            {
+                await using Stream input = file.OpenReadStream(8 * 1024 * 1024);
+                using MemoryStream buffer = new();
+                await input.CopyToAsync(buffer);
+                pending.Add(new(file.Name, file.ContentType, AttachmentKind(file), buffer.ToArray()));
+            }
             DateTimeOffset effective = ProcurementLabels.ParseLocal(negotiation.Effective) ?? DateTimeOffset.UtcNow;
-            await Workspace.AddNegotiationAsync(CurrentSubject,
-                new AddNegotiation(caseId, version, negotiation.SellerPrice, negotiation.BuyerOffer, null,
+            negotiationId = await Workspace.AddNegotiationWithIdAsync(CurrentSubject,
+                new AddNegotiation(caseId, version, negotiation.SellerPrice, negotiation.BuyerOffer, negotiation.AgreedPrice,
                     negotiation.Channel, "", negotiation.Outcome, "", negotiation.Comment, "", null, effective),
                 Correlation(), CancellationToken.None);
+            foreach (PendingAttachment attachment in pending)
+                await Workspace.AddAttachmentAsync(CurrentSubject, new AddCaseAttachment(caseId, CaseAttachmentOwner.Negotiation,
+                    negotiationId, attachment.Kind, attachment.Name, "Материал к контакту", attachment.Name,
+                    attachment.ContentType, attachment.Content, null), Correlation(), CancellationToken.None);
         });
-        if (Error == null) negotiationOpen = false;
+        if (negotiationId != null)
+        {
+            negotiationOpen = false;
+            negotiationFiles = [];
+            await OpenDrawerAsync(caseId);
+        }
     }
 
     private static string Correlation() => $"procurement-v2-{Guid.NewGuid():N}";
@@ -734,6 +921,47 @@
         return string.IsNullOrWhiteSpace(item.Channel) ? "Контакт" : item.Channel;
     }
 
+    private static string NegotiationTitle(ProcurementNegotiationHistoryItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Outcome)) return item.Outcome;
+        if (item.AgreedPrice != null) return $"Согласовано: {MoneyCompact(item.AgreedPrice)}";
+        if (item.BuyerOffer != null) return $"Наше предложение: {MoneyCompact(item.BuyerOffer)}";
+        if (item.SellerPrice != null) return $"Продавец: {MoneyCompact(item.SellerPrice)}";
+        return string.IsNullOrWhiteSpace(item.Channel) ? "Контакт" : item.Channel;
+    }
+
+    private string NegotiationHistoryCaption => negotiationHistory == null || negotiationHistory.Total == 0
+        ? "0 контактов"
+        : $"{negotiationHistory.Offset + 1}–{Math.Min(negotiationHistory.Offset + negotiationHistory.Items.Count, negotiationHistory.Total)} из {negotiationHistory.Total}";
+
+    private static string InspectionStatusLabel(ProcurementInspectionReportItem item) => item.Status switch
+    {
+        InspectionItemStatus.NotChecked => "Не проверено",
+        InspectionItemStatus.Unanswered => "Нет ответа",
+        _ when item.Problem => $"Проблема · {InspectionAnswer(item)}",
+        _ => InspectionAnswer(item)
+    };
+
+    private static string InspectionAnswer(ProcurementInspectionReportItem item) => string.IsNullOrWhiteSpace(item.Answer)
+        ? "Ответ не указан"
+        : item.Answer + (string.IsNullOrWhiteSpace(item.Unit) ? "" : " " + item.Unit);
+
+    private static string MaterialIcon(CaseAttachmentKind kind) => kind switch
+    {
+        CaseAttachmentKind.Photo => "📷",
+        CaseAttachmentKind.Video => "🎬",
+        CaseAttachmentKind.Audio => "🎙",
+        CaseAttachmentKind.Link => "🔗",
+        _ => "📎"
+    };
+
+    private static CaseAttachmentKind AttachmentKind(IBrowserFile file)
+    {
+        if (file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return CaseAttachmentKind.Photo;
+        if (file.ContentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)) return CaseAttachmentKind.Audio;
+        return CaseAttachmentKind.Document;
+    }
+
     private sealed class NegotiationDraft
     {
         [Required, MaxLength(100)] public string Channel { get; set; } = "Телефон";
@@ -741,8 +969,11 @@
         [MaxLength(4000)] public string Comment { get; set; } = "";
         public decimal? SellerPrice { get; set; }
         public decimal? BuyerOffer { get; set; }
+        public decimal? AgreedPrice { get; set; }
         public string Effective { get; set; } = "";
     }
+
+    private sealed record PendingAttachment(string Name, string ContentType, CaseAttachmentKind Kind, byte[] Content);
 
     private sealed class NextActionDraft
     {

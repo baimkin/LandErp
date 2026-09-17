@@ -42,16 +42,20 @@ public sealed partial class ProcurementQueueV2ReadService
     {
         SiteInspection? inspection = await db.SiteInspections.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .OrderByDescending(item => item.StartedAt).FirstOrDefaultAsync(cancellationToken);
-        if (inspection == null) return new(false, null, null, null, "", 0, 0, 0, 0);
+        if (inspection == null) return new(false, null, null, null, "", 0, 0, 0, 0, 0, 0, 0);
         InspectionItemDb[] items = await db.SiteInspectionItems.AsNoTracking().Where(item => item.InspectionId == inspection.Id)
             .Select(item => new InspectionItemDb(item.Status, item.Answer, item.NormalAnswerSnapshot)).ToArrayAsync(cancellationToken);
-        int materials = await db.CaseAttachments.AsNoTracking().CountAsync(item => item.PropertyCaseId == caseId
-            && (item.OwnerType == CaseAttachmentOwner.Inspection || item.OwnerType == CaseAttachmentOwner.InspectionItem), cancellationToken);
+        CaseAttachmentKind[] materialKinds = await db.CaseAttachments.AsNoTracking().Where(item => item.PropertyCaseId == caseId
+            && (item.OwnerType == CaseAttachmentOwner.Inspection || item.OwnerType == CaseAttachmentOwner.InspectionItem))
+            .Select(item => item.Kind).ToArrayAsync(cancellationToken);
         int checkedItems = items.Count(item => item.Status != InspectionItemStatus.Unanswered);
         int problems = items.Count(item => item.Status == InspectionItemStatus.Answered && item.NormalAnswer.Length > 0
             && !string.Equals(item.Answer, item.NormalAnswer, StringComparison.OrdinalIgnoreCase));
         return new(true, inspection.Id, inspection.Status, inspection.CompletedAt ?? inspection.StartedAt, inspection.OverallConclusion,
-            items.Length, checkedItems, problems, materials);
+            items.Length, checkedItems, problems, materialKinds.Length,
+            materialKinds.Count(kind => kind is CaseAttachmentKind.Photo or CaseAttachmentKind.Video),
+            materialKinds.Count(kind => kind == CaseAttachmentKind.Audio),
+            materialKinds.Count(kind => kind is CaseAttachmentKind.Document or CaseAttachmentKind.Link));
     }
 
     private static async Task<ProcurementTimelineSummary[]> ReadTimelineAsync(LandErpDbContext db, Guid organizationId, Guid caseId, CancellationToken cancellationToken)

@@ -1,4 +1,5 @@
 using LandErp.Application.Modules.Catalog.Domain;
+using LandErp.Application.Foundation.Files;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;
@@ -105,7 +106,67 @@ public sealed record ProcurementInspectionSummary(
     int TotalItems,
     int CheckedItems,
     int Problems,
-    int MaterialCount);
+    int MaterialCount,
+    int PhotoVideoCount,
+    int AudioCount,
+    int FileCount);
+
+public sealed record ProcurementQueueV2Attachment(
+    Guid Id,
+    CaseAttachmentKind Kind,
+    string Label,
+    string Description,
+    string OriginalName,
+    string ContentType,
+    long SizeBytes,
+    StoredFileStatus Status,
+    DateTimeOffset RecordedAt);
+
+public sealed record ProcurementNegotiationHistoryItem(
+    Guid Id,
+    DateTimeOffset EffectiveAt,
+    DateTimeOffset RecordedAt,
+    string Channel,
+    string Contact,
+    string Outcome,
+    string Conditions,
+    string Comment,
+    string NextStep,
+    DateTimeOffset? NextStepDueAt,
+    decimal? SellerPrice,
+    decimal? BuyerOffer,
+    decimal? AgreedPrice,
+    string Currency,
+    string Author,
+    IReadOnlyList<ProcurementQueueV2Attachment> Attachments);
+
+public sealed record ProcurementNegotiationHistoryPage(
+    IReadOnlyList<ProcurementNegotiationHistoryItem> Items,
+    int Total,
+    int Offset,
+    int Size);
+
+public sealed record ProcurementInspectionReportItem(
+    Guid Id,
+    string Title,
+    int SortOrder,
+    InspectionItemStatus Status,
+    string Answer,
+    string Unit,
+    string Note,
+    bool Problem,
+    IReadOnlyList<ProcurementQueueV2Attachment> Attachments);
+
+public sealed record ProcurementInspectionReport(
+    Guid InspectionId,
+    InspectionStatus Status,
+    string OverallConclusion,
+    string PreliminaryDecision,
+    string Inspector,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? CompletedAt,
+    IReadOnlyList<ProcurementInspectionReportItem> Items,
+    IReadOnlyList<ProcurementQueueV2Attachment> Attachments);
 
 public sealed record ProcurementTimelineSummary(
     Guid Id,
@@ -179,4 +240,6 @@ public interface IProcurementQueueV2ReadService
 {
     Task<ProcurementQueueV2Page> ReadPageAsync(Subject subject, ProcurementQueueV2Filter filter, CancellationToken cancellationToken);
     Task<ProcurementQueueV2Detail> ReadDetailAsync(Subject subject, Guid caseId, CancellationToken cancellationToken);
+    Task<ProcurementNegotiationHistoryPage> ReadNegotiationsAsync(Subject subject, Guid caseId, int offset, int size, CancellationToken cancellationToken);
+    Task<ProcurementInspectionReport?> ReadInspectionReportAsync(Subject subject, Guid caseId, CancellationToken cancellationToken);
 }

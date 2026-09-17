@@ -64,8 +64,15 @@ public static class SearchUrls
         static string Host(Uri uri) => uri.Host.StartsWith("www.", StringComparison.Ordinal) ? uri.Host[4..] : uri.Host;
         if (source == SourceSite.Avito && Host(a) != Host(b)) return false;
         static string[] Terms(Uri uri) => uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
-        // An omitted localPriority=0 is the same default, not a change of the search region.
-        string[] left = Terms(a).Where(x => x != "localPriority=0").ToArray(), right = Terms(b).Where(x => x != "localPriority=0").ToArray();
+        static bool AvitoPresentationOnly(string term)
+        {
+            string key = term.Split('=', 2)[0];
+            // Avito may remove these presentation defaults after the map initializes.
+            // They do not change the selected polygon or the membership filters.
+            return term == "localPriority=0" || key.Equals("s", StringComparison.OrdinalIgnoreCase);
+        }
+        string[] left = Terms(a).Where(x => source != SourceSite.Avito || !AvitoPresentationOnly(x)).ToArray();
+        string[] right = Terms(b).Where(x => source != SourceSite.Avito || !AvitoPresentationOnly(x)).ToArray();
         if (source == SourceSite.Cian)
         {
             // Cian's provided DOM omits redundant location[0]=region on pagination links.

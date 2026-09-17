@@ -22,6 +22,10 @@ public sealed class CollectionFixesTests
         Assert.AreEqual(4, store.Links().Length);
         Assert.IsTrue(SearchUrls.Normalize("https://www.cian.ru/sale/suburban/12345678/").Warnings.Length > 0);
         Assert.IsTrue(SearchUrls.SameSearch("https://www.avito.ru/pushkino/nedvizhimost?q=земля", "https://www.avito.ru/pushkino/zemelnye_uchastki?q=земля&localPriority=0&p=2", SourceSite.Avito));
+        Assert.IsTrue(SearchUrls.SameSearch(
+            "https://www.avito.ru/korolev/zemelnye_uchastki/prodam-ASgBAgICAUSWA9oQ?drawId=one&f=filter&localPriority=0&map=polygon&s=1044",
+            "https://www.avito.ru/korolev/zemelnye_uchastki/prodam-ASgBAgICAUSWA9oQ?drawId=one&f=filter&map=polygon",
+            SourceSite.Avito));
         Assert.IsFalse(SearchUrls.SameSearch(map.Url, map.Url.Replace("zoom=12", "zoom=10", StringComparison.Ordinal), SourceSite.Cian));
     }
 

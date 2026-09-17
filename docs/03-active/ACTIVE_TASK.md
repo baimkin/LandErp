@@ -1,6 +1,19 @@
 # Активная задача LandErp
 
-> **Активная интеграция с 17 сентября 2026 года по прямому запросу владельца:** ветка `codex/integrate-server-property-v2`, база `main` `b5139e0`. Объединяются Universal Parser, Collector Server Management и PropertyCase V2. Server остаётся authority для server groups/searches/jobs/queue/data; Parser может создавать группы и поиски только через server API при выданном `CanManageSearches` (по умолчанию выключено). Требуются новые forward migrations после `UniversalParserSearchManagement`, Release build и полный набор contract/PostgreSQL/PropertyCase проверок. Browser/visual tests, редизайн `/collectors`, merge в `main`, push и production apply не разрешены. После отчёта остановиться для ручной проверки владельца.
+> **Завершённый Gate от 17 сентября 2026 года по прямому запросу владельца:**
+> [`GATE-COLLECTORS-V1-3-UI.md`](GATE-COLLECTORS-V1-3-UI.md) — законченный экран
+> `/collectors` по макету «Поиски и парсинг v1.3». Ветка
+> `codex/collectors-v1-3-ui`, база — проверенный интеграционный HEAD `5b254b9`.
+> Server остаётся authority; Parser получает право создавать группы и поиски только
+> при включённом `CanManageSearches`. Страницы закупки и ParserSpike не изменять.
+> Browser/visual tests не выполнялись по решению владельца. Реализация и проверки
+> завершены; ожидается ручная визуальная приёмка. Evidence:
+> [`COLLECTORS_V1_3_UI_REPORT.md`](reports/COLLECTORS_V1_3_UI_REPORT.md).
+> Merge и push не выполнялись.
+
+> Предыдущая интеграция Collector Server Management + Universal Parser +
+> PropertyCase V2 завершена в `5b254b9`; evidence:
+> [`INTEGRATED_SERVER_PROPERTY_V2_REPORT.md`](reports/INTEGRATED_SERVER_PROPERTY_V2_REPORT.md).
 
 > **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–7 завершены и приняты владельцем**; Phase 8 `Operational Overview` реализована и ожидает приёмки владельцем, evidence: [`STAGE1_PHASE8_REPORT.md`](reports/STAGE1_PHASE8_REPORT.md). Рабочая ветка: `codex/stage1-phase8-overview`. Визуальный authority: [`landerp_overview_v1_4_market_per_group_production_fonts.html`](../14-ui-kit/prototypes/landerp_overview_v1_4_market_per_group_production_fonts.html). Phase 9 не начинать. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
 

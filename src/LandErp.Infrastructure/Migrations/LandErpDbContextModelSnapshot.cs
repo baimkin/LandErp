@@ -537,6 +537,48 @@ namespace LandErp.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.Collection.Domain.CollectionSchedulerStatus", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("LastFailedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_failed_at")
+                        .HasComment("UTC момент последнего зарегистрированного сбоя scheduler.");
+
+                    b.Property<string>("LastFailureCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("last_failure_code")
+                        .HasComment("Безопасный машинный код последнего сбоя scheduler без текста исключения и секретов.");
+
+                    b.Property<int>("LastQueuedCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("last_queued_count")
+                        .HasComment("Число новых работ, поставленных последним успешным циклом scheduler.");
+
+                    b.Property<DateTimeOffset?>("LastStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_started_at")
+                        .HasComment("UTC момент начала последнего цикла фонового scheduler.");
+
+                    b.Property<DateTimeOffset?>("LastSucceededAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_succeeded_at")
+                        .HasComment("UTC момент последнего полностью успешного цикла scheduler.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_scheduler_status");
+
+                    b.ToTable("scheduler_status", "collection", t =>
+                        {
+                            t.HasComment("Текущее техническое состояние server scheduler: последний старт, успешный цикл, ошибка и число поставленных работ.");
+                        });
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.Collection.Domain.CollectorAgent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -548,6 +590,30 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("can_manage_searches")
                         .HasComment("Разрешено ли этому Parser создавать группы и поиски своей организации через ограниченный machine API.");
+
+                    b.Property<DateTimeOffset?>("ActivationExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("activation_expires_at")
+                        .HasComment("UTC срок действия одноразового кода подключения Parser.");
+
+                    b.Property<string>("ActivationHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("activation_hash")
+                        .HasComment("SHA-256 verifier одноразового кода подключения; открытый код не хранится.");
+
+                    b.Property<DateTimeOffset?>("ActivationUsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("activation_used_at")
+                        .HasComment("UTC момент успешного обмена одноразового кода на постоянную machine credential.");
+
+                    b.Property<string>("AttentionCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("attention_code")
+                        .HasComment("Текущий очищаемый machine code ручного внимания: CAPTCHA, вход или rate limit.");
 
                     b.Property<string>("Capabilities")
                         .IsRequired()
@@ -567,6 +633,11 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("enabled");
 
+                    b.Property<DateTimeOffset?>("LastActivityAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_activity_at")
+                        .HasComment("UTC момент последнего полезного действия Parser внутри текущей работы.");
+
                     b.Property<DateTimeOffset?>("LastHeartbeatAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_heartbeat_at")
@@ -583,9 +654,35 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("organization_id")
                         .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
 
+                    b.Property<int?>("ProgressCurrentPage")
+                        .HasColumnType("integer")
+                        .HasColumnName("progress_current_page")
+                        .HasComment("Текущая страница источника, сообщённая Parser, если применимо.");
+
+                    b.Property<int?>("ProgressMaxPages")
+                        .HasColumnType("integer")
+                        .HasColumnName("progress_max_pages")
+                        .HasComment("Серверный предел страниц для текущей работы, сообщённый Parser.");
+
+                    b.Property<int>("ProgressProcessed")
+                        .HasColumnType("integer")
+                        .HasColumnName("progress_processed")
+                        .HasComment("Последнее число обработанных элементов, сообщённое heartbeat.");
+
+                    b.Property<int?>("ProgressTotal")
+                        .HasColumnType("integer")
+                        .HasColumnName("progress_total")
+                        .HasComment("Ожидаемое общее число элементов, если источник смог его определить.");
+
                     b.Property<DateTimeOffset?>("RegisteredAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("registered_at");
+
+                    b.Property<string>("RuntimeState")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("runtime_state")
+                        .HasComment("Последнее заявленное Parser состояние выполнения без browser-specific деталей.");
 
                     b.Property<long>("Version")
                         .IsConcurrencyToken()

@@ -17,6 +17,7 @@ public sealed class SafeExceptionHandler(IProblemDetailsService problems, ILogge
         (int status, string code, string title) = exception switch
         {
             CollectorProtocolException protocol => (protocol.Code == CollectorErrorCodes.AgentUnauthorized ? 401
+                : protocol.Code == "ACTIVATION_INVALID" ? 401
                 : protocol.Code is CollectorErrorCodes.WorkNotAllowed or CollectorErrorCodes.SearchPermissionRequired ? 403 : 409,
                 protocol.Code, "Collector request rejected"),
             AccessDeniedException => (403, "FORBIDDEN", "Нет доступа"),
@@ -27,6 +28,7 @@ public sealed class SafeExceptionHandler(IProblemDetailsService problems, ILogge
         httpContext.Response.StatusCode = status;
         return await problems.TryWriteAsync(new() { HttpContext = httpContext,
             ProblemDetails = new ProblemDetails { Status = status, Title = title,
-                Extensions = { ["code"] = code, ["correlationId"] = httpContext.TraceIdentifier } } });
+                Extensions = { ["code"] = code, ["correlationId"] = httpContext.TraceIdentifier,
+                    ["retryable"] = exception is CollectorProtocolException collectorFailure && collectorFailure.Retryable } } });
     }
 }

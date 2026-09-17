@@ -16,6 +16,9 @@ public sealed record CollectionProgress(int? Page, int? MaxPages, int ProcessedC
     CollectionProgressPhase Phase, DateTimeOffset? LastUsefulActionAt);
 public sealed record AgentHeartbeat(Guid? JobId = null, Guid? LeaseId = null, CollectionOutcome? SourceStatus = null,
     AgentRuntimeState? RuntimeState = null, SourceRuntimeState? SourceState = null, CollectionProgress? Progress = null);
+public sealed record AgentActivation(Guid AgentId, string ActivationSecret, string MachineName,
+    int ContractVersion, string Version, ListingSource[] Capabilities);
+public sealed record AgentActivationReceipt(Guid AgentId, string Credential, int ContractVersion, string AgentName);
 public sealed record CollectionWork(Guid JobId, Guid LeaseId, DateTimeOffset LeaseExpiresAt,
     ListingSource Source, string SearchUrl, int MaxPages, string Label);
 public sealed record ObservationEnvelope(string ObservationKey, ListingData Data);

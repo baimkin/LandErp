@@ -964,7 +964,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         {
             try
             {
-                FileWriteResult write = await fileStorage.WriteAsync(storedId, command.Content!, cancellationToken);
+                FileWriteResult write = await fileStorage.WriteAsync(new FileWriteRequest(storedId, context.OrganizationId,
+                    row.Case.Id, command.Kind.ToString(), contentType), command.Content!, cancellationToken);
                 stored.StorageKey = write.StorageKey; stored.Sha256 = write.Sha256; stored.SizeBytes = write.SizeBytes;
                 stored.Status = StoredFileStatus.Available;
                 await db.SaveChangesAsync(cancellationToken);
@@ -1048,7 +1049,13 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         if (value.File.Status != StoredFileStatus.Available) throw new InvalidOperationException("Вложение ещё не доступно.");
         if (value.File.ExternalUrl != null) return new(value.File.OriginalName, value.File.ContentType, null, value.File.ExternalUrl);
         if (value.File.StorageKey == null) throw new InvalidOperationException("Вложение повреждено.");
-        return new(value.File.OriginalName, value.File.ContentType, await fileStorage.ReadAsync(value.File.StorageKey, cancellationToken), null);
+        byte[] content = await fileStorage.ReadAsync(value.File.StorageKey, cancellationToken);
+        // Authorization above must happen before any provider request. Metadata remains the
+        // authority even if an operator changes the underlying file outside LandErp.
+        if (content.LongLength != value.File.SizeBytes || !string.Equals(
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content)), value.File.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new FileStorageException("STORAGE_INTEGRITY", false, "Проверка целостности вложения не пройдена.");
+        return new(value.File.OriginalName, value.File.ContentType, content, null);
     }
 
     public async Task RetryAttachmentAsync(Subject subject, RetryCaseAttachment command, string correlationId, CancellationToken cancellationToken)
@@ -1067,7 +1074,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         if (!AllowedContentType(value.Link.Kind, contentType)) throw new ArgumentException("Тип файла не разрешён для выбранного вложения.");
         try
         {
-            FileWriteResult write = await fileStorage.WriteAsync(value.File.Id, command.Content, cancellationToken);
+            FileWriteResult write = await fileStorage.WriteAsync(new FileWriteRequest(value.File.Id, context.OrganizationId,
+                command.CaseId, value.Link.Kind.ToString(), contentType), command.Content, cancellationToken);
             value.File.OriginalName = Required(command.OriginalName, 1, 512, "Укажите имя файла."); value.File.ContentType = contentType;
             value.File.StorageKey = write.StorageKey; value.File.Sha256 = write.Sha256; value.File.SizeBytes = write.SizeBytes; value.File.Status = StoredFileStatus.Available;
             if (value.Link.DocumentRequirementId is Guid requirementId)

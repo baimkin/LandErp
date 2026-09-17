@@ -1,5 +1,7 @@
 # Активная задача LandErp
 
+> **Активная работа:** [GATE-YANDEX-DISK-STORAGE.md](GATE-YANDEX-DISK-STORAGE.md), ветка `codex/yandex-disk-storage`. Реализация разрешена владельцем 17 сентября 2026 года и завершена целевыми проверками (13/13, включая реальный Диск). Evidence: [YANDEX_DISK_STORAGE_REPORT.md](reports/YANDEX_DISK_STORAGE_REPORT.md). Ожидаются ручная приёмка и отдельное разрешение на интеграцию. Required reading и scope — в Gate. Все записи ниже являются историческим контекстом.
+
 > **Завершённый Gate от 17 сентября 2026 года по прямому запросу владельца:**
 > [`GATE-COLLECTORS-V1-3-UI.md`](GATE-COLLECTORS-V1-3-UI.md) — законченный экран
 > `/collectors` по макету «Поиски и парсинг v1.3». Ветка

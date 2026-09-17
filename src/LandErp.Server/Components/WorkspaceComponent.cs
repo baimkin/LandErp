@@ -1,4 +1,5 @@
 using LandErp.Application.Modules.IdentityAccess.Contracts;
+using LandErp.Application.Foundation.Files;
 using LandErp.Server.Security;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -39,6 +40,7 @@ public abstract class WorkspaceComponent : ComponentBase
         catch (AccessDeniedException) { Forbidden = true; }
         catch (DbUpdateConcurrencyException) { Error = "Данные уже изменены. Обновите страницу и повторите решение."; }
         catch (ArgumentException exception) { Error = exception.Message; }
+        catch (FileStorageException exception) { Error = exception.Message + " Обновите карточку, чтобы увидеть состояние вложения."; }
         catch (Exception) { Error = "Сохранение не выполнено. Проверьте соединение и повторите."; }
         finally { Busy = false; }
     }

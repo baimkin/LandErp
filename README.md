@@ -71,6 +71,9 @@ Local mode Collector доступен независимо от Server. При �
 
 ## Проверки
 
+Яндекс Диск как пилотное хранилище вложений: [настройка и отключение](docs/03-active/YANDEX_DISK_SETUP.md).
+Доступ ограничен папкой приложения; production заказчика подключается отдельно.
+
 `./scripts/Test-Foundation.ps1 -DotnetPath ./artifacts/stage1/dotnet/dotnet.exe`
 использует настоящую PostgreSQL и удаляет только свои disposable test databases.
 Офлайн Collector tests запускаются с фильтром `TestCategory!=Live`; CI не зависит

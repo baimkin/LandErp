@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using LandErp.Application.Modules.Collection.Contracts;
 using LandErp.Collector.Contracts.V1;
+using LandErp.Application.Foundation.Files;
 
 namespace LandErp.Server.Foundation;
 
@@ -16,6 +17,7 @@ public sealed class SafeExceptionHandler(IProblemDetailsService problems, ILogge
         Failure(logger, exception.GetType().Name, httpContext.TraceIdentifier, null);
         (int status, string code, string title) = exception switch
         {
+            FileStorageException storage => (storage.Retryable ? 503 : 409, storage.Code, storage.Message),
             CollectorProtocolException protocol => (protocol.Code == CollectorErrorCodes.AgentUnauthorized ? 401
                 : protocol.Code == "ACTIVATION_INVALID" ? 401
                 : protocol.Code is CollectorErrorCodes.WorkNotAllowed or CollectorErrorCodes.SearchPermissionRequired ? 403 : 409,
@@ -29,6 +31,6 @@ public sealed class SafeExceptionHandler(IProblemDetailsService problems, ILogge
         return await problems.TryWriteAsync(new() { HttpContext = httpContext,
             ProblemDetails = new ProblemDetails { Status = status, Title = title,
                 Extensions = { ["code"] = code, ["correlationId"] = httpContext.TraceIdentifier,
-                    ["retryable"] = exception is CollectorProtocolException collectorFailure && collectorFailure.Retryable } } });
+                    ["retryable"] = exception is CollectorProtocolException { Retryable: true } or FileStorageException { Retryable: true } } } });
     }
 }

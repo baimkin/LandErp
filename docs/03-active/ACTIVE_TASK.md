@@ -1,5 +1,9 @@
 # Активная задача LandErp
 
+> **Активная работа:** [GATE-INTEGRATE-PARSER-UI-STORAGE.md](GATE-INTEGRATE-PARSER-UI-STORAGE.md), ветка `codex/integrate-parser-ui-storage`. Владелец 17 сентября 2026 года явно разрешил локальные коммиты и слияние завершённых Parser/UI, Яндекс Диска и исправления прав документов. Required reading и проверки — в Gate. Main, push и production apply не входят. Следующие записи — исторический контекст.
+
+> **Яндекс Диск:** [GATE-YANDEX-DISK-STORAGE.md](GATE-YANDEX-DISK-STORAGE.md), реализован и проверен: [отчёт](reports/YANDEX_DISK_STORAGE_REPORT.md), 13 целевых тестов включая реальный Диск.
+
 > **Активная работа:** [GATE-PARSER-WORKSPACE-UX.md](GATE-PARSER-WORKSPACE-UX.md), ветка `codex/parser-workspace-ux`. Переработка Parser разрешена владельцем после аудита. Реализация и проверки завершены: [отчёт Parser UX](reports/PARSER_WORKSPACE_UX_REPORT.md), 89 offline/WPF и 5 PostgreSQL тестов. Ожидается пользовательская приёмка живого сценария. Изменения Server UI сохраняются; следующий блок — предыдущий Gate.
 
 

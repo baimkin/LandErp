@@ -1,7 +1,9 @@
 # Отчёт — экран «Поиски и парсинг» v1.3
 
-**Ветка:** `codex/collectors-v1-3-ui`  
-**База:** `5b254b9` (`codex/integrate-server-property-v2`)  
+**Ветка:** `codex/collectors-v1-3-ui`
+
+**База:** `5b254b9` (`codex/integrate-server-property-v2`)
+
 **Дата:** 17 сентября 2026 года
 
 ## Результат

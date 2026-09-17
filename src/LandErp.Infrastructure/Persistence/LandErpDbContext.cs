@@ -45,6 +45,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CaseCheckTemplateItem> CaseCheckTemplateItems => Set<CaseCheckTemplateItem>();
     public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
     public DbSet<CaseAttachment> CaseAttachments => Set<CaseAttachment>();
+    public DbSet<CaseDocumentRequirement> CaseDocumentRequirements => Set<CaseDocumentRequirement>();
     public DbSet<PropertyCaseFactRevision> PropertyCaseFactRevisions => Set<PropertyCaseFactRevision>();
     public DbSet<InspectionTemplateItem> InspectionTemplateItems => Set<InspectionTemplateItem>();
     public DbSet<SiteInspection> SiteInspections => Set<SiteInspection>();

@@ -11,7 +11,8 @@ public enum ProcurementAction { Monitor, Clarify, Reject, Forward, Return, Appro
 public sealed record QueueFilter(string Text = "", string Stage = "", CatalogSource? Source = null, bool ChangedOnly = false, int Offset = 0, int Size = 40);
 public sealed record QueueItem(Guid CaseId, string BusinessNumber, string Title, CatalogSource[] Sources,
     decimal? Price, string Currency, decimal? Area, string? Location, string Stage, string? Assignee, DateTimeOffset? DueAt,
-    string Reason, string[] UnknownFields, bool Changed, long SourceRevision, long CaseVersion);
+    string Reason, string[] UnknownFields, bool Changed, long SourceRevision, long CaseVersion,
+    string NextActionTitle, string NextActionDescription, long NextActionVersion);
 public sealed record ProcurementQueuePage(IReadOnlyList<QueueItem> Items, int Total);
 public sealed record TimelineItem(Guid Id, string Kind, string Title, string Body, string Actor, string? Target,
     DateTimeOffset RecordedAt, DateTimeOffset? EffectiveAt, DateTimeOffset? DueAt);
@@ -27,7 +28,10 @@ public sealed record CheckView(Guid Id, CaseCheckLevel Level, string Title, Case
     bool Blocker, long Version, string DescriptionSnapshot, Guid? TemplateItemId, long? TemplateItemVersion);
 public sealed record AttachmentView(Guid Id, CaseAttachmentOwner OwnerType, Guid? OwnerId, CaseAttachmentKind Kind,
     string Label, string Description, string OwnerLabel, string OriginalName, string ContentType, long SizeBytes, StoredFileStatus Status,
-    bool External, DateTimeOffset RecordedAt);
+    bool External, DateTimeOffset RecordedAt, Guid? DocumentRequirementId);
+public sealed record DocumentRequirementView(Guid Id, string Code, string Title, string Description, string ExpectedSource,
+    CaseDocumentStatus Status, DateTimeOffset? DueAt, string Note, string UpdatedBy, DateTimeOffset UpdatedAt, long Version,
+    IReadOnlyList<Guid> AttachmentIds);
 public sealed record CheckTemplateView(Guid Id, string Title, CaseCheckLevel Level, string Description, int SortOrder, bool Active, long Version);
 public sealed record InspectionTemplateView(Guid Id, string Key, string Title, int SortOrder, InspectionAnswerType AnswerType,
     string[] Options, string Unit, string NormalAnswer, bool AllowAttachments, bool Required, bool Active, long Version);
@@ -42,9 +46,10 @@ public sealed record CaseCard(QueueItem Item, string? Description, string? Selle
     IReadOnlyList<CaseSourceView> Sources, IReadOnlyList<TimelineItem> Timeline, IReadOnlyList<ObservationView> Observations,
     IReadOnlyList<DecisionTarget> Heads, IReadOnlyList<DecisionTarget> Managers, Guid ManagerEmployeeId, bool CanManagerDecide, bool CanHeadDecide,
     IReadOnlyList<NegotiationView> Negotiations, IReadOnlyList<CheckView> Checks, IReadOnlyList<AttachmentView> Attachments,
+    IReadOnlyList<DocumentRequirementView> DocumentRequirements,
     IReadOnlyList<SourceDiscrepancyView> Discrepancies, IReadOnlyList<CheckTemplateView> CheckTemplates, InspectionView? Inspection,
     string? CadastralNumber, decimal? AcquisitionPrice, DateOnly? AcquisitionDate, string? AcquisitionComment,
-    bool CanManageDossier, bool CanManageBlockers);
+    bool CanManageDossier, bool CanManageBlockers, bool CanConfirmPurchase);
 public sealed record DecisionCommand(Guid CaseId, long ExpectedCaseVersion, long ExpectedSourceRevision,
     ProcurementAction Action, string Reason, string Clarification, Guid? TargetEmployeeId, DateTimeOffset? DueAt);
 public sealed record AddCaseNote(Guid CaseId, long ExpectedCaseVersion, string Text, bool Contact, string ContactResult, DateTimeOffset? EffectiveAt);
@@ -57,7 +62,10 @@ public sealed record SaveCaseCheck(Guid CaseId, Guid? CheckId, long ExpectedCase
 public sealed record SaveCheckTemplate(Guid? Id, long? ExpectedVersion, string Title, CaseCheckLevel Level,
     string Description, int SortOrder, bool Active);
 public sealed record AddCaseAttachment(Guid CaseId, CaseAttachmentOwner OwnerType, Guid? OwnerId,
-    CaseAttachmentKind Kind, string Label, string Description, string OriginalName, string ContentType, byte[]? Content, string? ExternalUrl);
+    CaseAttachmentKind Kind, string Label, string Description, string OriginalName, string ContentType, byte[]? Content, string? ExternalUrl,
+    Guid? DocumentRequirementId = null);
+public sealed record SaveDocumentRequirement(Guid CaseId, Guid RequirementId, long ExpectedCaseVersion,
+    long ExpectedRequirementVersion, CaseDocumentStatus Status, DateTimeOffset? DueAt, string Note);
 public sealed record RetryCaseAttachment(Guid CaseId, Guid AttachmentId, string OriginalName, string ContentType, byte[] Content);
 public sealed record SaveInspectionTemplate(Guid? Id, long? ExpectedVersion, string Key, string Title, int SortOrder,
     InspectionAnswerType AnswerType, string[] Options, string Unit, string NormalAnswer, bool AllowAttachments, bool Required, bool Active);
@@ -65,6 +73,8 @@ public sealed record InspectionAnswer(Guid ItemId, long ExpectedItemVersion, Ins
 public sealed record SaveInspection(Guid CaseId, Guid? InspectionId, long? ExpectedInspectionVersion,
     string OverallConclusion, string PreliminaryDecision, IReadOnlyList<InspectionAnswer> Answers, bool Complete);
 public sealed record MarkCaseAcquired(Guid CaseId, long ExpectedCaseVersion, decimal ActualPrice, DateOnly AcquisitionDate, string Comment);
+public sealed record CorrectCaseAcquisition(Guid CaseId, long ExpectedCaseVersion, decimal ActualPrice,
+    DateOnly AcquisitionDate, string Comment, string Reason);
 public sealed record AttachmentContent(string OriginalName, string ContentType, byte[]? Content, string? ExternalUrl);
 public sealed record ApplySourceFact(Guid CaseId, Guid CatalogItemId, long ExpectedCaseVersion,
     CaseFactField Field);
@@ -86,10 +96,12 @@ public interface IProcurementWorkspace
     Task SaveCheckAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken);
     Task SaveCheckTemplateAsync(Subject subject, SaveCheckTemplate command, string correlationId, CancellationToken cancellationToken);
     Task<Guid> AddAttachmentAsync(Subject subject, AddCaseAttachment command, string correlationId, CancellationToken cancellationToken);
+    Task SaveDocumentRequirementAsync(Subject subject, SaveDocumentRequirement command, string correlationId, CancellationToken cancellationToken);
     Task RetryAttachmentAsync(Subject subject, RetryCaseAttachment command, string correlationId, CancellationToken cancellationToken);
     Task SaveInspectionTemplateAsync(Subject subject, SaveInspectionTemplate command, string correlationId, CancellationToken cancellationToken);
     Task<Guid> SaveInspectionAsync(Subject subject, SaveInspection command, string correlationId, CancellationToken cancellationToken);
     Task MarkAcquiredAsync(Subject subject, MarkCaseAcquired command, string correlationId, CancellationToken cancellationToken);
+    Task CorrectAcquisitionAsync(Subject subject, CorrectCaseAcquisition command, string correlationId, CancellationToken cancellationToken);
     Task<AttachmentContent> ReadAttachmentAsync(Subject subject, Guid attachmentId, CancellationToken cancellationToken);
     Task ApplySourceFactAsync(Subject subject, ApplySourceFact command, string correlationId, CancellationToken cancellationToken);
     Task SaveNextActionAsync(Subject subject, SaveNextAction command, string correlationId, CancellationToken cancellationToken);

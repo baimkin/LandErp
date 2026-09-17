@@ -81,7 +81,7 @@ internal sealed class PostgresSandbox : IAsyncDisposable
             + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations,catalog.events TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON SCHEMA workflow,procurement TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT ON workflow.stages TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,procurement.case_checks,procurement.case_check_template_items,procurement.inspection_template_items,procurement.site_inspections,procurement.site_inspection_items,foundation.notifications,foundation.stored_files TO \"{RuntimeRole}\"; "
+            + $"GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,procurement.case_checks,procurement.case_check_template_items,procurement.case_document_requirements,procurement.inspection_template_items,procurement.site_inspections,procurement.site_inspection_items,foundation.notifications,foundation.stored_files TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT,INSERT ON workflow.transitions,workflow.approvals,foundation.business_timeline,procurement.negotiations,procurement.case_attachments,procurement.case_fact_revisions TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA procurement TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA identity,organization TO \"{RuntimeRole}\";", DatabaseName);

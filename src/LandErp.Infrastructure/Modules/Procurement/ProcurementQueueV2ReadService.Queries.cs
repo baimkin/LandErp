@@ -1,3 +1,4 @@
+using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
@@ -57,7 +58,7 @@ public sealed partial class ProcurementQueueV2ReadService
         where link.OrganizationId == organizationId && source.OrganizationId == organizationId && link.Confirmed && caseIds.Contains(link.PropertyCaseId)
         select new SourceDb(link.PropertyCaseId, source.Id, source.Source, source.ExternalId, source.Url, source.Title, source.Price, source.Currency,
             source.AreaSquareMeters, source.Location, source.CadastralNumber, source.PhotosJson, link.Provenance, source.LastObservedAt, source.ChangedAt,
-            source.DataRevision, link.ReviewedDataRevision);
+            source.DataRevision, link.ReviewedDataRevision, link.RecordedAt);
 
     private static IQueryable<ContactDb> LatestContacts(LandErpDbContext db, Guid[] caseIds) =>
         db.PropertyCases.AsNoTracking().Where(item => caseIds.Contains(item.Id)).Select(item => new ContactDb(item.Id,
@@ -70,8 +71,41 @@ public sealed partial class ProcurementQueueV2ReadService
             db.CaseNegotiations.Where(entry => entry.PropertyCaseId == item.Id).OrderByDescending(entry => entry.EffectiveAt).ThenByDescending(entry => entry.RecordedAt)
                 .Select(entry => entry.Comment).FirstOrDefault()));
 
+    private static async Task<Guid[]> PriceChangedCaseIdsAsync(LandErpDbContext db, IQueryable<Row> visible, CancellationToken cancellationToken)
+    {
+        IQueryable<Guid> visibleIds = visible.Select(row => row.Case.Id);
+        RevisionCandidate[] candidates = await (from link in db.PropertyCaseSourceLinks.AsNoTracking()
+                                                join source in db.Listings.AsNoTracking() on link.CatalogItemId equals source.Id
+                                                where link.Confirmed && visibleIds.Contains(link.PropertyCaseId)
+                                                    && source.DataRevision > link.ReviewedDataRevision
+                                                select new RevisionCandidate(link.PropertyCaseId, source.Id, source.DataRevision, link.ReviewedDataRevision))
+            .ToArrayAsync(cancellationToken);
+        if (candidates.Length == 0) return [];
+
+        Guid[] sourceIds = candidates.Select(item => item.CatalogItemId).Distinct().ToArray();
+        CatalogEvent[] events = await db.CatalogEvents.AsNoTracking()
+            .Where(item => sourceIds.Contains(item.CatalogItemId) && item.Kind == CatalogEventKind.SourceChanged)
+            .OrderByDescending(item => item.RecordedAt).ThenByDescending(item => item.Id)
+            .ToArrayAsync(cancellationToken);
+        Dictionary<Guid, CatalogEvent[]> eventsBySource = events.GroupBy(item => item.CatalogItemId)
+            .ToDictionary(group => group.Key, group => group.ToArray());
+        HashSet<Guid> changedCases = [];
+        foreach (RevisionCandidate candidate in candidates)
+        {
+            long revisionDelta = candidate.DataRevision - candidate.ReviewedDataRevision;
+            if (revisionDelta <= 0) continue;
+            CatalogEvent[] sourceEvents = eventsBySource.GetValueOrDefault(candidate.CatalogItemId, []);
+            long expectedSourceChangeEvents = Math.Max(0L, candidate.DataRevision - 1L);
+            if (sourceEvents.LongLength != expectedSourceChangeEvents) continue;
+            int take = revisionDelta > int.MaxValue ? int.MaxValue : (int)revisionDelta;
+            if (sourceEvents.Take(take).Any(item => item.Message.Contains("цена", StringComparison.OrdinalIgnoreCase)))
+                changedCases.Add(candidate.CaseId);
+        }
+        return changedCases.ToArray();
+    }
+
     private static async Task<ProcurementQueueV2Summary> ReadSummaryAsync(LandErpDbContext db, IQueryable<Row> visible,
-        DateTimeOffset todayStart, DateTimeOffset tomorrowStart, CancellationToken cancellationToken)
+        Guid[] priceChangedCaseIds, DateTimeOffset todayStart, DateTimeOffset tomorrowStart, CancellationToken cancellationToken)
     {
         IQueryable<Row> active = visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired");
         int inWork = await active.CountAsync(cancellationToken);
@@ -79,6 +113,11 @@ public sealed partial class ProcurementQueueV2ReadService
         int overdue = await active.CountAsync(row => !row.Task.Completed && row.Task.DueAt < todayStart, cancellationToken);
         int changed = await WhereSourceChanged(active, db).CountAsync(cancellationToken);
         int returned = await active.CountAsync(row => row.Case.StageId == "returned", cancellationToken);
-        return new(inWork, dueToday, overdue, changed, returned);
+        int checking = await active.CountAsync(row => row.Case.StageId == "analysis", cancellationToken);
+        int pendingHead = await active.CountAsync(row => row.Case.StageId == "pending_head", cancellationToken);
+        int priceChanged = priceChangedCaseIds.Length == 0
+            ? 0
+            : await active.CountAsync(row => priceChangedCaseIds.Contains(row.Case.Id), cancellationToken);
+        return new(inWork, dueToday, overdue, changed, returned, checking, pendingHead, priceChanged);
     }
 }

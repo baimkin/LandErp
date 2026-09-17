@@ -28,7 +28,7 @@ public sealed partial class ProcurementQueueV2ReadService(
     private sealed record SourceDb(Guid CaseId, Guid CatalogItemId, CatalogSource Source, string? ExternalId, string? Url,
         string? Title, decimal? Price, string Currency, decimal? AreaSquareMeters, string? Location, string? CadastralNumber,
         string PhotosJson, string Provenance, DateTimeOffset? LastObservedAt, DateTimeOffset ChangedAt,
-        long DataRevision, long ReviewedDataRevision);
+        long DataRevision, long ReviewedDataRevision, DateTimeOffset LinkRecordedAt);
     private sealed record CheckDb(Guid CaseId, CaseCheckLevel Level, CaseCheckStatus Status, bool Blocker, Guid? ResponsibleEmployeeId);
     private sealed record ContactDb(Guid CaseId, DateTimeOffset? EffectiveAt, string? Channel, string? Outcome, string? Comment);
     private sealed record InspectionItemDb(InspectionItemStatus Status, string Answer, string NormalAnswer);
@@ -41,6 +41,7 @@ public sealed partial class ProcurementQueueV2ReadService(
         int offset = Math.Max(0, filter.Offset);
         int size = Math.Clamp(filter.Size, 1, 100);
         IQueryable<Row> visible = VisibleCases(db, context);
+        Guid[] priceChangedCaseIds = await PriceChangedCaseIdsAsync(db, visible, cancellationToken);
         IQueryable<Row> query = string.IsNullOrWhiteSpace(filter.Stage)
             ? visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired")
             : visible.Where(row => row.Case.StageId == filter.Stage);
@@ -50,20 +51,26 @@ public sealed partial class ProcurementQueueV2ReadService(
         if (text.Length > 0)
         {
             string pattern = $"%{text}%";
+            Guid? exactId = Guid.TryParse(text, out Guid parsedId) ? parsedId : null;
             query = query.Where(row => EF.Functions.ILike(row.Case.BusinessNumber, pattern)
                 || EF.Functions.ILike(row.Case.WorkingTitle, pattern)
                 || (row.Case.WorkingLocation != null && EF.Functions.ILike(row.Case.WorkingLocation, pattern))
                 || (row.Case.CadastralNumber != null && EF.Functions.ILike(row.Case.CadastralNumber, pattern))
+                || (exactId.HasValue && row.Case.Id == exactId.Value)
+                || db.CaseNegotiations.Any(contact => contact.PropertyCaseId == row.Case.Id && EF.Functions.ILike(contact.Contact, pattern))
                 || db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id && link.Confirmed
                     && db.Listings.Any(source => source.Id == link.CatalogItemId
                         && ((source.ExternalId != null && EF.Functions.ILike(source.ExternalId, pattern))
-                            || (source.Title != null && EF.Functions.ILike(source.Title, pattern))))));
+                            || (source.Title != null && EF.Functions.ILike(source.Title, pattern))
+                            || (source.SellerName != null && EF.Functions.ILike(source.SellerName, pattern))
+                            || (exactId.HasValue && source.Id == exactId.Value)))));
         }
         if (filter.AssigneeId is Guid assigneeId) query = query.Where(row => row.Assignment.EmployeeId == assigneeId);
         if (filter.Source is CatalogSource source)
             query = query.Where(row => db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id && link.Confirmed
                 && db.Listings.Any(item => item.Id == link.CatalogItemId && item.Source == source)));
         if (filter.SourceChangedOnly) query = WhereSourceChanged(query, db);
+        if (filter.PriceChangedOnly) query = query.Where(row => priceChangedCaseIds.Contains(row.Case.Id));
         if (filter.DueTodayOnly) query = query.Where(row => !row.Task.Completed && row.Task.DueAt >= todayStart && row.Task.DueAt < tomorrowStart);
         if (filter.OverdueOnly) query = query.Where(row => !row.Task.Completed && row.Task.DueAt < todayStart);
         query = ApplyCheckFilter(query, filter.Checks, db);
@@ -84,7 +91,7 @@ public sealed partial class ProcurementQueueV2ReadService(
             .OrderBy(item => item.DisplayName).Select(item => new ProcurementQueueV2Assignee(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);
         Dictionary<Guid, string> names = assignees.ToDictionary(item => item.Id, item => item.Name);
         string[] stages = await visible.Select(row => row.Case.StageId).Distinct().OrderBy(item => item).ToArrayAsync(cancellationToken);
-        ProcurementQueueV2Summary summary = await ReadSummaryAsync(db, visible, todayStart, tomorrowStart, cancellationToken);
+        ProcurementQueueV2Summary summary = await ReadSummaryAsync(db, visible, priceChangedCaseIds, todayStart, tomorrowStart, cancellationToken);
         Dictionary<Guid, SourceDb[]> sourcesByCase = sourceRows.GroupBy(item => item.CaseId).ToDictionary(group => group.Key, group => group.ToArray());
         Dictionary<Guid, CheckDb[]> checksByCase = checkRows.GroupBy(item => item.CaseId).ToDictionary(group => group.Key, group => group.ToArray());
         Dictionary<Guid, ContactDb> contactsByCase = contacts.Where(item => item.EffectiveAt != null).ToDictionary(item => item.CaseId);
@@ -98,12 +105,14 @@ public sealed partial class ProcurementQueueV2ReadService(
     {
         AccessContext context = await _access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await using LandErpDbContext db = await _factory.CreateDbContextAsync(cancellationToken);
-        Row? row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == caseId, cancellationToken);
+        IQueryable<Row> visible = VisibleCases(db, context);
+        Row? row = await visible.SingleOrDefaultAsync(item => item.Case.Id == caseId, cancellationToken);
         if (row == null) throw new AccessDeniedException();
         (DateTimeOffset todayStart, DateTimeOffset tomorrowStart) = TodayBounds();
         SourceDb[] sourceRows = (await SourceRows(db, context.OrganizationId, [caseId]).ToArrayAsync(cancellationToken))
             .OrderByDescending(item => item.LastObservedAt ?? item.ChangedAt).ToArray();
         bool sourceChanged = sourceRows.Any(item => item.DataRevision > item.ReviewedDataRevision);
+        bool priceChanged = (await PriceChangedCaseIdsAsync(db, visible.Where(item => item.Case.Id == caseId), cancellationToken)).Contains(caseId);
 
         ProcurementQueueV2Negotiation[] negotiations = await db.CaseNegotiations.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.RecordedAt).Take(3)
@@ -125,6 +134,13 @@ public sealed partial class ProcurementQueueV2ReadService(
         ProcurementTimelineSummary[] timeline = await ReadTimelineAsync(db, context.OrganizationId, caseId, cancellationToken);
         ProcurementSourceDetail[] sources = sourceRows.Select(source => SourceDetail(row.Case, source)).ToArray();
         SourceDb? askSource = sourceRows.FirstOrDefault(item => item.Price != null);
+        decimal? startPrice = await ReadStartPriceAsync(db, row.Case, sourceRows, cancellationToken);
+        decimal? currentSellerPrice = sellerOffer ?? askSource?.Price;
+        decimal? comparisonPrice = agreedPrice ?? currentSellerPrice;
+        decimal? priceDelta = startPrice != null && comparisonPrice != null ? comparisonPrice.Value - startPrice.Value : null;
+        decimal? priceDeltaPercent = priceDelta != null && startPrice is > 0m
+            ? decimal.Round(priceDelta.Value / startPrice.Value * 100m, 1, MidpointRounding.AwayFromZero)
+            : null;
         bool managerPermission = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken);
         bool headPermission = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
         bool canManagerDecide = managerPermission && row.Assignment.EmployeeId == context.EmployeeId
@@ -138,6 +154,6 @@ public sealed partial class ProcurementQueueV2ReadService(
             askSource == null ? null : SourceLabel(askSource), sellerOffer, buyerOffer, agreedPrice, row.Task.Title, row.Task.DueAt,
             DueState(row.Task, todayStart, tomorrowStart), negotiations, quick, deep, inspection, timeline, sources, sourceChanged,
             sourceRows.Length == 0 ? 0 : sourceRows.Max(item => item.DataRevision), row.Case.Version, canManagerDecide, canHeadDecide,
-            managerPermission || headPermission);
+            managerPermission || headPermission, startPrice, priceDelta, priceDeltaPercent, priceChanged);
     }
 }

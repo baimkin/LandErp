@@ -22,9 +22,18 @@ public sealed record ProcurementQueueV2Filter(
     bool Descending = true,
     int Offset = 0,
     int Size = 30,
-    bool MineOnly = false);
+    bool MineOnly = false,
+    bool PriceChangedOnly = false);
 
-public sealed record ProcurementQueueV2Summary(int InWork, int DueToday, int Overdue, int SourceChanged, int Returned);
+public sealed record ProcurementQueueV2Summary(
+    int InWork,
+    int DueToday,
+    int Overdue,
+    int SourceChanged,
+    int Returned,
+    int Checking = 0,
+    int PendingHead = 0,
+    int PriceChanged = 0);
 public sealed record ProcurementQueueV2Assignee(Guid Id, string Name);
 public sealed record ProcurementQuickCheckSummary(int Total, int Completed, int Issues, int Remaining);
 public sealed record ProcurementLatestContact(DateTimeOffset EffectiveAt, string Channel, string Outcome, string Comment);
@@ -152,7 +161,11 @@ public sealed record ProcurementQueueV2Detail(
     long CaseVersion,
     bool CanManagerDecide,
     bool CanHeadDecide,
-    bool CanManageDossier);
+    bool CanManageDossier,
+    decimal? StartPrice = null,
+    decimal? PriceDeltaFromStart = null,
+    decimal? PriceDeltaFromStartPercent = null,
+    bool PriceChanged = false);
 
 public interface IProcurementQueueV2ReadService
 {

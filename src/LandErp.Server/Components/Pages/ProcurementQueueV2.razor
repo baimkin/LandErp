@@ -50,12 +50,12 @@
                     <button type="button" class="stat warning @(stageFilter == "returned" ? "selected" : "")" @onclick="ShowReturnedAsync">
                         <span>Возвращены</span><b>@(queuePage.Summary.Returned)</b><small>руководителем</small>
                     </button>
-                    <div class="stat unavailable" title="Текущий V2 read model не отдаёт отдельный server-side count состояния «На проверке»">
-                        <span>На проверке</span><b>—</b><small>нужен backend count</small>
-                    </div>
-                    <div class="stat unavailable" title="Текущий V2 read model не отдаёт отдельный server-side count состояния «У руководителя»">
-                        <span>У руководителя</span><b>—</b><small>нужен backend count</small>
-                    </div>
+                    <button type="button" class="stat @(stageFilter == "analysis" ? "selected" : "")" @onclick="ShowCheckingAsync">
+                        <span>На проверке</span><b>@(queuePage.Summary.Checking)</b><small>первичный анализ</small>
+                    </button>
+                    <button type="button" class="stat @(stageFilter == "pending_head" ? "selected" : "")" @onclick="ShowPendingHeadAsync">
+                        <span>У руководителя</span><b>@(queuePage.Summary.PendingHead)</b><small>ждут решения</small>
+                    </button>
                 </div>
 
                 <section class="box">
@@ -64,7 +64,7 @@
                                @oninput="e => searchDraft = e.Value?.ToString() ?? string.Empty"
                                @onchange="SearchChangedAsync"
                                @onkeydown="SearchKeyDownAsync"
-                               placeholder="Адрес, PropertyCase, кадастровый номер, продавец…" />
+                               placeholder="Адрес, PC, кадастровый номер, продавец…" />
                         <select value="@stageFilter" @onchange="StageChangedAsync" aria-label="Этап">
                             <option value="">Все этапы</option>
                             @foreach (string stage in queuePage.Stages)
@@ -90,8 +90,8 @@
                         <button type="button" class="chipbtn @(dueTodayOnly ? "on" : "")" @onclick="ToggleDueTodayAsync">Сегодня <b>@(queuePage.Summary.DueToday)</b></button>
                         <button type="button" class="chipbtn @(overdueOnly ? "on" : "")" @onclick="ToggleOverdueAsync">Просрочено <b>@(queuePage.Summary.Overdue)</b></button>
                         <button type="button" class="chipbtn @(stageFilter == "returned" ? "on" : "")" @onclick="ShowReturnedAsync">Возвращены <b>@(queuePage.Summary.Returned)</b></button>
-                        <button type="button" class="chipbtn unavailable" aria-disabled="true" title="Сейчас сервер сообщает только об изменении source revision, а не именно цены">Изменилась цена <b>—</b></button>
-                        <button type="button" class="chipbtn unavailable" aria-disabled="true" title="Нужен отдельный server-side count/filter состояния руководителя">У руководителя <b>—</b></button>
+                        <button type="button" class="chipbtn @(priceChangedOnly ? "on" : "")" @onclick="TogglePriceChangedAsync">Изменилась цена <b>@(queuePage.Summary.PriceChanged)</b></button>
+                        <button type="button" class="chipbtn @(stageFilter == "pending_head" ? "on" : "")" @onclick="ShowPendingHeadAsync">У руководителя <b>@(queuePage.Summary.PendingHead)</b></button>
                     </div>
 
                     <div class="table">
@@ -209,11 +209,15 @@
                 <div class="card">
                     <div class="ct"><b>Цена и торг</b><button class="btn" type="button" aria-disabled="true" title="Полная история цены и переговоров пока не выдаётся V2 read model">История цены и переговоров</button></div>
                     <div class="prices">
-                        <div class="p"><label>Цена источника</label><b>@MoneyCompact(detail.CurrentSourceAsk)</b><small>@ValueOrDash(detail.CurrentSourceLabel)</small></div>
-                        <div class="p good"><label>Сейчас продавец</label><b>@MoneyCompact(detail.LatestSellerOffer)</b></div>
-                        <div class="p ours"><label>Наше последнее</label><b>@MoneyCompact(detail.LatestBuyerOffer)</b></div>
+                        <div class="p"><label>Старт</label><b>@MoneyCompact(detail.StartPrice)</b></div>
+                        <div class="p good"><label>Продавец</label><b>@MoneyCompact(detail.LatestSellerOffer ?? detail.CurrentSourceAsk)</b><small>@SellerPriceCaption(detail)</small></div>
+                        <div class="p ours"><label>Мы</label><b>@MoneyCompact(detail.LatestBuyerOffer)</b></div>
                         <div class="p good"><label>Согласовано</label><b>@MoneyCompact(detail.LatestAgreedPrice)</b></div>
                     </div>
+                    @if (detail.PriceDeltaFromStart != null)
+                    {
+                        <div class="sub">@PriceDeltaCaption(detail.PriceDeltaFromStart.Value, detail.PriceDeltaFromStartPercent)</div>
+                    }
                 </div>
 
                 <div class="card">
@@ -402,6 +406,7 @@
     private bool dueTodayOnly;
     private bool overdueOnly;
     private bool queryInitialized;
+    private bool priceChangedOnly;
     private int offset;
     private const int PageSize = 30;
 
@@ -427,24 +432,40 @@
     private ProcurementQueueV2Filter BuildFilter()
     {
         Guid? assignee = Guid.TryParse(assigneeFilter, out Guid assigneeId) ? assigneeId : null;
-        return new(search, stageFilter, assignee, null, false, dueTodayOnly, overdueOnly,
-            ProcurementQueueV2CheckFilter.Any, ProcurementQueueV2Sort.RecordedAt, true, offset, PageSize, MineOnly);
+        return new ProcurementQueueV2Filter(
+            Text: search,
+            Stage: stageFilter,
+            AssigneeId: assignee,
+            Source: null,
+            SourceChangedOnly: false,
+            DueTodayOnly: dueTodayOnly,
+            OverdueOnly: overdueOnly,
+            Checks: ProcurementQueueV2CheckFilter.Any,
+            Sort: ProcurementQueueV2Sort.RecordedAt,
+            Descending: true,
+            Offset: offset,
+            Size: PageSize,
+            MineOnly: MineOnly,
+            PriceChangedOnly: priceChangedOnly);
     }
 
-    private bool HasFilters => search.Length > 0 || stageFilter.Length > 0 || assigneeFilter.Length > 0 || dueTodayOnly || overdueOnly;
-    private bool HasOperationalFilter => stageFilter.Length > 0 || dueTodayOnly || overdueOnly;
+    private bool HasFilters => search.Length > 0 || stageFilter.Length > 0 || assigneeFilter.Length > 0 || dueTodayOnly || overdueOnly || priceChangedOnly;
+    private bool HasOperationalFilter => stageFilter.Length > 0 || dueTodayOnly || overdueOnly || priceChangedOnly;
     private string PageCaption => queuePage == null || queuePage.Total == 0 ? "Показано 0 объектов" : $"Показано {queuePage.Offset + 1}–{Math.Min(queuePage.Offset + queuePage.Size, queuePage.Total)} из {queuePage.Total} объектов";
 
     private async Task ApplySearchAsync() { search = searchDraft.Trim(); offset = 0; await ReloadAsync(); }
     private async Task SearchChangedAsync(ChangeEventArgs e) { searchDraft = e.Value?.ToString() ?? ""; await ApplySearchAsync(); }
     private async Task SearchKeyDownAsync(KeyboardEventArgs args) { if (args.Key == "Enter") await ApplySearchAsync(); }
-    private async Task StageChangedAsync(ChangeEventArgs e) { stageFilter = e.Value?.ToString() ?? ""; dueTodayOnly = overdueOnly = false; offset = 0; await ReloadAsync(); }
+    private async Task StageChangedAsync(ChangeEventArgs e) { stageFilter = e.Value?.ToString() ?? ""; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
     private async Task AssigneeChangedAsync(ChangeEventArgs e) { assigneeFilter = e.Value?.ToString() ?? ""; offset = 0; await ReloadAsync(); }
-    private async Task ToggleDueTodayAsync() { dueTodayOnly = !dueTodayOnly; if (dueTodayOnly) { overdueOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }
-    private async Task ToggleOverdueAsync() { overdueOnly = !overdueOnly; if (overdueOnly) { dueTodayOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }
-    private async Task ShowReturnedAsync() { stageFilter = stageFilter == "returned" ? "" : "returned"; dueTodayOnly = overdueOnly = false; offset = 0; await ReloadAsync(); }
-    private async Task ClearOperationalFiltersAsync() { stageFilter = ""; dueTodayOnly = overdueOnly = false; offset = 0; await ReloadAsync(); }
-    private async Task ClearFiltersAsync() { search = searchDraft = stageFilter = assigneeFilter = ""; dueTodayOnly = overdueOnly = false; offset = 0; await ReloadAsync(); }
+    private async Task ToggleDueTodayAsync() { dueTodayOnly = !dueTodayOnly; if (dueTodayOnly) { overdueOnly = priceChangedOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }
+    private async Task ToggleOverdueAsync() { overdueOnly = !overdueOnly; if (overdueOnly) { dueTodayOnly = priceChangedOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }
+    private async Task TogglePriceChangedAsync() { priceChangedOnly = !priceChangedOnly; if (priceChangedOnly) { dueTodayOnly = overdueOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }
+    private async Task ShowReturnedAsync() { stageFilter = stageFilter == "returned" ? "" : "returned"; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
+    private async Task ShowCheckingAsync() { stageFilter = stageFilter == "analysis" ? "" : "analysis"; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
+    private async Task ShowPendingHeadAsync() { stageFilter = stageFilter == "pending_head" ? "" : "pending_head"; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
+    private async Task ClearOperationalFiltersAsync() { stageFilter = ""; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
+    private async Task ClearFiltersAsync() { search = searchDraft = stageFilter = assigneeFilter = ""; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
     private async Task PreviousPageAsync() { offset = Math.Max(0, offset - PageSize); await ReloadAsync(); }
     private async Task NextPageAsync() { if (queuePage != null && offset + PageSize < queuePage.Total) { offset += PageSize; await ReloadAsync(); } }
 
@@ -524,6 +545,18 @@
         if (value == null) return "—";
         if (Math.Abs(value.Value) >= 1_000_000m) return $"{(value.Value / 1_000_000m).ToString("0.#", Ru)} млн ₽";
         return $"{value.Value.ToString("N0", Ru)} ₽";
+    }
+    private static string SellerPriceCaption(ProcurementQueueV2Detail item) => item.LatestSellerOffer != null
+        ? "последняя цена в переговорах"
+        : item.CurrentSourceAsk != null ? "текущая цена объявления" : "—";
+    private static string PriceDeltaCaption(decimal delta, decimal? percent)
+    {
+        if (delta == 0m) return "Без изменения от старта";
+        string arrow = delta < 0m ? "↓" : "↑";
+        string sign = delta < 0m ? "−" : "+";
+        string amount = MoneyCompact(Math.Abs(delta));
+        string percentText = percent == null ? "" : $" · {sign}{Math.Abs(percent.Value).ToString("0.#", Ru)}%";
+        return $"{arrow} {amount}{percentText} от старта";
     }
     private static string AreaSotki(decimal? squareMeters) => squareMeters == null ? "—" : $"{(squareMeters.Value / 100m).ToString("0.##", Ru)} сот.";
     private static string ShortDate(DateTimeOffset? value) => value == null ? "—" : ProcurementLabels.Time(value).Split(' ')[0];

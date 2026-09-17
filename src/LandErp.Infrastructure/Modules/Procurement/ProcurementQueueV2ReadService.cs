@@ -98,7 +98,8 @@ public sealed partial class ProcurementQueueV2ReadService(
 
         ProcurementQueueV2Row[] items = pageRows.Select(row => ProjectRow(row, names, sourcesByCase.GetValueOrDefault(row.Case.Id, []),
             checksByCase.GetValueOrDefault(row.Case.Id, []), contactsByCase.GetValueOrDefault(row.Case.Id), todayStart, tomorrowStart)).ToArray();
-        return new(items, total, summary, assignees, stages, offset, size);
+        bool canCreateManualCase = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        return new(items, total, summary, assignees, stages, offset, size, canCreateManualCase);
     }
 
     public async Task<ProcurementQueueV2Detail> ReadDetailAsync(Subject subject, Guid caseId, CancellationToken cancellationToken)

@@ -74,7 +74,8 @@ public sealed record ProcurementQueueV2Page(
     IReadOnlyList<ProcurementQueueV2Assignee> Assignees,
     IReadOnlyList<string> Stages,
     int Offset,
-    int Size);
+    int Size,
+    bool CanCreateManualCase);
 
 public sealed record ProcurementQueueV2Negotiation(
     Guid Id,

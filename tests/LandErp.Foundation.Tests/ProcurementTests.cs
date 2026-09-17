@@ -109,6 +109,66 @@ public sealed class ProcurementTests
     }
 
     [TestMethod]
+    public async Task DirectAndIncomingCreationConvergeOnOneScopedPropertyCaseModel()
+    {
+        await using Phase1Fixture fixture = await Phase1Fixture.CreateAsync(includeSecondManager: true, includeTeams: true);
+        await fixture.ChangeScopeAsync("manager-phase1@test.invalid", AccessScope.Team, fixture.TeamA);
+        await fixture.ChangeScopeAsync("manager2-phase1@test.invalid", AccessScope.Team, fixture.TeamB);
+        int listingsBefore = await fixture.CountAsync(db => db.Listings.CountAsync());
+        int agentsBefore = await fixture.CountAsync(db => db.CollectorAgents.CountAsync());
+        int jobsBefore = await fixture.CountAsync(db => db.CollectionJobs.CountAsync());
+
+        ManualPropertyCaseResult direct = await fixture.Workspace.CreateManualCaseAsync(fixture.Manager,
+            new("Участок от собственника", "Истра", "50:08:0000000:42", 8_500_000m, 2_000m,
+                "Собственник позвонил напрямую по рекомендации директора"), "direct-case", CancellationToken.None);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.CreateManualCaseAsync(fixture.Head,
+            new("Недоступный объект", null, null, null, null, "Руководитель не создаёт менеджерский кейс"),
+            "head-direct-case", CancellationToken.None));
+
+        ProcurementQueueV2ReadService read = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2Detail directWithoutSources = await read.ReadDetailAsync(
+            fixture.Manager, direct.CaseId, CancellationToken.None);
+        Assert.AreEqual(0, directWithoutSources.Sources.Count);
+        Assert.AreEqual("Участок от собственника", directWithoutSources.Title);
+        Assert.AreEqual(8_500_000m, directWithoutSources.WorkingPrice);
+
+        Guid incomingId = await fixture.CreateUnlinkedManualAsync();
+        TakeToWorkResult incoming = await fixture.Workspace.TakeToWorkAsync(fixture.Manager,
+            new(incomingId), "incoming-case", CancellationToken.None);
+        Guid laterSourceId = await fixture.CreateUnlinkedManualAsync();
+        TakeToWorkResult linked = await fixture.Workspace.TakeToWorkAsync(fixture.Manager,
+            new(laterSourceId, direct.CaseId), "link-direct-case", CancellationToken.None);
+
+        Assert.AreEqual(direct.CaseId, linked.CaseId);
+        Assert.IsFalse(linked.Created);
+        Assert.AreEqual(listingsBefore + 2, await fixture.CountAsync(db => db.Listings.CountAsync()),
+            "Only Incoming sources create Catalog items.");
+        Assert.AreEqual(agentsBefore, await fixture.CountAsync(db => db.CollectorAgents.CountAsync()));
+        Assert.AreEqual(jobsBefore, await fixture.CountAsync(db => db.CollectionJobs.CountAsync()));
+        Assert.AreEqual(2, await fixture.CountAsync(db => db.PropertyCases.CountAsync()));
+        Assert.AreEqual(2, await fixture.CountAsync(db => db.PropertyCaseSourceLinks.CountAsync()));
+        Assert.AreEqual(2, await fixture.CountAsync(db => db.WorkAssignments.CountAsync()));
+        Assert.AreEqual(2, await fixture.CountAsync(db => db.WorkTasks.CountAsync()));
+
+        ProcurementQueueV2Page managerQueue = await read.ReadPageAsync(fixture.Manager, new(), CancellationToken.None);
+        Assert.AreEqual(2, managerQueue.Total);
+        Assert.AreEqual(0, (await read.ReadPageAsync(fixture.SecondManager, new(), CancellationToken.None)).Total);
+        ProcurementQueueV2Detail directDetail = await read.ReadDetailAsync(fixture.Manager, direct.CaseId, CancellationToken.None);
+        Assert.AreEqual(1, directDetail.Sources.Count,
+            "A source can be linked later without changing the direct PropertyCase identity.");
+
+        await using LandErpDbContext db = await fixture.Factory.CreateDbContextAsync();
+        PropertyCase directCase = await db.PropertyCases.SingleAsync(item => item.Id == direct.CaseId);
+        Assert.IsNull(directCase.ListingId);
+        Assert.AreEqual(fixture.TeamA, directCase.TeamId);
+        Assert.AreEqual(fixture.ManagerEmployeeId, directCase.ManagerEmployeeId);
+        Assert.IsTrue(await db.WorkflowTransitions.AnyAsync(item => item.ObjectId == direct.CaseId && item.Action == "CreateManual"));
+        Assert.IsTrue(await db.WorkflowTransitions.AnyAsync(item => item.ObjectId == incoming.CaseId && item.Action == "TakeWork"));
+        Assert.IsTrue(await db.BusinessTimeline.AnyAsync(item => item.ObjectId == direct.CaseId && item.Kind == "Created"));
+        Assert.IsTrue(await db.AuditEvents.AnyAsync(item => item.ObjectId == direct.CaseId && item.Action == "PropertyCaseCreatedManually"));
+    }
+
+    [TestMethod]
     public async Task IncomingUiCreatesCaseUsesCanonicalRouteAndSurvivesRestart()
     {
         await using Phase1Fixture fixture = await Phase1Fixture.CreateAsync(includeSecondManager: false, includeTeams: false);

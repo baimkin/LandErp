@@ -217,6 +217,36 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             .Select(row => new CaseLinkTarget(row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle)).ToArrayAsync(cancellationToken);
     }
 
+    public async Task<ManualPropertyCaseResult> CreateManualCaseAsync(Subject subject, CreateManualPropertyCase command,
+        string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        string title = Required(command.Title, 3, 512, "Укажите название объекта от 3 до 512 символов.");
+        string? location = Optional(command.Location, 20000);
+        string? cadastralNumber = Optional(command.CadastralNumber, 128);
+        string comment = Required(command.Comment, 3, 900, "Укажите происхождение или контекст объекта от 3 до 900 символов.");
+        if (command.Price is <= 0m) throw new ArgumentException("Цена должна быть больше нуля.");
+        if (command.AreaSquareMeters is <= 0m) throw new ArgumentException("Площадь должна быть больше нуля.");
+
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        PropertyCase propertyCase = await CreatePropertyCaseAsync(db, context, title, command.Price, command.AreaSquareMeters,
+            location, cadastralNumber, "Прямое создание PropertyCase: " + comment, "CreateManual", cancellationToken);
+        DateTimeOffset now = time.GetUtcNow();
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+            ObjectId = propertyCase.Id, ActorEmployeeId = context.EmployeeId, Kind = "Created",
+            Title = "PropertyCase создан вручную", Body = comment, RecordedAt = now
+        });
+        OrganizationWorkspace.AddAudit(db, context, subject, "PropertyCaseCreatedManually", "PropertyCase", propertyCase.Id,
+            new { propertyCase.BusinessNumber, Title = title, Location = location, CadastralNumber = cadastralNumber,
+                command.Price, command.AreaSquareMeters, Comment = comment }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new(propertyCase.Id, propertyCase.BusinessNumber);
+    }
+
     public async Task<TakeToWorkResult> TakeToWorkAsync(Subject subject, TakeCatalogItemToWork command, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
@@ -239,35 +269,9 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         bool created = command.ExistingCaseId == null;
         if (created)
         {
-            await using var number = db.Database.GetDbConnection().CreateCommand();
-            number.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
-            number.CommandText = "SELECT nextval('procurement.property_case_numbers')";
-            long businessNumber = (long)(await number.ExecuteScalarAsync(cancellationToken))!;
-            Guid caseId = DataConventions.NewId();
-            Assignment assignment = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = caseId, EmployeeId = context.EmployeeId };
-            WorkTask task = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = caseId, EmployeeId = context.EmployeeId, Title = "Первичный анализ", RecordedAt = time.GetUtcNow() };
-            propertyCase = new()
-            {
-                Id = caseId,
-                OrganizationId = context.OrganizationId,
-                BusinessNumber = "PC-" + businessNumber.ToString("D6", System.Globalization.CultureInfo.InvariantCulture),
-                WorkingTitle = catalogItem.Title ?? "Объект без названия",
-                WorkingPrice = catalogItem.Price,
-                Currency = catalogItem.Currency,
-                WorkingAreaSquareMeters = catalogItem.AreaSquareMeters,
-                WorkingLocation = catalogItem.Location,
-                CadastralNumber = catalogItem.CadastralNumber,
-                FactsProvenance = "Catalog snapshot at case creation",
-                DepartmentId = context.DepartmentId,
-                TeamId = context.TeamId,
-                ManagerEmployeeId = context.EmployeeId,
-                AssignmentId = assignment.Id,
-                WorkTaskId = task.Id,
-                ReviewedDataRevision = catalogItem.DataRevision,
-                RecordedAt = time.GetUtcNow()
-            };
-            db.WorkAssignments.Add(assignment); db.WorkTasks.Add(task); db.PropertyCases.Add(propertyCase);
-            db.WorkflowTransitions.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = caseId, FromStageId = "new", ToStageId = "analysis", Action = "TakeWork", ActorEmployeeId = context.EmployeeId, ObjectVersion = 1, RecordedAt = time.GetUtcNow() });
+            propertyCase = await CreatePropertyCaseAsync(db, context, catalogItem.Title ?? "Объект без названия",
+                catalogItem.Price, catalogItem.AreaSquareMeters, catalogItem.Location, catalogItem.CadastralNumber,
+                "Catalog snapshot at case creation", "TakeWork", cancellationToken, catalogItem.Currency, catalogItem.DataRevision);
         }
         else
         {
@@ -1244,6 +1248,58 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     }
 
     private static string? Format(decimal? value) => value?.ToString("0.####", CultureInfo.InvariantCulture);
+
+    private async Task<PropertyCase> CreatePropertyCaseAsync(LandErpDbContext db, AccessContext context, string title,
+        decimal? price, decimal? areaSquareMeters, string? location, string? cadastralNumber, string provenance,
+        string transitionAction, CancellationToken cancellationToken, string currency = "RUB", long reviewedDataRevision = 0)
+    {
+        await using var number = db.Database.GetDbConnection().CreateCommand();
+        number.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+        number.CommandText = "SELECT nextval('procurement.property_case_numbers')";
+        long businessNumber = (long)(await number.ExecuteScalarAsync(cancellationToken))!;
+        Guid caseId = DataConventions.NewId();
+        DateTimeOffset now = time.GetUtcNow();
+        Assignment assignment = new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+            ObjectId = caseId, EmployeeId = context.EmployeeId
+        };
+        WorkTask task = new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+            ObjectId = caseId, EmployeeId = context.EmployeeId, Title = "Первичный анализ", RecordedAt = now
+        };
+        PropertyCase propertyCase = new()
+        {
+            Id = caseId,
+            OrganizationId = context.OrganizationId,
+            BusinessNumber = "PC-" + businessNumber.ToString("D6", CultureInfo.InvariantCulture),
+            WorkingTitle = title,
+            WorkingPrice = price,
+            Currency = currency,
+            WorkingAreaSquareMeters = areaSquareMeters,
+            WorkingLocation = location,
+            CadastralNumber = cadastralNumber,
+            FactsProvenance = provenance,
+            DepartmentId = context.DepartmentId,
+            TeamId = context.TeamId,
+            ManagerEmployeeId = context.EmployeeId,
+            AssignmentId = assignment.Id,
+            WorkTaskId = task.Id,
+            ReviewedDataRevision = reviewedDataRevision,
+            RecordedAt = now
+        };
+        db.WorkAssignments.Add(assignment);
+        db.WorkTasks.Add(task);
+        db.PropertyCases.Add(propertyCase);
+        db.WorkflowTransitions.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+            ObjectId = caseId, FromStageId = "new", ToStageId = "analysis", Action = transitionAction,
+            ActorEmployeeId = context.EmployeeId, ObjectVersion = 1, RecordedAt = now
+        });
+        return propertyCase;
+    }
 
     private static string NextActionTypeLabel(WorkTaskType type) => type switch
     {

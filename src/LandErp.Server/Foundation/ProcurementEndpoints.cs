@@ -14,6 +14,8 @@ internal static class ProcurementEndpoints
         var group = app.MapGroup("/api/procurement").RequireAuthorization(Permissions.QueueRead);
         group.MapGet("/queue", async (HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => Results.Ok(await workspace.ReadQueueAsync(PermissionAuthorization.SubjectFrom(http.User), new(), token)));
         group.MapGet("/cases/{id:guid}", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => Results.Ok(await workspace.ReadCardAsync(PermissionAuthorization.SubjectFrom(http.User), id, token)));
+        group.MapPost("/cases/manual", async (CreateManualPropertyCase command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
+            Results.Ok(await workspace.CreateManualCaseAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token))).AddEndpointFilter(ValidateCsrfAsync);
         group.MapGet("/listings/{id:guid}", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
         {
             Guid? caseId = await workspace.ResolveLegacyListingAsync(PermissionAuthorization.SubjectFrom(http.User), id, token);

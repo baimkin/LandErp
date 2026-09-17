@@ -21,7 +21,7 @@
                 <h1>Очередь закупки</h1>
                 <p>Только уже выбранные PropertyCase. В очереди — минимум информации; детали открываются справа.</p>
             </div>
-            <button type="button" class="btn primary" aria-disabled="true" title="Требуется отдельное подключение ручного создания PropertyCase">+ Создать объект вручную</button>
+            <button type="button" class="btn primary" disabled="@(queuePage?.CanCreateManualCase != true)" @onclick="OpenManualCase">+ Создать объект вручную</button>
         </div>
 
         @if (Loading)
@@ -360,6 +360,30 @@
     </aside>
 }
 
+@if (manualCaseOpen)
+{
+    <div class="modalBack on" @onclick="CloseManualCase">
+        <div class="modal add-modal" @onclick:stopPropagation="true">
+            <div class="mh"><div class="grow"><b>Создать объект вручную</b><div class="sub">PropertyCase без обязательного входящего объявления</div></div><button class="btn" type="button" @onclick="CloseManualCase">×</button></div>
+            <EditForm Model="manualCase" FormName="procurement-v2-manual-case" OnValidSubmit="CreateManualCaseAsync">
+                <DataAnnotationsValidator />
+                <div class="mb">
+                    <ValidationSummary />
+                    <div class="form">
+                        <div class="field full"><label>Название объекта</label><input @bind="manualCase.Title" maxlength="512" placeholder="Например, участок у деревни Новая" /></div>
+                        <div class="field"><label>Локация</label><input @bind="manualCase.Location" maxlength="20000" /></div>
+                        <div class="field"><label>Кадастровый номер</label><input @bind="manualCase.CadastralNumber" maxlength="128" /></div>
+                        <div class="field"><label>Рабочая цена, ₽</label><InputNumber @bind-Value="manualCase.Price" /></div>
+                        <div class="field"><label>Площадь, м²</label><InputNumber @bind-Value="manualCase.AreaSquareMeters" /></div>
+                        <div class="field full"><label>Как узнали об объекте / контекст</label><textarea @bind="manualCase.Comment" maxlength="900" placeholder="Звонок собственника, Telegram, рекомендация директора…"></textarea></div>
+                    </div>
+                </div>
+                <div class="mf"><button class="btn" type="button" @onclick="CloseManualCase">Отмена</button><button class="btn primary" type="submit" disabled="@Busy">Создать объект</button></div>
+            </EditForm>
+        </div>
+    </div>
+}
+
 @if (decisionCard != null)
 {
     <DecisionDialog Card="decisionCard" Action="decisionAction" Title="@DecisionTitle(decisionAction)" Busy="@Busy" Error="@Error"
@@ -440,6 +464,8 @@
     private NegotiationDraft negotiation = new();
     private bool nextActionOpen;
     private NextActionDraft nextAction = new();
+    private bool manualCaseOpen;
+    private ManualCaseDraft manualCase = new();
 
     protected override void OnParametersSet()
     {
@@ -507,6 +533,28 @@
     private void CloseDrawer() { selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = nextActionOpen = false; }
     private void OpenFullCase() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}"); }
     private void OpenInspection() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}/inspection"); }
+
+    private void OpenManualCase()
+    {
+        if (queuePage?.CanCreateManualCase != true) return;
+        manualCase = new();
+        manualCaseOpen = true;
+    }
+
+    private void CloseManualCase() => manualCaseOpen = false;
+
+    private async Task CreateManualCaseAsync()
+    {
+        ManualPropertyCaseResult? result = null;
+        await ExecuteAsync(async () => result = await Workspace.CreateManualCaseAsync(CurrentSubject,
+            new CreateManualPropertyCase(manualCase.Title, manualCase.Location, manualCase.CadastralNumber,
+                manualCase.Price, manualCase.AreaSquareMeters, manualCase.Comment), Correlation(), CancellationToken.None));
+        if (Error == null && result != null)
+        {
+            manualCaseOpen = false;
+            await OpenDrawerAsync(result.CaseId);
+        }
+    }
 
     private async Task OpenDecisionAsync(ProcurementAction action)
     {
@@ -703,5 +751,15 @@
         [Required, MinLength(3), MaxLength(4000)] public string Description { get; set; } = "";
         [Required] public Guid AssigneeEmployeeId { get; set; }
         public string Due { get; set; } = "";
+    }
+
+    private sealed class ManualCaseDraft
+    {
+        [Required, MinLength(3), MaxLength(512)] public string Title { get; set; } = "";
+        [MaxLength(20000)] public string? Location { get; set; }
+        [MaxLength(128)] public string? CadastralNumber { get; set; }
+        public decimal? Price { get; set; }
+        public decimal? AreaSquareMeters { get; set; }
+        [Required, MinLength(3), MaxLength(900)] public string Comment { get; set; } = "";
     }
 }

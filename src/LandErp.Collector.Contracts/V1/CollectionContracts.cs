@@ -6,10 +6,17 @@ namespace LandErp.Collector.Contracts.V1;
 public enum ListingSource { Avito, Cian }
 public enum FieldPresence { NotInspected, Absent, Empty, Present, ParseFailed }
 public enum CollectionOutcome { Unknown, Success, Captcha, AuthenticationRequired, RateLimited, SourceError, Interrupted, LimitReached }
+public enum AgentRuntimeState { Idle, Claiming, Parsing, Delivering, AwaitingManualAction, Paused }
 public sealed record TextField(FieldPresence Presence, string? Raw);
 public sealed record DecimalField(FieldPresence Presence, string? Raw, decimal? Parsed);
 public sealed record AgentRegistration(int ContractVersion, string Version, ListingSource[] Capabilities);
-public sealed record AgentHeartbeat(Guid? JobId = null, Guid? LeaseId = null, CollectionOutcome? SourceStatus = null);
+public sealed record AgentProgress(int Processed, int? Total = null, int? CurrentPage = null,
+    int? MaxPages = null, DateTimeOffset? LastActivityAt = null);
+public sealed record AgentHeartbeat(Guid? JobId = null, Guid? LeaseId = null, CollectionOutcome? SourceStatus = null,
+    AgentRuntimeState? State = null, AgentProgress? Progress = null, bool ClearSourceStatus = false);
+public sealed record AgentActivation(Guid AgentId, string ActivationSecret, string MachineName,
+    int ContractVersion, string Version, ListingSource[] Capabilities);
+public sealed record AgentActivationReceipt(Guid AgentId, string Credential, int ContractVersion, string AgentName);
 public sealed record CollectionWork(Guid JobId, Guid LeaseId, DateTimeOffset LeaseExpiresAt,
     ListingSource Source, string SearchUrl, int MaxPages, string Label);
 public sealed record ObservationEnvelope(string ObservationKey, ListingData Data);

@@ -15,7 +15,7 @@ public sealed class SafeExceptionHandler(IProblemDetailsService problems, ILogge
         Failure(logger, exception.GetType().Name, httpContext.TraceIdentifier, null);
         (int status, string code, string title) = exception switch
         {
-            CollectorProtocolException protocol => (protocol.Code == "AGENT_UNAUTHORIZED" ? 401 : protocol.Code == "WORK_NOT_ALLOWED" ? 403 : 409, protocol.Code, "Collector request rejected"),
+            CollectorProtocolException protocol => (protocol.Code is "AGENT_UNAUTHORIZED" or "ACTIVATION_INVALID" ? 401 : protocol.Code == "WORK_NOT_ALLOWED" ? 403 : 409, protocol.Code, "Collector request rejected"),
             AccessDeniedException => (403, "FORBIDDEN", "Нет доступа"),
             DbUpdateConcurrencyException => (409, "CONFLICT", "Данные уже изменены"),
             ArgumentException => (400, "VALIDATION_FAILED", "Проверьте введённые данные"),
@@ -24,6 +24,7 @@ public sealed class SafeExceptionHandler(IProblemDetailsService problems, ILogge
         httpContext.Response.StatusCode = status;
         return await problems.TryWriteAsync(new() { HttpContext = httpContext,
             ProblemDetails = new ProblemDetails { Status = status, Title = title,
-                Extensions = { ["code"] = code, ["correlationId"] = httpContext.TraceIdentifier } } });
+                Extensions = { ["code"] = code, ["correlationId"] = httpContext.TraceIdentifier,
+                    ["retryable"] = exception is CollectorProtocolException collectorFailure && collectorFailure.Retryable } } });
     }
 }

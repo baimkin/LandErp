@@ -3,6 +3,7 @@ using System;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace LandErp.Infrastructure.Migrations
 {
     [DbContext(typeof(LandErpDbContext))]
-    partial class LandErpDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260917114553_CollectorServerManagement")]
+    partial class CollectorServerManagement
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -586,30 +589,6 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<DateTimeOffset?>("ActivationExpiresAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("activation_expires_at")
-                        .HasComment("UTC срок действия одноразового кода подключения Parser.");
-
-                    b.Property<string>("ActivationHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("activation_hash")
-                        .HasComment("SHA-256 verifier одноразового кода подключения; открытый код не хранится.");
-
-                    b.Property<DateTimeOffset?>("ActivationUsedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("activation_used_at")
-                        .HasComment("UTC момент успешного обмена одноразового кода на постоянную machine credential.");
-
-                    b.Property<string>("AttentionCode")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("attention_code")
-                        .HasComment("Текущий очищаемый machine code ручного внимания: CAPTCHA, вход или rate limit.");
-
                     b.Property<string>("Capabilities")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -628,11 +607,6 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("enabled");
 
-                    b.Property<DateTimeOffset?>("LastActivityAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("last_activity_at")
-                        .HasComment("UTC момент последнего полезного действия Parser внутри текущей работы.");
-
                     b.Property<DateTimeOffset?>("LastHeartbeatAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_heartbeat_at")
@@ -649,35 +623,9 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("organization_id")
                         .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
 
-                    b.Property<int?>("ProgressCurrentPage")
-                        .HasColumnType("integer")
-                        .HasColumnName("progress_current_page")
-                        .HasComment("Текущая страница источника, сообщённая Parser, если применимо.");
-
-                    b.Property<int?>("ProgressMaxPages")
-                        .HasColumnType("integer")
-                        .HasColumnName("progress_max_pages")
-                        .HasComment("Серверный предел страниц для текущей работы, сообщённый Parser.");
-
-                    b.Property<int>("ProgressProcessed")
-                        .HasColumnType("integer")
-                        .HasColumnName("progress_processed")
-                        .HasComment("Последнее число обработанных элементов, сообщённое heartbeat.");
-
-                    b.Property<int?>("ProgressTotal")
-                        .HasColumnType("integer")
-                        .HasColumnName("progress_total")
-                        .HasComment("Ожидаемое общее число элементов, если источник смог его определить.");
-
                     b.Property<DateTimeOffset?>("RegisteredAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("registered_at");
-
-                    b.Property<string>("RuntimeState")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("runtime_state")
-                        .HasComment("Последнее заявленное Parser состояние выполнения без browser-specific деталей.");
 
                     b.Property<long>("Version")
                         .IsConcurrencyToken()

@@ -9,6 +9,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace LandErp.Foundation.Tests;
 
@@ -16,6 +18,40 @@ namespace LandErp.Foundation.Tests;
 [TestCategory("PostgreSQL")]
 public sealed class CollectorIntegrationTests
 {
+    [TestMethod]
+    public async Task HttpsActivationReturnsMachineCredentialOnceAndProblemDetailsCodeAfterUse()
+    {
+        await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
+        await using (LandErpDbContext migrator = sandbox.Context()) await migrator.Database.MigrateAsync();
+        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
+        Guid userId = await IdentityOrganizationTests.BootstrapAsync(bootstrap, "activation-http@test.invalid", "Activation HTTP");
+        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, userId);
+        await sandbox.GrantRuntimeAsync();
+        await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
+        IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
+        CollectionAdministration admin = new(factory, services.GetRequiredService<IAccessControl>(), TimeProvider.System);
+        AgentConnectionCode code = await admin.CreateConnectionCodeAsync(new(userId, true), "HTTP Parser", "activation", CancellationToken.None);
+        AgentActivation request = new(code.AgentId, code.ActivationSecret, "PC-HTTP", 1, "http-test", [ListingSource.Avito]);
+        int port = PostgresTests.FreePort(); Uri origin = new($"https://127.0.0.1:{port}/");
+        using HttpClientHandler handler = new() { ServerCertificateCustomValidationCallback = (message, _, _, _) => message.RequestUri?.Host == "127.0.0.1" && message.RequestUri.Port == port };
+        using HttpClient http = new(handler) { Timeout = TimeSpan.FromSeconds(10) };
+        using var server = PostgresTests.StartHost("LandErp.Server", sandbox.RuntimeConnection, port, true);
+        try
+        {
+            await WaitLiveAsync(http, origin, server);
+            HttpResponseMessage response = await http.PostAsJsonAsync(new Uri(origin, "api/collector/v1/activation"), request, CollectionJson.Options);
+            Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+            AgentActivationReceipt receipt = (await response.Content.ReadFromJsonAsync<AgentActivationReceipt>(CollectionJson.Options))!;
+            Assert.AreEqual(code.AgentId, receipt.AgentId);
+            Assert.AreEqual(64, receipt.Credential.Length);
+            HttpResponseMessage repeated = await http.PostAsJsonAsync(new Uri(origin, "api/collector/v1/activation"), request, CollectionJson.Options);
+            Assert.AreEqual(HttpStatusCode.Conflict, repeated.StatusCode);
+            using JsonDocument problem = JsonDocument.Parse(await repeated.Content.ReadAsStringAsync());
+            Assert.AreEqual("ACTIVATION_USED", problem.RootElement.GetProperty("code").GetString());
+        }
+        finally { await PostgresTests.StopAsync(server); }
+    }
+
     [TestMethod]
     public async Task ControlCollectorHttpsDurableRetryCatalogPresenceDedupLeaseAndRevocation()
     {

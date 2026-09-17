@@ -15,33 +15,68 @@ namespace LandErp.Infrastructure.Modules.Collection;
 /// <summary>Short database transactions serialize each agent and fence expired work. No browser dependencies.</summary>
 public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory, TimeProvider time) : ICollectorGateway
 {
+    public async Task<AgentActivationReceipt> ActivateAsync(AgentActivation activation, CancellationToken cancellationToken)
+    {
+        ValidateRegistration(activation.ContractVersion, activation.Version, activation.Capabilities);
+        if (activation.AgentId == Guid.Empty || activation.ActivationSecret is not { Length: 64 }
+            || !activation.ActivationSecret.All(char.IsAsciiHexDigit)
+            || string.IsNullOrWhiteSpace(activation.MachineName) || activation.MachineName.Length > 200)
+            throw new CollectorProtocolException("ACTIVATION_INVALID");
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var agents = await db.CollectorAgents.FromSqlInterpolated($"SELECT * FROM collection.agents WHERE id={activation.AgentId} FOR UPDATE").ToListAsync(cancellationToken);
+        CollectorAgent agent = agents.SingleOrDefault() ?? throw new CollectorProtocolException("ACTIVATION_INVALID");
+        if (!agent.Enabled) throw new CollectorProtocolException("AGENT_UNAUTHORIZED");
+        if (agent.ActivationUsedAt != null) throw new CollectorProtocolException("ACTIVATION_USED");
+        if (agent.ActivationExpiresAt <= time.GetUtcNow()) throw new CollectorProtocolException("ACTIVATION_EXPIRED");
+        if (agent.ActivationHash.Length != 64 || !CryptographicOperations.FixedTimeEquals(
+            Convert.FromHexString(agent.ActivationHash), Convert.FromHexString(Hash(activation.ActivationSecret))))
+            throw new CollectorProtocolException("ACTIVATION_INVALID");
+        string credential = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        agent.CredentialHash = Hash(credential);
+        agent.ActivationUsedAt = time.GetUtcNow();
+        agent.VersionText = activation.Version;
+        agent.Capabilities = string.Join(',', activation.Capabilities.Distinct().Order());
+        agent.RegisteredAt = time.GetUtcNow(); agent.LastHeartbeatAt = time.GetUtcNow();
+        agent.RuntimeState = AgentRuntimeState.Idle;
+        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return new(agent.Id, credential, 1, agent.Name);
+    }
+
     public async Task RegisterAsync(AgentCredential credential, AgentRegistration registration, CancellationToken cancellationToken)
     {
-        if (registration.ContractVersion != 1 || string.IsNullOrWhiteSpace(registration.Version) || registration.Version.Length > 32
-            || registration.Capabilities == null || registration.Capabilities.Length is < 1 or > 2
-            || registration.Capabilities.Any(value => !Enum.IsDefined(value)))
-            throw new CollectorProtocolException("VERSION_OR_CAPABILITY_UNSUPPORTED");
+        ValidateRegistration(registration.ContractVersion, registration.Version, registration.Capabilities);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         CollectorAgent agent = await AuthenticateAsync(db, credential, cancellationToken);
         agent.VersionText = registration.Version;
         agent.Capabilities = string.Join(',', registration.Capabilities.Distinct().Order());
         agent.RegisteredAt ??= time.GetUtcNow(); agent.LastHeartbeatAt = time.GetUtcNow();
+        agent.RuntimeState = AgentRuntimeState.Idle;
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task HeartbeatAsync(AgentCredential credential, AgentHeartbeat heartbeat, CancellationToken cancellationToken)
     {
-        if (heartbeat.SourceStatus != null && !Enum.IsDefined(heartbeat.SourceStatus.Value)) throw new ArgumentException("SOURCE_STATUS_INVALID");
+        if (heartbeat.SourceStatus is not null and not (CollectionOutcome.Captcha
+            or CollectionOutcome.AuthenticationRequired or CollectionOutcome.RateLimited))
+            throw new ArgumentException("SOURCE_STATUS_INVALID");
+        if (heartbeat.State != null && !Enum.IsDefined(heartbeat.State.Value)) throw new ArgumentException("AGENT_STATE_INVALID");
+        ValidateProgress(heartbeat.Progress);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         CollectorAgent agent = await AuthenticateAsync(db, credential, cancellationToken);
         agent.LastHeartbeatAt = time.GetUtcNow();
+        if (heartbeat.State != null) agent.RuntimeState = heartbeat.State.Value;
+        if (heartbeat.ClearSourceStatus) agent.AttentionCode = "";
+        if (heartbeat.SourceStatus != null) agent.AttentionCode = heartbeat.SourceStatus.Value.ToString();
+        ApplyProgress(agent, heartbeat.Progress);
         if (heartbeat.JobId != null || heartbeat.LeaseId != null)
         {
-            ServerCollectionJob job = await LockedJobAsync(db, heartbeat.JobId ?? Guid.Empty, agent.Id, cancellationToken);
-            EnsureLease(job, heartbeat.LeaseId ?? Guid.Empty);
+            ServerCollectionJob job = await LockedJobAsync(db, heartbeat.JobId ?? Guid.Empty, agent.OrganizationId, cancellationToken);
+            EnsureLease(job, agent.Id, heartbeat.LeaseId ?? Guid.Empty, false);
             job.LeaseExpiresAt = time.GetUtcNow().AddMinutes(3);
+            if (heartbeat.ClearSourceStatus) job.ResultCode = "";
             if (heartbeat.SourceStatus != null) job.ResultCode = heartbeat.SourceStatus.Value.ToString();
         }
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
@@ -55,6 +90,21 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         if (agent.RegisteredAt == null) throw new CollectorProtocolException("REGISTRATION_REQUIRED");
         DateTimeOffset now = time.GetUtcNow();
         string[] capabilities = agent.Capabilities.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        // AuthenticateAsync holds a row lock on the Agent. Concurrent claims from the same machine
+        // therefore serialize here and always return its one still-valid lease.
+        var active = await db.CollectionJobs.FromSqlInterpolated($"""
+            SELECT * FROM collection.jobs
+            WHERE agent_id={agent.Id} AND state='Leased' AND lease_expires_at>{now}
+            ORDER BY created_at FOR UPDATE
+            """).ToListAsync(cancellationToken);
+        if (active.Count > 1) throw new CollectorProtocolException("AGENT_MULTIPLE_ACTIVE_WORK");
+        if (active.Count == 1)
+        {
+            agent.LastHeartbeatAt = now;
+            SearchConfiguration activeSearch = await db.SearchConfigurations.SingleAsync(item => item.Id == active[0].SearchId, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+            return Work(active[0], activeSearch);
+        }
         // Shared work is assigned only here. SKIP LOCKED prevents two compatible agents leasing the same job.
         var jobs = await db.CollectionJobs.FromSqlInterpolated($"""
             SELECT j.* FROM collection.jobs j JOIN collection.search_configurations s ON s.id=j.search_id
@@ -67,9 +117,9 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         SearchConfiguration search = await db.SearchConfigurations.SingleAsync(item => item.Id == job.SearchId, cancellationToken);
         job.AgentId = agent.Id; job.State = CollectionJobState.Leased;
         job.LeaseId = DataConventions.NewId(); job.LeaseExpiresAt = now.AddMinutes(3);
-        agent.LastHeartbeatAt = now;
+        agent.LastHeartbeatAt = now; agent.RuntimeState = AgentRuntimeState.Claiming;
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
-        return new(job.Id, job.LeaseId.Value, job.LeaseExpiresAt.Value, CollectorSource(search.Source), search.Url, search.MaxPages, search.Label);
+        return Work(job, search);
     }
 
     public async Task<CollectionReceipt> AcceptAsync(AgentCredential credential, CollectionResult result, CancellationToken cancellationToken)
@@ -94,8 +144,8 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
                 throw new CollectorProtocolException("IDEMPOTENCY_CONFLICT");
             return JsonSerializer.Deserialize<CollectionReceipt>(delivered.ReceiptJson, CollectionJson.Options)!;
         }
-        ServerCollectionJob job = await LockedJobAsync(db, result.JobId, agent.Id, cancellationToken);
-        EnsureLease(job, result.LeaseId);
+        ServerCollectionJob job = await LockedJobAsync(db, result.JobId, agent.OrganizationId, cancellationToken);
+        EnsureLease(job, agent.Id, result.LeaseId, true);
         SearchConfiguration search = await db.SearchConfigurations.SingleAsync(item => item.Id == job.SearchId, cancellationToken);
         if (result.Observations.Any(item => MapSource(item.Data.Source) != search.Source)) throw new ArgumentException("SOURCE_MISMATCH");
         // Global ordering of natural identity locks avoids two overlapping search batches deadlocking.
@@ -189,6 +239,10 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
                 _ => CollectionJobState.Failed
             };
             job.ResultCode = result.Outcome.ToString(); job.CompletedAt = time.GetUtcNow();
+            bool attention = result.Outcome is CollectionOutcome.Captcha or CollectionOutcome.AuthenticationRequired or CollectionOutcome.RateLimited;
+            agent.RuntimeState = attention ? AgentRuntimeState.AwaitingManualAction : AgentRuntimeState.Idle;
+            agent.AttentionCode = attention ? result.Outcome.ToString() : "";
+            ApplyProgress(agent, null);
         }
         CollectionReceipt receipt = new(result.ResultId, result.Final ? job.State.ToString() : "Accepted", accepted, duplicates);
         db.CollectionDeliveries.Add(new()
@@ -204,14 +258,16 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         return receipt;
     }
 
-    private void EnsureLease(ServerCollectionJob job, Guid lease)
+    private void EnsureLease(ServerCollectionJob job, Guid agentId, Guid lease, bool acceptingResult)
     {
-        if (job.State != CollectionJobState.Leased || job.LeaseId != lease || job.LeaseExpiresAt <= time.GetUtcNow())
-            throw new CollectorProtocolException("LEASE_EXPIRED_OR_REPLACED");
+        if (job.State != CollectionJobState.Leased)
+            throw new CollectorProtocolException(acceptingResult ? "RESULT_SUPERSEDED" : "WORK_NOT_ACTIVE");
+        if (job.LeaseExpiresAt <= time.GetUtcNow()) throw new CollectorProtocolException("LEASE_EXPIRED");
+        if (job.AgentId != agentId || job.LeaseId != lease) throw new CollectorProtocolException("LEASE_REPLACED");
     }
-    private static async Task<ServerCollectionJob> LockedJobAsync(LandErpDbContext db, Guid id, Guid agentId, CancellationToken cancellationToken)
+    private static async Task<ServerCollectionJob> LockedJobAsync(LandErpDbContext db, Guid id, Guid organizationId, CancellationToken cancellationToken)
     {
-        var jobs = await db.CollectionJobs.FromSqlInterpolated($"SELECT * FROM collection.jobs WHERE id={id} AND agent_id={agentId} FOR UPDATE").ToListAsync(cancellationToken);
+        var jobs = await db.CollectionJobs.FromSqlInterpolated($"SELECT * FROM collection.jobs WHERE id={id} AND organization_id={organizationId} FOR UPDATE").ToListAsync(cancellationToken);
         return jobs.SingleOrDefault() ?? throw new CollectorProtocolException("WORK_NOT_ALLOWED");
     }
     private static async Task<CollectorAgent> AuthenticateAsync(LandErpDbContext db, AgentCredential credential, CancellationToken cancellationToken)
@@ -224,6 +280,36 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         return agent;
     }
     internal static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+    private static void ValidateRegistration(int contractVersion, string version, ListingSource[] capabilities)
+    {
+        if (contractVersion != 1 || string.IsNullOrWhiteSpace(version) || version.Length > 32
+            || capabilities == null || capabilities.Length is < 1 or > 2
+            || capabilities.Any(value => !Enum.IsDefined(value)))
+            throw new CollectorProtocolException("VERSION_OR_CAPABILITY_UNSUPPORTED");
+    }
+
+    private static void ValidateProgress(AgentProgress? progress)
+    {
+        if (progress == null) return;
+        if (progress.Processed < 0 || progress.Total < 0 || progress.CurrentPage < 0 || progress.MaxPages < 1
+            || progress.Total != null && progress.Processed > progress.Total
+            || progress.CurrentPage != null && progress.MaxPages != null && progress.CurrentPage > progress.MaxPages
+            || progress.LastActivityAt?.Offset != TimeSpan.Zero)
+            throw new ArgumentException("AGENT_PROGRESS_INVALID");
+    }
+
+    private static void ApplyProgress(CollectorAgent agent, AgentProgress? progress)
+    {
+        agent.ProgressProcessed = progress?.Processed ?? 0;
+        agent.ProgressTotal = progress?.Total;
+        agent.ProgressCurrentPage = progress?.CurrentPage;
+        agent.ProgressMaxPages = progress?.MaxPages;
+        agent.LastActivityAt = progress?.LastActivityAt;
+    }
+
+    private static CollectionWork Work(ServerCollectionJob job, SearchConfiguration search) =>
+        new(job.Id, job.LeaseId!.Value, job.LeaseExpiresAt!.Value, CollectorSource(search.Source), search.Url, search.MaxPages, search.Label);
 
     private static CatalogSource MapSource(ListingSource source) => source switch
     {

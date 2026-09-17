@@ -16,6 +16,98 @@ namespace LandErp.Foundation.Tests;
 public sealed class CollectionPoolTests
 {
     [TestMethod]
+    public async Task ActivationProgressAttentionAndLeaseCodesAreExplicit()
+    {
+        await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
+        await using (LandErpDbContext migrator = sandbox.Context()) await migrator.Database.MigrateAsync();
+        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
+        Guid ownerId = await IdentityOrganizationTests.BootstrapAsync(bootstrap, "owner-machine-protocol@test.invalid", "Machine protocol");
+        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerId);
+        await sandbox.GrantRuntimeAsync();
+        await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
+        IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
+        TestClock clock = new(); Subject owner = new(ownerId, true);
+        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        AgentConnectionCode code = await administration.CreateConnectionCodeAsync(owner, "Parser PC", "activation", CancellationToken.None);
+        CollectorGateway gatewayA = new(factory, clock);
+        CollectorProtocolException invalidActivation = await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
+            gatewayA.ActivateAsync(new(code.AgentId, null!, "PC-01", 1, "protocol-test", [ListingSource.Avito]), CancellationToken.None));
+        Assert.AreEqual("ACTIVATION_INVALID", invalidActivation.Code);
+        AgentActivation activation = new(code.AgentId, code.ActivationSecret, "PC-01", 1, "protocol-test", [ListingSource.Avito]);
+        AgentActivationReceipt activated = await gatewayA.ActivateAsync(activation, CancellationToken.None);
+        AgentCredential agentA = new(activated.AgentId, activated.Credential);
+        CollectorProtocolException reused = await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
+            gatewayA.ActivateAsync(activation, CancellationToken.None));
+        Assert.AreEqual("ACTIVATION_USED", reused.Code);
+
+        AgentCredential agentB = await CreateRegisteredAsync(administration, factory, clock, owner, "Replacement", ListingSource.Avito);
+        await administration.CreateSearchAsync(owner, new("Protocol", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 5), "protocol", CancellationToken.None);
+        Guid searchId = (await administration.ReadAsync(owner, CancellationToken.None)).Searches.Single().Id;
+        await administration.EnqueueAsync(owner, searchId, "protocol", CancellationToken.None);
+        CollectionWork first = (await gatewayA.ClaimAsync(agentA, CancellationToken.None))!;
+        await gatewayA.HeartbeatAsync(agentA, new(first.JobId, first.LeaseId, CollectionOutcome.Captcha,
+            AgentRuntimeState.AwaitingManualAction, new(5, 20, 2, 5, clock.GetUtcNow())), CancellationToken.None);
+        AgentView attention = (await administration.ReadAsync(owner, CancellationToken.None)).Agents.Single(item => item.Id == agentA.AgentId);
+        Assert.AreEqual("CAPTCHA", attention.OperationalStatus);
+        Assert.AreEqual(5, attention.ProgressProcessed);
+        Assert.AreEqual(20, attention.ProgressTotal);
+        await gatewayA.HeartbeatAsync(agentA, new(first.JobId, first.LeaseId, State: AgentRuntimeState.Parsing,
+            Progress: new(6, 20, 2, 5, clock.GetUtcNow()), ClearSourceStatus: true), CancellationToken.None);
+        AgentView resumed = (await administration.ReadAsync(owner, CancellationToken.None)).Agents.Single(item => item.Id == agentA.AgentId);
+        Assert.AreEqual("Выполняет сбор", resumed.OperationalStatus);
+        Assert.AreEqual("", resumed.AttentionCode);
+
+        clock.Advance(TimeSpan.FromMinutes(4));
+        CollectorProtocolException expired = await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
+            gatewayA.HeartbeatAsync(agentA, new(first.JobId, first.LeaseId), CancellationToken.None));
+        Assert.AreEqual("LEASE_EXPIRED", expired.Code);
+        CollectorGateway gatewayB = new(factory, clock);
+        CollectionWork replacement = (await gatewayB.ClaimAsync(agentB, CancellationToken.None))!;
+        CollectorProtocolException replaced = await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
+            gatewayA.HeartbeatAsync(agentA, new(first.JobId, first.LeaseId), CancellationToken.None));
+        Assert.AreEqual("LEASE_REPLACED", replaced.Code);
+        await gatewayB.AcceptAsync(agentB, new(Guid.CreateVersion7(), replacement.JobId, replacement.LeaseId,
+            CollectionOutcome.Success, [], true), CancellationToken.None);
+        CollectorProtocolException superseded = await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
+            gatewayA.AcceptAsync(agentA, new(Guid.CreateVersion7(), first.JobId, first.LeaseId,
+                CollectionOutcome.Success, [], true), CancellationToken.None));
+        Assert.AreEqual("RESULT_SUPERSEDED", superseded.Code);
+    }
+
+    [TestMethod]
+    public async Task RepeatedClaimReturnsTheSingleActiveLeaseAndLeavesOtherWorkPending()
+    {
+        await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
+        await using (LandErpDbContext migrator = sandbox.Context()) await migrator.Database.MigrateAsync();
+        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
+        Guid ownerId = await IdentityOrganizationTests.BootstrapAsync(bootstrap, "owner-single-agent-work@test.invalid", "Single agent work");
+        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerId);
+        await sandbox.GrantRuntimeAsync();
+        await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
+        IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
+        TestClock clock = new();
+        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        Subject owner = new(ownerId, true);
+        AgentCredential agent = await CreateRegisteredAsync(administration, factory, clock, owner, "One worker", ListingSource.Avito);
+        await administration.CreateSearchAsync(owner, new("First", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 1), "single", CancellationToken.None);
+        await administration.CreateSearchAsync(owner, new("Second", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 1), "single", CancellationToken.None);
+        foreach (SearchView search in (await administration.ReadAsync(owner, CancellationToken.None)).Searches)
+            await administration.EnqueueAsync(owner, search.Id, "single", CancellationToken.None);
+
+        CollectorGateway gateway = new(factory, clock);
+        CollectionWork first = (await gateway.ClaimAsync(agent, CancellationToken.None))!;
+        CollectionWork repeated = (await gateway.ClaimAsync(agent, CancellationToken.None))!;
+        Assert.AreEqual(first.JobId, repeated.JobId);
+        Assert.AreEqual(first.LeaseId, repeated.LeaseId);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync();
+        Assert.AreEqual(1, await db.CollectionJobs.CountAsync(item => item.State == CollectionJobState.Leased));
+        Assert.AreEqual(1, await db.CollectionJobs.CountAsync(item => item.State == CollectionJobState.Pending));
+    }
+
+    [TestMethod]
     public async Task StaleAgentAcceptIsRejectedAfterExpiredLeaseIsReclaimed()
     {
         await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();

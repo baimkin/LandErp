@@ -16,7 +16,8 @@ public static class LocalBootstrap
     {
         await using var transaction = await db.Database.BeginTransactionAsync();
         string[] admin = [Permissions.UsersRead, Permissions.UsersManage, Permissions.OrganizationManage,
-            Permissions.RolesManage, Permissions.AuditRead, Permissions.AgentsManage, Permissions.CollectionManage];
+            Permissions.RolesManage, Permissions.AuditRead, Permissions.AgentsManage,
+            Permissions.CollectionRead, Permissions.CollectionManage];
         Dictionary<string, string[]> catalog = new(StringComparer.Ordinal)
         {
             ["Owner"] = [.. admin, Permissions.QueueRead, Permissions.ManagerDecide, Permissions.HeadDecide],

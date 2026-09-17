@@ -14,6 +14,8 @@ internal static class CollectorEndpoints
             if (!context.HttpContext.Request.IsHttps) return Results.Problem(statusCode: 400, title: "HTTPS required");
             return await next(context);
         });
+        group.MapPost("/activation", async (AgentActivation request, ICollectorGateway gateway, CancellationToken token) =>
+            Results.Ok(await gateway.ActivateAsync(request, token)));
         group.MapPost("/registration", async (HttpContext http, AgentRegistration request, ICollectorGateway gateway, CancellationToken token) =>
         { await gateway.RegisterAsync(Credentials(http), request, token); return Results.Ok(new { contractVersion = 1 }); });
         group.MapPost("/heartbeat", async (HttpContext http, AgentHeartbeat request, ICollectorGateway gateway, CancellationToken token) =>

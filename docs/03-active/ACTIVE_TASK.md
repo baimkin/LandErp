@@ -1,5 +1,7 @@
 # Активная задача LandErp
 
+> **Реализованный отдельный Gate, ожидающий review владельца:** [`GATE-COLLECTOR-SERVER-MANAGEMENT.md`](GATE-COLLECTOR-SERVER-MANAGEMENT.md). Ветка `codex/collector-server-management`, база `08771293ae0a75085484d10ed50b9897c480f4c4`. Server management и machine protocol реализованы; evidence: [`COLLECTOR_SERVER_MANAGEMENT_REPORT.md`](reports/COLLECTOR_SERVER_MANAGEMENT_REPORT.md). Server является authority протокола; локальный Parser в этом Gate не изменялся. Следующий Parser Gate не активирован. Phase 9 не активирована.
+
 > **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–7 завершены и приняты владельцем**; Phase 8 `Operational Overview` реализована и ожидает приёмки владельцем, evidence: [`STAGE1_PHASE8_REPORT.md`](reports/STAGE1_PHASE8_REPORT.md). Рабочая ветка: `codex/stage1-phase8-overview`. Визуальный authority: [`landerp_overview_v1_4_market_per_group_production_fonts.html`](../14-ui-kit/prototypes/landerp_overview_v1_4_market_per_group_production_fonts.html). Phase 9 не начинать. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
 
 ## P0 — обязательная следующая задача перед дальнейшим развитием

@@ -42,3 +42,33 @@ Parser создаёт server groups/searches и задаёт расписани�
 ## Следующий рекомендуемый шаг
 
 Провести ручную приёмку на тестовом Server: создать/разрешить Parser, вставить код, переключить режим, открыть карту, настроить URL, добавить одну ссылку в server group и убедиться, что scheduler выдаёт её после перезапуска приложения. После приёмки отдельно разрешить применение migration к выбранной непроизводственной базе.
+
+## Интеграция с параллельной Procurement V2
+
+После завершения реализации Parser его изменения зафиксированы отдельным коммитом
+`9328365`. Верхняя проверенная ветка Procurement V2
+`codex/procurement-v2-negotiations-inspection` @ `41c6fea` объединена с Parser без
+текстовых конфликтов. Интеграционный commit — `a0d9025` в
+`codex/universal-parser`. Отдельные устаревшие queue, diagnostic и `tmp-*` ветки
+повторно не объединялись: их необходимые изменения уже входят в актуальную
+линейную цепочку либо были заменены последующей реализацией.
+
+Проверки объединённого состояния:
+
+- locked restore — успешно после разрешения доступа к NuGet;
+- Release build всего `LandErp.slnx` — успешно, 0 warnings / 0 errors;
+- целевой offline Parser suite — 29/29;
+- PostgreSQL `CollectionPoolTests` — 3/3;
+- PostgreSQL `OverviewTests` — 2/2;
+- PostgreSQL `ProcurementQueueV2ReadTests` — 5/5;
+- пять отдельно запущенных `ProcurementTests` для manual/marketplace flow,
+  direct creation, concurrent take-to-work, scope и clean migration — 5/5;
+- `git diff --check` — успешно.
+
+Общий Parser suite не является green evidence: реальный visible-Chrome test падает
+при закрытии browser process, а Desktop UI tests удерживают testhost в текущей
+неинтерактивной среде. Старый restart scenario
+`IncomingUiCreatesCaseUsesCanonicalRouteAndSurvivesRestart` также не вернул итог
+за две минуты и был остановлен; интеграция меняет в его fixture только новый
+аргумент права Parser и не меняет restart/runtime path. Эти проверки не заменены
+предположением и остаются в ручном/интерактивном checklist.

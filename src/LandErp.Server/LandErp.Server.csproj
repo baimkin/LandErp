@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
+    <!-- Scratch builds inside the project are not application source or public content. -->
+    <Compile Remove="artifacts\**" />
+    <Content Remove="artifacts\**" />
+    <None Remove="artifacts\**" />
     <ProjectReference Include="../LandErp.Application/LandErp.Application.csproj" />
     <ProjectReference Include="../LandErp.Infrastructure/LandErp.Infrastructure.csproj" />
   </ItemGroup>

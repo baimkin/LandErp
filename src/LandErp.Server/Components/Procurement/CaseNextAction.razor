@@ -1,0 +1,27 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+@using LandErp.Application.Modules.Workflow.Domain
+@inherits CaseWorkspaceComponent
+@inject IProcurementQueueV2ReadService Reader
+@inject IProcurementWorkspace Workspace
+<CaseModal Title="Следующее действие" Subtitle="Актуальная задача объекта и её исполнитель" Error="@Error" Busy="Busy" OnClose="OnClose">
+@if(Loading){<p>Загружаем задачу…</p>}
+else if(detail is not null && detail.CanManageDossier){
+    <EditForm Model="draft" OnValidSubmit="SaveAsync"><DataAnnotationsValidator/><ValidationSummary/><div class="form-grid">
+        <label class="field dossier-wide"><span>Что сделать *</span><InputText @bind-Value="draft.Title"/><ValidationMessage For="()=>draft.Title"/></label>
+        <label class="field"><span>Тип</span><InputSelect @bind-Value="draft.Type"><option value="General">Другое</option><option value="Call">Звонок</option><option value="Meeting">Встреча / осмотр</option><option value="Check">Проверка</option><option value="Documents">Документы</option><option value="Decision">Решение</option></InputSelect></label>
+        <label class="field"><span>Срок (МСК)</span><input type="datetime-local" value="@draft.Due" @oninput="e=>draft.Due=e.Value?.ToString()??string.Empty"/></label>
+        <label class="field dossier-wide"><span>Ответственный</span><InputSelect @bind-Value="draft.Assignee">@foreach(var item in detail.AvailableAssignees){<option value="@item.Id">@item.Name</option>}</InputSelect></label>
+        <label class="field dossier-wide"><span>Подробности</span><InputTextArea @bind-Value="draft.Description"/></label>
+        <div class="form-actions"><ActionButton Label="Сохранить действие" Type="submit" Busy="Busy"/></div>
+    </div></EditForm>
+}else{<p>Действие недоступно.</p>}
+</CaseModal>
+@code{
+    [Parameter]public Guid CaseId{get;set;}
+    [Parameter]public EventCallback OnClose{get;set;}
+    [Parameter]public EventCallback OnSaved{get;set;}
+    private ProcurementQueueV2Detail? detail;private Draft draft=new();
+    protected override async Task ReadAsync(){detail=await Reader.ReadDetailAsync(CurrentSubject,CaseId,CancellationToken.None);draft=new(){Title=detail.NextActionTitle,Description=detail.NextActionDescription,Type=detail.NextActionType,Due=ProcurementLabels.LocalInput(detail.DueAt),Assignee=detail.AssigneeId};}
+    private async Task SaveAsync(){await ExecuteAsync(()=>Workspace.SaveNextActionAsync(CurrentSubject,new(CaseId,detail!.CaseVersion,detail.TaskVersion,draft.Type,draft.Title,draft.Description,CaseFormValues.ParseLocal(draft.Due),draft.Assignee),Guid.CreateVersion7().ToString(),CancellationToken.None));if(Success!=null)await OnSaved.InvokeAsync();}
+    private sealed class Draft{[System.ComponentModel.DataAnnotations.Required(ErrorMessage="Укажите действие.")]public string Title{get;set;}="";public string Description{get;set;}="";public string Due{get;set;}="";public WorkTaskType Type{get;set;}public Guid Assignee{get;set;}}
+}

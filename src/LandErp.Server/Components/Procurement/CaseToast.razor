@@ -1,0 +1,21 @@
+@implements IDisposable
+@if(visible && !string.IsNullOrEmpty(Message))
+{
+    <div class="case-toast" role="status"><span aria-hidden="true">✓</span><span>@Message</span><button aria-label="Закрыть уведомление" @onclick="()=>visible=false">×</button></div>
+}
+@code {
+    [Parameter] public string? Message { get; set; }
+    private string? last; private bool visible; private CancellationTokenSource? timer;
+    protected override void OnParametersSet()
+    {
+        if(last==Message)return;
+        last=Message; timer?.Cancel(); timer?.Dispose(); timer=new(); visible=!string.IsNullOrEmpty(Message);
+        if(visible) _=DismissAsync(timer.Token);
+    }
+    private async Task DismissAsync(CancellationToken token)
+    {
+        try { await Task.Delay(4500,token); await InvokeAsync(()=>{visible=false;StateHasChanged();}); }
+        catch(OperationCanceledException) { }
+    }
+    public void Dispose(){timer?.Cancel();timer?.Dispose();}
+}

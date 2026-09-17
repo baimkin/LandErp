@@ -1,0 +1,30 @@
+.case-modal{width:min(700px,calc(100vw - 32px));max-height:calc(100dvh - 40px);padding:0;border:1px solid var(--border);border-radius:18px;color:var(--text-strong);background:white;box-shadow:0 30px 100px #10223938}
+.case-modal.gallery-modal{width:min(1200px,calc(100vw - 24px))}
+.case-modal[open]{display:flex;flex-direction:column}
+.case-modal::backdrop{background:#10223980;backdrop-filter:blur(4px)}
+header{display:flex;justify-content:space-between;gap:16px;padding:22px 26px;border-bottom:1px solid var(--border);flex-shrink:0}
+h2{font-size:var(--text-section);margin:0}
+header p{margin:5px 0 0;font-size:var(--text-sm);color:var(--text-muted)}
+.close{border:0;border-radius:50%;background:var(--surface-subtle);width:36px;height:36px;font-size:var(--text-section);flex-shrink:0}
+.body{overflow:auto;padding:22px 26px}
+fieldset{border:0;padding:0;margin:0;min-width:0}
+.form-error{padding:14px;background:var(--danger-soft);color:var(--danger);border:1px solid var(--danger);border-radius:8px;margin-bottom:18px;font-size:var(--text-ui)}
+.body ::deep .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.body ::deep .field{display:flex;flex-direction:column;gap:7px;font-size:var(--text-ui);font-weight:var(--weight-medium);margin:0 0 16px;min-width:0}
+.body ::deep .form-grid .field{margin:0}
+.body ::deep .dossier-wide{grid-column:1/-1}
+.body ::deep input,.body ::deep select,.body ::deep textarea{border:1px solid var(--border-strong);border-radius:8px;padding:10px 12px;min-height:42px;width:100%;font-size:var(--text-ui);background:white;color:var(--text-strong)}
+.body ::deep textarea{min-height:92px;resize:vertical}
+.body ::deep input[type=checkbox]{width:auto;min-height:0}
+.body ::deep small,.body ::deep .subtle{font-size:var(--text-sm);font-weight:var(--weight-normal);color:var(--text-muted)}
+.body ::deep details{border-top:1px solid var(--border);margin-top:22px;padding-top:16px}
+.body ::deep summary{cursor:pointer;font-weight:var(--weight-semibold);margin-bottom:16px}
+.body ::deep .form-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--border);padding:16px 0 0;margin-top:22px;position:sticky;bottom:-22px;background:white;padding-bottom:16px}
+.body ::deep .validation-message,.body ::deep .validation-errors{color:var(--danger);font-size:var(--text-sm)}
+.body ::deep .upload{position:relative;padding:26px;text-align:center;border:1px dashed var(--border-strong);background:var(--surface-blue);border-radius:12px;margin-bottom:20px;display:grid;gap:6px;overflow:hidden}
+.body ::deep .upload input{position:absolute;inset:0;opacity:0;cursor:pointer;height:100%}
+.body ::deep .upload:focus-within{outline:2px solid var(--accent)}
+@media(max-width:760px){.case-modal{width:calc(100vw - 16px);max-height:calc(100dvh - 16px)}
+header,.body{padding:18px}
+.body ::deep .form-grid{grid-template-columns:1fr}
+.body ::deep .dossier-wide{grid-column:auto}}

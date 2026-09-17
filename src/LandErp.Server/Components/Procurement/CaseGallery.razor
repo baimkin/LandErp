@@ -1,0 +1,18 @@
+<CaseModal Title="Фотографии объекта" Kind="gallery-modal" Subtitle="← → переключение · Esc закрыть" OnClose="OnClose" OnKeyDown="KeyDown">
+    <div class="gallery" @ontouchstart="TouchStart" @ontouchend="TouchEnd">
+        <img src="@Photos[index]" alt="Фото объекта @(index+1) из @Photos.Length" referrerpolicy="no-referrer" />
+        <div class="controls"><button class="btn secondary" @onclick="()=>Move(-1)" aria-label="Предыдущее фото">←</button><span>@(index+1) / @Photos.Length</span><button class="btn secondary" @onclick="()=>Move(1)" aria-label="Следующее фото">→</button></div>
+        <div class="thumbnails">@for(int i=0;i<Photos.Length;i++){int n=i;<button class="@(index==n?"selected":"")" aria-label="Фото @(n+1)" @onclick="()=>index=n"><img src="@Photos[n]" alt="" referrerpolicy="no-referrer" loading="lazy" /></button>}</div>
+    </div>
+</CaseModal>
+@code{
+    [Parameter,EditorRequired]public string[] Photos{get;set;}=[];
+    [Parameter]public int InitialIndex{get;set;}
+    [Parameter]public EventCallback OnClose{get;set;}
+    private int index;private double touchX;
+    protected override void OnInitialized()=>index=Math.Clamp(InitialIndex,0,Photos.Length-1);
+    private void Move(int delta)=>index=(index+delta+Photos.Length)%Photos.Length;
+    private void KeyDown(KeyboardEventArgs e){if(e.Key=="ArrowLeft")Move(-1);if(e.Key=="ArrowRight")Move(1);}
+    private void TouchStart(TouchEventArgs e){if(e.ChangedTouches.Length>0)touchX=e.ChangedTouches[0].ClientX;}
+    private void TouchEnd(TouchEventArgs e){if(e.ChangedTouches.Length>0){double delta=e.ChangedTouches[0].ClientX-touchX;if(Math.Abs(delta)>45)Move(delta>0?-1:1);}}
+}

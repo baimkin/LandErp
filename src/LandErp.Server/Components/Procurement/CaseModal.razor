@@ -1,0 +1,28 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime Js
+<dialog @ref="dialog" class="case-modal @Kind" aria-labelledby="@heading" @onkeydown="KeyDown" @onkeydown:stopPropagation="true">
+    <header><div><h2 id="@heading">@Title</h2>@if(!string.IsNullOrEmpty(Subtitle)){<p>@Subtitle</p>}</div><button type="button" class="close" disabled="@Busy" aria-label="Закрыть" @onclick="OnClose">×</button></header>
+    <div class="body">
+        @if(Error!=null){<div class="form-error" role="alert" tabindex="-1" @ref="errorElement">@Error</div>}
+        <fieldset disabled="@Busy">@ChildContent</fieldset>
+    </div>
+</dialog>
+@code{
+    [Parameter] public string Title{get;set;}="";
+    [Parameter] public string? Subtitle{get;set;}
+    [Parameter] public string Kind{get;set;}="";
+    [Parameter] public string? Error{get;set;}
+    [Parameter] public bool Busy{get;set;}
+    [Parameter] public EventCallback OnClose{get;set;}
+    [Parameter] public RenderFragment? ChildContent{get;set;}
+    [Parameter] public EventCallback<KeyboardEventArgs> OnKeyDown{get;set;}
+    private ElementReference dialog,errorElement;private string? lastError;
+    private readonly string heading="case-modal-"+Guid.NewGuid().ToString("N");
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if(firstRender)await Js.InvokeVoidAsync("LandErpUi.open",dialog);
+        if(Error!=null&&Error!=lastError)await errorElement.FocusAsync();
+        lastError=Error;
+    }
+    private async Task KeyDown(KeyboardEventArgs e){if(e.Key=="Escape"&&!Busy)await OnClose.InvokeAsync();else await OnKeyDown.InvokeAsync(e);}
+}

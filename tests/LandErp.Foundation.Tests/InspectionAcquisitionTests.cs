@@ -16,6 +16,46 @@ namespace LandErp.Foundation.Tests;
 public sealed class InspectionAcquisitionTests
 {
     private static readonly string[] ExpectedCheckTemplates = ["Собственник", "Обременения", "Категория / ВРИ", "Подъезд", "ПЗЗ / генплан", "Юридическая проверка"];
+
+    [TestMethod]
+    public async Task DocumentChecklistTracksRequestAttachmentVerificationAndHistory()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        Guid itemId = await fixture.CreateUnlinkedManualAsync();
+        TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(itemId), "take", CancellationToken.None);
+        CaseCard card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
+        Assert.AreEqual(5, card.DocumentRequirements.Count);
+        Assert.IsTrue(card.DocumentRequirements.All(item => item.Status == CaseDocumentStatus.Missing));
+        DocumentRequirementView egrn = card.DocumentRequirements.Single(item => item.Code == "egrn");
+        DateTimeOffset due = new(DateTime.UtcNow.Date.AddDays(2), TimeSpan.Zero);
+        await fixture.Workspace.SaveDocumentRequirementAsync(fixture.Manager,
+            new(taken.CaseId, egrn.Id, card.Item.CaseVersion, egrn.Version, CaseDocumentStatus.Requested, due, "Запрошена свежая выписка"),
+            "request-document", CancellationToken.None);
+        card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
+        egrn = card.DocumentRequirements.Single(item => item.Id == egrn.Id);
+        Assert.AreEqual(CaseDocumentStatus.Requested, egrn.Status);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => fixture.Workspace.SaveDocumentRequirementAsync(fixture.Manager,
+            new(taken.CaseId, egrn.Id, card.Item.CaseVersion, egrn.Version, CaseDocumentStatus.Verified, due, "Без файла"),
+            "verify-without-file", CancellationToken.None));
+
+        byte[] content = Encoding.UTF8.GetBytes("synthetic-egrn");
+        Guid attachmentId = await fixture.Workspace.AddAttachmentAsync(fixture.Manager,
+            new(taken.CaseId, CaseAttachmentOwner.Case, null, CaseAttachmentKind.Document, "Выписка ЕГРН",
+                "Получена от Росреестра", "egrn.pdf", "application/pdf", content, null, egrn.Id),
+            "attach-document", CancellationToken.None);
+        card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
+        egrn = card.DocumentRequirements.Single(item => item.Id == egrn.Id);
+        Assert.AreEqual(CaseDocumentStatus.Received, egrn.Status);
+        CollectionAssert.Contains(egrn.AttachmentIds.ToArray(), attachmentId);
+        await fixture.Workspace.SaveDocumentRequirementAsync(fixture.Manager,
+            new(taken.CaseId, egrn.Id, card.Item.CaseVersion, egrn.Version, CaseDocumentStatus.Verified, null, "Сведения сверены"),
+            "verify-document", CancellationToken.None);
+        card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
+        Assert.AreEqual(CaseDocumentStatus.Verified, card.DocumentRequirements.Single(item => item.Id == egrn.Id).Status);
+        Assert.IsTrue(card.Timeline.Any(item => item.Kind == "Document" && item.Title.Contains("проверен")));
+        Assert.AreEqual(2, await fixture.CountAsync(db => db.AuditEvents.CountAsync(item => item.ObjectId == taken.CaseId
+            && item.Action == "CaseDocumentRequirementChanged")));
+    }
     [TestMethod]
     public async Task Phase4CorrectionsPreserveResponsibleTemplateSnapshotAndCaseCadastralNumber()
     {
@@ -122,18 +162,36 @@ public sealed class InspectionAcquisitionTests
             "complete", CancellationToken.None);
         card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
         DateOnly acquiredDate = DateOnly.FromDateTime(DateTime.UtcNow.Date);
-        await fixture.Workspace.MarkAcquiredAsync(fixture.Manager, new(taken.CaseId, card.Item.CaseVersion, 3_750_000m, acquiredDate,
+        Assert.IsFalse(card.CanConfirmPurchase, "Обычный менеджер не должен подтверждать покупку.");
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.MarkAcquiredAsync(fixture.Manager,
+            new(taken.CaseId, card.Item.CaseVersion, 3_750_000m, acquiredDate, "Право зарегистрировано"), "manager-acquire", CancellationToken.None));
+        CaseCard headCard = await fixture.Workspace.ReadCardAsync(fixture.Head, taken.CaseId, CancellationToken.None);
+        Assert.IsTrue(headCard.CanConfirmPurchase, "Руководитель закупок должен подтверждать покупку.");
+        Assert.IsTrue((await fixture.Workspace.ReadCardAsync(fixture.Owner, taken.CaseId, CancellationToken.None)).CanConfirmPurchase,
+            "Владелец должен подтверждать покупку.");
+        await fixture.Workspace.MarkAcquiredAsync(fixture.Head, new(taken.CaseId, headCard.Item.CaseVersion, 3_750_000m, acquiredDate,
             "Право зарегистрировано"), "acquire", CancellationToken.None);
-        card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
+        card = await fixture.Workspace.ReadCardAsync(fixture.Head, taken.CaseId, CancellationToken.None);
         Assert.AreEqual("acquired", card.Item.Stage); Assert.AreEqual(3_750_000m, card.AcquisitionPrice); Assert.AreEqual(acquiredDate, card.AcquisitionDate);
         Assert.AreEqual("Право зарегистрировано", card.AcquisitionComment);
         Assert.AreEqual(InspectionStatus.Completed, card.Inspection!.Status); Assert.IsTrue(card.Timeline.Any(item => item.Kind == "Acquisition"));
-        await fixture.Workspace.MarkAcquiredAsync(fixture.Manager, new(taken.CaseId, card.Item.CaseVersion, 3_750_000m, acquiredDate,
+        await fixture.Workspace.MarkAcquiredAsync(fixture.Head, new(taken.CaseId, card.Item.CaseVersion, 3_750_000m, acquiredDate,
             "Право зарегистрировано"), "idempotent", CancellationToken.None);
-        await Assert.ThrowsExactlyAsync<ArgumentException>(() => fixture.Workspace.MarkAcquiredAsync(fixture.Manager,
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => fixture.Workspace.MarkAcquiredAsync(fixture.Head,
             new(taken.CaseId, card.Item.CaseVersion, 3_800_000m, acquiredDate, "Другая цена"), "duplicate", CancellationToken.None));
+        await fixture.Workspace.CorrectAcquisitionAsync(fixture.Head,
+            new(taken.CaseId, card.Item.CaseVersion, 3_800_000m, acquiredDate, "Исправлено по договору", "Исправлена опечатка в цене"),
+            "correct", CancellationToken.None);
+        card = await fixture.Workspace.ReadCardAsync(fixture.Head, taken.CaseId, CancellationToken.None);
+        Assert.AreEqual(3_800_000m, card.AcquisitionPrice);
+        Assert.AreEqual("Исправлено по договору", card.AcquisitionComment);
+        Assert.IsTrue(card.Timeline.Any(item => item.Kind == "AcquisitionCorrection" && item.Body.Contains("Исправлена опечатка")));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.CorrectAcquisitionAsync(fixture.Manager,
+            new(taken.CaseId, card.Item.CaseVersion, 3_900_000m, acquiredDate, "", "Попытка менеджера"), "manager-correct", CancellationToken.None));
         Assert.AreEqual(1, await fixture.CountAsync(db => db.BusinessTimeline.CountAsync(item => item.ObjectId == taken.CaseId && item.Kind == "Acquisition")));
+        Assert.AreEqual(1, await fixture.CountAsync(db => db.BusinessTimeline.CountAsync(item => item.ObjectId == taken.CaseId && item.Kind == "AcquisitionCorrection")));
         Assert.AreEqual(1, await fixture.CountAsync(db => db.AuditEvents.CountAsync(item => item.ObjectId == taken.CaseId && item.Action == "PropertyCaseAcquired")));
+        Assert.AreEqual(1, await fixture.CountAsync(db => db.AuditEvents.CountAsync(item => item.ObjectId == taken.CaseId && item.Action == "PropertyCaseAcquisitionCorrected")));
         Assert.IsTrue(await fixture.CountAsync(db => db.WorkTasks.Where(item => item.ObjectId == taken.CaseId).Select(item => item.Completed).CountAsync(value => value)) == 1);
     }
 
@@ -155,7 +213,7 @@ public sealed class InspectionAcquisitionTests
             CaseCheckLevel.Quick, "Собственник", CaseCheckStatus.Passed, null, false, null, null, "Подтверждён", false),
             "check", CancellationToken.None);
 
-        await ProcurementUiScenario.RunPhase5Async(fixture.Sandbox, "manager-phase1@test.invalid", taken.CaseId);
+        await ProcurementUiScenario.RunPhase5Async(fixture.Sandbox, "head-phase1@test.invalid", taken.CaseId);
         card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
         Assert.AreEqual("acquired", card.Item.Stage);
         Assert.AreEqual(InspectionStatus.Completed, card.Inspection!.Status);

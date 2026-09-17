@@ -267,6 +267,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                 RecordedAt = time.GetUtcNow()
             };
             db.WorkAssignments.Add(assignment); db.WorkTasks.Add(task); db.PropertyCases.Add(propertyCase);
+            db.CaseDocumentRequirements.AddRange(DefaultDocumentRequirements(propertyCase, context.EmployeeId, propertyCase.RecordedAt));
             db.WorkflowTransitions.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = caseId, FromStageId = "new", ToStageId = "analysis", Action = "TakeWork", ActorEmployeeId = context.EmployeeId, ObjectVersion = 1, RecordedAt = time.GetUtcNow() });
         }
         else
@@ -411,10 +412,13 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         bool canManageDossier = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken)
             || await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
         bool canManageBlockers = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
+        bool canConfirmPurchase = await AllowedAsync(subject, Permissions.PurchaseConfirm, cancellationToken);
         CaseNegotiation[] negotiations = await db.CaseNegotiations.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.Id).ToArrayAsync(cancellationToken);
         CaseCheck[] checks = await db.CaseChecks.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .OrderBy(item => item.Level).ThenBy(item => item.Title).ToArrayAsync(cancellationToken);
+        CaseDocumentRequirement[] documentRequirements = await db.CaseDocumentRequirements.AsNoTracking()
+            .Where(item => item.PropertyCaseId == caseId).OrderBy(item => item.Title).ToArrayAsync(cancellationToken);
         CaseCheckTemplateItem[] checkTemplates = await EnsureCheckTemplatesAsync(db, context.OrganizationId, cancellationToken);
         SiteInspection? inspection = await db.SiteInspections.AsNoTracking().SingleOrDefaultAsync(item => item.PropertyCaseId == caseId, cancellationToken);
         SiteInspectionItem[] inspectionItems = inspection == null ? [] : await db.SiteInspectionItems.AsNoTracking()
@@ -446,7 +450,11 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             attachments.Select(item => new AttachmentView(item.Link.Id, item.Link.OwnerType,
                 AttachmentOwnerId(item.Link), item.Link.Kind, item.Link.Label, item.Link.Description,
                 AttachmentOwnerLabel(item.Link, negotiations, checks, inspectionItems), item.File.OriginalName, item.File.ContentType, item.File.SizeBytes,
-                item.File.Status, item.File.ExternalUrl != null, item.Link.RecordedAt)).ToArray(),
+                item.File.Status, item.File.ExternalUrl != null, item.Link.RecordedAt, item.Link.DocumentRequirementId)).ToArray(),
+            documentRequirements.Select(item => new DocumentRequirementView(item.Id, item.Code, item.Title, item.Description,
+                item.ExpectedSource, item.Status, item.DueAt, item.Note, names.GetValueOrDefault(item.UpdatedByEmployeeId, "Сотрудник"),
+                item.UpdatedAt, item.Version, attachments.Where(value => value.Link.DocumentRequirementId == item.Id)
+                    .Select(value => value.Link.Id).ToArray())).ToArray(),
             Discrepancies(row.Case, sources),
             checkTemplates.Select(item => new CheckTemplateView(item.Id, item.Title, item.Level, item.Description, item.SortOrder, item.Active, item.Version)).ToArray(),
             inspection == null ? null : new InspectionView(inspection.Id, inspection.Status, inspection.OverallConclusion, inspection.PreliminaryDecision,
@@ -456,7 +464,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                     item.UnitSnapshot, item.NormalAnswerSnapshot, item.AllowAttachmentsSnapshot, item.RequiredSnapshot, item.Status,
                     item.Answer, item.Note, item.Version)).ToArray()),
             row.Case.CadastralNumber, row.Case.AcquisitionPrice, row.Case.AcquisitionDate, row.Case.AcquisitionComment,
-            canManageDossier, canManageBlockers);
+            canManageDossier, canManageBlockers, canConfirmPurchase);
     }
 
     public async Task<Guid?> ResolveLegacyListingAsync(Subject subject, Guid listingId, CancellationToken cancellationToken)
@@ -824,8 +832,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     {
         if (command.ActualPrice <= 0) throw new ArgumentException("Фактическая цена покупки должна быть положительной.");
         if (command.AcquisitionDate > DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime.AddDays(1))) throw new ArgumentException("Дата покупки не может быть в будущем.");
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
-        await RequireDossierPermissionAsync(subject, cancellationToken);
+        AccessContext context = await access.RequireAsync(subject, Permissions.PurchaseConfirm, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
@@ -860,6 +867,41 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task CorrectAcquisitionAsync(Subject subject, CorrectCaseAcquisition command, string correlationId, CancellationToken cancellationToken)
+    {
+        if (command.ActualPrice <= 0) throw new ArgumentException("Фактическая цена покупки должна быть положительной.");
+        if (command.AcquisitionDate > DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime.AddDays(1))) throw new ArgumentException("Дата покупки не может быть в будущем.");
+        string reason = Required(command.Reason, 3, 1000, "Укажите причину исправления от 3 до 1000 символов.");
+        AccessContext context = await access.RequireAsync(subject, Permissions.PurchaseConfirm, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
+        if (row.Case.StageId != "acquired") throw new ArgumentException("Исправить можно только уже подтверждённую покупку.");
+        if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
+        decimal price = DataConventions.RoundRubles(command.ActualPrice);
+        string comment = Optional(command.Comment, 4000) ?? "";
+        var previous = new { row.Case.AcquisitionPrice, row.Case.AcquisitionDate, row.Case.AcquisitionComment };
+        if (previous.AcquisitionPrice == price && previous.AcquisitionDate == command.AcquisitionDate && previous.AcquisitionComment == comment)
+            throw new ArgumentException("Новые данные совпадают с текущими.");
+        DateTimeOffset now = time.GetUtcNow();
+        row.Case.AcquisitionPrice = price;
+        row.Case.AcquisitionDate = command.AcquisitionDate;
+        row.Case.AcquisitionComment = comment;
+        db.Entry(row.Case).Property(item => item.Version).IsModified = true;
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
+            ActorEmployeeId = context.EmployeeId, Kind = "AcquisitionCorrection", Title = "Исправлены данные покупки",
+            Body = $"Причина: {reason}\nЦена: {previous.AcquisitionPrice:N0} ₽ → {price:N0} ₽\nДата: {previous.AcquisitionDate:dd.MM.yyyy} → {command.AcquisitionDate:dd.MM.yyyy}" +
+                (comment.Length == 0 ? "" : "\n" + comment),
+            EffectiveAt = new DateTimeOffset(command.AcquisitionDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero), RecordedAt = now
+        });
+        OrganizationWorkspace.AddAudit(db, context, subject, "PropertyCaseAcquisitionCorrected", "PropertyCase", row.Case.Id,
+            new { Previous = previous, Current = new { ActualPrice = price, command.AcquisitionDate, Comment = comment }, Reason = reason }, correlationId);
+        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task<Guid> AddAttachmentAsync(Subject subject, AddCaseAttachment command, string correlationId, CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(command.OwnerType) || !Enum.IsDefined(command.Kind)) throw new ArgumentException("Некорректный тип вложения.");
@@ -871,6 +913,11 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         Guid? checkId = command.OwnerType == CaseAttachmentOwner.Check ? command.OwnerId : null;
         Guid? inspectionId = command.OwnerType == CaseAttachmentOwner.Inspection ? command.OwnerId : null;
         Guid? inspectionItemId = command.OwnerType == CaseAttachmentOwner.InspectionItem ? command.OwnerId : null;
+        CaseDocumentRequirement? documentRequirement = command.DocumentRequirementId == null ? null
+            : await db.CaseDocumentRequirements.SingleOrDefaultAsync(item => item.Id == command.DocumentRequirementId
+                && item.PropertyCaseId == row.Case.Id, cancellationToken) ?? throw new AccessDeniedException();
+        if (documentRequirement != null && command.Kind != CaseAttachmentKind.Document)
+            throw new ArgumentException("С пунктом чек-листа можно связать только документ.");
         if (command.OwnerType == CaseAttachmentOwner.Case && command.OwnerId != null
             || command.OwnerType == CaseAttachmentOwner.Negotiation && (negotiationId == null || !await db.CaseNegotiations.AnyAsync(item => item.Id == negotiationId && item.PropertyCaseId == row.Case.Id, cancellationToken))
             || command.OwnerType == CaseAttachmentOwner.Check && (checkId == null || !await db.CaseChecks.AnyAsync(item => item.Id == checkId && item.PropertyCaseId == row.Case.Id, cancellationToken))
@@ -901,7 +948,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         {
             Id = attachmentId, OrganizationId = context.OrganizationId, PropertyCaseId = row.Case.Id, StoredFileId = storedId,
             OwnerType = command.OwnerType, NegotiationId = negotiationId, CheckId = checkId, InspectionId = inspectionId,
-            InspectionItemId = inspectionItemId, Kind = command.Kind,
+            InspectionItemId = inspectionItemId, DocumentRequirementId = documentRequirement?.Id, Kind = command.Kind,
             Label = Required(command.Label, 2, 512, "Укажите понятное название вложения."),
             Description = Optional(command.Description, 4000) ?? "", ActorEmployeeId = context.EmployeeId, RecordedAt = now
         });
@@ -922,8 +969,16 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                 throw;
             }
         }
+        if (documentRequirement != null)
+        {
+            documentRequirement.Status = CaseDocumentStatus.Received;
+            documentRequirement.Note = Optional(command.Description, 2000) ?? documentRequirement.Note;
+            documentRequirement.UpdatedByEmployeeId = context.EmployeeId;
+            documentRequirement.UpdatedAt = now;
+            db.Entry(row.Case).Property(item => item.Version).IsModified = true;
+        }
         OrganizationWorkspace.AddAudit(db, context, subject, "CaseAttachmentAdded", "PropertyCase", row.Case.Id,
-            new { AttachmentId = attachmentId, command.OwnerType, command.Kind, External = external }, correlationId);
+            new { AttachmentId = attachmentId, command.OwnerType, command.Kind, command.DocumentRequirementId, External = external }, correlationId);
         db.BusinessTimeline.Add(new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
@@ -931,6 +986,47 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         });
         await db.SaveChangesAsync(cancellationToken);
         return attachmentId;
+    }
+
+    public async Task SaveDocumentRequirementAsync(Subject subject, SaveDocumentRequirement command, string correlationId, CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(command.Status)) throw new ArgumentException("Некорректный статус документа.");
+        if (command.DueAt?.Offset != null && command.DueAt.Value.Offset != TimeSpan.Zero)
+            throw new ArgumentException("Срок документа должен быть указан в UTC.");
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await RequireDossierPermissionAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
+        CaseDocumentRequirement requirement = await db.CaseDocumentRequirements.SingleOrDefaultAsync(item => item.Id == command.RequirementId
+            && item.PropertyCaseId == row.Case.Id, cancellationToken) ?? throw new AccessDeniedException();
+        if (row.Case.Version != command.ExpectedCaseVersion || requirement.Version != command.ExpectedRequirementVersion)
+            throw new DbUpdateConcurrencyException();
+        bool hasDocument = await (from attachment in db.CaseAttachments
+                                  join file in db.StoredFiles on attachment.StoredFileId equals file.Id
+                                  where attachment.DocumentRequirementId == requirement.Id && file.Status == StoredFileStatus.Available
+                                  select attachment.Id).AnyAsync(cancellationToken);
+        if (command.Status is CaseDocumentStatus.Received or CaseDocumentStatus.Verified && !hasDocument)
+            throw new ArgumentException("Сначала прикрепите документ к этому пункту чек-листа.");
+        string note = Optional(command.Note, 2000) ?? "";
+        DateTimeOffset now = time.GetUtcNow();
+        requirement.Status = command.Status;
+        requirement.DueAt = command.DueAt;
+        requirement.Note = note;
+        requirement.UpdatedByEmployeeId = context.EmployeeId;
+        requirement.UpdatedAt = now;
+        db.Entry(row.Case).Property(item => item.Version).IsModified = true;
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
+            ActorEmployeeId = context.EmployeeId, Kind = "Document", Title = $"Документ «{requirement.Title}»: {DocumentStatusLabel(command.Status)}",
+            Body = note, DueAt = command.DueAt, RecordedAt = now
+        });
+        OrganizationWorkspace.AddAudit(db, context, subject, "CaseDocumentRequirementChanged", "PropertyCase", row.Case.Id,
+            new { requirement.Id, requirement.Code, command.Status, command.DueAt }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<AttachmentContent> ReadAttachmentAsync(Subject subject, Guid attachmentId, CancellationToken cancellationToken)
@@ -957,7 +1053,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         var value = await (from link in db.CaseAttachments join file in db.StoredFiles on link.StoredFileId equals file.Id
                            where link.Id == command.AttachmentId && link.PropertyCaseId == command.CaseId && link.OrganizationId == context.OrganizationId
                            select new { Link = link, File = file }).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
-        if (!await VisibleCases(db, context).AnyAsync(item => item.Case.Id == command.CaseId, cancellationToken)) throw new AccessDeniedException();
+        PropertyCase propertyCase = await VisibleCases(db, context).Where(item => item.Case.Id == command.CaseId)
+            .Select(item => item.Case).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
         if (value.File.Status is not (StoredFileStatus.UploadFailed or StoredFileStatus.PendingUpload)) throw new ArgumentException("Повторная загрузка этому вложению не требуется.");
         string contentType = Required(command.ContentType, 3, 256, "Укажите MIME-тип файла.");
         if (!AllowedContentType(value.Link.Kind, contentType)) throw new ArgumentException("Тип файла не разрешён для выбранного вложения.");
@@ -966,6 +1063,14 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             FileWriteResult write = await fileStorage.WriteAsync(value.File.Id, command.Content, cancellationToken);
             value.File.OriginalName = Required(command.OriginalName, 1, 512, "Укажите имя файла."); value.File.ContentType = contentType;
             value.File.StorageKey = write.StorageKey; value.File.Sha256 = write.Sha256; value.File.SizeBytes = write.SizeBytes; value.File.Status = StoredFileStatus.Available;
+            if (value.Link.DocumentRequirementId is Guid requirementId)
+            {
+                CaseDocumentRequirement requirement = await db.CaseDocumentRequirements.SingleAsync(item => item.Id == requirementId, cancellationToken);
+                requirement.Status = CaseDocumentStatus.Received;
+                requirement.UpdatedByEmployeeId = context.EmployeeId;
+                requirement.UpdatedAt = time.GetUtcNow();
+                db.Entry(propertyCase).Property(item => item.Version).IsModified = true;
+            }
             OrganizationWorkspace.AddAudit(db, context, subject, "CaseAttachmentUploadRetried", "PropertyCase", command.CaseId,
                 new { command.AttachmentId, value.Link.OwnerType }, correlationId);
             await db.SaveChangesAsync(cancellationToken);
@@ -1255,6 +1360,33 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         _ => "Другое"
     };
 
+    private static CaseDocumentRequirement[] DefaultDocumentRequirements(PropertyCase propertyCase, Guid employeeId, DateTimeOffset recordedAt)
+    {
+        (string Code, string Title, string Description, string Source)[] defaults =
+        [
+            ("egrn", "Выписка ЕГРН", "Актуальные сведения о правах, правообладателях и ограничениях.", "Росреестр"),
+            ("owner_identity", "Документы собственника", "Документы для идентификации собственника или его представителя.", "Продавец"),
+            ("title_basis", "Документ-основание права", "Основание возникновения права для глубокой юридической проверки.", "Продавец"),
+            ("access_scheme", "Схема подъезда / сервитут", "Правовое и фактическое основание доступа к участку.", "Продавец"),
+            ("cadastral_plan", "Кадастровый план", "Границы, конфигурация и кадастровые сведения об участке.", "Росреестр")
+        ];
+        return defaults.Select(item => new CaseDocumentRequirement
+        {
+            Id = DataConventions.NewId(), OrganizationId = propertyCase.OrganizationId, PropertyCaseId = propertyCase.Id,
+            Code = item.Code, Title = item.Title, Description = item.Description, ExpectedSource = item.Source,
+            Status = CaseDocumentStatus.Missing, UpdatedByEmployeeId = employeeId, UpdatedAt = recordedAt
+        }).ToArray();
+    }
+
+    private static string DocumentStatusLabel(CaseDocumentStatus status) => status switch
+    {
+        CaseDocumentStatus.Missing => "не получен",
+        CaseDocumentStatus.Requested => "запрошен",
+        CaseDocumentStatus.Received => "получен",
+        CaseDocumentStatus.Verified => "проверен",
+        _ => status.ToString()
+    };
+
     private static Task<DecisionTarget[]> TargetsAsync(LandErpDbContext db, PropertyCase propertyCase, string permission, CancellationToken cancellationToken)
     {
         var query = from employee in db.Employees
@@ -1285,7 +1417,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         names.GetValueOrDefault(row.Assignment.EmployeeId, "Сотрудник"), row.Task.DueAt,
         row.Case.StageId == "returned" ? "Руководитель вернул: требуются исправления" : SourcesChanged(sources) ? "Источник изменился" : "Рабочий объект закупки",
         new[] { row.Case.WorkingPrice == null ? "цена" : null, row.Case.WorkingAreaSquareMeters == null ? "площадь" : null, row.Case.WorkingLocation == null ? "местоположение" : null }.OfType<string>().ToArray(),
-        SourcesChanged(sources), SourceRevision(sources), row.Case.Version);
+        SourcesChanged(sources), SourceRevision(sources), row.Case.Version,
+        row.Task.Title, row.Task.Description, row.Task.Version);
 
     private static bool SourcesChanged(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Any(value => value.Item.DataRevision > value.Link.ReviewedDataRevision);
     private static long SourceRevision(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Sum(value => value.Item.DataRevision);

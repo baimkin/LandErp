@@ -19,10 +19,10 @@ public static class LocalBootstrap
             Permissions.RolesManage, Permissions.AuditRead, Permissions.AgentsManage, Permissions.CollectionManage];
         Dictionary<string, string[]> catalog = new(StringComparer.Ordinal)
         {
-            ["Owner"] = [.. admin, Permissions.QueueRead, Permissions.ManagerDecide, Permissions.HeadDecide],
+            ["Owner"] = [.. admin, Permissions.QueueRead, Permissions.ManagerDecide, Permissions.HeadDecide, Permissions.PurchaseConfirm],
             ["Administrator"] = admin,
             ["ProcurementManager"] = [Permissions.UsersRead, Permissions.QueueRead, Permissions.ManagerDecide],
-            ["ProcurementHead"] = [Permissions.UsersRead, Permissions.QueueRead, Permissions.HeadDecide],
+            ["ProcurementHead"] = [Permissions.UsersRead, Permissions.QueueRead, Permissions.HeadDecide, Permissions.PurchaseConfirm],
             ["Viewer"] = [Permissions.UsersRead, Permissions.QueueRead]
         };
         foreach (string permission in catalog.Values.SelectMany(item => item).Distinct(StringComparer.Ordinal))

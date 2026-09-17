@@ -22,6 +22,7 @@ public sealed class PostgresTests
     {
         await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
         await using LandErpDbContext context = sandbox.Context();
+        int expectedMigrations = context.Database.GetMigrations().Count();
         Assert.IsFalse(context.Database.HasPendingModelChanges());
         string sql = context.GetService<IMigrator>().GenerateScript();
         Assert.IsTrue(sql.Contains("COMMENT ON TABLE", StringComparison.Ordinal));
@@ -33,7 +34,7 @@ public sealed class PostgresTests
         Assert.IsFalse(await readiness.IsReadyAsync(CancellationToken.None), "Partial schema must not report ready.");
         await context.Database.MigrateAsync();
         await context.Database.MigrateAsync();
-        Assert.AreEqual(15, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.AreEqual(expectedMigrations, (await context.Database.GetAppliedMigrationsAsync()).Count());
         Assert.AreEqual(0, (await context.Database.GetPendingMigrationsAsync()).Count());
         Assert.IsTrue(await readiness.IsReadyAsync(CancellationToken.None));
 
@@ -111,7 +112,7 @@ public sealed class PostgresTests
         await context.GetService<IMigrator>().MigrateAsync("0");
         Assert.AreEqual(0, (await context.Database.GetAppliedMigrationsAsync()).Count());
         await context.Database.MigrateAsync();
-        Assert.AreEqual(15, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.AreEqual(expectedMigrations, (await context.Database.GetAppliedMigrationsAsync()).Count());
     }
 
     [TestMethod]

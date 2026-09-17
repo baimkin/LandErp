@@ -1,5 +1,14 @@
 # Активная задача LandErp
 
+> **Текущий Gate по прямому запросу владельца от 2026-09-17:**
+> [`GATE-PROPERTY-CASE-V2.md`](GATE-PROPERTY-CASE-V2.md). Реализация ведётся в отдельной ветке
+> `codex/property-case-v2-implementation` от `533440c`. Утверждённый владельцем макет карточки
+> закупки является визуальным эталоном, а согласованный чек-лист — функциональным scope.
+> Браузерные тесты не запускать: визуальную приёмку выполняет владелец. Merge, push,
+> production apply и переход к другим модулям не разрешены. Реализация и адресные
+> автоматические проверки завершены; осталась ручная визуальная приёмка владельцем.
+> Evidence: [`PROPERTY_CASE_V2_REPORT.md`](reports/PROPERTY_CASE_V2_REPORT.md).
+
 > **Канонический execution-документ завершения Stage 1:** [`STAGE1_COMPLETION_MASTER_PLAN.md`](STAGE1_COMPLETION_MASTER_PLAN.md). **Phases 1–7 завершены и приняты владельцем**; Phase 8 `Operational Overview` реализована и ожидает приёмки владельцем, evidence: [`STAGE1_PHASE8_REPORT.md`](reports/STAGE1_PHASE8_REPORT.md). Рабочая ветка: `codex/stage1-phase8-overview`. Визуальный authority: [`landerp_overview_v1_4_market_per_group_production_fonts.html`](../14-ui-kit/prototypes/landerp_overview_v1_4_market_per_group_production_fonts.html). Phase 9 не начинать. Старые checkpoint/ERP-разделы ниже сохраняются как исторический контекст и не переопределяют master plan.
 
 ## P0 — обязательная следующая задача перед дальнейшим развитием

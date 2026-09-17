@@ -611,6 +611,9 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     }
 
     public async Task AddNegotiationAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken)
+        => await AddNegotiationWithIdAsync(subject, command, correlationId, cancellationToken);
+
+    public async Task<Guid> AddNegotiationWithIdAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await RequireDossierPermissionAsync(subject, cancellationToken);
@@ -650,6 +653,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             new { negotiation.SellerPrice, negotiation.BuyerOffer, negotiation.AgreedPrice, negotiation.EffectiveAt }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        return negotiation.Id;
     }
 
     public async Task SaveCheckAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken)

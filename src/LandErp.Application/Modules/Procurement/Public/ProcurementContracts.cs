@@ -2,6 +2,7 @@ using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Foundation.Files;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
+using LandErp.Application.Modules.Workflow.Domain;
 using LandErp.Collector.Contracts.V1;
 
 namespace LandErp.Application.Modules.Procurement.Contracts;
@@ -67,6 +68,8 @@ public sealed record MarkCaseAcquired(Guid CaseId, long ExpectedCaseVersion, dec
 public sealed record AttachmentContent(string OriginalName, string ContentType, byte[]? Content, string? ExternalUrl);
 public sealed record ApplySourceFact(Guid CaseId, Guid CatalogItemId, long ExpectedCaseVersion,
     CaseFactField Field);
+public sealed record SaveNextAction(Guid CaseId, long ExpectedCaseVersion, long ExpectedTaskVersion,
+    WorkTaskType Type, string Title, string Description, DateTimeOffset? DueAt, Guid AssigneeEmployeeId);
 public sealed record NotificationView(Guid Id, Guid CaseId, string Title, DateTimeOffset RecordedAt, bool Read);
 public interface IProcurementWorkspace
 {
@@ -85,6 +88,7 @@ public interface IProcurementWorkspace
     Task MarkAcquiredAsync(Subject subject, MarkCaseAcquired command, string correlationId, CancellationToken cancellationToken);
     Task<AttachmentContent> ReadAttachmentAsync(Subject subject, Guid attachmentId, CancellationToken cancellationToken);
     Task ApplySourceFactAsync(Subject subject, ApplySourceFact command, string correlationId, CancellationToken cancellationToken);
+    Task SaveNextActionAsync(Subject subject, SaveNextAction command, string correlationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<NotificationView>> ReadNotificationsAsync(Subject subject, CancellationToken cancellationToken);
     Task MarkNotificationReadAsync(Subject subject, Guid id, CancellationToken cancellationToken);
 }

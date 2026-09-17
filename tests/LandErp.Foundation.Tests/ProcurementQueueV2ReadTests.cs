@@ -3,6 +3,7 @@ using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
+using LandErp.Application.Modules.Workflow.Domain;
 using LandErp.Infrastructure.Modules.Procurement;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +15,52 @@ namespace LandErp.Foundation.Tests;
 [TestCategory("PostgreSQL")]
 public sealed class ProcurementQueueV2ReadTests
 {
+    [TestMethod]
+    public async Task NextActionPersistsProjectsAndWritesTimelineWithoutChangingCaseScope()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(includeSecondManager: true, includeTeams: false);
+        Guid caseId = await fixture.InsertIndependentCaseAsync("Участок для следующего действия");
+        ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2Detail before = await service.ReadDetailAsync(fixture.Manager, caseId, CancellationToken.None);
+        Guid secondManagerId = fixture.EmployeeId("manager2-phase1@test.invalid");
+        DateTimeOffset due = DateTimeOffset.UtcNow.AddDays(3);
+
+        await fixture.Workspace.SaveNextActionAsync(fixture.Manager,
+            new SaveNextAction(caseId, before.CaseVersion, before.TaskVersion, WorkTaskType.Call,
+                "Позвонить собственнику", "Согласовать встречу и уточнить условия торга", due, secondManagerId),
+            "next-action-test", CancellationToken.None);
+
+        ProcurementQueueV2Detail detail = await service.ReadDetailAsync(fixture.Manager, caseId, CancellationToken.None);
+        Assert.AreEqual(WorkTaskType.Call, detail.NextActionType);
+        Assert.AreEqual("Позвонить собственнику", detail.NextActionTitle);
+        Assert.AreEqual("Согласовать встречу и уточнить условия торга", detail.NextActionDescription);
+        Assert.AreEqual(secondManagerId, detail.AssigneeId);
+        Assert.AreEqual(due, detail.DueAt);
+        Assert.IsTrue(detail.TaskVersion > before.TaskVersion);
+        Assert.IsTrue(detail.CaseVersion > before.CaseVersion);
+        Assert.IsTrue(detail.Timeline.Any(item => item.Kind == "NextActionChanged" && item.DueAt == due));
+
+        ProcurementQueueV2Row row = (await service.ReadPageAsync(fixture.Manager,
+            new ProcurementQueueV2Filter(AssigneeId: secondManagerId), CancellationToken.None)).Items.Single();
+        Assert.AreEqual(WorkTaskType.Call, row.NextActionType);
+        Assert.AreEqual(detail.NextActionDescription, row.NextActionDescription);
+        await using (LandErpDbContext db = await fixture.Factory.CreateDbContextAsync())
+        {
+            Assert.AreEqual(fixture.ManagerEmployeeId, await db.WorkAssignments.Where(item => item.ObjectId == caseId)
+                .Select(item => item.EmployeeId).SingleAsync(), "Changing the action assignee must not redefine PropertyCase visibility.");
+            Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.ObjectId == caseId && item.Action == "ProcurementNextActionChanged"));
+        }
+
+        await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => fixture.Workspace.SaveNextActionAsync(fixture.Manager,
+            new SaveNextAction(caseId, before.CaseVersion, before.TaskVersion, WorkTaskType.Check,
+                "Устаревшая команда", "Эта команда не должна сохраниться", due, fixture.ManagerEmployeeId),
+            "next-action-stale", CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.SaveNextActionAsync(fixture.ForeignOwner,
+            new SaveNextAction(caseId, detail.CaseVersion, detail.TaskVersion, WorkTaskType.Check,
+                "Чужая команда", "Другая организация не должна получить доступ", due, fixture.ManagerEmployeeId),
+            "next-action-foreign", CancellationToken.None));
+    }
+
     [TestMethod]
     public async Task ProjectionSearchesFiltersAndPagesServerSide()
     {

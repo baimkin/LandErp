@@ -4,6 +4,7 @@
 @using LandErp.Application.Modules.Catalog.Domain
 @using LandErp.Application.Modules.Procurement.Contracts
 @using LandErp.Application.Modules.Procurement.Domain
+@using LandErp.Application.Modules.Workflow.Domain
 @using LandErp.Server.Components.Procurement
 @inherits WorkspaceComponent
 @inject IProcurementQueueV2ReadService ReadModel
@@ -134,7 +135,7 @@
                                         </td>
                                         <td><span class="badge @StageBadge(item.Stage)">@ProcurementLabels.Stage(item.Stage)</span></td>
                                         <td class="price"><b>@MoneyCompact(item.WorkingPrice)</b><div class="sub">@AreaSotki(item.AreaSquareMeters)</div></td>
-                                        <td><b>@ValueOrDash(item.NextActionTitle)</b><div class="sub @DueCss(item.DueState)">@DueCompact(item.DueAt, item.DueState)</div></td>
+                                        <td><span class="badge neutral">@NextActionTypeLabel(item.NextActionType)</span><b>@ValueOrDash(item.NextActionTitle)</b><div class="sub" title="@item.NextActionDescription">@CompactText(item.NextActionDescription, 80)</div><div class="sub @DueCss(item.DueState)">@DueCompact(item.DueAt, item.DueState)</div></td>
                                         <td><span class="badge @CheckBadge(item.QuickChecks)">@CheckRatio(item.QuickChecks)</span></td>
                                         <td>
                                             @if (item.LatestContact == null)
@@ -221,8 +222,8 @@
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Следующее действие</b><span class="badge @DueBadge(detail.DueState)">@DueCompact(detail.DueAt, detail.DueState)</span></div>
-                    <div class="next"><b>@ValueOrDash(detail.NextActionTitle)</b></div>
+                    <div class="ct"><b>Следующее действие</b><div><span class="badge @DueBadge(detail.DueState)">@DueCompact(detail.DueAt, detail.DueState)</span>@if (detail.CanManageDossier) { <button class="btn" type="button" @onclick="OpenNextAction">Изменить</button> }</div></div>
+                    <div class="next"><span class="badge info">@NextActionTypeLabel(detail.NextActionType)</span><b>@ValueOrDash(detail.NextActionTitle)</b><p>@ValueOrDash(detail.NextActionDescription)</p><div class="sub">Ответственный: @detail.AssigneeName</div></div>
                 </div>
 
                 <div class="card">
@@ -389,6 +390,29 @@
     </div>
 }
 
+@if (nextActionOpen && detail != null)
+{
+    <div class="modalBack on" @onclick="CloseNextAction">
+        <div class="modal add-modal" @onclick:stopPropagation="true">
+            <div class="mh"><div class="grow"><b>Следующее действие</b><div class="sub">Рабочая задача по @detail.BusinessNumber</div></div><button class="btn" type="button" @onclick="CloseNextAction">×</button></div>
+            <EditForm Model="nextAction" FormName="procurement-v2-next-action" OnValidSubmit="SaveNextActionAsync">
+                <DataAnnotationsValidator />
+                <div class="mb">
+                    <ValidationSummary />
+                    <div class="form">
+                        <div class="field"><label>Тип</label><select @bind="nextAction.Type"><option value="@WorkTaskType.General">Другое</option><option value="@WorkTaskType.Call">Звонок</option><option value="@WorkTaskType.Meeting">Встреча</option><option value="@WorkTaskType.Check">Проверка</option><option value="@WorkTaskType.Documents">Документы</option><option value="@WorkTaskType.Decision">Решение</option></select></div>
+                        <div class="field"><label>Ответственный</label><select @bind="nextAction.AssigneeEmployeeId">@foreach (ProcurementQueueV2Assignee assignee in detail.AvailableAssignees) { <option value="@assignee.Id">@assignee.Name</option> }</select></div>
+                        <div class="field full"><label>Название</label><input @bind="nextAction.Title" maxlength="512" /></div>
+                        <div class="field full"><label>Описание / цель</label><textarea @bind="nextAction.Description" maxlength="4000"></textarea></div>
+                        <div class="field full"><label>Срок</label><InputText type="datetime-local" @bind-Value="nextAction.Due" /></div>
+                    </div>
+                </div>
+                <div class="mf"><button class="btn" type="button" @onclick="CloseNextAction">Отмена</button><button class="btn primary" type="submit" disabled="@Busy">Сохранить действие</button></div>
+            </EditForm>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter, SupplyParameterFromQuery(Name = "stage")] public string? InitialStage { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "mine")] public bool MineOnly { get; set; }
@@ -414,6 +438,8 @@
     private ProcurementAction decisionAction;
     private bool negotiationOpen;
     private NegotiationDraft negotiation = new();
+    private bool nextActionOpen;
+    private NextActionDraft nextAction = new();
 
     protected override void OnParametersSet()
     {
@@ -478,7 +504,7 @@
         finally { drawerLoading = false; }
     }
 
-    private void CloseDrawer() { selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = false; }
+    private void CloseDrawer() { selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = nextActionOpen = false; }
     private void OpenFullCase() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}"); }
     private void OpenInspection() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}/inspection"); }
 
@@ -513,6 +539,34 @@
 
     private void CloseNegotiation() => negotiationOpen = false;
 
+    private void OpenNextAction()
+    {
+        if (detail == null || !detail.CanManageDossier) return;
+        nextAction = new()
+        {
+            Type = detail.NextActionType,
+            Title = detail.NextActionTitle,
+            Description = detail.NextActionDescription,
+            Due = ProcurementLabels.LocalInput(detail.DueAt),
+            AssigneeEmployeeId = detail.AssigneeId
+        };
+        nextActionOpen = true;
+    }
+
+    private void CloseNextAction() => nextActionOpen = false;
+
+    private async Task SaveNextActionAsync()
+    {
+        if (detail == null) return;
+        Guid caseId = detail.CaseId;
+        long caseVersion = detail.CaseVersion;
+        long taskVersion = detail.TaskVersion;
+        await ExecuteAsync(() => Workspace.SaveNextActionAsync(CurrentSubject,
+            new SaveNextAction(caseId, caseVersion, taskVersion, nextAction.Type, nextAction.Title, nextAction.Description,
+                ProcurementLabels.ParseLocal(nextAction.Due), nextAction.AssigneeEmployeeId), Correlation(), CancellationToken.None));
+        if (Error == null) nextActionOpen = false;
+    }
+
     private async Task SaveNegotiationAsync()
     {
         if (detail == null) return;
@@ -539,7 +593,19 @@
         _ => "Решение"
     };
 
+    private static string NextActionTypeLabel(WorkTaskType type) => type switch
+    {
+        WorkTaskType.Call => "Звонок",
+        WorkTaskType.Meeting => "Встреча",
+        WorkTaskType.Check => "Проверка",
+        WorkTaskType.Documents => "Документы",
+        WorkTaskType.Decision => "Решение",
+        _ => "Другое"
+    };
+
     private static string ValueOrDash(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
+    private static string CompactText(string? value, int max) => string.IsNullOrWhiteSpace(value) ? "—"
+        : value.Length <= max ? value : value[..(max - 1)] + "…";
     private static string MoneyCompact(decimal? value)
     {
         if (value == null) return "—";
@@ -628,5 +694,14 @@
         public decimal? SellerPrice { get; set; }
         public decimal? BuyerOffer { get; set; }
         public string Effective { get; set; } = "";
+    }
+
+    private sealed class NextActionDraft
+    {
+        public WorkTaskType Type { get; set; }
+        [Required, MinLength(3), MaxLength(512)] public string Title { get; set; } = "";
+        [Required, MinLength(3), MaxLength(4000)] public string Description { get; set; } = "";
+        [Required] public Guid AssigneeEmployeeId { get; set; }
+        public string Due { get; set; } = "";
     }
 }

@@ -1010,6 +1010,64 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task SaveNextActionAsync(Subject subject, SaveNextAction command, string correlationId, CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(command.Type)) throw new ArgumentException("Выберите поддерживаемый тип следующего действия.");
+        string title = Required(command.Title, 3, 512, "Укажите название следующего действия от 3 до 512 символов.");
+        string description = Required(command.Description, 3, 4000, "Укажите цель следующего действия от 3 до 4000 символов.");
+        DateTimeOffset now = time.GetUtcNow();
+        if (command.DueAt is DateTimeOffset due && (due.Offset != TimeSpan.Zero || due < now || due > now.AddYears(2)))
+            throw new ArgumentException("Укажите будущий срок в UTC.");
+
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await RequireDossierPermissionAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.PropertyCases.FromSqlInterpolated(
+            $"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .LoadAsync(cancellationToken);
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken)
+            ?? throw new AccessDeniedException();
+        if (row.Case.Version != command.ExpectedCaseVersion || row.Task.Version != command.ExpectedTaskVersion)
+            throw new DbUpdateConcurrencyException();
+
+        DecisionTarget[] managers = await TargetsAsync(db, row.Case, Permissions.ManagerDecide, cancellationToken);
+        DecisionTarget[] heads = await TargetsAsync(db, row.Case, Permissions.HeadDecide, cancellationToken);
+        if (!managers.Concat(heads).Any(item => item.EmployeeId == command.AssigneeEmployeeId))
+            throw new AccessDeniedException();
+
+        var before = new { row.Task.Type, row.Task.Title, row.Task.Description, row.Task.DueAt, row.Task.EmployeeId };
+        row.Task.Type = command.Type;
+        row.Task.Title = title;
+        row.Task.Description = description;
+        row.Task.DueAt = command.DueAt;
+        row.Task.EmployeeId = command.AssigneeEmployeeId;
+        row.Task.Completed = false;
+        db.Entry(row.Case).Property(item => item.Version).IsModified = true;
+
+        string assigneeName = managers.Concat(heads).First(item => item.EmployeeId == command.AssigneeEmployeeId).Name;
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
+            ActorEmployeeId = context.EmployeeId, Kind = "NextActionChanged", Title = "Следующее действие обновлено",
+            Body = $"{NextActionTypeLabel(command.Type)}: {title}\nЦель: {description}", TargetEmployeeId = command.AssigneeEmployeeId,
+            DueAt = command.DueAt, RecordedAt = now
+        });
+        if (command.AssigneeEmployeeId != context.EmployeeId && command.AssigneeEmployeeId != before.EmployeeId)
+        {
+            db.Notifications.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, EmployeeId = command.AssigneeEmployeeId,
+                ObjectType = "PropertyCase", ObjectId = row.Case.Id,
+                Title = $"{row.Case.BusinessNumber}: назначено действие «{title}»", RecordedAt = now
+            });
+        }
+        OrganizationWorkspace.AddAudit(db, context, subject, "ProcurementNextActionChanged", "PropertyCase", row.Case.Id,
+            new { Before = before, After = new { command.Type, Title = title, Description = description, command.DueAt, command.AssigneeEmployeeId, Assignee = assigneeName } }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<NotificationView>> ReadNotificationsAsync(Subject subject, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
@@ -1186,6 +1244,16 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     }
 
     private static string? Format(decimal? value) => value?.ToString("0.####", CultureInfo.InvariantCulture);
+
+    private static string NextActionTypeLabel(WorkTaskType type) => type switch
+    {
+        WorkTaskType.Call => "Звонок",
+        WorkTaskType.Meeting => "Встреча",
+        WorkTaskType.Check => "Проверка",
+        WorkTaskType.Documents => "Документы",
+        WorkTaskType.Decision => "Решение",
+        _ => "Другое"
+    };
 
     private static Task<DecisionTarget[]> TargetsAsync(LandErpDbContext db, PropertyCase propertyCase, string permission, CancellationToken cancellationToken)
     {

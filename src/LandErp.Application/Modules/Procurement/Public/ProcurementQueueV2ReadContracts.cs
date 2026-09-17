@@ -1,6 +1,7 @@
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
+using LandErp.Application.Modules.Workflow.Domain;
 
 namespace LandErp.Application.Modules.Procurement.Contracts;
 
@@ -50,7 +51,9 @@ public sealed record ProcurementQueueV2Row(
     decimal? WorkingPrice,
     string Currency,
     decimal? AreaSquareMeters,
+    WorkTaskType NextActionType,
     string NextActionTitle,
+    string NextActionDescription,
     DateTimeOffset? DueAt,
     ProcurementDueState DueState,
     Guid AssigneeId,
@@ -147,7 +150,9 @@ public sealed record ProcurementQueueV2Detail(
     decimal? LatestSellerOffer,
     decimal? LatestBuyerOffer,
     decimal? LatestAgreedPrice,
+    WorkTaskType NextActionType,
     string NextActionTitle,
+    string NextActionDescription,
     DateTimeOffset? DueAt,
     ProcurementDueState DueState,
     IReadOnlyList<ProcurementQueueV2Negotiation> Negotiations,
@@ -162,6 +167,8 @@ public sealed record ProcurementQueueV2Detail(
     bool CanManagerDecide,
     bool CanHeadDecide,
     bool CanManageDossier,
+    long TaskVersion,
+    IReadOnlyList<ProcurementQueueV2Assignee> AvailableAssignees,
     decimal? StartPrice = null,
     decimal? PriceDeltaFromStart = null,
     decimal? PriceDeltaFromStartPercent = null,

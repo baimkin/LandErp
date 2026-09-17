@@ -20,12 +20,23 @@ public sealed class WorkTask
     public Guid OrganizationId { get; set; }
     public string ObjectType { get; set; } = "";
     public Guid ObjectId { get; set; }
+    public WorkTaskType Type { get; set; } = WorkTaskType.General;
     public string Title { get; set; } = "";
+    public string Description { get; set; } = "";
     public Guid EmployeeId { get; set; }
     public bool Completed { get; set; }
     public DateTimeOffset? DueAt { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
     public long Version { get; set; } = 1;
+}
+public enum WorkTaskType
+{
+    General,
+    Call,
+    Meeting,
+    Check,
+    Documents,
+    Decision
 }
 public sealed class WorkflowTransition
 {

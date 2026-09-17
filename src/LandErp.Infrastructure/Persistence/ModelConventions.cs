@@ -200,6 +200,8 @@ internal static class ModelConventions
                 else if (table == "events" && property.Name == "ObservedPrice") property.SetComment("Общая цена источника в момент события, если была известна.");
                 else if (table == "events" && property.Name == "ObservedPricePerSotka") property.SetComment("Вычисленная цена за сотку в момент события, если цена и площадь были известны.");
                 else if (table == "case_fact_revisions" && property.Name == "Value") property.SetComment("Человекочитаемое значение рабочего факта в момент явного подтверждения сотрудником.");
+                else if (table == "work_tasks" && property.Name == "Type") property.SetComment("Стабильный прикладной тип следующего действия; пользовательское название и цель хранятся отдельно.");
+                else if (table == "work_tasks" && property.Name == "Description") property.SetComment("Человекочитаемое описание или цель следующего действия без технического payload.");
                 else if (table == "negotiations" && property.Name == "Outcome") property.SetComment("Результат конкретного контакта с продавцом; не является workflow-решением или фактом покупки.");
                 else if (table == "stored_files" && property.Name == "CreatedByEmployeeId") property.SetComment("Сотрудник, инициировавший загрузку файла или добавление внешней ссылки.");
                 else if (table is "org_units" or "teams" && property.Name == "ManagerEmployeeId") property.SetComment("Назначенный руководитель подразделения или команды; права доступа определяются отдельно ролью и scope.");

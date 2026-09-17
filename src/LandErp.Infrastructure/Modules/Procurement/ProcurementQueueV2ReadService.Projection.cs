@@ -22,8 +22,8 @@ public sealed partial class ProcurementQueueV2ReadService
         ProcurementSourceTypeSummary[] sourceTypes = sources.GroupBy(item => item.Source).OrderBy(group => group.Key)
             .Select(group => new ProcurementSourceTypeSummary(group.Key, group.Count())).ToArray();
         return new(row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle, row.Case.WorkingLocation, row.Case.CadastralNumber, FirstPhoto(sources),
-            row.Case.StageId, row.Case.WorkingPrice, row.Case.Currency, row.Case.WorkingAreaSquareMeters, row.Task.Title, row.Task.DueAt, due,
-            row.Assignment.EmployeeId, names.GetValueOrDefault(row.Assignment.EmployeeId, "Сотрудник"), quick, latest, sourceTypes, sources.Length, changed,
+            row.Case.StageId, row.Case.WorkingPrice, row.Case.Currency, row.Case.WorkingAreaSquareMeters, row.Task.Type, row.Task.Title,
+            row.Task.Description, row.Task.DueAt, due, row.Task.EmployeeId, names.GetValueOrDefault(row.Task.EmployeeId, "Сотрудник"), quick, latest, sourceTypes, sources.Length, changed,
             RowState(due, quick, changed), row.Case.Version, sources.Length == 0 ? 0 : sources.Max(item => item.DataRevision));
     }
 

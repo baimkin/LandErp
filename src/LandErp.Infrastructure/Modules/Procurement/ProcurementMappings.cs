@@ -23,6 +23,9 @@ internal static class ProcurementMappings
         builder.Entity<Assignment>().HasIndex(item => new { item.ObjectType, item.ObjectId }).IsUnique();
         builder.Entity<Assignment>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<WorkTask>().ToTable("work_tasks", "workflow");
+        builder.Entity<WorkTask>().Property(item => item.Type).HasConversion<string>().HasMaxLength(64);
+        builder.Entity<WorkTask>().Property(item => item.Title).HasMaxLength(512);
+        builder.Entity<WorkTask>().Property(item => item.Description).HasMaxLength(4000);
         builder.Entity<WorkTask>().HasIndex(item => new { item.EmployeeId, item.Completed, item.DueAt });
         builder.Entity<WorkTask>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<WorkflowTransition>().ToTable("transitions", "workflow");

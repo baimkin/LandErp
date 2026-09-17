@@ -65,7 +65,7 @@ public sealed partial class ProcurementQueueV2ReadService(
                             || (source.SellerName != null && EF.Functions.ILike(source.SellerName, pattern))
                             || (exactId.HasValue && source.Id == exactId.Value)))));
         }
-        if (filter.AssigneeId is Guid assigneeId) query = query.Where(row => row.Assignment.EmployeeId == assigneeId);
+        if (filter.AssigneeId is Guid assigneeId) query = query.Where(row => row.Task.EmployeeId == assigneeId);
         if (filter.Source is CatalogSource source)
             query = query.Where(row => db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id && link.Confirmed
                 && db.Listings.Any(item => item.Id == link.CatalogItemId && item.Source == source)));
@@ -85,7 +85,7 @@ public sealed partial class ProcurementQueueV2ReadService(
         ContactDb[] contacts = pageIds.Length == 0 ? [] : await LatestContacts(db, pageIds).ToArrayAsync(cancellationToken);
 
         Guid[] assigneeIds = await visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired")
-            .Select(row => row.Assignment.EmployeeId).Distinct().ToArrayAsync(cancellationToken);
+            .Select(row => row.Task.EmployeeId).Distinct().ToArrayAsync(cancellationToken);
         ProcurementQueueV2Assignee[] assignees = await db.Employees.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId && assigneeIds.Contains(item.Id))
             .OrderBy(item => item.DisplayName).Select(item => new ProcurementQueueV2Assignee(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);
@@ -124,8 +124,20 @@ public sealed partial class ProcurementQueueV2ReadService(
 
         CheckDb[] checks = await db.CaseChecks.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .Select(item => new CheckDb(item.PropertyCaseId, item.Level, item.Status, item.Blocker, item.ResponsibleEmployeeId)).ToArrayAsync(cancellationToken);
+        var assigneeRows = await (from employee in db.Employees.AsNoTracking()
+                                  join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
+                                  join grant in db.RolePermissions.AsNoTracking() on assignment.RoleId equals grant.RoleId
+                                  where employee.OrganizationId == context.OrganizationId && employee.Active
+                                      && (grant.PermissionId == Permissions.ManagerDecide || grant.PermissionId == Permissions.HeadDecide)
+                                      && (assignment.Scope == AccessScope.Organization || assignment.Scope == AccessScope.Own
+                                          || assignment.Scope == AccessScope.AssignedObjects
+                                          || assignment.Scope == AccessScope.Department && row.Case.DepartmentId != null && assignment.OrgUnitId == row.Case.DepartmentId
+                                          || assignment.Scope == AccessScope.Team && row.Case.TeamId != null && assignment.TeamId == row.Case.TeamId)
+                                  select new { employee.Id, Name = employee.DisplayName })
+            .Distinct().OrderBy(item => item.Name).ToArrayAsync(cancellationToken);
+        ProcurementQueueV2Assignee[] availableAssignees = assigneeRows.Select(item => new ProcurementQueueV2Assignee(item.Id, item.Name)).ToArray();
         Guid[] peopleIds = checks.Where(item => item.ResponsibleEmployeeId != null).Select(item => item.ResponsibleEmployeeId!.Value)
-            .Append(row.Assignment.EmployeeId).Distinct().ToArray();
+            .Append(row.Task.EmployeeId).Concat(availableAssignees.Select(item => item.Id)).Distinct().ToArray();
         Dictionary<Guid, string> people = await db.Employees.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId && peopleIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
         ProcurementCheckLevelSummary quick = CheckLevelSummary(CaseCheckLevel.Quick, checks, people);
@@ -149,11 +161,11 @@ public sealed partial class ProcurementQueueV2ReadService(
             && row.Assignment.EmployeeId == context.EmployeeId && row.Case.ManagerEmployeeId != context.EmployeeId;
 
         return new(row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle, row.Case.WorkingLocation, row.Case.CadastralNumber,
-            row.Case.WorkingAreaSquareMeters, row.Case.WorkingPrice, row.Case.Currency, row.Case.StageId, row.Assignment.EmployeeId,
-            people.GetValueOrDefault(row.Assignment.EmployeeId, "Сотрудник"), FirstPhoto(sourceRows), askSource?.Price,
-            askSource == null ? null : SourceLabel(askSource), sellerOffer, buyerOffer, agreedPrice, row.Task.Title, row.Task.DueAt,
+            row.Case.WorkingAreaSquareMeters, row.Case.WorkingPrice, row.Case.Currency, row.Case.StageId, row.Task.EmployeeId,
+            people.GetValueOrDefault(row.Task.EmployeeId, "Сотрудник"), FirstPhoto(sourceRows), askSource?.Price,
+            askSource == null ? null : SourceLabel(askSource), sellerOffer, buyerOffer, agreedPrice, row.Task.Type, row.Task.Title, row.Task.Description, row.Task.DueAt,
             DueState(row.Task, todayStart, tomorrowStart), negotiations, quick, deep, inspection, timeline, sources, sourceChanged,
             sourceRows.Length == 0 ? 0 : sourceRows.Max(item => item.DataRevision), row.Case.Version, canManagerDecide, canHeadDecide,
-            managerPermission || headPermission, startPrice, priceDelta, priceDeltaPercent, priceChanged);
+            managerPermission || headPermission, row.Task.Version, availableAssignees, startPrice, priceDelta, priceDeltaPercent, priceChanged);
     }
 }

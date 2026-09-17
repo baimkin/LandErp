@@ -2,6 +2,5 @@
 @attribute [Authorize(Policy = "manager_queue.read")]
 @using LandErp.Server.Components.Procurement
 <PageTitle>Объект закупки · LandErp</PageTitle>
-<PageHeader Title="Объект закупки" Breadcrumb="Закупка / Карточка" /><a href="/procurement" class="btn secondary">Вернуться в очередь</a>
-<CaseWorkspace CaseId="CaseId" />
+<CaseWorkspace CaseId="CaseId" FullPage="true" />
 @code { [Parameter] public Guid CaseId { get; set; } }

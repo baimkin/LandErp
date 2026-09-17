@@ -142,7 +142,8 @@ public sealed class AvitoMapTests
         LocalStore store=Store(); store.SaveLink("Map",Url); string batch=store.StartBatch(new());CollectionJob job=store.Claim(batch,SourceSite.Avito,"one")!;
         PageObservation page=Data().Read(Url,false); store.SavePage(job,1,Url,page.Listings,false,null,"partial");store.StopBatch(batch);
         using (SqliteConnection db=new(new SqliteConnectionStringBuilder { DataSource=store.Path,Pooling=false }.ToString()))
-        { db.Open();using SqliteCommand command=db.CreateCommand();command.CommandText="DROP TABLE local_map_scopes; DROP TABLE local_sightings; PRAGMA user_version=1;";command.ExecuteNonQuery(); }
+        // This disposable fixture must contain the v1 schema, without workspace tables added in v3.
+        { db.Open();using SqliteCommand command=db.CreateCommand();command.CommandText="DROP TABLE local_link_schedules; DROP TABLE local_groups; DROP TABLE local_map_scopes; DROP TABLE local_sightings; PRAGMA user_version=1;";command.ExecuteNonQuery(); }
         LocalStore migrated=new(store.Path);Assert.IsNotNull(migrated.MigrationBackup);Assert.IsTrue(File.Exists(migrated.MigrationBackup));
         Assert.AreEqual(1L,migrated.ReadListings(new()).Total);Assert.AreEqual(1,migrated.History(SourceSite.Avito,"12345678").Length);
         Assert.AreEqual(1L,migrated.ReadListings(new(JobId:job.Id)).Total);

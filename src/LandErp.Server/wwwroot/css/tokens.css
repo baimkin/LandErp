@@ -10,7 +10,7 @@
   --surface-blue: #f1f6fc;
   --text-strong: #14243a;
   --text: #33465e;
-  --text-muted: #66778d;
+  --text-muted: #586b80;
   --border: #dce4ec;
   --border-strong: #c5d0dc;
   --accent: #2268b5;
@@ -38,15 +38,42 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
-  --control-h: 40px;
-  --row-h: 44px;
+  /* Shared type roles: density changes spacing, never reading size. */
+  --text-xs: .75rem;
+  --text-sm: .875rem;
+  --text-ui: .9375rem;
+  --text-body: 1rem;
+  --text-section: 1.125rem;
+  --text-title: 1.75rem;
+  --text-metric: 1.75rem;
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --leading-body: 1.5;
+  --leading-ui: 1.45;
+  --leading-heading: 1.3;
+  --control-h: 42px;
+  --control-sm-h: 36px;
+  --row-h: 52px;
+  --row-rich-h: 84px;
+  --cell-py: 12px;
+  --panel-pad: 20px;
+  --page-gutter: clamp(16px, 1.6vw, 32px);
   --sidebar-w: 248px;
+  --sidebar-compact-w: 64px;
+  --shell-sidebar-w: var(--sidebar-w);
+  --topbar-h: 74px;
+  --drawer-w: 760px;
   --focus: 0 0 0 3px rgb(34 104 181 / 22%);
 }
 
 [data-density="compact"] {
   --control-h: 36px;
-  --row-h: 36px;
+  --control-sm-h: 32px;
+  --row-h: 44px;
+  --row-rich-h: 72px;
+  --cell-py: 8px;
+  --panel-pad: 16px;
   --space-5: 16px;
   --space-6: 20px;
 }

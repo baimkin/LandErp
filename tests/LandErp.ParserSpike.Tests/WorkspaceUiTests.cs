@@ -5,6 +5,12 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using LandErp.ParserSpike.Desktop;
 using LandErp.ParserSpike.LocalCollection;
+using LandErp.ParserSpike.ServerIntegration;
+using LandErp.Collector.Contracts.V1;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace LandErp.ParserSpike.Tests;
@@ -21,7 +27,7 @@ public sealed class WorkspaceUiTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
     [TestMethod]
-    public async Task WindowAddsSearchesValidatesSettingsSearchesAndResizesWithoutAutomaticCollection()
+    public async Task WorkspaceHasFourSectionsValidatesSettingsAndAddsSearchWithSchedule()
     {
         string root = Path.Combine(Path.GetTempPath(), "LandErp-WorkspaceUi", Guid.NewGuid().ToString("N"));
         NoSessions sessions = new();
@@ -29,73 +35,134 @@ public sealed class WorkspaceUiTests
         await OnSta(async () =>
         {
             WorkspaceWindow window = new(controller); window.Show();
-            await Until(() => ((DataGrid)window.FindName("SettingsGrid")).ItemsSource is not null);
-            Assert.AreEqual(0, sessions.Created); Assert.IsFalse(controller.Runner.IsRunning);
-            TextBox url = (TextBox)window.FindName("UrlInput");
-            Button add = (Button)window.FindName("AddButton");
-            url.Text = "https://example.org/search";
-            add.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            await Until(() => add.IsEnabled);
-            Assert.AreEqual("https://example.org/search", url.Text);
-            Assert.AreEqual(Visibility.Visible, ((Border)window.FindName("LinkFeedbackPanel")).Visibility);
-            StringAssert.Contains(((TextBlock)window.FindName("LinkFeedbackText")).Text, "Не удалось сохранить");
-            Assert.AreEqual(0, controller.Store.Links().Length);
-            url.Text = "https://www.avito.ru/pushkino/zemelnye_uchastki?q=земля";
-            add.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Until(() => controller.Store.Links().Length == 1);
-            await Until(() => ((DataGrid)window.FindName("LinksGrid")).Items.Count == 1);
-            url.Text = "https://zvenigorod.cian.ru/kupit-zemelniy-uchastok-moskovskaya-oblast-odincovskiy-gorodskoy-okrug/";
-            add.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Until(() => controller.Store.Links().Length == 2);
-            await Until(() => ((DataGrid)window.FindName("LinksGrid")).Items.Count == 2);
-            SettingEntry[] entries = (SettingEntry[])((DataGrid)window.FindName("SettingsGrid")).ItemsSource;
-            entries.Single(x => x.Key == "maxPages").Value = "7";
-            ((Button)window.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            await Until(() => controller.Store.Settings().MaxPages == 7);
-            window.UpdateLayout(); double small = ((DataGrid)window.FindName("LinksGrid")).ActualWidth;
-            window.Width = 1600; window.Height = 1000; window.UpdateLayout();
-            Assert.IsTrue(((DataGrid)window.FindName("LinksGrid")).ActualWidth > small);
-            string? image = Environment.GetEnvironmentVariable("LANDERP_LOCAL_UI_SCREENSHOT");
-            if (image is not null)
+            try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(image)!);
-                RenderTargetBitmap bitmap = new((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
-                bitmap.Render(window); PngBitmapEncoder encoder = new(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                using FileStream stream = File.Create(image); encoder.Save(stream);
+                await Until(() => ((TextBox)window.FindName("MaxPagesInput")).Text.Length > 0);
+                TabControl tabs = (TabControl)window.FindName("Pages");
+                Assert.AreEqual(4, tabs.Items.Count);
+                CollectionAssert.AreEqual((string[])["Поиски", "Работа", "Результаты", "Настройки"], tabs.Items.Cast<TabItem>().Select(x => (string)x.Header).ToArray());
+                Assert.IsNull(window.FindName("SettingsGrid")); Assert.IsNull(window.FindName("DiagnosticText"));
+                Assert.AreEqual(0, sessions.Created); Assert.IsFalse(controller.AutomationEnabled);
+                tabs.SelectedIndex = 3;
+                ((TextBox)window.FindName("MaxPagesInput")).Text = "0";
+                ((Button)window.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.AreEqual(10, controller.Store.Settings().MaxPages);
+                ((TextBox)window.FindName("MaxPagesInput")).Text = "7";
+                ((Button)window.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Until(() => controller.Store.Settings().MaxPages == 7);
+                tabs.SelectedIndex = 0;
+                _ = window.Dispatcher.BeginInvoke(() =>
+                {
+                    SearchEditorWindow editor = window.OwnedWindows.OfType<SearchEditorWindow>().Single();
+                    ((TextBox)editor.FindName("LabelInput")).Text = "Участки в Подмосковье";
+                    ((TextBox)editor.FindName("UrlInput")).Text = "https://www.avito.ru/pushkino/zemelnye_uchastki";
+                    ((ComboBox)editor.FindName("ScheduleKindInput")).SelectedIndex = 1;
+                    ((TextBox)editor.FindName("ScheduleValueInput")).Text = "60";
+                    ((Button)editor.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                }, DispatcherPriority.ApplicationIdle);
+                ((Button)window.FindName("AddButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Until(() => controller.Store.Links().Length == 1);
+                Assert.AreEqual(60, controller.Store.ScheduledLinks().Single().Schedule.IntervalMinutes);
+                Assert.AreEqual(1, ((DataGrid)window.FindName("LinksGrid")).Items.Count);
+                window.UpdateLayout(); double small = ((DataGrid)window.FindName("LinksGrid")).ActualWidth;
+                window.Width = 1600; window.Height = 1000; window.UpdateLayout();
+                Assert.IsTrue(((DataGrid)window.FindName("LinksGrid")).ActualWidth > small);
+                string? image = Environment.GetEnvironmentVariable("LANDERP_LOCAL_UI_SCREENSHOT");
+                if (image != null)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(image)!);
+                    for (int i = 0; i < 4; i++)
+                    {
+                        tabs.SelectedIndex = i; window.UpdateLayout();
+                        RenderTargetBitmap bitmap = new((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                        bitmap.Render(window); PngBitmapEncoder encoder = new(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                        using FileStream stream = File.Create(Path.ChangeExtension(image, i + ".png")); encoder.Save(stream);
+                    }
+                }
+                Assert.AreEqual(0, sessions.Created); Assert.AreEqual(0, controller.Store.Jobs().Length);
             }
-            Assert.AreEqual(0, sessions.Created); Assert.AreEqual(0, controller.Store.Jobs().Length);
-            window.Close(); await Until(() => !window.IsVisible);
+            finally { window.Close(); await Until(() => !window.IsVisible); }
         });
     }
     [TestMethod]
-    public async Task CheckboxSelectionIsPersistedBeforeImmediateStart()
+    public async Task ServerEditorCreatesRemoteSearchWithoutStagingLocalData()
     {
-        string root=Path.Combine(Path.GetTempPath(),"LandErp-SelectionUi",Guid.NewGuid().ToString("N"));
-        NoSessions sessions=new();
-        WorkspaceController controller=new(Path.Combine(root,"data.sqlite"),root,sessions);
-        controller.Store.SaveLink("Avito","https://www.avito.ru/korolev/zemelnye_uchastki");
-        controller.Store.SaveLink("Cian","https://www.cian.ru/cat.php?region=1");
-        await OnSta(async()=>
+        string root = Path.Combine(Path.GetTempPath(), "LandErp-ServerUi", Guid.NewGuid().ToString("N"));
+        using WorkspaceServer handler = new(); NoSessions sessions = new();
+        WorkspaceController controller = new(Path.Combine(root, "data.sqlite"), root, sessions, () => new HttpClient(handler, false));
+        controller.Store.SaveLink("Личный проект", "https://www.avito.ru/moskva/zemelnye_uchastki");
+        await controller.ConnectServerAsync(new(new Uri("https://server.test/"), Guid.CreateVersion7(), new string('A', 64)));
+        controller.SetMode(ParserOperatingMode.Server);
+        await OnSta(async () =>
         {
-            WorkspaceWindow window=new(controller);window.Show();
-            DataGrid grid=(DataGrid)window.FindName("LinksGrid");
-            await Until(()=>grid.Items.Count==2);window.UpdateLayout();
-            SearchLink cian=controller.Store.Links().Single(x=>x.Source==SourceSite.Cian);
-            DataGridRow row=(DataGridRow)grid.ItemContainerGenerator.ContainerFromItem(grid.Items.Cast<SearchLink>().Single(x=>x.Id==cian.Id));
-            CheckBox checkbox=FindCheckbox(row)!;Assert.IsNotNull(checkbox);
-            checkbox.IsChecked=false;checkbox.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            ((Button)window.FindName("StartButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            await Until(()=>controller.Store.Jobs().Length>0);
-            Assert.IsFalse(controller.Store.Links().Single(x=>x.Id==cian.Id).Selected);
-            Assert.AreEqual(1,controller.Store.Jobs().Length);Assert.AreEqual(SourceSite.Avito,controller.Store.Jobs().Single().Source);
-            await Until(()=>!controller.Runner.IsRunning);
-            window.Close();await Until(()=>!window.IsVisible);
+            WorkspaceWindow window = new(controller); window.Show();
+            try
+            {
+                DataGrid grid = (DataGrid)window.FindName("LinksGrid");
+                await Until(() => ((ListBox)window.FindName("GroupsList")).Items.Count == 3);
+                Assert.AreEqual(0, grid.Items.Count);
+                Assert.AreEqual(Visibility.Collapsed, ((Button)window.FindName("TransferButton")).Visibility);
+                _ = window.Dispatcher.BeginInvoke(() =>
+                {
+                    SearchEditorWindow editor = window.OwnedWindows.OfType<SearchEditorWindow>().Single();
+                    ((TextBox)editor.FindName("LabelInput")).Text = "Серверный поиск";
+                    ((TextBox)editor.FindName("UrlInput")).Text = "https://www.avito.ru/korolev/zemelnye_uchastki";
+                    ((ComboBox)editor.FindName("GroupInput")).SelectedIndex = 1;
+                    ((Button)editor.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                }, DispatcherPriority.ApplicationIdle);
+                ((Button)window.FindName("AddButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Until(() => grid.Items.Count == 1);
+                Assert.AreEqual("Серверный поиск", ((WorkspaceSearch)grid.Items[0]).Label);
+                Assert.AreEqual("Личный проект", controller.Store.Links().Single().Label);
+                Assert.AreEqual(0, controller.Store.Groups().Length); Assert.AreEqual(0, sessions.Created);
+                Assert.AreEqual(handler.Group.Id, handler.Searches.Single().GroupId);
+            }
+            finally { window.Close(); await Until(() => !window.IsVisible); }
         });
-        static CheckBox? FindCheckbox(DependencyObject parent)
+    }
+    private sealed class WorkspaceServer : HttpMessageHandler
+    {
+        public CollectorGroupView Group { get; } = new(Guid.CreateVersion7(), "Серверная группа", 10, true, 1);
+        public List<CollectorSearchView> Searches { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            if(parent is CheckBox box)return box;
-            for(int i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++)
-            {CheckBox? found=FindCheckbox(VisualTreeHelper.GetChild(parent,i));if(found is not null)return found;}
-            return null;
+            object response;
+            if (request.RequestUri!.AbsolutePath.EndsWith("/workspace", StringComparison.Ordinal)) response = new CollectorWorkspace([Group], Searches.ToArray(), [CollectorFeatures.SearchManage]);
+            else if (request.RequestUri.AbsolutePath.EndsWith("/workspace/searches", StringComparison.Ordinal))
+            {
+                CreateCollectorSearch command = JsonSerializer.Deserialize<CreateCollectorSearch>(await request.Content!.ReadAsStringAsync(cancellationToken), CollectionJson.Options)!;
+                CollectorSearchView search = new(command.CommandId, command.Label, command.Source, command.Url, command.MaxPages, command.GroupId, command.Schedule, true, 1);
+                Searches.Add(search); response = search;
+            }
+            else response = new { contractVersion = 1 };
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(response, options: CollectionJson.Options) };
         }
+    }
+
+    [TestMethod]
+    public void CsvQuotesTextAndPreventsSpreadsheetFormulaExecution()
+    {
+        Assert.AreEqual("\"'=SUM(A1:A2)\"", WorkspaceWindow.CsvCell("=SUM(A1:A2)"));
+        Assert.AreEqual("\"слово;\"\"цитата\"\"\"", WorkspaceWindow.CsvCell("слово;\"цитата\""));
+    }
+    [TestMethod]
+    public async Task StopSurvivesRestartAndModeSwitchNeverTransfersLocalData()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "LandErp-StopUi", Guid.NewGuid().ToString("N"));
+        string database = Path.Combine(root, "data.sqlite");
+        await using (WorkspaceController first = new(database, root, new NoSessions()))
+        {
+            first.Store.SaveSearch("Другой проект", "https://www.avito.ru/pushkino/zemelnye_uchastki", null, new(LocalScheduleKind.Interval, 5));
+            first.SetAutomation(true); first.SetAutomation(false);
+        }
+        await using WorkspaceController reopened = new(database, root, new NoSessions());
+        Assert.IsFalse(reopened.AutomationEnabled);
+        await reopened.TickLocalScheduleAsync(CancellationToken.None);
+        Assert.AreEqual(0, reopened.Store.Jobs().Length);
+        reopened.SetAutomation(true); reopened.SetMode(ParserOperatingMode.Server);
+        Assert.IsFalse(reopened.AutomationEnabled);
+        Assert.IsNull(reopened.Server); Assert.AreEqual(1, reopened.Store.Links().Length);
+        Assert.IsFalse(File.Exists(Path.Combine(root, "server-connection.json")));
     }
     private static async Task Until(Func<bool> predicate)
     {

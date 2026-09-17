@@ -1,4 +1,21 @@
 window.LandErpUi = {
+    loadShellPreferences: function () {
+        try {
+            const value = JSON.parse(localStorage.getItem("landerp.ui.shell.v1"));
+            return { compact: value?.compact === true, sidebarCollapsed: value?.sidebarCollapsed === true };
+        } catch {
+            return { compact: false, sidebarCollapsed: false };
+        }
+    },
+    saveShellPreferences: function (value) {
+        // Whitelist UI booleans. Private mode/quota limits must not break navigation.
+        try {
+            localStorage.setItem("landerp.ui.shell.v1", JSON.stringify({
+                compact: value?.compact === true,
+                sidebarCollapsed: value?.sidebarCollapsed === true
+            }));
+        } catch { }
+    },
     open: function (dialog) {
         if (!dialog.open) dialog.showModal();
         dialog.addEventListener("cancel", function (event) { event.preventDefault(); });

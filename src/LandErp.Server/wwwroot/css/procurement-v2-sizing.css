@@ -28,25 +28,25 @@
 }
 
 .pq2-reference .head h1 {
-    font-size: 28px;
+    font-size: var(--text-title);
     line-height: 1.12;
     margin-bottom: 6px;
 }
 
 .pq2-reference .head p {
-    font-size: 13px;
+    font-size: var(--text-ui);
     line-height: 1.45;
 }
 
 .pq2-reference .kicker {
-    font-size: 10.5px;
+    font-size: var(--text-xs);
     margin-bottom: 6px;
 }
 
 .pq2-reference .btn {
-    min-height: 38px;
+    min-height: var(--control-h);
     padding: 0 13px;
-    font-size: 12px;
+    font-size: var(--text-ui);
 }
 
 .pq2-reference .stats {
@@ -60,16 +60,16 @@
 }
 
 .pq2-reference .stat span {
-    font-size: 12px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference .stat b {
-    font-size: 23px;
+    font-size: var(--text-metric);
     margin-top: 6px;
 }
 
 .pq2-reference .stat small {
-    font-size: 10.5px;
+    font-size: var(--text-sm);
     line-height: 1.35;
     margin-top: 5px;
 }
@@ -81,9 +81,9 @@
 
 .pq2-reference .tools input,
 .pq2-reference .tools select {
-    height: 40px;
+    height: var(--control-h);
     padding: 0 11px;
-    font-size: 13px;
+    font-size: var(--text-ui);
 }
 
 .pq2-reference .tools select {
@@ -98,11 +98,11 @@
 .pq2-reference .chipbtn {
     height: 30px;
     padding: 0 10px;
-    font-size: 11px;
+    font-size: var(--text-ui);
 }
 
 .pq2-reference .chipbtn b {
-    font-size: 10px;
+    font-size: var(--text-ui);
 }
 
 /* Full-workspace table on normal desktop widths. */
@@ -113,22 +113,22 @@
 
 .pq2-reference table {
     width: 100%;
-    min-width: 0;
+    min-width: 1440px;
     table-layout: fixed;
 }
 
 .pq2-reference th {
     height: 42px;
     padding: 0 10px;
-    font-size: 11px;
+    font-size: var(--text-sm);
     line-height: 1.2;
     letter-spacing: .025em;
 }
 
 .pq2-reference td {
-    height: 72px;
-    padding: 9px 10px;
-    font-size: 13px;
+    height: var(--row-rich-h);
+    padding: var(--cell-py) 14px;
+    font-size: var(--text-ui);
     line-height: 1.35;
 }
 
@@ -150,7 +150,7 @@
 .pq2-reference td:nth-child(8) { width: 7%; }
 
 .pq2-reference .obj b {
-    font-size: 13.5px;
+    font-size: var(--text-ui);
     line-height: 1.3;
 }
 
@@ -164,11 +164,11 @@
 }
 
 .pq2-reference .thumb.fallback {
-    font-size: 18px;
+    font-size: var(--text-section);
 }
 
 .pq2-reference .sub {
-    font-size: 11px;
+    font-size: var(--text-sm);
     line-height: 1.35;
     margin-top: 4px;
 }
@@ -176,15 +176,15 @@
 .pq2-reference .badge {
     min-height: 25px;
     padding: 0 8px;
-    font-size: 10.5px;
+    font-size: var(--text-xs);
 }
 
 .pq2-reference .price b {
-    font-size: 14px;
+    font-size: var(--text-ui);
 }
 
 .pq2-reference .price s {
-    font-size: 11px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference .ass {
@@ -194,12 +194,12 @@
 .pq2-reference .av {
     width: 30px;
     height: 30px;
-    font-size: 10.5px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference .pager {
     padding: 11px 12px;
-    font-size: 11px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference .pager .btn,
@@ -209,16 +209,16 @@
 }
 
 .pq2-reference .state {
-    font-size: 13px;
+    font-size: var(--text-ui);
 }
 
 /* Drawer. It is a sibling of .pq2-reference, so keep overrides scoped to this page. */
 .pq2-reference ~ .drawer {
-    width: min(780px, 100vw);
+    width: min(var(--drawer-w), 100vw);
 }
 
 .pq2-reference ~ .drawer .dh {
-    min-height: 72px;
+    min-height: var(--row-rich-h);
     padding: 11px 14px;
     gap: 10px;
 }
@@ -228,26 +228,26 @@
 }
 
 .pq2-reference ~ .drawer .dh b {
-    font-size: 18px;
+    font-size: var(--text-section);
     line-height: 1.25;
 }
 
 .pq2-reference ~ .drawer .dh .sub {
-    font-size: 11px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference ~ .drawer .btn {
-    min-height: 38px;
+    min-height: var(--control-h);
     padding: 0 12px;
-    font-size: 12px;
+    font-size: var(--text-ui);
 }
 
 .pq2-reference ~ .drawer .db {
-    padding: 14px;
+    padding: var(--panel-pad);
 }
 
 .pq2-reference ~ .drawer .card {
-    padding: 14px;
+    padding: var(--panel-pad);
     margin-bottom: 11px;
     border-radius: 11px;
 }
@@ -258,7 +258,7 @@
 }
 
 .pq2-reference ~ .drawer .ct b {
-    font-size: 15px;
+    font-size: var(--text-section);
 }
 
 .pq2-reference ~ .drawer .ct > div {
@@ -286,14 +286,14 @@
 
 .pq2-reference ~ .drawer .fact label,
 .pq2-reference ~ .drawer .p label {
-    font-size: 10px;
+    font-size: var(--text-sm);
     margin-bottom: 4px;
 }
 
 .pq2-reference ~ .drawer .fact b,
 .pq2-reference ~ .drawer .p b,
 .pq2-reference ~ .drawer .next b {
-    font-size: 14px;
+    font-size: var(--text-ui);
     line-height: 1.35;
 }
 
@@ -303,7 +303,7 @@
     display: block;
     margin-top: 4px;
     color: #667085;
-    font-size: 11px;
+    font-size: var(--text-sm);
     line-height: 1.4;
 }
 
@@ -326,14 +326,14 @@
 
 .pq2-reference ~ .drawer .neg-summary-main b {
     display: block;
-    font-size: 13.5px;
+    font-size: var(--text-ui);
     line-height: 1.35;
 }
 
 .pq2-reference ~ .drawer .neg-summary-main p {
     margin: 4px 0 0;
     color: #667085;
-    font-size: 11.5px;
+    font-size: var(--text-sm);
     line-height: 1.45;
 }
 
@@ -350,7 +350,7 @@
 .pq2-reference ~ .drawer .inspection b,
 .pq2-reference ~ .drawer .timeline-row b,
 .pq2-reference ~ .drawer .source-row b {
-    font-size: 13px;
+    font-size: var(--text-ui);
     line-height: 1.35;
 }
 
@@ -359,7 +359,7 @@
 .pq2-reference ~ .drawer .inspection p,
 .pq2-reference ~ .drawer .timeline-row p,
 .pq2-reference ~ .drawer .muted {
-    font-size: 11.5px;
+    font-size: var(--text-sm);
     line-height: 1.5;
 }
 
@@ -375,7 +375,7 @@
 }
 
 .pq2-reference ~ .drawer .tag {
-    font-size: 10px;
+    font-size: var(--text-xs);
     padding: 4px 7px;
 }
 
@@ -417,12 +417,12 @@
     border-radius: 8px;
     background: #fff;
     color: #536273;
-    font-size: 10.5px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference ~ .drawer .inspection-stat b {
     margin-right: 3px;
-    font-size: 12px;
+    font-size: var(--text-metric);
 }
 
 .pq2-reference ~ .drawer .timeline-row {
@@ -433,7 +433,7 @@
     display: block;
     margin-top: 4px;
     color: #667085;
-    font-size: 10.5px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference ~ .drawer .source-list {
@@ -446,7 +446,7 @@
 
 .pq2-reference ~ .drawer .source-row span,
 .pq2-reference ~ .drawer .source-row a {
-    font-size: 11px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference ~ .drawer .df {
@@ -457,13 +457,13 @@
 /* Keep readable column widths when the viewport is genuinely narrow. */
 @media (max-width: 1320px) {
     .pq2-reference table {
-        min-width: 1180px;
-        table-layout: auto;
+        min-width: 1440px;
+        table-layout: fixed;
     }
 
     .pq2-reference th:nth-child(n),
     .pq2-reference td:nth-child(n) {
-        width: auto;
+        width: revert;
     }
 }
 
@@ -473,7 +473,7 @@
     }
 
     .pq2-reference ~ .drawer {
-        width: min(740px, 100vw);
+        width: min(var(--drawer-w), 100vw);
     }
 
     .pq2-reference ~ .drawer .prices {
@@ -487,11 +487,11 @@
     }
 
     .pq2-reference .main {
-        padding: 14px;
+        padding: var(--panel-pad);
     }
 
     .pq2-reference .head h1 {
-        font-size: 26px;
+        font-size: var(--text-title);
     }
 
     .pq2-reference ~ .drawer {

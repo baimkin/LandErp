@@ -214,6 +214,35 @@ public sealed class LocalStore : IJobSource, IResultSink
         tx.Commit(); return Links().Single(x => x.Id == linkId);
     }
 
+    /// <summary>Editor commits link and schedule together: a rejected schedule cannot leave half a search saved.</summary>
+    public LocalScheduledLink SaveSearch(string label, string url, string? groupId, LocalSchedule schedule, LocalScheduledLink? previous = null)
+    {
+        NormalizedSearch safe = SearchUrls.Normalize(url); schedule.Validate();
+        string name = label.Trim();
+        if (name.Length is < 1 or > 200 || name.Any(char.IsControl)) throw new ArgumentException("Введите название поиска.");
+        string id = previous?.Link.Id ?? Guid.CreateVersion7().ToString();
+        using SqliteConnection db = Open(); using SqliteTransaction tx = db.BeginTransaction();
+        if (groupId != null && Convert.ToInt64(Scalar(db, tx, "SELECT count(*) FROM local_groups WHERE id=$id AND active=1", ("$id", groupId)), CultureInfo.InvariantCulture) != 1)
+            throw new ArgumentException("Группа недоступна. Обновите список.");
+        if (Convert.ToInt64(Scalar(db, tx, "SELECT count(*) FROM local_jobs WHERE link_id=$id AND state IN ('Pending','Running','AwaitingManualAction','PausedByUser')", ("$id", id)), CultureInfo.InvariantCulture) > 0)
+            throw new InvalidOperationException("Сначала завершите текущий сбор этого поиска.");
+        if (previous != null && Convert.ToInt64(Scalar(db, tx, "SELECT revision FROM local_link_schedules WHERE link_id=$id", ("$id", id)), CultureInfo.InvariantCulture) != previous.Revision)
+            throw new InvalidOperationException("Поиск уже изменён. Обновите список.");
+        Exec(db, tx, """
+            INSERT INTO local_links VALUES($id,$label,$url,$key,$source,1,$enabled,1,0)
+            ON CONFLICT(id) DO UPDATE SET label=excluded.label,url=excluded.url,canonical=excluded.canonical,source=excluded.source,
+              revision=local_links.revision+CASE WHEN local_links.canonical<>excluded.canonical THEN 1 ELSE 0 END
+            """, ("$id", id), ("$label", name), ("$url", safe.Url), ("$key", safe.Key), ("$source", safe.Source.ToString()), ("$enabled", previous?.Link.Enabled == false ? 0 : 1));
+        DateTimeOffset? next = schedule.Enabled ? LocalScheduleRules.Next(schedule, DateTimeOffset.UtcNow) : null;
+        Exec(db, tx, """
+            INSERT INTO local_link_schedules VALUES($id,$group,$kind,$interval,$times,$zone,$enabled,$next,1)
+            ON CONFLICT(link_id) DO UPDATE SET group_id=excluded.group_id,kind=excluded.kind,interval_minutes=excluded.interval_minutes,
+              fixed_times=excluded.fixed_times,time_zone_id=excluded.time_zone_id,enabled=excluded.enabled,next_run_at=excluded.next_run_at,revision=local_link_schedules.revision+1
+            """, ("$id", id), ("$group", groupId), ("$kind", schedule.Kind.ToString()), ("$interval", schedule.IntervalMinutes),
+            ("$times", LocalJson.Write(schedule.FixedTimes ?? [])), ("$zone", schedule.TimeZoneId), ("$enabled", schedule.Enabled ? 1 : 0), ("$next", next == null ? null : Time(next.Value)));
+        tx.Commit(); return ScheduledLinks().Single(x => x.Link.Id == id);
+    }
+
     /// <summary>Server jobs use a hidden durable link so their recovery data never appears in the Local workspace.</summary>
     public SearchLink EnsureServerWorkLink(string label, string url, SourceSite source)
     {
@@ -533,20 +562,38 @@ public sealed class LocalStore : IJobSource, IResultSink
         using SqliteConnection db = Open();
         string where = " WHERE ($source IS NULL OR l.source=$source) AND ($text='' OR local_contains(l.title||' '||l.location||' '||l.seller||' '||l.external_id,$text))";
         List<(string, object?)> args = [("$source", filter.Source?.ToString()), ("$text", filter.Text)];
+        // Workspace results use only observations sighted in that mode, never another mode's merged values.
+        string prefix = filter.ServerWork == null ? "" : """
+            WITH scoped AS (
+              SELECT o.*,MIN(observed_at) OVER(PARTITION BY source,external_id) AS first_seen,
+                MAX(observed_at) OVER(PARTITION BY source,external_id) AS last_seen,
+                ROW_NUMBER() OVER(PARTITION BY source,external_id ORDER BY observed_at DESC,o.rowid DESC) AS rn
+              FROM local_observations o WHERE EXISTS(SELECT 1 FROM local_sightings s WHERE s.observation_id=o.id AND (s.link_id LIKE 'server-%')=$server)
+            ), workspace_listings AS (
+              SELECT source,external_id,json,first_seen,last_seen,COALESCE(json_extract(json,'$.title.raw'),'') AS title,
+                COALESCE(json_extract(json,'$.location.raw'),'') AS location,COALESCE(json_extract(json,'$.sellerName.raw'),'') AS seller,
+                json_extract(json,'$.price.parsed') AS price FROM scoped WHERE rn=1
+              UNION ALL
+              SELECT source,external_id,json,first_seen,last_seen,title,location,seller,price FROM local_listings legacy
+                WHERE $server=0 AND NOT EXISTS(SELECT 1 FROM local_sightings s WHERE s.source=legacy.source AND s.external_id=legacy.external_id)
+            )
+            """;
+        string table = filter.ServerWork == null ? "local_listings" : "workspace_listings";
+        if (filter.ServerWork != null) args.Add(("$server", filter.ServerWork.Value ? 1 : 0));
         if (filter.LinkId is not null) { where += " AND EXISTS(SELECT 1 FROM local_sightings o WHERE o.source=l.source AND o.external_id=l.external_id AND o.link_id=$link)"; args.Add(("$link", filter.LinkId)); }
         if (filter.JobId is not null) { where += " AND EXISTS(SELECT 1 FROM local_sightings o WHERE o.source=l.source AND o.external_id=l.external_id AND o.job_id=$job)"; args.Add(("$job", filter.JobId)); }
-        long count = Convert.ToInt64(Scalar(db, null, "SELECT count(*) FROM local_listings l" + where, args.ToArray()), CultureInfo.InvariantCulture);
+        long count = Convert.ToInt64(Scalar(db, null, prefix + " SELECT count(*) FROM " + table + " l" + where, args.ToArray()), CultureInfo.InvariantCulture);
         args.Add(("$limit", filter.Size)); args.Add(("$offset", filter.Offset));
-        using SqliteCommand cmd = Command(db, null, "SELECT json,first_seen,last_seen FROM local_listings l" + where
+        using SqliteCommand cmd = Command(db, null, prefix + " SELECT json,first_seen,last_seen FROM " + table + " l" + where
             + (filter.PriceOrder ? " ORDER BY price,source,external_id" : " ORDER BY last_seen DESC,source,external_id") + " LIMIT $limit OFFSET $offset", args.ToArray());
         using SqliteDataReader r = cmd.ExecuteReader(); List<ListingRow> rows = [];
         while (r.Read()) rows.Add(new(LocalJson.Read<ListingObservation>(r.GetString(0)), DateTimeOffset.Parse(r.GetString(1), CultureInfo.InvariantCulture), DateTimeOffset.Parse(r.GetString(2), CultureInfo.InvariantCulture)));
         return new(rows.ToArray(), count);
     }
-    public HistoryRow[] History(SourceSite source, string externalId, int offset = 0, int size = 100)
+    public HistoryRow[] History(SourceSite source, string externalId, int offset = 0, int size = 100, bool? serverWork = null)
     {
-        using SqliteConnection db = Open(); using SqliteCommand cmd = Command(db, null, "SELECT id,job_id,page,json FROM local_observations WHERE source=$source AND external_id=$id ORDER BY observed_at DESC,rowid DESC LIMIT $size OFFSET $offset",
-            ("$source", source.ToString()), ("$id", externalId), ("$size", Math.Clamp(size, 1, 500)), ("$offset", Math.Max(0, offset)));
+        using SqliteConnection db = Open(); using SqliteCommand cmd = Command(db, null, "SELECT id,job_id,page,json FROM local_observations o WHERE source=$source AND external_id=$id AND ($server IS NULL OR EXISTS(SELECT 1 FROM local_sightings s WHERE s.observation_id=o.id AND (s.link_id LIKE 'server-%')=$server)) ORDER BY observed_at DESC,rowid DESC LIMIT $size OFFSET $offset",
+            ("$source", source.ToString()), ("$id", externalId), ("$size", Math.Clamp(size, 1, 500)), ("$offset", Math.Max(0, offset)), ("$server", serverWork == null ? null : serverWork.Value ? 1 : 0));
         using SqliteDataReader r = cmd.ExecuteReader(); List<HistoryRow> rows = [];
         while (r.Read()) rows.Add(new(r.GetString(0), r.GetString(1), r.GetInt32(2), LocalJson.Read<ListingObservation>(r.GetString(3)))); return rows.ToArray();
     }

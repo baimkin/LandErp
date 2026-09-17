@@ -5,7 +5,7 @@
 #main-content > .pq2-reference {
     width: 100%;
     max-width: none;
-    margin: 0 !important;
+    margin: 0;
 }
 
 #main-content:has(> .pq2-reference) {
@@ -18,7 +18,7 @@
 #main-content > .pq2-reference > .main {
     width: 100%;
     max-width: none;
-    padding: 24px 24px 30px;
+    padding: var(--space-6) var(--page-gutter);
 }
 
 #main-content > .pq2-reference .head {
@@ -33,28 +33,28 @@
 
 /* Negotiations must remain readable at normal browser zoom. */
 .pq2-reference ~ .drawer .ct b {
-    font-size: 15px;
+    font-size: var(--text-section);
 }
 
 .pq2-reference ~ .drawer .neg-summary-main b {
-    font-size: 14px;
+    font-size: var(--text-ui);
 }
 
 .pq2-reference ~ .drawer .neg-summary-main p,
 .pq2-reference ~ .drawer .negrow p,
 .pq2-reference ~ .drawer .muted {
-    font-size: 12.5px;
+    font-size: var(--text-sm);
     line-height: 1.5;
 }
 
 .pq2-reference ~ .drawer .negrow b {
-    font-size: 13.5px;
+    font-size: var(--text-ui);
     line-height: 1.4;
 }
 
 .pq2-reference ~ .drawer .tag {
     padding: 5px 8px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     line-height: 1.25;
 }
 
@@ -69,7 +69,7 @@
     inset: auto !important;
     display: flex !important;
     height: auto !important;
-    margin: 0 !important;
+    margin: 0;
     transform: none !important;
 }
 
@@ -87,26 +87,26 @@
 }
 
 .pq2-reference ~ .modalBack .mh b {
-    font-size: 15px;
+    font-size: var(--text-section);
 }
 
 .pq2-reference ~ .modalBack .mh .sub {
-    font-size: 11px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference ~ .modalBack .mb {
-    padding: 14px;
+    padding: var(--panel-pad);
 }
 
 .pq2-reference ~ .modalBack .field label {
     margin-bottom: 6px;
-    font-size: 11.5px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference ~ .modalBack .field input,
 .pq2-reference ~ .modalBack .field select,
 .pq2-reference ~ .modalBack .field textarea {
-    font-size: 13px;
+    font-size: var(--text-body);
 }
 
 .pq2-reference ~ .modalBack .field input,
@@ -122,7 +122,7 @@
 .pq2-reference ~ .modalBack .field small,
 .pq2-reference ~ .modalBack .validation-message,
 .pq2-reference ~ .modalBack .validation-errors {
-    font-size: 11px;
+    font-size: var(--text-sm);
 }
 
 .pq2-reference ~ .modalBack .mf {
@@ -131,33 +131,63 @@
 
 .pq2-reference ~ .modalBack .btn {
     min-height: 38px;
-    font-size: 12px;
-}
-
-/* On wide desktop the editor belongs to the open drawer, so place it immediately to its left. */
-@media (min-width: 1200px) {
-    .pq2-reference ~ .modalBack .add-modal {
-        position: fixed !important;
-        top: 50% !important;
-        right: 798px !important;
-        left: auto !important;
-        width: min(620px, calc(100vw - 824px));
-        transform: translateY(-50%) !important;
-    }
+    font-size: var(--text-ui);
 }
 
 @media (max-width: 1100px) {
     #main-content > .pq2-reference > .main {
-        padding: 18px;
+        padding: var(--space-6) var(--page-gutter);
     }
 }
 
 @media (max-width: 900px) {
     #main-content > .pq2-reference > .main {
-        padding: 14px;
+        padding: var(--panel-pad);
     }
 
     .pq2-reference ~ .modalBack .add-modal {
         width: min(620px, calc(100vw - 24px));
     }
 }
+
+/* Shared type and density; fixed columns protect readable values on laptops. */
+.pq2-reference td { overflow-wrap:anywhere; font-size:var(--text-ui); }
+.pq2-reference th { text-transform:none; font-weight:var(--weight-medium); padding-block:10px; }
+.pq2-reference .obj b { font-weight:var(--weight-medium); }
+.pq2-reference .price b { font-size:var(--text-body); font-variant-numeric:tabular-nums; }
+.pq2-reference .btn,.pq2-reference ~ .drawer .btn,.pq2-reference ~ .modalBack .btn { font-size:var(--text-ui); font-weight:var(--weight-medium); height:auto; min-height:var(--control-h); padding-block:6px; white-space:normal; }
+.pq2-reference .stat { padding:var(--panel-pad); }
+.pq2-reference .chipbtn { height:auto; min-height:var(--control-sm-h); padding-block:5px; }
+.pq2-reference .tools { flex-wrap:wrap; }
+.pq2-reference .tools input { flex:1 1 280px; min-width:0; }
+.pq2-reference .tools select { flex:0 1 230px; max-width:100%; }
+.pq2-reference .stats { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+.pq2-reference ~ .drawer { font-size:var(--text-body); line-height:var(--leading-body); }
+.pq2-reference ~ .drawer .dh,.pq2-reference ~ .drawer .df { flex-shrink:0; flex-wrap:wrap; }
+.pq2-reference ~ .drawer .db { flex:1; min-height:0; overscroll-behavior:contain; }
+.pq2-reference ~ .drawer .ct { align-items:flex-start; flex-wrap:wrap; }
+.pq2-reference ~ .drawer .ct b { font-size:var(--text-section); }
+.pq2-reference ~ .drawer .fact { border:0; background:transparent; padding:8px 0; }
+.pq2-reference ~ .drawer .fact b,.pq2-reference ~ .drawer .p b { font-size:var(--text-body); font-weight:var(--weight-medium); }
+.pq2-reference ~ .drawer .prices { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.pq2-reference ~ .drawer .checks { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.pq2-reference ~ .drawer .check-line,.pq2-reference ~ .drawer .inspection-top { flex-wrap:wrap; }
+.pq2-reference ~ .drawer .inspection-top { position:static; padding:0; border:0; box-shadow:none; background:transparent; }
+.pq2-reference ~ .drawer .source-row { flex-wrap:wrap; overflow-wrap:anywhere; }
+.pq2-reference ~ .drawer .df { padding-bottom:max(12px,env(safe-area-inset-bottom)); }
+.pq2-reference ~ .modalBack .mh,.pq2-reference ~ .modalBack .mf { flex-shrink:0; flex-wrap:wrap; }
+.pq2-reference ~ .modalBack .mb { min-height:0; }
+@media(max-width:620px) {
+  .pq2-reference .tools { display:flex; }
+  .pq2-reference .tools select { flex:1 1 100%; }
+  .pq2-reference ~ .drawer .facts,.pq2-reference ~ .drawer .checks { grid-template-columns:1fr; }
+  .pq2-reference ~ .drawer .neg-summary { grid-template-columns:minmax(0,1fr); }
+  .pq2-reference ~ .drawer .df .btn { flex:1 1 140px; }
+  .pq2-reference .pager { flex-wrap:wrap; gap:12px; }
+}
+@media(max-width:400px) {
+  .pq2-reference .stats { grid-template-columns:1fr; }
+  .pq2-reference ~ .drawer .prices { grid-template-columns:1fr; }
+}
+
+.pq2-reference .badge,.pq2-reference ~ .drawer .badge { max-width:100%; white-space:normal; line-height:var(--leading-ui); padding-block:3px; }

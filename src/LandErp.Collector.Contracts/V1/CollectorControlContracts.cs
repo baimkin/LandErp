@@ -4,6 +4,7 @@ using System.Text.Json;
 namespace LandErp.Collector.Contracts.V1;
 
 public enum CollectorScheduleKind { Manual, Interval, FixedTimes }
+public sealed record RunCollectorSearch(Guid SearchId);
 
 public sealed record CollectorScheduleDefinition(
     CollectorScheduleKind Kind,

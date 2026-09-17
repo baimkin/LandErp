@@ -1,6 +1,6 @@
+using System.Globalization;
 using System.IO;
-using System.Net.Http;
-using System.Text.Json;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -11,99 +11,30 @@ using Microsoft.Win32;
 
 namespace LandErp.ParserSpike.Desktop;
 
-/// <summary>Presentation only: all collection lifetime and durable operations belong to the controller.</summary>
+public sealed record WorkspaceSearch(string Id, string Label, string Url, string Source, string? GroupId,
+    LocalSchedule Schedule, bool Enabled, LocalScheduledLink? Local = null, CollectorSearchView? Remote = null)
+{
+    public string State => Enabled ? "Включён" : "Приостановлен";
+    public string ScheduleText => Schedule.Kind switch { LocalScheduleKind.Interval => $"Каждые {Schedule.IntervalMinutes} мин",
+        LocalScheduleKind.FixedTimes => string.Join(", ", Schedule.FixedTimes ?? []), _ => "Вручную" };
+}
+
+/// <summary>One visible workspace, one destination. Local data is never uploaded by switching modes.</summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "Window Closing awaits operations; dispatcher-owned synchronization resources live until the window closes.")]
 public partial class WorkspaceWindow : Window
 {
     private WorkspaceController? controller;
     private readonly DispatcherTimer refresh = new() { Interval = TimeSpan.FromSeconds(1) };
-    private string? editing;
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly SemaphoreSlim operations = new(1, 1);
+    private WorkspaceSearch[] searches = [];
+    private CollectorWorkspace? remote;
+    private bool ready, closing, changingMode, ticking, modalOpen;
+    private DateTimeOffset workspaceReadAfter;
     private int offset;
-    private int historyOffset;
-    private bool closing;
-    private bool reading;
-    private string? selectedJob;
-    private Task selectionUpdate = Task.CompletedTask;
-    private bool starting;
-    private bool serverCommand;
-    private bool serverTick;
-    private async Task ServerActionAsync(Func<Task> action)
-    {
-        if (controller == null || serverCommand) return;
-        serverCommand = true;
-        try { await action(); ServerStatusText.Text = controller.Server?.Status ?? "Server подключён"; }
-        catch (ServerDeliveryException exception)
-        {
-            ServerStatusText.Text = exception.Code switch
-            {
-                CollectorErrorCodes.SearchPermissionRequired => "В ERP для этого Parser нужно включить право «Разрешить добавление».",
-                CollectorErrorCodes.AgentUnauthorized => "Подключение отозвано или ключ изменён. Вставьте новый код подключения из ERP.",
-                "SERVER_UNAVAILABLE" or "SERVER_TIMEOUT" => "Server сейчас недоступен. Локальные данные сохранены; повторите позже.",
-                _ => "Server отклонил действие: " + exception.Code
-            };
-        }
-        catch (Exception) { ServerStatusText.Text = "Server действие не выполнено. Проверьте локальные настройки/HTTPS и повторите. Local mode и данные сохранены."; }
-        finally { serverCommand = false; }
-    }
-    private void ConnectServerClick(object sender, RoutedEventArgs e)
-    {
-        if (controller == null || serverCommand) return;
-        serverCommand = true;
-        try
-        {
-            ServerConnectionWindow dialog = new(controller) { Owner = this };
-            if (dialog.ShowDialog() == true) ServerStatusText.Text = "Сервер подключён. Настройки сохранены. Можно получить задание на сбор.";
-        }
-        finally { serverCommand = false; }
-    }
-    private async void StartServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () =>
-    {
-        if (controller!.Mode != ParserOperatingMode.Server) throw new InvalidOperationException("Переключите режим на «Через Server».");
-        await controller.ConnectServerAsync(); await controller.Server!.StartWorkAsync(CancellationToken.None); await RefreshAsync();
-    });
-    private async void DeliverServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () => { await controller!.ConnectServerAsync(); await controller.Server!.DeliverAsync(CancellationToken.None); });
-    private async void RefreshServerWorkspaceClick(object sender, RoutedEventArgs e) => await ServerActionAsync(RefreshServerWorkspaceAsync);
-    private async Task RefreshServerWorkspaceAsync()
-    {
-        await controller!.ConnectServerAsync();
-        CollectorWorkspace workspace = await controller.Server!.ReadWorkspaceAsync(CancellationToken.None);
-        ServerGroupInput.ItemsSource = workspace.Groups.Where(item => item.Active).ToArray();
-        ServerSearchesGrid.ItemsSource = workspace.Searches;
-        ServerStatusText.Text = "Серверные группы и поиски обновлены.";
-    }
-    private async void AddServerGroupClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () =>
-    {
-        if (controller!.Mode != ParserOperatingMode.Server) throw new InvalidOperationException("Переключите режим на «Через Server».");
-        await controller.ConnectServerAsync();
-        await controller.Server!.CreateGroupAsync(new(Guid.CreateVersion7(), ServerGroupName.Text, 100), CancellationToken.None);
-        ServerGroupName.Clear(); await RefreshServerWorkspaceAsync();
-    });
-    private async void AddLinkToServerClick(object sender, RoutedEventArgs e) => await ServerActionAsync(async () =>
-    {
-        if (controller!.Mode != ParserOperatingMode.Server) throw new InvalidOperationException("Переключите режим на «Через Server».");
-        if (LinksGrid.SelectedItem is not SearchLink link) throw new InvalidOperationException("Сначала выберите одну локальную ссылку.");
-        CollectorGroupView? group = ServerGroupInput.SelectedItem as CollectorGroupView;
-        CollectorScheduleDefinition schedule = ServerSchedule();
-        MessageBoxResult confirmation = MessageBox.Show(this,
-            $"Добавить на Server только ссылку «{link.Label}»?\n\nЛокальная группа, расписание, история и результаты переданы не будут.",
-            "Добавление ссылки на Server", MessageBoxButton.YesNo, MessageBoxImage.Question);
-        if (confirmation != MessageBoxResult.Yes) return;
-        await controller.ConnectServerAsync();
-        await controller.Server!.CreateSearchAsync(new(Guid.CreateVersion7(), link.Label,
-            Enum.Parse<ListingSource>(link.Source.ToString()), link.Url, controller.Store.Settings().MaxPages, group?.Id, schedule), CancellationToken.None);
-        await RefreshServerWorkspaceAsync();
-    });
-    private CollectorScheduleDefinition ServerSchedule()
-    {
-        CollectorScheduleKind kind = (CollectorScheduleKind)ServerScheduleKindInput.SelectedIndex;
-        string value = ServerScheduleValueInput.Text.Trim();
-        return kind switch
-        {
-            CollectorScheduleKind.Manual => new(kind),
-            CollectorScheduleKind.Interval when int.TryParse(value, out int minutes) => new(kind, IntervalMinutes: minutes),
-            CollectorScheduleKind.FixedTimes => new(kind, FixedTimes: value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)),
-            _ => throw new ArgumentException("Для интервала укажите количество минут.")
-        };
-    }
+    private long total;
+    private SourceSite? noticeSource;
+    private bool IsServer => controller?.Mode == ParserOperatingMode.Server;
     public WorkspaceWindow() : this(null) { }
     public WorkspaceWindow(WorkspaceController? controller)
     {
@@ -113,270 +44,351 @@ public partial class WorkspaceWindow : Window
             try
             {
                 string root = WorkspaceController.WorkspaceRoot();
-                this.controller ??= new WorkspaceController(Path.Combine(root, "local-data", "spike-002.sqlite"), Path.Combine(root, "browser-profiles"));
-                ShowSettings(this.controller.Store.Settings());
-                ModeInput.SelectedIndex = this.controller.Mode == ParserOperatingMode.Local ? 0 : 1;
+                this.controller ??= new(Path.Combine(root, "local-data", "spike-002.sqlite"), Path.Combine(root, "browser-profiles"));
                 this.controller.Runner.ManualActionRequired += OnNotice;
-                if (this.controller.Mode == ParserOperatingMode.Server && this.controller.SavedServerConnection() != null)
-                {
-                    try
-                    {
-                        await this.controller.ConnectServerAsync();
-                        ServerStatusText.Text = "Сохранённое подключение восстановлено. Ожидаем задания Server.";
-                    }
-                    catch (Exception exception) when (exception is ServerDeliveryException or InvalidOperationException or HttpRequestException)
-                    { ServerStatusText.Text = "Автоподключение пока не выполнено. Проверьте Server или вставьте новый код подключения."; }
-                }
-                await RefreshAsync(); refresh.Start();
+                CollectionSettings settings = this.controller.Store.Settings();
+                BrowserInput.SelectedIndex = settings.Browser == "msedge" ? 1 : 0;
+                MaxPagesInput.Text = settings.MaxPages.ToString(CultureInfo.CurrentCulture); FreshnessInput.Text = settings.FreshnessHours.ToString(CultureInfo.CurrentCulture);
+                ModeInput.SelectedIndex = IsServer ? 1 : 0; ready = true;
+                ShowStatus(); await ActionAsync(ReloadAsync); refresh.Start();
             }
-            catch (Exception ex) when (ex is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException)
-            { StatusText.Text = ex.Message; StartButton.IsEnabled = false; }
+            catch (Exception ex) { StatusText.Text = FriendlyError(ex); }
         };
         refresh.Tick += async (_, _) =>
         {
-            await RefreshAsync(false);
-            if (!serverCommand && this.controller is not null) await this.controller.TickLocalScheduleAsync(CancellationToken.None);
-            if (!serverCommand && !serverTick && this.controller?.Mode == ParserOperatingMode.Server && this.controller.Server is { } server)
+            if (!ready || closing || ticking) return;
+            bool ownsOperation = await operations.WaitAsync(0);
+            if (!ownsOperation && !modalOpen) return;
+            ticking = true;
+            try
             {
-                serverTick = true;
-                try { await server.TickAsync(CancellationToken.None); ServerStatusText.Text = server.Status; }
-                finally { serverTick = false; }
+                await this.controller!.TickAsync(lifetime.Token);
+                if (ownsOperation)
+                {
+                    if (IsServer && remote == null && this.controller.Server != null && DateTimeOffset.UtcNow >= workspaceReadAfter)
+                    { workspaceReadAfter = DateTimeOffset.UtcNow.AddSeconds(30); await LoadSearchesAsync(); }
+                    RefreshJobs(); ShowStatus();
+                }
             }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { StatusText.Text = FriendlyError(ex); }
+            finally { ticking = false; if (ownsOperation) operations.Release(); }
         };
         Closing += async (_, e) =>
         {
             if (closing) return;
-            e.Cancel = true; closing = true; refresh.Stop();
-            try { if (this.controller is not null) { this.controller.Runner.ManualActionRequired -= OnNotice; await this.controller.DisposeAsync(); } }
-            finally { _ = Dispatcher.InvokeAsync(Close); }
-        };
-    }
-    private void OnNotice(object? sender, CollectionNotice notice) => _ = Dispatcher.InvokeAsync(() =>
-    { NoticePanel.Visibility = Visibility.Visible; NoticeText.Text = $"{notice.Source}, {notice.Worker}: {notice.Reason}\n{notice.Link}"; });
-    private async Task ActionAsync(Func<Task> action, Action<Exception>? onError = null)
-    {
-        if (controller is null) return;
-        try { await action(); }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or JsonException or Microsoft.Data.Sqlite.SqliteException or Microsoft.Playwright.PlaywrightException)
-        { StatusText.Text = ex.Message; onError?.Invoke(ex); }
-    }
-    private async Task RefreshAsync(bool all = true)
-    {
-        if (reading && !all) return;
-        while (reading && !closing) await Task.Delay(50);
-        if (controller is null || closing) return;
-        reading = true;
-        try
-        {
-            var data = await Task.Run(() => (Links: controller.Store.Links(), Jobs: controller.Store.Jobs()));
-            if (all)
+            e.Cancel = true; closing = true; refresh.Stop(); lifetime.Cancel();
+            await operations.WaitAsync();
+            while (ticking) await Task.Delay(20);
+            try
             {
-                LinksGrid.ItemsSource = data.Links; FilterLink.ItemsSource = data.Links;
-                LocalGroup[] groups = controller.Store.Groups();
-                LocalGroupsGrid.ItemsSource = groups; ScheduleGroupInput.ItemsSource = groups.Where(item => item.Active).ToArray();
-                ScheduleLinkInput.ItemsSource = data.Links; LocalSchedulesGrid.ItemsSource = controller.Store.ScheduledLinks();
-                await FindAsync();
+                if (this.controller != null)
+                {
+                    this.controller.Runner.ManualActionRequired -= OnNotice;
+                    await this.controller.DisposeAsync();
+                }
             }
-            string? id = (JobsGrid.SelectedItem as CollectionJob)?.Id ?? selectedJob;
-            JobsGrid.ItemsSource = data.Jobs;
-            if (id is not null) JobsGrid.SelectedItem = data.Jobs.FirstOrDefault(x => x.Id == id);
-            StartButton.IsEnabled = !starting && !controller.Runner.IsRunning && selectionUpdate.IsCompleted;
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException ex) { StatusText.Text = ex.Message; }
-        finally { reading = false; }
-    }
-    private void LinkFeedback(string message, bool error)
-    {
-        LinkFeedbackPanel.Visibility = Visibility.Visible;
-        LinkFeedbackPanel.Background = error ? System.Windows.Media.Brushes.MistyRose : System.Windows.Media.Brushes.Honeydew;
-        LinkFeedbackText.Text = message;
-        UrlInput.BorderBrush = error ? System.Windows.Media.Brushes.Firebrick : System.Windows.Media.Brushes.Gray;
-    }
-    private async void AddClick(object sender, RoutedEventArgs e)
-    {
-        AddButton.IsEnabled = false;
-        try
-        {
-            await ActionAsync(async () =>
-            {
-                SourceSite? source = SourceInput.SelectedIndex == 0 ? null : SourceInput.SelectedIndex == 1 ? SourceSite.Avito : SourceSite.Cian;
-                string label = LabelInput.Text, url = UrlInput.Text;
-                NormalizedSearch normalized = SearchUrls.Normalize(url, source);
-                await Task.Run(() => controller!.Store.SaveLink(label, url, true, source, editing));
-                editing = null; UrlInput.Clear(); LabelInput.Clear();
-                StatusText.Text = "Ссылка сохранена. " + string.Join(" ", normalized.Warnings);
-                LinkFeedback(StatusText.Text, false);
-                await RefreshAsync();
-            }, ex => LinkFeedback("Не удалось сохранить: " + ex.Message, true));
-        }
-        finally { AddButton.IsEnabled = true; }
-    }
-    private async void DiagnosticsClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    {
-        string? job = DiagnosticJobInput.IsChecked == true ? selectedJob : null;
-        DiagnosticText.Text = controller!.Diagnostics.Describe(await Task.Run(() => controller.Diagnostics.Read(job)));
-    });
-    private async void JsonStartClick(object sender, RoutedEventArgs e) => await ActionAsync(() =>
-    {
-        controller!.JsonResponses.Start();
-        DiagnosticText.Text = controller.JsonResponses.Status;
-        StatusText.Text = "Наблюдение JSON включено. Откройте поиск вручную, выделите зону и прокрутите список.";
-        return Task.CompletedTask;
-    });
-    private void JsonStopClick(object sender, RoutedEventArgs e)
-    {
-        controller?.JsonResponses.Stop();
-        StatusText.Text = controller?.JsonResponses.Status ?? "Запись выключена.";
-    }
-    private async void JsonReadClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    { DiagnosticText.Text = await Task.Run(() => controller!.JsonResponses.Read()); });
-    private async void SelectClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    {
-        if (sender is not CheckBox { DataContext: SearchLink link } input) return;
-        // Read WPF state on its dispatcher before scheduling durable work.
-        bool selected = input.IsChecked == true;
-        Task previous = selectionUpdate;
-        selectionUpdate = SaveSelectionAsync(previous, () => controller!.Store.SelectLink(link.Id, selected));
-        await selectionUpdate; await RefreshAsync();
-    });
-    private async void SelectAllClick(object sender, RoutedEventArgs e) => await SelectAllAsync(true);
-    private async void ClearSelectionClick(object sender, RoutedEventArgs e) => await SelectAllAsync(false);
-    private Task SelectAllAsync(bool value) => ActionAsync(async () =>
-    {
-        Task previous = selectionUpdate;
-        selectionUpdate = SaveSelectionAsync(previous, () => { foreach (SearchLink link in controller!.Store.Links()) controller.Store.SelectLink(link.Id, value); });
-        await selectionUpdate; await RefreshAsync();
-    });
-    private static async Task SaveSelectionAsync(Task previous, Action save)
-    {
-        // Serialize rapid clicks; a failed write blocks that start, but a new user choice can recover.
-        try { await previous; } catch (Exception ex) when (ex is InvalidOperationException or IOException or Microsoft.Data.Sqlite.SqliteException) { }
-        await Task.Run(save);
-    }
-    private void EditClick(object sender, RoutedEventArgs e)
-    {
-        if (LinksGrid.SelectedItem is not SearchLink link) return;
-        editing = link.Id; LabelInput.Text = link.Label; UrlInput.Text = link.Url; SourceInput.SelectedIndex = link.Source == SourceSite.Avito ? 1 : 2;
-    }
-    private async void ArchiveClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    { if (LinksGrid.SelectedItem is SearchLink link) { await Task.Run(() => controller!.Store.ArchiveLink(link.Id)); await RefreshAsync(); } });
-    private async void EnableClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    { if (LinksGrid.SelectedItem is SearchLink link) { await Task.Run(() => controller!.Store.SaveLink(link.Label, link.Url, link.Selected, link.Source, link.Id, !link.Enabled)); await RefreshAsync(); } });
-    private async void OpenClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    {
-        if (LinksGrid.SelectedItem is not SearchLink link) { StatusText.Text = "Выберите сохранённую ссылку."; return; }
-        if (controller!.Runner.IsRunning) { StatusText.Text = "Во время сбора используйте уже открытые вкладки."; return; }
-        // Manual browsing is separate from collection and never performs a read automatically.
-        await controller.OpenManualAsync(link);
-        StatusText.Text = "Поиск открыт. Сбор начнётся по кнопке «Обработать отмеченные».";
-    });
-    private void CaptureManualClick(object sender, RoutedEventArgs e)
-    {
-        if (controller?.CurrentManualSearch() is not { } current)
-        { StatusText.Text = "Сначала откройте сохранённый поиск и настройте фильтры или область в браузере."; return; }
-        UrlInput.Text = current.Url; SourceInput.SelectedIndex = current.Source == SourceSite.Avito ? 1 : 2;
-        StatusText.Text = "Текущая ссылка взята из браузера. Проверьте название, затем сохраните её.";
-    }
-    private async void AddLocalGroupClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    {
-        await Task.Run(() => controller!.Store.SaveGroup(LocalGroupName.Text, controller.Store.Groups().Length * 10));
-        LocalGroupName.Clear(); await RefreshAsync(); StatusText.Text = "Локальная группа сохранена только на этом компьютере.";
-    });
-    private async void SaveLocalScheduleClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    {
-        if (ScheduleLinkInput.SelectedItem is not SearchLink link) throw new InvalidOperationException("Выберите ссылку.");
-        string? groupId = (ScheduleGroupInput.SelectedItem as LocalGroup)?.Id;
-        LocalScheduleKind kind = (LocalScheduleKind)ScheduleKindInput.SelectedIndex;
-        string value = ScheduleValueInput.Text.Trim();
-        LocalSchedule schedule = kind switch
-        {
-            LocalScheduleKind.Manual => new(kind),
-            LocalScheduleKind.Interval when int.TryParse(value, out int minutes) => new(kind, IntervalMinutes: minutes),
-            LocalScheduleKind.FixedTimes => new(kind, FixedTimes: value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)),
-            _ => throw new ArgumentException("Для интервала укажите количество минут.")
+            catch (Exception ex) { StatusText.Text = FriendlyError(ex); }
+            finally { operations.Release(); _ = Dispatcher.InvokeAsync(Close); }
         };
-        await Task.Run(() => controller!.Store.SaveSchedule(link.Id, groupId, schedule));
-        await RefreshAsync(); StatusText.Text = "Локальное расписание сохранено. Оно работает только в режиме «Локально».";
-    });
-    private void ModeChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (controller == null || ModeInput.SelectedIndex < 0) return;
-        ParserOperatingMode requested = ModeInput.SelectedIndex == 0 ? ParserOperatingMode.Local : ParserOperatingMode.Server;
-        try
-        {
-            controller.SetMode(requested);
-            StatusText.Text = requested == ParserOperatingMode.Local
-                ? "Локальный режим: группы, расписания и результаты принадлежат этому компьютеру."
-                : "Режим Server: задания и расписания принадлежат LandErp Server.";
-        }
-        catch (InvalidOperationException exception)
-        {
-            ModeInput.SelectedIndex = controller.Mode == ParserOperatingMode.Local ? 0 : 1;
-            StatusText.Text = exception.Message;
-        }
     }
-    private async void StartClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    public static string FriendlyError(Exception ex) => ex switch
     {
-        if (controller!.Mode != ParserOperatingMode.Local) throw new InvalidOperationException("Переключите режим на «Локально».");
-        if (starting || controller!.Runner.IsRunning) return;
-        starting = true; StartButton.IsEnabled = false;
-        try
+        ServerDeliveryException server => server.Code switch
         {
-            await selectionUpdate;
-            await controller.CloseManualAsync();
-            CollectionSettings settings = controller.Store.Settings();
-            bool force = ForceInput.IsChecked == true;
-            NoticePanel.Visibility = Visibility.Collapsed; StatusText.Text = "Сбор выполняется. Браузеры откроются для выбранных источников.";
-            await Task.Run(() => controller.Runner.StartAsync(settings, force));
-            StatusText.Text = "Очередь завершена. Состояние и причины указаны у каждой задачи.";
+            CollectorErrorCodes.SearchPermissionRequired => "В LandErp нужно разрешить этому парсеру управление поисками.",
+            CollectorErrorCodes.AgentUnauthorized => "Подключение отозвано. Вставьте новый код из LandErp в настройках.",
+            "ACTIVATION_USED" or "ACTIVATION_EXPIRED" => "Код уже использован или устарел. Создайте новый код подключения в LandErp.",
+            "ACTIVATION_INVALID" => "Сервер не принял код. Скопируйте полный код из LandErp.",
+            "SEARCH_BUSY" => "Поиск уже в очереди или выполняется. Дождитесь завершения и обновите список.",
+            "SEARCH_CHANGED" or "GROUP_CHANGED" or "CONFLICT" or "CONCURRENCY_CONFLICT" => "Данные уже изменились на сервере. Обновите список и повторите.",
+            "GROUP_HAS_ACTIVE_SEARCHES" => "Сначала перенесите или приостановите поиски этой группы.",
+            "SEARCH_DISABLED" => "Сначала включите этот поиск.",
+            _ => "Сервер не выполнил действие. Проверьте соединение и повторите. Код: " + server.Code
+        },
+        Microsoft.Data.Sqlite.SqliteException => "Не удалось сохранить данные. Проверьте, нет ли группы или ссылки с таким же названием/адресом.",
+        ArgumentException => "Проверьте введённые данные. " + ex.Message,
+        InvalidOperationException => ex.Message,
+        OperationCanceledException => "Действие отменено.",
+        _ => "Действие не выполнено. Проверьте соединение, браузер и доступ к папке данных."
+    };
+    private async Task ActionAsync(Func<Task> action)
+    {
+        if (controller == null || closing) return;
+        await operations.WaitAsync();
+        try { if (!closing) await action(); }
+        catch (Exception ex) { StatusText.Text = FriendlyError(ex); }
+        finally { operations.Release(); ShowStatus(); }
+    }
+    private T DuringDialog<T>(Func<T> action)
+    {
+        modalOpen = true; controller!.SuspendNewWork = true;
+        try { return action(); }
+        finally { modalOpen = false; controller.SuspendNewWork = false; }
+    }
+    private void ShowStatus()
+    {
+        if (controller == null) return;
+        AutomationButton.Content = controller.AutomationEnabled ? "Выключить автоработу" : "Включить автоработу";
+        ModeDescription.Text = IsServer ? "Поиски и расписания вашей организации" : "Самостоятельная работа на этом компьютере";
+        ConnectionText.Text = IsServer ? controller.ConnectionStatus : "Сервер не требуется";
+        ServerAddressText.Text = controller.SavedServerConnection()?.Origin.ToString() ?? "Сервер пока не подключён";
+        TransferButton.Visibility = ArchiveButton.Visibility = IsServer ? Visibility.Collapsed : Visibility.Visible;
+        StartButton.IsEnabled = !controller.Runner.IsRunning;
+    }
+    private async Task ReloadAsync() { await LoadSearchesAsync(); RefreshJobs(); offset = 0; await FindAsync(); }
+    private async Task LoadSearchesAsync()
+    {
+        string? selectedSearch = (LinksGrid.SelectedItem as WorkspaceSearch)?.Id;
+        string? groupId = (GroupsList.SelectedItem as WorkspaceGroup)?.Id;
+        WorkspaceGroup[] groups;
+        if (IsServer)
+        {
+            await controller!.ConnectServerAsync(); remote = await controller.Server!.ReadWorkspaceAsync(lifetime.Token);
+            groups = remote.Groups.Where(x => x.Active).Select(x => new WorkspaceGroup(x.Id.ToString(), x.Name)).ToArray();
+            searches = remote.Searches.Select(x => new WorkspaceSearch(x.Id.ToString(), x.Label, x.Url, x.Source.ToString(), x.GroupId?.ToString(),
+                new((LocalScheduleKind)x.Schedule.Kind, x.Schedule.IntervalMinutes, x.Schedule.FixedTimes), x.Enabled, Remote: x)).ToArray();
         }
-        finally { starting = false; await RefreshAsync(); }
-    });
-    private void PauseClick(object sender, RoutedEventArgs e) { controller?.Runner.Pause(); StatusText.Text = "Пауза. Текущее браузерное действие завершится перед ожиданием."; }
+        else
+        {
+            groups = controller!.Store.Groups().Where(x => x.Active).Select(x => new WorkspaceGroup(x.Id, x.Name)).ToArray();
+            searches = controller.Store.ScheduledLinks().Select(x => new WorkspaceSearch(x.Link.Id, x.Link.Label, x.Link.Url, x.Link.Source.ToString(), x.GroupId, x.Schedule, x.Link.Enabled, x)).ToArray();
+        }
+        WorkspaceGroup[] all = [new(null, "Все поиски"), new("", "Без группы"), .. groups];
+        GroupsList.ItemsSource = all; GroupsList.SelectedItem = all.FirstOrDefault(x => x.Id == groupId) ?? all[0]; ApplyGroup();
+        LinksGrid.SelectedItem = LinksGrid.Items.Cast<WorkspaceSearch>().FirstOrDefault(x => x.Id == selectedSearch);
+    }
+    private void ApplyGroup()
+    {
+        if (LinksGrid == null) return;
+        string? id = (LinksGrid.SelectedItem as WorkspaceSearch)?.Id;
+        string? group = (GroupsList.SelectedItem as WorkspaceGroup)?.Id;
+        WorkspaceSearch[] rows = searches.Where(x => group == null || (group == "" ? x.GroupId == null : x.GroupId == group)).ToArray();
+        LinksGrid.ItemsSource = rows; LinksGrid.SelectedItem = rows.FirstOrDefault(x => x.Id == id);
+        EmptyText.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+    private void GroupSelected(object sender, SelectionChangedEventArgs e) => ApplyGroup();
+    private void RefreshJobs()
+    {
+        if (controller == null) return;
+        JobsGrid.ItemsSource = controller.Store.Jobs().Where(x => x.LinkId.StartsWith("server-", StringComparison.Ordinal) == IsServer).Select(x => new
+        {
+            Label = searches.FirstOrDefault(s => s.Id == x.LinkId || s.Url == x.Url)?.Label ?? new Uri(x.Url).Host,
+            Source = x.Source.ToString(), State = x.DisplayState, Progress = $"{x.Page} / {x.Limit} стр.", Started = x.StartedAtUtc.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.CurrentCulture)
+        }).ToArray();
+    }
+    private async void ModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ready || changingMode || controller == null) return;
+        int chosen = ModeInput.SelectedIndex;
+        await ActionAsync(async () =>
+        {
+            try
+            {
+                await controller.CloseManualAsync(); controller.SetMode(chosen == 1 ? ParserOperatingMode.Server : ParserOperatingMode.Local);
+                remote = null; searches = []; LinksGrid.ItemsSource = searches; GroupsList.ItemsSource = null;
+                ListingsGrid.ItemsSource = null; JobsGrid.ItemsSource = null; PageText.Text = "";
+                await ReloadAsync(); StatusText.Text = "Режим изменён. Поиски остаются в своём рабочем пространстве.";
+            }
+            finally { changingMode = true; ModeInput.SelectedIndex = IsServer ? 1 : 0; changingMode = false; }
+        });
+    }
+    private async void AutomationClick(object sender, RoutedEventArgs e)
+    {
+        if (controller == null) return;
+        // Stop is immediate even if a server request is still in flight.
+        if (controller.AutomationEnabled) { StopClick(sender, e); return; }
+        await ActionAsync(async () => { await controller.CloseManualAsync(); controller.SetAutomation(true); ShowStatus(); StatusText.Text = "Авторабота включена. Приложение должно оставаться открытым."; });
+    }
+    private void StopClick(object sender, RoutedEventArgs e)
+    {
+        if (controller == null) return;
+        try { controller.SetAutomation(false); StatusText.Text = "Авторабота выключена. Текущий сбор останавливается, результаты сохраняются."; ShowStatus(); }
+        catch (Exception ex) { StatusText.Text = FriendlyError(ex); }
+    }
+    private void PauseClick(object sender, RoutedEventArgs e) { controller?.Runner.Pause(); StatusText.Text = "Текущий сбор на паузе. Чтобы выключить автоработу, нажмите «Остановить всё»."; }
     private void ResumeClick(object sender, RoutedEventArgs e) => controller?.Runner.Resume();
-    private void StopClick(object sender, RoutedEventArgs e) { controller?.Runner.Stop(); StatusText.Text = "Остановка; завершённые страницы и частичные результаты сохранены."; }
-    private async void ResumeAvitoClick(object sender, RoutedEventArgs e) => await ActionAsync(() => controller!.Runner.ResumeSourceAsync(SourceSite.Avito));
-    private async void ResumeCianClick(object sender, RoutedEventArgs e) => await ActionAsync(() => controller!.Runner.ResumeSourceAsync(SourceSite.Cian));
-    private async void SaveSettingsClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    private void OnNotice(object? sender, CollectionNotice notice) => _ = Dispatcher.InvokeAsync(() =>
+    { noticeSource = notice.Source; NoticePanel.Visibility = Visibility.Visible; NoticeText.Text = $"{notice.Source}: требуется ваше действие. Проверьте открытую вкладку браузера, затем продолжите сбор."; });
+    private async void VerifyClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    { if (noticeSource is { } source) { await controller!.Runner.ResumeSourceAsync(source); NoticePanel.Visibility = Visibility.Collapsed; } });
+    private async void RefreshClick(object sender, RoutedEventArgs e) => await ActionAsync(ReloadAsync);
+    private WorkspaceSearch Selected() => LinksGrid.SelectedItem as WorkspaceSearch ?? throw new InvalidOperationException("Выберите поиск в списке.");
+    private async void AddClick(object sender, RoutedEventArgs e) => await ActionAsync(() => EditSearchAsync(null));
+    private async void EditClick(object sender, RoutedEventArgs e) => await ActionAsync(() => EditSearchAsync(Selected()));
+    private Task EditSearchAsync(WorkspaceSearch? item, string? captured = null)
     {
-        SettingsGrid.CommitEdit(DataGridEditingUnit.Cell, true); SettingsGrid.CommitEdit(DataGridEditingUnit.Row, true);
-        CollectionSettings settings = SettingsEditor.Read((SettingEntry[])SettingsGrid.ItemsSource, BrowserInput.SelectedIndex == 1 ? "msedge" : "chrome", ErrorInput.SelectedIndex == 1 ? ErrorPolicy.PauseSource : ErrorPolicy.Continue);
-        await Task.Run(() => controller!.Store.SaveSettings(settings)); StatusText.Text = "Настройки сохранены для следующего запуска.";
-    });
-    private void ShowSettings(CollectionSettings settings)
-    { SettingsGrid.ItemsSource = SettingsEditor.Entries(settings); BrowserInput.SelectedIndex = settings.Browser == "chrome" ? 0 : 1; ErrorInput.SelectedIndex = settings.ErrorPolicy == ErrorPolicy.Continue ? 0 : 1; }
-    private void DefaultsClick(object sender, RoutedEventArgs e) => ShowSettings(new CollectionSettings());
-    private async void FindClick(object sender, RoutedEventArgs e) => await ActionAsync(async () => { offset = 0; await FindAsync(); });
-    private async Task FindAsync()
-    {
-        if (controller is null) return;
-        SourceSite? source = FilterSource.SelectedIndex == 0 ? null : FilterSource.SelectedIndex == 1 ? SourceSite.Avito : SourceSite.Cian;
-        ListingFilter filter = new(SearchInput.Text, source, (FilterLink.SelectedItem as SearchLink)?.Id,
-            FilterJob.IsChecked == true ? selectedJob : null, offset, 100, PriceSort.IsChecked == true);
-        ListingPage page = await Task.Run(() => controller.Store.ReadListings(filter));
-        ListingsGrid.ItemsSource = page.Rows; PageText.Text = $"Всего {page.Total}; показано {offset + (page.Rows.Length == 0 ? 0 : 1)}–{offset + page.Rows.Length}";
+        WorkspaceGroup[] groups = ((WorkspaceGroup[]?)GroupsList.ItemsSource ?? []).Where(x => !string.IsNullOrEmpty(x.Id)).ToArray();
+        SearchDraft draft = new(item?.Label ?? "Новый поиск", captured ?? item?.Url ?? "", item?.GroupId ?? (GroupsList.SelectedItem as WorkspaceGroup)?.Id,
+            item?.Schedule ?? new(LocalScheduleKind.Manual), item?.Remote?.MaxPages ?? controller!.Store.Settings().MaxPages);
+        if (draft.GroupId == "") draft = draft with { GroupId = null };
+        Guid commandId = Guid.CreateVersion7();
+        SearchEditorWindow editor = new(item == null ? "Добавить поиск" : "Изменить поиск", draft, groups, IsServer, false, async value =>
+        {
+            if (IsServer)
+            {
+                await controller!.ConnectServerAsync(); ListingSource source = Enum.Parse<ListingSource>(SearchUrls.Normalize(value.Url).Source.ToString());
+                Guid? group = value.GroupId == null ? null : Guid.Parse(value.GroupId);
+                if (item?.Remote is { } old) await controller.Server!.UpdateSearchAsync(new(old.Id, old.Revision, value.Label, source, value.Url, value.MaxPages, group, value.ServerSchedule, old.Enabled), lifetime.Token);
+                else await controller.Server!.CreateSearchAsync(new(commandId, value.Label, source, value.Url, value.MaxPages, group, value.ServerSchedule), lifetime.Token);
+            }
+            else controller!.Store.SaveSearch(value.Label, value.Url, value.GroupId, value.Schedule, item?.Local);
+        }) { Owner = this };
+        if (DuringDialog(editor.ShowDialog) == true) { StatusText.Text = "Поиск сохранён."; return LoadSearchesAsync(); }
+        return Task.CompletedTask;
     }
-    private async void PreviousClick(object sender, RoutedEventArgs e) => await ActionAsync(async () => { offset = Math.Max(0, offset - 100); await FindAsync(); });
-    private async void NextClick(object sender, RoutedEventArgs e) => await ActionAsync(async () => { offset += 100; await FindAsync(); });
-    private async void ResetFiltersClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    { SearchInput.Clear(); FilterSource.SelectedIndex = 0; FilterLink.SelectedItem = null; FilterJob.IsChecked = false; PriceSort.IsChecked = false; offset = 0; await FindAsync(); });
-    private async void ListingSelected(object sender, SelectionChangedEventArgs e) => await ActionAsync(async () => { historyOffset = 0; await DetailsAsync(); });
-    private async void MoreHistoryClick(object sender, RoutedEventArgs e) => await ActionAsync(async () => { historyOffset += 100; await DetailsAsync(); });
-    private async Task DetailsAsync()
+    private async void ToggleSearchClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
     {
-        if (ListingsGrid.SelectedItem is not ListingRow row || controller is null) return;
-        HistoryRow[] history = await Task.Run(() => controller.Store.History(row.Source, row.ExternalId, historyOffset));
-        DetailsText.Text = "Текущее известное состояние (отсутствие поля не очищает прежнее значение):\n" + LocalJson.Write(row.Observation)
-            + "\n\nИсходные наблюдения, включая историю цены (по 100):\n" + LocalJson.Write(history);
-    }
-    private async void JobSelected(object sender, SelectionChangedEventArgs e) => await ActionAsync(async () =>
-    {
-        if (JobsGrid.SelectedItem is CollectionJob job) { selectedJob = job.Id; JournalGrid.ItemsSource = await Task.Run(() => controller!.Store.Journal(job.Id)); }
+        WorkspaceSearch item = Selected();
+        if (item.Remote is { } r) await controller!.Server!.UpdateSearchAsync(new(r.Id, r.Revision, r.Label, r.Source, r.Url, r.MaxPages, r.GroupId, r.Schedule, !r.Enabled), lifetime.Token);
+        else if (item.Local is { } l) controller!.Store.SaveLink(l.Link.Label, l.Link.Url, l.Link.Selected, l.Link.Source, l.Link.Id, !l.Link.Enabled);
+        await LoadSearchesAsync();
     });
+    private async void ArchiveClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    {
+        WorkspaceSearch item = Selected(); if (item.Local == null) return;
+        if (MessageBox.Show(this, $"Убрать «{item.Label}» из рабочих поисков? Результаты и история сохранятся.", "Архивировать поиск", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        controller!.Store.ArchiveLink(item.Id); await LoadSearchesAsync();
+    });
+    private async void RunClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    {
+        WorkspaceSearch item = Selected(); if (!item.Enabled) throw new InvalidOperationException("Сначала включите поиск.");
+        await controller!.CloseManualAsync();
+        if (item.Remote != null)
+        {
+            await controller.Server!.EnqueueSearchAsync(item.Remote.Id, lifetime.Token);
+            StatusText.Text = "Поиск добавлен в очередь сервера. Его примет доступный парсер с включённой автоработой.";
+        }
+        else { _ = ObserveRunAsync(controller.Runner.StartAsync(controller.Store.Settings(), onlyLinkId: item.Id)); StatusText.Text = "Сбор запущен с учётом настройки свежести."; }
+        Pages.SelectedIndex = 1; RefreshJobs();
+    });
+    private async Task ObserveRunAsync(Task run)
+    { try { await run; } catch (Exception ex) { if (!closing) StatusText.Text = FriendlyError(ex); } }
+    private async void BrowseClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    {
+        if (controller!.Runner.IsRunning) throw new InvalidOperationException("Сначала остановите текущий сбор.");
+        WorkspaceSearch? selected = LinksGrid.SelectedItem as WorkspaceSearch;
+        string url;
+        if (selected != null) url = selected.Url;
+        else
+        {
+            string? selectedUrl = DuringDialog(() => SearchEditorWindow.ChooseSource(this));
+            if (selectedUrl == null) return;
+            url = selectedUrl;
+        }
+        await OpenBrowserAsync(url); StatusText.Text = "Настройте область и фильтры в браузере, затем нажмите «Добавить из браузера».";
+    });
+    private async Task OpenBrowserAsync(string url)
+    {
+        if (controller!.Runner.IsRunning) throw new InvalidOperationException("Сначала остановите текущий сбор.");
+        NormalizedSearch safe = SearchUrls.Normalize(url);
+        await controller.OpenManualAsync(new("manual", "Браузер", safe.Url, safe.Source, false, false, 1));
+    }
+    private async void CaptureClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    {
+        var current = controller!.CurrentManualSearch() ?? throw new InvalidOperationException("Сначала откройте сайт кнопкой «Открыть сайт» и настройте поиск.");
+        await EditSearchAsync(null, current.Url);
+    });
+    private async void TransferClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    {
+        WorkspaceSearch selected = Selected(); if (selected.Local == null) return;
+        await controller!.ConnectServerAsync(); CollectorWorkspace workspace = await controller.Server!.ReadWorkspaceAsync(lifetime.Token);
+        WorkspaceGroup[] groups = workspace.Groups.Where(x => x.Active).Select(x => new WorkspaceGroup(x.Id.ToString(), x.Name)).ToArray();
+        if (groups.Length == 0) throw new InvalidOperationException("Сначала создайте группу в серверном режиме или в LandErp.");
+        Guid commandId = Guid.CreateVersion7();
+        SearchEditorWindow dialog = new("Добавить ссылку на сервер", new(selected.Label, selected.Url, null, new(LocalScheduleKind.Manual), controller.Store.Settings().MaxPages), groups, true, true, async draft =>
+        {
+            string groupName = groups.Single(x => x.Id == draft.GroupId).Name;
+            if (MessageBox.Show(this, $"Добавить «{draft.Label}» в группу «{groupName}» на сервере {controller.SavedServerConnection()?.Origin.Host}?\n\n{draft.Url}\n\nЛокальные группы, расписания, история и результаты не передаются. Новое расписание — из этого окна.", "Подтвердите добавление", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) throw new OperationCanceledException();
+            await controller.Server.CreateSearchAsync(new(commandId, draft.Label, Enum.Parse<ListingSource>(SearchUrls.Normalize(draft.Url).Source.ToString()), draft.Url, draft.MaxPages, Guid.Parse(draft.GroupId!), draft.ServerSchedule), lifetime.Token);
+        }) { Owner = this };
+        if (DuringDialog(dialog.ShowDialog) == true) StatusText.Text = "Ссылка добавлена на сервер. Локальный поиск сохранён без изменений.";
+    });
+    private async void AddGroupClick(object sender, RoutedEventArgs e) => await ActionAsync(() => SaveGroupAsync(false, false));
+    private async void RenameGroupClick(object sender, RoutedEventArgs e) => await ActionAsync(() => SaveGroupAsync(true, false));
+    private async void ArchiveGroupClick(object sender, RoutedEventArgs e) => await ActionAsync(() => SaveGroupAsync(true, true));
+    private async Task SaveGroupAsync(bool edit, bool archive)
+    {
+        WorkspaceGroup? selected = GroupsList.SelectedItem as WorkspaceGroup;
+        if (edit && string.IsNullOrEmpty(selected?.Id)) throw new InvalidOperationException("Выберите группу.");
+        string? name = archive ? selected!.Name : DuringDialog(() => SearchEditorWindow.AskName(this, edit ? "Переименовать группу" : "Новая группа", edit ? selected!.Name : ""));
+        if (name == null) return;
+        if (archive && MessageBox.Show(this, $"Архивировать группу «{name}»? Поиски и результаты не удаляются.", "Архивировать группу", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        if (IsServer)
+        {
+            await controller!.ConnectServerAsync();
+            if (edit)
+            {
+                CollectorGroupView old = remote!.Groups.Single(x => x.Id.ToString() == selected!.Id);
+                await controller.Server!.UpdateGroupAsync(new(old.Id, old.Revision, name, old.SortOrder, !archive), lifetime.Token);
+            }
+            else await controller.Server!.CreateGroupAsync(new(Guid.CreateVersion7(), name, 100), lifetime.Token);
+        }
+        else
+        {
+            LocalGroup? old = edit ? controller!.Store.Groups().Single(x => x.Id == selected!.Id) : null;
+            if (archive && searches.Any(x => x.GroupId == selected!.Id && x.Enabled)) throw new InvalidOperationException("Сначала перенесите или приостановите поиски этой группы.");
+            controller!.Store.SaveGroup(name, old?.SortOrder ?? 100, old?.Id, !archive, old?.Revision);
+        }
+        await LoadSearchesAsync();
+    }
+    private async void ConnectClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    { if (new ServerConnectionWindow(controller!) { Owner = this }.ShowDialog() == true) { remote = null; StatusText.Text = "Сервер подключён."; if (IsServer) await ReloadAsync(); } });
+    private async void SaveSettingsClick(object sender, RoutedEventArgs e) => await ActionAsync(() =>
+    {
+        if (!int.TryParse(MaxPagesInput.Text, out int pages) || pages is < 1 or > 100) throw new ArgumentException("Предел страниц: от 1 до 100.");
+        if (!double.TryParse(FreshnessInput.Text, out double hours) || !double.IsFinite(hours) || hours is < 0 or > 168) throw new ArgumentException("Свежесть данных: от 0 до 168 часов.");
+        controller!.Store.SaveSettings(controller.Store.Settings() with { Browser = BrowserInput.SelectedIndex == 1 ? "msedge" : "chrome", MaxPages = pages, FreshnessHours = hours });
+        StatusText.Text = "Настройки сохранены для следующего запуска."; return Task.CompletedTask;
+    });
+    private ListingFilter Filter(int start = 0, int size = 100) => new(SearchInput.Text, Offset: start, Size: size, ServerWork: IsServer);
+    private Task FindAsync()
+    {
+        ListingPage page = controller!.Store.ReadListings(Filter(offset)); total = page.Total;
+        ListingsGrid.ItemsSource = page.Rows; PageText.Text = $"{(page.Rows.Length == 0 ? 0 : offset + 1)}–{offset + page.Rows.Length} из {total}";
+        return Task.CompletedTask;
+    }
+    private async void FindClick(object sender, RoutedEventArgs e) => await ActionAsync(() => { offset = 0; return FindAsync(); });
+    private async void PreviousClick(object sender, RoutedEventArgs e) => await ActionAsync(() => { offset = Math.Max(0, offset - 100); return FindAsync(); });
+    private async void NextClick(object sender, RoutedEventArgs e) => await ActionAsync(() => { if (offset + 100 < total) offset += 100; return FindAsync(); });
+    private void ListingSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (controller == null || ListingsGrid.SelectedItem is not ListingRow row) { OpenListingButton.IsEnabled = false; DetailsTitle.Text = "Выберите объявление"; DetailsText.Text = HistoryText.Text = ""; return; }
+        ListingObservation data = row.Observation; DetailsTitle.Text = row.Title;
+        DetailsText.Text = $"{row.Price}\n{row.Location}\n\nПлощадь: {data.AreaSquareMeters.Raw ?? "нет данных"}\nПродавец: {data.SellerName.Raw ?? "нет данных"}\n\n{data.Description.Raw}\n\nПоследнее наблюдение: {row.LastSeen.ToLocalTime():dd.MM.yyyy HH:mm}";
+        HistoryRow[] history = controller.Store.History(row.Source, row.ExternalId, serverWork: IsServer);
+        HistoryText.Text = "Последние наблюдения (до 100):\n" + string.Join("\n", history.Select(x => $"{x.Observation.ObservedAtUtc.ToLocalTime():dd.MM.yyyy HH:mm} — {x.Observation.DisplayPrice}"));
+        OpenListingButton.IsEnabled = true;
+    }
+    private async void OpenListingClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    { if (ListingsGrid.SelectedItem is ListingRow row) await OpenBrowserAsync(row.Observation.Url); });
+    public static string CsvCell(string? text)
+    {
+        string value = text ?? "";
+        if (value.TrimStart().StartsWith('=') || value.TrimStart().StartsWith('+') || value.TrimStart().StartsWith('-') || value.TrimStart().StartsWith('@')) value = "'" + value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
     private async void ExportClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
     {
-        if (selectedJob is null) { StatusText.Text = "Выберите задачу в очереди."; return; }
-        SaveFileDialog dialog = new() { Filter = "JSON|*.json", FileName = "collection-" + selectedJob + ".json" };
-        if (dialog.ShowDialog() == true) { await Task.Run(() => { using FileStream stream = File.Create(dialog.FileName); controller!.Store.ExportJob(selectedJob, stream); }); StatusText.Text = "Исходные наблюдения экспортированы."; }
+        SaveFileDialog dialog = new() { Filter = "Таблица CSV|*.csv", FileName = "Объявления.csv" };
+        if (DuringDialog(() => dialog.ShowDialog(this)) != true) return;
+        using StreamWriter writer = new(dialog.FileName, false, new UTF8Encoding(true));
+        await writer.WriteLineAsync("Название;Цена;Адрес;Продавец;Ссылка;Последнее наблюдение");
+        for (int start = 0; ; start += 500)
+        {
+            ListingPage page = controller!.Store.ReadListings(Filter(start, 500));
+            foreach (ListingRow row in page.Rows) await writer.WriteLineAsync(string.Join(';', new[] { row.Title, row.Price, row.Location, row.Seller, row.Observation.Url, row.LastSeen.ToString("O") }.Select(CsvCell)));
+            if (start + page.Rows.Length >= page.Total) break;
+        }
+        StatusText.Text = "Таблица сохранена.";
+    });
+    private async void DiagnosticsClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    {
+        SaveFileDialog dialog = new() { Filter = "Текстовый отчёт|*.txt", FileName = "Parser-диагностика.txt" };
+        if (DuringDialog(() => dialog.ShowDialog(this)) != true) return;
+        // No tokens, URLs, browser responses or raw source content enter the support report.
+        string report = $"LandErp Parser\nДата: {DateTimeOffset.Now:O}\nВерсия: {typeof(WorkspaceWindow).Assembly.GetName().Version}\nРежим: {(IsServer ? "Сервер" : "Локально")}\nАвторабота: {controller!.AutomationEnabled}\nСбор активен: {controller.Runner.IsRunning}\n";
+        report += string.Join("\n", controller.Store.Jobs().GroupBy(x => x.State).Select(x => $"{x.Key}: {x.Count()}"));
+        await File.WriteAllTextAsync(dialog.FileName, report); StatusText.Text = "Краткая диагностика сохранена.";
     });
 }

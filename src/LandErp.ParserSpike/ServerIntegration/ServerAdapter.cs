@@ -36,6 +36,36 @@ public sealed class ServerDeliveryException(string code, bool retryable) : Excep
 /// <summary>HTTPS transport only. Default certificate verification is never disabled in runtime.</summary>
 public sealed class ServerAdapter(HttpClient http, ServerConnection connection)
 {
+    public static ServerConnection ParseActivationCode(string code)
+    {
+        if (!code.StartsWith("LDP1.", StringComparison.Ordinal) || code.Length > 4096) throw new ArgumentException("Неверный код подключения.");
+        try
+        {
+            string value = code[5..].Replace('-', '+').Replace('_', '/');
+            string[] parts = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(value.PadRight((value.Length + 3) / 4 * 4, '='))).Split('|');
+            if (parts.Length != 3 || !Uri.TryCreate(parts[0], UriKind.Absolute, out Uri? origin)
+                || origin.Scheme != Uri.UriSchemeHttps || origin.UserInfo.Length != 0 || origin.AbsolutePath != "/" || origin.Query.Length != 0 || origin.Fragment.Length != 0
+                || !Guid.TryParse(parts[1], out Guid id) || id == Guid.Empty || parts[2].Length != 64 || !parts[2].All(char.IsAsciiHexDigit))
+                throw new ArgumentException("Неверный код подключения.");
+            return new(origin, id, parts[2]);
+        }
+        catch (FormatException) { throw new ArgumentException("Неверный код подключения."); }
+    }
+    public async Task<ServerConnection> ActivateAsync(CancellationToken token)
+    {
+        AgentActivationReceipt result = await SendAsync<AgentActivationReceipt>("activation",
+            new AgentActivation(connection.AgentId, connection.Token, Environment.MachineName, 1, "parser-workspace", [ListingSource.Avito, ListingSource.Cian]), token)
+            ?? throw new ServerDeliveryException("ACTIVATION_INVALID", false);
+        if (result.AgentId != connection.AgentId || result.ContractVersion != 1 || result.Credential.Length != 64 || !result.Credential.All(char.IsAsciiHexDigit))
+            throw new ServerDeliveryException("ACTIVATION_INVALID", false);
+        return new(connection.Origin, result.AgentId, result.Credential);
+    }
+    public async Task<CollectorSearchView> UpdateSearchAsync(UpdateCollectorSearch command, CancellationToken token) =>
+        await SendAsync<CollectorSearchView>("workspace/searches/update", command, token) ?? throw new ServerDeliveryException("INVALID_SEARCH", false);
+    public async Task<CollectorGroupView> UpdateGroupAsync(UpdateCollectorGroup command, CancellationToken token) =>
+        await SendAsync<CollectorGroupView>("workspace/groups/update", command, token) ?? throw new ServerDeliveryException("INVALID_GROUP", false);
+    public async Task EnqueueSearchAsync(Guid searchId, CancellationToken token) =>
+        await SendAsync<object>("workspace/searches/run", new RunCollectorSearch(searchId), token);
     public async Task RegisterAsync(CancellationToken token) => await SendAsync<object>("registration", new AgentRegistration(1, "stage1.1", [ListingSource.Avito, ListingSource.Cian]), token);
     public async Task HeartbeatAsync(AgentHeartbeat heartbeat, CancellationToken token) => await SendAsync<object>("heartbeat", heartbeat, token);
     public Task<CollectionWork?> ClaimAsync(CancellationToken token) => SendAsync<CollectionWork>("work/claim", null, token);
@@ -53,7 +83,7 @@ public sealed class ServerAdapter(HttpClient http, ServerConnection connection)
     private async Task<T?> SendAsync<T>(string path, object? body, CancellationToken token)
     {
         using HttpRequestMessage request = new(HttpMethod.Post, new Uri(connection.Origin, "api/collector/v1/" + path));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connection.Token);
+        if (path != "activation") request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connection.Token);
         request.Headers.Add("X-LandErp-Agent-Id", connection.AgentId.ToString());
         request.Headers.Add("X-Correlation-ID", Guid.CreateVersion7().ToString());
         if (body != null) request.Content = JsonContent.Create(body, options: CollectionJson.Options);

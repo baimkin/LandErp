@@ -26,7 +26,7 @@ public sealed record LocalSchedule(
         if (!Enum.IsDefined(Kind)) throw new ArgumentOutOfRangeException(nameof(Kind));
         if (string.IsNullOrWhiteSpace(TimeZoneId) || TimeZoneId.Length > 100) throw new ArgumentException("LOCAL_SCHEDULE_TIME_ZONE_INVALID");
         _ = TimeZoneInfo.FindSystemTimeZoneById(TimeZoneId);
-        if (Kind == LocalScheduleKind.Interval && IntervalMinutes is < 5 or > 10080)
+        if (Kind == LocalScheduleKind.Interval && IntervalMinutes is not (>= 5 and <= 10080))
             throw new ArgumentOutOfRangeException(nameof(IntervalMinutes));
         if (Kind != LocalScheduleKind.Interval && IntervalMinutes != null) throw new ArgumentException("LOCAL_SCHEDULE_INTERVAL_UNEXPECTED");
         string[] times = FixedTimes ?? [];
@@ -157,7 +157,7 @@ public sealed record ListingRow(ListingObservation Observation, DateTimeOffset F
     public decimal? Longitude => Observation.Longitude.Parsed;
 }
 public sealed record ListingFilter(string Text = "", SourceSite? Source = null, string? LinkId = null,
-    string? JobId = null, int Offset = 0, int Size = 100, bool PriceOrder = false);
+    string? JobId = null, int Offset = 0, int Size = 100, bool PriceOrder = false, bool? ServerWork = null);
 public sealed record ListingPage(ListingRow[] Rows, long Total);
 public sealed record HistoryRow(string Id, string JobId, int Page, ListingObservation Observation);
 

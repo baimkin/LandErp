@@ -1,5 +1,17 @@
 # Активная задача LandErp
 
+> **Активная работа:** [GATE-PARSER-WORKSPACE-UX.md](GATE-PARSER-WORKSPACE-UX.md), ветка `codex/parser-workspace-ux`. Переработка Parser разрешена владельцем после аудита. Реализация и проверки завершены: [отчёт Parser UX](reports/PARSER_WORKSPACE_UX_REPORT.md), 89 offline/WPF и 5 PostgreSQL тестов. Ожидается пользовательская приёмка живого сценария. Изменения Server UI сохраняются; следующий блок — предыдущий Gate.
+
+
+> **Активный Gate от 17 сентября 2026 года:**
+> [`GATE-UI-CONSISTENCY.md`](GATE-UI-CONSISTENCY.md) — визуальная унификация
+> существующих страниц; ветка `codex/ui-consistency`. Реализация завершена,
+> ожидает визуальной приёмки владельца. Evidence:
+> [`UI_CONSISTENCY_REPORT.md`](reports/UI_CONSISTENCY_REPORT.md).
+> Required reading и scope определены этим Gate. Browser/visual
+> tests не запускались: визуальную приёмку выполнит владелец. Следующие записи —
+> исторический контекст, они не активируют другую работу.
+
 > **Завершённый Gate от 17 сентября 2026 года по прямому запросу владельца:**
 > [`GATE-COLLECTORS-V1-3-UI.md`](GATE-COLLECTORS-V1-3-UI.md) — законченный экран
 > `/collectors` по макету «Поиски и парсинг v1.3». Ветка

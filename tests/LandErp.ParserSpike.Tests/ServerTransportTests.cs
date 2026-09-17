@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using LandErp.Collector.Contracts.V1;
 using LandErp.ParserSpike.ServerIntegration;
+using LandErp.ParserSpike.LocalCollection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace LandErp.ParserSpike.Tests;
@@ -11,6 +12,83 @@ namespace LandErp.ParserSpike.Tests;
 [TestClass]
 public sealed class ServerTransportTests
 {
+    [TestMethod]
+    public async Task NewActivationCodeExchangesSecretWithoutBearerAndValidatesOrigin()
+    {
+        Guid id = Guid.CreateVersion7();
+        string code = "LDP1." + Convert.ToBase64String(Encoding.UTF8.GetBytes($"https://server.test/|{id:N}|{new string('B', 64)}")).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        ServerConnection activation = ServerAdapter.ParseActivationCode(code);
+        using HttpClient http = new(new ReplyHandler(request =>
+        {
+            Assert.AreEqual("/api/collector/v1/activation", request.RequestUri!.AbsolutePath);
+            Assert.IsNull(request.Headers.Authorization);
+            AgentActivation body = JsonSerializer.Deserialize<AgentActivation>(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult(), CollectionJson.Options)!;
+            Assert.AreEqual(id, body.AgentId); Assert.AreEqual(new string('B', 64), body.ActivationSecret);
+            return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new AgentActivationReceipt(id, new string('C', 64), 1, "PC"), CollectionJson.Options));
+        }));
+        ServerConnection issued = await new ServerAdapter(http, activation).ActivateAsync(CancellationToken.None);
+        Assert.AreEqual(new string('C', 64), issued.Token);
+        string invalid = "LDP1." + Convert.ToBase64String(Encoding.UTF8.GetBytes($"http://server.test/|{id:N}|{new string('B', 64)}"));
+        Assert.ThrowsExactly<ArgumentException>(() => ServerAdapter.ParseActivationCode(invalid));
+    }
+
+    [TestMethod]
+    public async Task StopDuringClaimDoesNotOpenBrowserAndCompletesLeaseAsInterrupted()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "LandErp-StopClaim", Guid.NewGuid().ToString("N"));
+        LocalStore store = new(Path.Combine(root, "local.sqlite"));
+        NoSessions sessions = new(); await using QueueRunner runner = new(store, sessions);
+        ServerOutbox outbox = new(Path.Combine(root, "outbox.sqlite"));
+        ServerCoordinator? coordinator = null;
+        CollectionWork work = new(Guid.CreateVersion7(), Guid.CreateVersion7(), DateTimeOffset.UtcNow.AddMinutes(3), ListingSource.Avito, "https://www.avito.ru/moskva/zemelnye_uchastki", 1, "Search");
+        int interrupted = 0;
+        using HttpClient http = new(new ReplyHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("work/claim", StringComparison.Ordinal))
+            { coordinator!.AcceptNewWork = false; return Json(HttpStatusCode.OK, JsonSerializer.Serialize(work, CollectionJson.Options)); }
+            if (request.RequestUri.AbsolutePath.EndsWith("results", StringComparison.Ordinal))
+            {
+                CollectionResult result = JsonSerializer.Deserialize<CollectionResult>(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult(), CollectionJson.Options)!;
+                Assert.AreEqual(CollectionOutcome.Interrupted, result.Outcome); Assert.AreEqual(0, result.Observations.Length); interrupted++;
+                return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new CollectionReceipt(result.ResultId, "Interrupted", 0, 0), CollectionJson.Options));
+            }
+            return Json(HttpStatusCode.OK, "{}");
+        }));
+        await using (coordinator = new(store, runner, outbox, Adapter(http)))
+        {
+            await coordinator.TickAsync(CancellationToken.None);
+            Assert.AreEqual(0, sessions.Created); Assert.AreEqual(0, store.Jobs().Length);
+            await coordinator.TickAsync(CancellationToken.None);
+            Assert.AreEqual(1, interrupted); Assert.IsNull(outbox.ReadWork()); Assert.AreEqual(0, outbox.Pending().Length);
+        }
+    }
+
+    private sealed class NoSessions : ISourceSessions
+    {
+        public int Created;
+        public Task<ISourcePage> CreatePageAsync(SourceSite source, CollectionSettings settings, CancellationToken cancellationToken)
+        { Created++; throw new InvalidOperationException("Browser must not start after Stop"); }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [TestMethod]
+    public async Task ExpiredLeaseRetainsRejectedPayloadWithoutBlockingFutureWork()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "LandErp-ExpiredLease", Guid.NewGuid().ToString("N"));
+        LocalStore store = new(Path.Combine(root, "local.sqlite"));
+        NoSessions sessions = new(); await using QueueRunner runner = new(store, sessions);
+        ServerOutbox outbox = new(Path.Combine(root, "outbox.sqlite"));
+        CollectionWork work = new(Guid.CreateVersion7(), Guid.CreateVersion7(), DateTimeOffset.UtcNow.AddMinutes(-1), ListingSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 1, "Expired");
+        outbox.SaveWork(new(work, null));
+        using HttpClient http = new(new ReplyHandler(_ => Problem(HttpStatusCode.Conflict, "LEASE_EXPIRED")));
+        await using ServerCoordinator coordinator = new(store, runner, outbox, Adapter(http)) { AcceptNewWork = false };
+        await coordinator.TickAsync(CancellationToken.None);
+        Assert.AreEqual(0, sessions.Created); Assert.IsNull(outbox.ReadWork()); Assert.AreEqual(0, outbox.Pending().Length);
+        Assert.IsTrue(outbox.HasDelivery(work.JobId, work.LeaseId));
+        StringAssert.Contains(coordinator.Status, "сохранены на компьютере");
+    }
+
     [TestMethod]
     public async Task ProblemDetailsMachineCodeIsPreservedInsteadOfCollapsedByStatus()
     {

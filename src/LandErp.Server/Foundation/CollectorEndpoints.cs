@@ -24,6 +24,12 @@ internal static class CollectorEndpoints
         { CollectionWork? work = await gateway.ClaimAsync(Credentials(http), token); return work == null ? Results.NoContent() : Results.Ok(work); });
         group.MapPost("/workspace", async (HttpContext http, ICollectorGateway gateway, CancellationToken token) =>
             Results.Ok(await gateway.ReadWorkspaceAsync(Credentials(http), token)));
+        group.MapPost("/workspace/groups/update", async (HttpContext http, UpdateCollectorGroup request, ICollectorGateway gateway, CancellationToken token) =>
+            Results.Ok(await gateway.UpdateGroupAsync(Credentials(http), request, token)));
+        group.MapPost("/workspace/searches/update", async (HttpContext http, UpdateCollectorSearch request, ICollectorGateway gateway, CancellationToken token) =>
+            Results.Ok(await gateway.UpdateSearchAsync(Credentials(http), request, token)));
+        group.MapPost("/workspace/searches/run", async (HttpContext http, RunCollectorSearch request, ICollectorGateway gateway, CancellationToken token) =>
+        { await gateway.EnqueueSearchAsync(Credentials(http), request, token); return Results.Ok(new { queued = true }); });
         group.MapPost("/workspace/groups", async (HttpContext http, CreateCollectorGroup request, ICollectorGateway gateway, CancellationToken token) =>
             Results.Ok(await gateway.CreateGroupAsync(Credentials(http), request, token)));
         group.MapPost("/workspace/searches", async (HttpContext http, CreateCollectorSearch request, ICollectorGateway gateway, CancellationToken token) =>

@@ -1,0 +1,80 @@
+/* Size against the workspace, including the legacy drawer, not the monitor. */
+.case-workspace { container: property-card / inline-size; min-width: 0; gap: var(--space-4); }
+.case-workspace > *, .case-hero > *, .case-dashboard > *, .case-object-card > * { min-width: 0; }
+.case-titlebar { align-items: center; }
+.case-identity { min-width: 0; }
+.case-identity h1, .case-identity h2 { margin: var(--space-2) 0; font-size: var(--text-title); line-height: var(--leading-heading); overflow-wrap: anywhere; }
+.case-identity p { max-width: 90ch; overflow-wrap: anywhere; }
+.case-breadcrumb { display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--text-muted); font-size: var(--text-sm); }
+.case-breadcrumb a { color: var(--accent); text-decoration: none; }
+.case-breadcrumb a:hover { text-decoration: underline; }
+.case-title-actions { flex-shrink: 0; max-width: 45%; }
+.surface { padding: var(--panel-pad); box-shadow: var(--shadow-sm); }
+.surface h3 { margin: 0 0 var(--space-3); font-size: var(--text-section); }
+.case-hero { grid-template-columns: minmax(0, 1.5fr) minmax(360px, 1fr); align-items: start; }
+.case-object-card { grid-template-columns: minmax(230px, 38%) minmax(0, 1fr); padding: 0; align-items: start; }
+.case-gallery { min-width: 0; padding: var(--space-3); }
+/* A real height prevents intrinsic image dimensions from expanding the grid. */
+.case-cover { position: relative; height: 280px; min-height: 0; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-subtle); }
+.case-cover img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: cover; }
+.case-photo-caption { position: absolute; bottom: var(--space-2); left: var(--space-2); right: var(--space-2); padding: var(--space-2); border-radius: var(--radius-sm); background: var(--navy-950); color: white; font-size: var(--text-sm); text-align: center; }
+.case-cover.empty { display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); padding: var(--space-5); text-align: center; border: 1px dashed var(--border-strong); background: var(--surface-subtle); }
+.case-cover.empty svg { width: 36px; height: 36px; margin-bottom: var(--space-2); color: var(--text-muted); }
+.case-cover.empty span { font-size: var(--text-sm); max-width: 24ch; }
+.case-photo-controls { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding-top: var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
+.case-photo-controls .btn { min-width: 40px; }
+.case-object-facts { padding: var(--panel-pad); }
+.case-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5) var(--space-4); margin: var(--space-4) 0 0; }
+.case-facts dt { color: var(--text-muted); font-size: var(--text-sm); margin-bottom: var(--space-1); }
+.case-facts dd { margin: 0; color: var(--text-strong); font-weight: var(--weight-medium); overflow-wrap: anywhere; }
+.case-facts small { display: block; color: var(--text-muted); font-weight: var(--weight-normal); font-size: var(--text-sm); margin-top: var(--space-1); }
+.case-description { margin-top: var(--space-5); }
+.case-description p { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 75ch; line-height: var(--leading-body); }
+.case-side-stack { align-content: start; }
+.case-main-price { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.case-main-price span { color: var(--text-muted); font-size: var(--text-sm); }
+.case-main-price strong { color: var(--text-strong); font-size: var(--text-metric); font-weight: var(--weight-semibold); }
+.price-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.price-grid > div { padding: var(--space-3); }
+.price-grid strong { margin-top: var(--space-1); font-size: var(--text-ui); overflow-wrap: anywhere; }
+.case-pricing > .btn { padding-left: 0; }
+.case-next-action { border-left: 3px solid var(--accent); }
+.case-next-action > strong { font-size: var(--text-body); font-weight: var(--weight-medium); }
+.case-next-action p { margin: var(--space-2) 0 0; overflow-wrap: anywhere; }
+.case-context { display: grid; grid-template-columns: 1fr .7fr 1fr 1.5fr; gap: var(--space-4); padding: var(--panel-pad); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.case-context > div { min-width: 0; }
+.case-context small, .case-context strong { display: block; overflow-wrap: anywhere; }
+.case-context small { font-size: var(--text-sm); color: var(--text-muted); }
+.case-context strong { margin: var(--space-1) 0; font-size: var(--text-ui); font-weight: var(--weight-medium); }
+.case-dashboard { grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); align-items: start; }
+.case-dashboard > .stack { align-content: start; }
+.section-heading { margin-bottom: var(--space-3); align-items: flex-start; }
+.section-heading h3 { margin-bottom: 0; }
+.section-heading > div { min-width: 0; }
+.dossier-row { align-items: flex-start; overflow-wrap: anywhere; }
+.dossier-row > div { min-width: min(220px, 100%); }
+.case-workspace ::deep .page-state.empty { margin: 0; padding: var(--space-4); }
+.case-workspace ::deep .page-state.empty h2 { font-size: var(--text-body); margin: 0; }
+.case-workspace ::deep .page-state.empty .state-icon { display: none; }
+.case-acquired-banner { overflow-wrap: anywhere; }
+@container property-card (max-width: 1150px) {
+    .case-hero, .case-dashboard { grid-template-columns: 1fr; }
+    .case-side-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+    .case-object-card { grid-template-columns: minmax(230px, 32%) minmax(0, 1fr); }
+    .price-grid { grid-template-columns: 1fr; }
+    .price-grid > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); }
+    .price-grid strong { margin: 0; }
+}
+@container property-card (max-width: 760px) {
+    .case-titlebar { flex-direction: column; align-items: flex-start; }
+    .case-title-actions { justify-content: flex-start; max-width: 100%; }
+    .case-object-card, .case-side-stack, .check-columns { grid-template-columns: 1fr; }
+    .case-cover { height: 240px; }
+    .case-context { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .case-acquired-banner { grid-template-columns: 1fr; }
+    .case-tabs { position: static; }
+}
+@container property-card (max-width: 420px) {
+    .case-facts, .case-context, .check-summary { grid-template-columns: 1fr; }
+    .case-title-actions .btn { white-space: normal; }
+}

@@ -1,25 +1,28 @@
 @inherits LayoutComponentBase
-<div class="app-shell" data-density="@(compact ? "compact" : "comfortable")" data-interactive-ready="@(interactiveReady ? "true" : "false")" inert="@(!interactiveReady)">
-    <aside class="sidebar @(menuOpen ? "open" : "")" aria-label="Навигация LandErp">
-        <a class="brand" href="/" @onclick="() => menuOpen = false">
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+<div class="app-shell" data-sidebar="@(sidebarCollapsed ? "compact" : "expanded")" data-density="@(compact ? "compact" : "comfortable")" data-interactive-ready="@(interactiveReady ? "true" : "false")" inert="@(!interactiveReady)">
+    <aside id="app-navigation" class="sidebar @(menuOpen ? "open" : "")" aria-label="Навигация LandErp" @onkeydown="HandleMenuKey">
+        <a class="brand" href="/" aria-label="LandErp — обзор" @onclick="() => menuOpen = false">
             <span class="brand-symbol" aria-hidden="true">L</span>
             <div><strong>LandErp</strong><small>Земля. Данные. Решения.</small></div>
         </a>
+        <button type="button" class="sidebar-toggle" aria-label="@(sidebarCollapsed ? "Развернуть меню" : "Свернуть меню")" title="@(sidebarCollapsed ? "Развернуть меню" : "Свернуть меню")" aria-expanded="@(!sidebarCollapsed)" aria-controls="app-navigation" @onclick="ToggleSidebarAsync"><span aria-hidden="true">@(sidebarCollapsed ? "»" : "«")</span><span class="toggle-label">Свернуть меню</span></button>
         <button type="button" class="icon-button mobile-menu sidebar-close" aria-label="Закрыть меню" @onclick="() => menuOpen = false">×</button>
 
         <nav class="side-nav">
             <p class="nav-label">Работа</p>
-            <NavLink class="nav-item" href="/" Match="NavLinkMatch.All" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">◫</span><span>Обзор</span></NavLink>
+            <NavLink class="nav-item" href="/" Match="NavLinkMatch.All" @onclick="() => menuOpen = false" title="Обзор" aria-label="Обзор"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><span class="nav-caption">Обзор</span></NavLink>
             <AuthorizeView Policy="manager_queue.read">
-                <NavLink class="nav-item" href="/incoming" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">⇥</span><span>Входящие объявления</span></NavLink>
-                <NavLink class="nav-item" href="/procurement-v2" Match="NavLinkMatch.All" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">≡</span><span>Очередь закупки</span></NavLink>
+                <NavLink class="nav-item" href="/incoming" @onclick="() => menuOpen = false" title="Входящие объявления" aria-label="Входящие объявления"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 4h16v16H4z M4 14h5l2 3h2l2-3h5 M12 3v8 M9 8l3 3 3-3"/></svg></span><span class="nav-caption">Входящие объявления</span></NavLink>
+                <NavLink class="nav-item" href="/procurement-v2" Match="NavLinkMatch.All" @onclick="() => menuOpen = false" title="Очередь закупки" aria-label="Очередь закупки"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M8 5h13 M8 12h13 M8 19h13 M3 5h1 M3 12h1 M3 19h1"/></svg></span><span class="nav-caption">Очередь закупки</span></NavLink>
             </AuthorizeView>
-            <span class="nav-item nav-item-disabled" aria-disabled="true" title="Раздел ещё не подключён"><span class="nav-icon" aria-hidden="true">▦</span><span>Проекты и финансы</span></span>
+            <span class="nav-item nav-item-disabled" aria-disabled="true" title="Раздел ещё не подключён"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V3h8v4 M3 12h18 M10 12v3h4v-3"/></svg></span><span class="nav-caption">Проекты и финансы</span></span>
 
             <p class="nav-label">Система</p>
-            <AuthorizeView Policy="collection.read"><NavLink class="nav-item" href="/collectors" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">⌁</span><span>Поиски и парсинг</span></NavLink></AuthorizeView>
-            <AuthorizeView Policy="users.read"><NavLink class="nav-item" href="/organization" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">▦</span><span>Организация</span></NavLink></AuthorizeView>
-            <AuthorizeView Policy="audit.read"><NavLink class="nav-item" href="/audit" @onclick="() => menuOpen = false"><span class="nav-icon" aria-hidden="true">≡</span><span>Аудит</span></NavLink></AuthorizeView>
+            <AuthorizeView Policy="collection.read"><NavLink class="nav-item" href="/collectors" @onclick="() => menuOpen = false" title="Поиски и парсинг" aria-label="Поиски и парсинг"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6 M7 10h6 M10 7v6"/></svg></span><span class="nav-caption">Поиски и парсинг</span></NavLink></AuthorizeView>
+            <AuthorizeView Policy="users.read"><NavLink class="nav-item" href="/organization" @onclick="() => menuOpen = false" title="Организация" aria-label="Организация"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5 M5 17v-5h14v5"/></svg></span><span class="nav-caption">Организация</span></NavLink></AuthorizeView>
+            <AuthorizeView Policy="audit.read"><NavLink class="nav-item" href="/audit" @onclick="() => menuOpen = false" title="Аудит" aria-label="Аудит"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg></span><span class="nav-caption">Аудит</span></NavLink></AuthorizeView>
         </nav>
 
         <div class="sidebar-footer">
@@ -38,7 +41,7 @@
             <button type="button" class="icon-button mobile-menu" aria-label="Открыть меню" aria-expanded="@menuOpen" @onclick="() => menuOpen = !menuOpen">☰</button>
             <div class="top-context"><span class="eyebrow">Закупка</span><strong>Земля. Данные. Решения.</strong></div>
             <div class="top-actions">
-                <button type="button" class="btn quiet density-control" aria-pressed="@compact" @onclick="() => compact = !compact">@(compact ? "Обычно" : "Компактно")</button>
+                <button type="button" class="btn quiet density-control" title="Изменить отступы и высоту строк, сохранив размер текста" aria-pressed="@compact" @onclick="ToggleDensityAsync">@(compact ? "Плотность: компактная" : "Плотность: обычная")</button>
                 <AuthorizeView>
                     <Authorized Context="auth">
                         <div class="shell-user">
@@ -57,14 +60,61 @@
 
 @code {
     private bool compact;
+    private bool sidebarCollapsed;
     private bool menuOpen;
     private bool interactiveReady;
 
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
+        // Only presentation preferences are stored; unavailable storage must not block the app.
+        try
+        {
+            var preferences = await JS.InvokeAsync<ShellPreferences>("LandErpUi.loadShellPreferences");
+            compact = preferences.Compact;
+            sidebarCollapsed = preferences.SidebarCollapsed;
+        }
+        catch (JSException) { }
+        catch (OperationCanceledException) { }
         interactiveReady = true;
         StateHasChanged();
+    }
+
+    private async Task ToggleSidebarAsync()
+    {
+        sidebarCollapsed = !sidebarCollapsed;
+        await SavePreferencesAsync();
+    }
+
+    private async Task ToggleDensityAsync()
+    {
+        compact = !compact;
+        await SavePreferencesAsync();
+    }
+
+    private async Task SavePreferencesAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("LandErpUi.saveShellPreferences", new ShellPreferences
+            {
+                Compact = compact,
+                SidebarCollapsed = sidebarCollapsed
+            });
+        }
+        catch (JSException) { }
+        catch (OperationCanceledException) { }
+    }
+
+    private void HandleMenuKey(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape") menuOpen = false;
+    }
+
+    public sealed class ShellPreferences
+    {
+        public bool Compact { get; set; }
+        public bool SidebarCollapsed { get; set; }
     }
 
     private static string Initial(string? value)

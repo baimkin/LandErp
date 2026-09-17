@@ -1,102 +1,25 @@
-<Window x:Class="LandErp.ParserSpike.Desktop.WorkspaceWindow"
- xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
- xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
- Title="LandErp — сбор Avito и Cian" Width="1400" Height="900" MinWidth="950" MinHeight="650" Background="#F4F6F8">
- <Window.Resources>
-  <Style TargetType="Button"><Setter Property="Padding" Value="12,7"/><Setter Property="Margin" Value="3"/></Style>
-  <Style TargetType="TextBox"><Setter Property="Padding" Value="7"/><Setter Property="Margin" Value="3"/></Style>
-  <Style TargetType="DataGrid"><Setter Property="AutoGenerateColumns" Value="False"/><Setter Property="CanUserAddRows" Value="False"/><Setter Property="IsReadOnly" Value="True"/><Setter Property="EnableRowVirtualization" Value="True"/></Style>
- </Window.Resources>
- <DockPanel Margin="16">
-  <StackPanel DockPanel.Dock="Top">
-   <TextBlock Text="Сохранённые поиски → очередь → результаты" FontSize="23" FontWeight="SemiBold" Margin="3,0,0,10"/>
-   <WrapPanel>
-    <TextBlock Text="Режим" VerticalAlignment="Center" Margin="3"/>
-    <ComboBox x:Name="ModeInput" Width="150" Margin="3" SelectionChanged="ModeChanged"><ComboBoxItem Content="Локально"/><ComboBoxItem Content="Через Server"/></ComboBox>
-    <Button x:Name="StartButton" Content="Обработать отмеченные" Click="StartClick"/>
-    <CheckBox x:Name="ForceInput" Content="Начать заново, игнорируя свежесть" VerticalAlignment="Center" Margin="10"/>
-    <Button Content="Пауза" Click="PauseClick"/><Button Content="Продолжить" Click="ResumeClick"/><Button Content="Остановить" Click="StopClick"/>
-    <Button Content="Продолжить Avito" Click="ResumeAvitoClick"/><Button Content="Продолжить Cian" Click="ResumeCianClick"/>
-   </WrapPanel>
-   <Border Background="#FFF0C2" Padding="10" Margin="3,8" x:Name="NoticePanel" Visibility="Collapsed"><TextBlock x:Name="NoticeText" TextWrapping="Wrap"/></Border>
-   <TextBlock x:Name="StatusText" Text="Сбор запускается только по кнопке. Авторизация и CAPTCHA — вручную в браузере." TextWrapping="Wrap" Margin="3,7"/>
-  </StackPanel>
-  <TabControl>
-
-   <TabItem Header="Ссылки и очередь">
-    <Grid Margin="10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <StackPanel><TextBlock Text="Название поиска" Margin="3"/><TextBox x:Name="LabelInput" ToolTip="Название поиска"/></StackPanel>
-      <StackPanel Grid.Column="1"><TextBlock Text="Ссылка Avito или Cian" Margin="3"/><TextBox x:Name="UrlInput" ToolTip="Публичная HTTPS-ссылка Avito или Cian"/><Border x:Name="LinkFeedbackPanel" Visibility="Collapsed" Padding="8" Margin="3"><TextBlock x:Name="LinkFeedbackText" TextWrapping="Wrap"/></Border></StackPanel>
-      <ComboBox x:Name="SourceInput" Grid.Column="2" SelectedIndex="0" Margin="3"><ComboBoxItem Content="Авто"/><ComboBoxItem Content="Avito"/><ComboBoxItem Content="Cian"/></ComboBox>
-      <Button x:Name="AddButton" Grid.Column="3" Content="Добавить / сохранить" Click="AddClick"/>
-     </Grid>
-     <WrapPanel Grid.Row="1"><Button Content="Отметить все" Click="SelectAllClick"/><Button Content="Снять отметки" Click="ClearSelectionClick"/><Button Content="Редактировать выбранную" Click="EditClick"/><Button Content="Включить / отключить" Click="EnableClick"/><Button Content="Архивировать" Click="ArchiveClick"/><Button Content="Открыть поиск вручную" Click="OpenClick"/><Button Content="Взять ссылку из браузера" Click="CaptureManualClick"/></WrapPanel>
-     <DataGrid Grid.Row="2" x:Name="LinksGrid">
-      <DataGrid.Columns>
-       <DataGridTemplateColumn Header="Собирать" Width="85"><DataGridTemplateColumn.CellTemplate><DataTemplate><CheckBox IsChecked="{Binding Selected, Mode=OneWay}" Click="SelectClick" HorizontalAlignment="Center"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
-       <DataGridTextColumn Header="Название" Binding="{Binding Label}" Width="180"/><DataGridTextColumn Header="Источник" Binding="{Binding Source}" Width="80"/><DataGridTextColumn Header="Ссылка" Binding="{Binding Url}" Width="*"/><DataGridTextColumn Header="Включена" Binding="{Binding Enabled}" Width="70"/>
-      </DataGrid.Columns>
-     </DataGrid>
-     <TextBlock Grid.Row="3" Text="Очередь и журнал выбранной задачи" FontWeight="Bold" Margin="0,10"/>
-     <DataGrid Grid.Row="4" x:Name="JobsGrid" SelectionChanged="JobSelected"><DataGrid.Columns>
-      <DataGridTextColumn Header="Источник" Binding="{Binding Source}" Width="80"/><DataGridTextColumn Header="Состояние" Binding="{Binding DisplayState}" Width="150"/><DataGridTextColumn Header="Страница" Binding="{Binding Page}" Width="75"/><DataGridTextColumn Header="Предел" Binding="{Binding Limit}" Width="60"/><DataGridTextColumn Header="Вкладка" Binding="{Binding Owner}" Width="90"/><DataGridTextColumn Header="Причина" Binding="{Binding Reason}" Width="*"/>
-     </DataGrid.Columns></DataGrid>
-     <DataGrid Grid.Row="5" x:Name="JournalGrid" Margin="0,8,0,0"><DataGrid.Columns><DataGridTextColumn Header="Страница" Binding="{Binding Page}"/><DataGridTextColumn Header="Объявления" Binding="{Binding Count}"/><DataGridTextColumn Header="Новые" Binding="{Binding NewCount}"/><DataGridTextColumn Header="Повторные" Binding="{Binding RepeatCount}"/><DataGridCheckBoxColumn Header="Завершена" Binding="{Binding Completed}"/><DataGridTextColumn Header="Результат" Binding="{Binding Reason}" Width="*"/><DataGridTextColumn Header="Время" Binding="{Binding Time}" Width="200"/></DataGrid.Columns></DataGrid>
-    </Grid>
-   </TabItem>
-   <TabItem Header="Группы и расписания">
-    <Grid Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="2*"/></Grid.RowDefinitions>
-     <WrapPanel><TextBlock Text="Новая локальная группа" VerticalAlignment="Center"/><TextBox x:Name="LocalGroupName" Width="240"/><Button Content="Добавить группу" Click="AddLocalGroupClick"/></WrapPanel>
-     <DataGrid Grid.Row="1" x:Name="LocalGroupsGrid"><DataGrid.Columns><DataGridTextColumn Header="Группа" Binding="{Binding Name}" Width="*"/><DataGridTextColumn Header="Порядок" Binding="{Binding SortOrder}" Width="100"/><DataGridCheckBoxColumn Header="Активна" Binding="{Binding Active}" Width="90"/></DataGrid.Columns></DataGrid>
-     <WrapPanel Grid.Row="2" Margin="0,10,0,6">
-      <TextBlock Text="Ссылка" VerticalAlignment="Center"/><ComboBox x:Name="ScheduleLinkInput" Width="230" DisplayMemberPath="Label" Margin="3"/>
-      <TextBlock Text="Группа" VerticalAlignment="Center"/><ComboBox x:Name="ScheduleGroupInput" Width="190" DisplayMemberPath="Name" Margin="3"/>
-      <TextBlock Text="Расписание" VerticalAlignment="Center"/><ComboBox x:Name="ScheduleKindInput" Width="140" SelectedIndex="0" Margin="3"><ComboBoxItem Content="Вручную"/><ComboBoxItem Content="Интервал"/><ComboBoxItem Content="По времени"/></ComboBox>
-      <TextBox x:Name="ScheduleValueInput" Width="170" ToolTip="Интервал в минутах либо время через запятую: 09:00, 18:00"/>
-      <Button Content="Сохранить расписание" Click="SaveLocalScheduleClick"/>
-     </WrapPanel>
-     <DataGrid Grid.Row="3" x:Name="LocalSchedulesGrid"><DataGrid.Columns><DataGridTextColumn Header="Ссылка" Binding="{Binding Link.Label}" Width="220"/><DataGridTextColumn Header="Группа" Binding="{Binding GroupName}" Width="180"/><DataGridTextColumn Header="Тип" Binding="{Binding Schedule.Kind}" Width="110"/><DataGridTextColumn Header="Следующий запуск" Binding="{Binding NextRunAt}" Width="210"/><DataGridTextColumn Header="URL" Binding="{Binding Link.Url}" Width="*"/></DataGrid.Columns></DataGrid>
-    </Grid>
-   </TabItem>
-   <TabItem Header="Сохранённые объявления">
-    <Grid Margin="10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-     <WrapPanel>
-      <TextBox x:Name="SearchInput" Width="230" ToolTip="Заголовок, адрес, продавец или ID"/>
-      <ComboBox x:Name="FilterSource" SelectedIndex="0" Width="100" Margin="3"><ComboBoxItem Content="Все"/><ComboBoxItem Content="Avito"/><ComboBoxItem Content="Cian"/></ComboBox>
-      <ComboBox x:Name="FilterLink" Width="190" Margin="3" DisplayMemberPath="Label" ToolTip="Поиск; пустое значение — все"/>
-      <CheckBox x:Name="FilterJob" Content="Задача из очереди" VerticalAlignment="Center" Margin="8"/>
-      <CheckBox x:Name="PriceSort" Content="По цене" VerticalAlignment="Center" Margin="8"/>
-      <Button x:Name="FindButton" Content="Найти" Click="FindClick"/><Button Content="Сбросить фильтры" Click="ResetFiltersClick"/><Button Content="Экспорт выбранной задачи" Click="ExportClick"/>
-     </WrapPanel>
-     <DataGrid Grid.Row="1" x:Name="ListingsGrid" SelectionChanged="ListingSelected"><DataGrid.Columns>
-      <DataGridTextColumn Header="Источник" Binding="{Binding Source}" Width="80"/><DataGridTextColumn Header="ID" Binding="{Binding ExternalId}" Width="100"/><DataGridTextColumn Header="Заголовок" Binding="{Binding Title}" Width="2*"/><DataGridTextColumn Header="Цена" Binding="{Binding Price}" Width="140"/><DataGridTextColumn Header="Адрес" Binding="{Binding Location}" Width="2*"/><DataGridTextColumn Header="Продавец" Binding="{Binding Seller}" Width="*"/><DataGridTextColumn Header="Широта" Binding="{Binding Latitude}" Width="100"/><DataGridTextColumn Header="Долгота" Binding="{Binding Longitude}" Width="100"/>
-     </DataGrid.Columns></DataGrid>
-     <WrapPanel Grid.Row="2"><Button Content="← 100" Click="PreviousClick"/><TextBlock x:Name="PageText" VerticalAlignment="Center" Margin="10"/><Button Content="100 →" Click="NextClick"/><Button Content="Ещё история" Click="MoreHistoryClick"/></WrapPanel>
-     <TextBox Grid.Row="3" x:Name="DetailsText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
-    </Grid>
-   </TabItem>
-   <TabItem Header="Диагностика"><DockPanel Margin="10"><StackPanel DockPanel.Dock="Top"><WrapPanel><Button x:Name="DiagnosticsButton" Content="Обновить журнал" Click="DiagnosticsClick"/><CheckBox x:Name="DiagnosticJobInput" Content="Только выбранная задача" VerticalAlignment="Center" Margin="10"/></WrapPanel><WrapPanel><Button Content="Начать запись JSON" Click="JsonStartClick"/><Button Content="Остановить запись JSON" Click="JsonStopClick"/><Button Content="Показать JSON" Click="JsonReadClick"/></WrapPanel><TextBlock Text="Для проверки карты: начните запись, откройте сохранённый поиск вручную и прокрутите правый список. Записываются структуры ответов и отдельные публичные числа; личные значения исключены." TextWrapping="Wrap" Margin="5"/></StackPanel><TextBox x:Name="DiagnosticText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/></DockPanel></TabItem>
-   <TabItem Header="Настройки">
-    <DockPanel Margin="15"><StackPanel DockPanel.Dock="Top">
-     <TextBlock Text="Настройки применяются к следующему запуску. CAPTCHA всегда требует ручной проверки." TextWrapping="Wrap"/>
-     <WrapPanel><Button x:Name="SaveSettingsButton" Content="Сохранить настройки" Click="SaveSettingsClick"/><Button Content="Вернуть значения по умолчанию" Click="DefaultsClick"/></WrapPanel>
-     <WrapPanel Margin="3,8"><TextBlock Text="Браузер" VerticalAlignment="Center"/><ComboBox x:Name="BrowserInput" Width="120" Margin="8"><ComboBoxItem Content="Chrome"/><ComboBoxItem Content="Edge"/></ComboBox><TextBlock Text="Обычная ошибка источника" VerticalAlignment="Center"/><ComboBox x:Name="ErrorInput" Width="240" Margin="8"><ComboBoxItem Content="Продолжать другие поиски"/><ComboBoxItem Content="Приостановить источник"/></ComboBox></WrapPanel>
-    </StackPanel><DataGrid x:Name="SettingsGrid" IsReadOnly="False" CanUserSortColumns="False"><DataGrid.Columns><DataGridTextColumn Header="Параметр" Binding="{Binding Label}" IsReadOnly="True" Width="*"/><DataGridTextColumn Header="Значение" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="150"/><DataGridTextColumn Header="Допустимые значения" Binding="{Binding Bounds}" IsReadOnly="True" Width="200"/></DataGrid.Columns></DataGrid></DockPanel>
-   </TabItem>
-   <TabItem Header="LandErp Server">
-    <Grid Margin="16"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-    <StackPanel>
-     <TextBlock Text="Подключение к LandErp" FontSize="20" FontWeight="SemiBold"/>
-     <TextBlock Margin="0,12" TextWrapping="Wrap" Text="Нажмите «Подключить сервер», введите адрес сервера, ID сборщика и ключ доступа из ERP. Настройки сохранятся локально. Самостоятельный сбор доступен независимо от сервера."/>
-     <WrapPanel><Button Content="Подключить сервер" Click="ConnectServerClick"/><Button Content="Обновить группы" Click="RefreshServerWorkspaceClick"/><Button Content="Получить задание и начать сбор" Click="StartServerClick"/><Button Content="Повторить доставку" Click="DeliverServerClick"/></WrapPanel>
-     <TextBlock x:Name="ServerStatusText" Margin="0,12" TextWrapping="Wrap" Text="Сервер не подключён. Нажмите «Подключить сервер» для настройки."/>
-    </StackPanel>
-     <WrapPanel Grid.Row="1" Margin="0,8"><TextBlock Text="Новая серверная группа" VerticalAlignment="Center"/><TextBox x:Name="ServerGroupName" Width="230"/><Button Content="Создать на Server" Click="AddServerGroupClick"/></WrapPanel>
-     <WrapPanel Grid.Row="2" Margin="0,8"><TextBlock Text="Выберите локальную ссылку во вкладке «Ссылки и очередь», затем серверную группу" VerticalAlignment="Center"/><ComboBox x:Name="ServerGroupInput" Width="210" DisplayMemberPath="Name" Margin="6"/><ComboBox x:Name="ServerScheduleKindInput" Width="130" SelectedIndex="0" Margin="3"><ComboBoxItem Content="Вручную"/><ComboBoxItem Content="Интервал"/><ComboBoxItem Content="По времени"/></ComboBox><TextBox x:Name="ServerScheduleValueInput" Width="150" ToolTip="Минуты либо 09:00, 18:00"/><Button Content="Добавить выбранную ссылку на Server" Click="AddLinkToServerClick"/></WrapPanel>
-     <DataGrid Grid.Row="3" x:Name="ServerSearchesGrid"><DataGrid.Columns><DataGridTextColumn Header="Название" Binding="{Binding Label}" Width="200"/><DataGridTextColumn Header="Источник" Binding="{Binding Source}" Width="90"/><DataGridTextColumn Header="Расписание" Binding="{Binding Schedule.Kind}" Width="120"/><DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="*"/></DataGrid.Columns></DataGrid>
-    </Grid>
-   </TabItem>
-  </TabControl>
- </DockPanel>
-</Window>
+<Window FontFamily="Segoe UI" FontSize="15" Foreground="#203047" Background="#F4F6FA" x:Class="LandErp.ParserSpike.Desktop.WorkspaceWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="LandErp Parser" Width="1440" Height="920" MinWidth="1060" MinHeight="720">
+<Window.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ParserTheme.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></Window.Resources>
+<DockPanel Margin="24">
+<Grid DockPanel.Dock="Top" Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="230"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<StackPanel><TextBlock Text="LandErp Parser" Style="{StaticResource Title}"/><TextBlock x:Name="ModeDescription" Style="{StaticResource Hint}"/></StackPanel>
+<StackPanel Grid.Column="1" Margin="16,0"><TextBlock Text="Где работать" Style="{StaticResource Hint}"/><ComboBox x:Name="ModeInput" SelectionChanged="ModeChanged"><ComboBoxItem Content="На этом компьютере"/><ComboBoxItem Content="Через сервер"/></ComboBox></StackPanel>
+<StackPanel Grid.Column="2" VerticalAlignment="Center"><Button x:Name="AutomationButton" Content="Включить автоработу" Style="{StaticResource Primary}" Click="AutomationClick"/><TextBlock x:Name="ConnectionText" Style="{StaticResource Hint}" MaxWidth="310"/></StackPanel></Grid>
+<Border DockPanel.Dock="Bottom" Background="#EAF0FA" CornerRadius="8" Padding="12" Margin="0,14,0,0"><TextBlock x:Name="StatusText" Text="Добавьте поиск или откройте сайт, чтобы настроить фильтры."/></Border>
+<TabControl x:Name="Pages" BorderThickness="0" Background="Transparent">
+<TabItem Header="Поиски"><Grid Margin="0,18,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="235"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<Border Style="{StaticResource Card}" Padding="12"><DockPanel><StackPanel DockPanel.Dock="Top"><TextBlock Text="Группы" FontSize="18" FontWeight="SemiBold" Margin="8"/><Button Content="+ Новая группа" Click="AddGroupClick"/></StackPanel><StackPanel DockPanel.Dock="Bottom"><Button Content="Переименовать" Click="RenameGroupClick"/><Button Content="Архивировать группу" Click="ArchiveGroupClick"/></StackPanel><ListBox x:Name="GroupsList" DisplayMemberPath="Name" BorderThickness="0" SelectionChanged="GroupSelected"/></DockPanel></Border>
+<Border Grid.Column="2" Style="{StaticResource Card}"><DockPanel><WrapPanel DockPanel.Dock="Top" Margin="0,0,0,12"><Button x:Name="AddButton" Content="+ Добавить поиск" Style="{StaticResource Primary}" Click="AddClick"/><Button Content="Открыть сайт" Click="BrowseClick"/><Button Content="Добавить из браузера" Click="CaptureClick"/><Button Content="Обновить" Click="RefreshClick"/></WrapPanel>
+<WrapPanel DockPanel.Dock="Bottom" Margin="0,12,0,0"><Button x:Name="StartButton" Content="Запустить выбранный" Click="RunClick"/><Button Content="Изменить" Click="EditClick"/><Button Content="Включить / приостановить" Click="ToggleSearchClick"/><Button x:Name="ArchiveButton" Content="В архив" Click="ArchiveClick"/><Button x:Name="TransferButton" Content="Добавить на сервер…" Click="TransferClick"/></WrapPanel>
+<Grid><DataGrid x:Name="LinksGrid"><DataGrid.Columns><DataGridTextColumn Header="Поиск" Binding="{Binding Label}" Width="2*"/><DataGridTextColumn Header="Источник" Binding="{Binding Source}" Width="95"/><DataGridTextColumn Header="Расписание" Binding="{Binding ScheduleText}" Width="2*"/><DataGridTextColumn Header="Состояние" Binding="{Binding State}" Width="140"/></DataGrid.Columns></DataGrid><TextBlock x:Name="EmptyText" Text="Здесь пока нет поисков. Добавьте ссылку или настройте поиск в браузере." Foreground="{StaticResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380"/></Grid>
+</DockPanel></Border></Grid></TabItem>
+<TabItem Header="Работа"><Border Style="{StaticResource Card}" Margin="0,18,0,0"><DockPanel><StackPanel DockPanel.Dock="Top"><TextBlock Text="Текущая работа и история" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="Авторабота запускает местные расписания или принимает задания сервера. Приложение должно оставаться открытым." Style="{StaticResource Hint}"/><WrapPanel><Button Content="Пауза текущего сбора" Click="PauseClick"/><Button Content="Продолжить" Click="ResumeClick"/><Button Content="Остановить всё" Click="StopClick"/></WrapPanel><Border x:Name="NoticePanel" Visibility="Collapsed" Background="#FFF4D7" Padding="14" Margin="0,12"><StackPanel><TextBlock x:Name="NoticeText"/><Button Content="Проверка в браузере выполнена — продолжить" HorizontalAlignment="Left" Click="VerifyClick"/></StackPanel></Border></StackPanel>
+<DataGrid x:Name="JobsGrid"><DataGrid.Columns><DataGridTextColumn Header="Поиск" Binding="{Binding Label}" Width="2*"/><DataGridTextColumn Header="Источник" Binding="{Binding Source}" Width="100"/><DataGridTextColumn Header="Состояние" Binding="{Binding State}" Width="180"/><DataGridTextColumn Header="Прогресс" Binding="{Binding Progress}" Width="130"/><DataGridTextColumn Header="Начало" Binding="{Binding Started}" Width="170"/></DataGrid.Columns></DataGrid>
+</DockPanel></Border></TabItem>
+<TabItem Header="Результаты"><Border Style="{StaticResource Card}" Margin="0,18,0,0"><DockPanel><WrapPanel DockPanel.Dock="Top"><TextBox x:Name="SearchInput" Width="280" ToolTip="Название, адрес или продавец" Margin="4"/><Button Content="Найти" Click="FindClick"/><Button Content="Экспорт CSV" Click="ExportClick"/></WrapPanel><WrapPanel DockPanel.Dock="Bottom"><Button Content="Назад" Click="PreviousClick"/><TextBlock x:Name="PageText" VerticalAlignment="Center" Margin="12"/><Button Content="Далее" Click="NextClick"/></WrapPanel>
+<Grid Margin="0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions><DataGrid x:Name="ListingsGrid" SelectionChanged="ListingSelected"><DataGrid.Columns><DataGridTextColumn Header="Объявление" Binding="{Binding Title}" Width="2*"/><DataGridTextColumn Header="Цена" Binding="{Binding Price}" Width="140"/><DataGridTextColumn Header="Адрес" Binding="{Binding Location}" Width="*"/></DataGrid.Columns></DataGrid><ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock x:Name="DetailsTitle" Text="Выберите объявление" FontSize="18" FontWeight="SemiBold"/><TextBlock x:Name="DetailsText" Margin="0,14" LineHeight="24"/><Button x:Name="OpenListingButton" Content="Открыть объявление" Click="OpenListingClick" IsEnabled="False"/><TextBlock x:Name="HistoryText" Margin="0,18" Style="{StaticResource Hint}"/></StackPanel></ScrollViewer></Grid>
+</DockPanel></Border></TabItem>
+<TabItem Header="Настройки"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="0,18" MaxWidth="720" HorizontalAlignment="Left"><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="Подключение" FontSize="18" FontWeight="SemiBold"/><TextBlock x:Name="ServerAddressText" Style="{StaticResource Hint}"/><Button Content="Подключить или сменить сервер" HorizontalAlignment="Left" Click="ConnectClick"/><TextBlock Text="Вставьте код, выданный в LandErp. Локальные поиски и группы не отправляются на сервер автоматически." Style="{StaticResource Hint}"/></StackPanel></Border>
+<Border Style="{StaticResource Card}" Margin="0,16"><StackPanel><TextBlock Text="Сбор данных" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="Браузер" Margin="0,14,0,0"/><ComboBox x:Name="BrowserInput"><ComboBoxItem Content="Google Chrome"/><ComboBoxItem Content="Microsoft Edge"/></ComboBox><TextBlock Text="Предел страниц для локального сбора"/><TextBox x:Name="MaxPagesInput"/><TextBlock Text="Не повторять свежие результаты при ручном запуске, часов"/><TextBox x:Name="FreshnessInput"/><Button x:Name="SaveSettingsButton" Content="Сохранить настройки" Style="{StaticResource Primary}" HorizontalAlignment="Left" Click="SaveSettingsClick"/><TextBlock Text="Расписание выполняется только при открытом приложении и включённой автоработе. Сервер управляет своими расписаниями самостоятельно." Style="{StaticResource Hint}"/></StackPanel></Border>
+<Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="Помощь" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="Если сбор остановился с ошибкой, сохраните краткий отчёт для разбора." Style="{StaticResource Hint}"/><Button Content="Сохранить диагностику" HorizontalAlignment="Left" Click="DiagnosticsClick"/></StackPanel></Border></StackPanel></ScrollViewer></TabItem>
+</TabControl></DockPanel></Window>

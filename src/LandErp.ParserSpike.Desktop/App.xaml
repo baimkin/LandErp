@@ -1,3 +1,5 @@
 <Application x:Class="LandErp.ParserSpike.Desktop.App"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
- xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" StartupUri="WorkspaceWindow.xaml" />
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" StartupUri="WorkspaceWindow.xaml">
+ <Application.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ParserTheme.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></Application.Resources>
+</Application>

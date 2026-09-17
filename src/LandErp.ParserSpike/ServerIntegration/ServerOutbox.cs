@@ -108,6 +108,12 @@ public sealed class ServerOutbox
         foreach (PendingDelivery pending in Pending().Where(item => item.Result.JobId == job && item.Result.LeaseId != lease))
             RecordAttempt(pending, "SupersededLeaseLocalDataRetained", true, "Superseded");
     }
+    public void RetainLocally(Guid job, string code)
+    {
+        // Only a definitive server rejection may end retries. Payloads and local observations are retained.
+        foreach (PendingDelivery pending in Pending().Where(item => item.Result.JobId == job))
+            RecordAttempt(pending, code, true, "RetainedLocally");
+    }
     public async Task FlushAsync(ServerAdapter adapter, CancellationToken token)
     {
         RecoverRejectedPhotoPayloads();

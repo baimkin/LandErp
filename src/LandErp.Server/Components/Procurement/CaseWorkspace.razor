@@ -13,7 +13,11 @@ else if(card!=null)
     @if(Success!=null) { <PageState Kind="success" Title="@Success" /> }
     <div class="stack case-workspace" data-case-version="@card.Item.CaseVersion">
         <section class="case-titlebar">
-            <div><span class="kicker">@card.Item.BusinessNumber</span><h2>@card.Item.Title</h2><p>@(card.Item.Location??"Местоположение уточняется") · @(card.Item.Assignee??"Ответственный не назначен")</p></div>
+            <div class="case-identity">
+                <div class="case-breadcrumb">@if(FullPage){<a href="/procurement">← Очередь закупки</a><span aria-hidden="true">/</span>}<span>@card.Item.BusinessNumber</span></div>
+                @if(FullPage){<h1>@card.Item.Title</h1>}else{<h2>@card.Item.Title</h2>}
+                <p>@(card.Item.Location??"Местоположение уточняется")</p>
+            </div>
             <div class="case-title-actions">@foreach(var source in card.Item.Sources) { <SourceBadge Source="source" /> }<StatusBadge Label="@ProcurementLabels.Stage(card.Item.Stage)" Tone="@(card.Item.Stage=="acquired" ? "success" : card.Item.Stage=="returned" ? "warning" : "info")" />@if(card.CanConfirmPurchase&&card.Item.Stage!="acquired"){<button class="btn primary" @onclick="OpenPurchase">Отметить как куплено</button>}</div>
         </section>
 
@@ -28,20 +32,78 @@ else if(card!=null)
             </section>
         }
 
-        <section class="case-hero">
-            <article class="surface case-object-card">
-                @if(card.Photos.Length>0) { <a class="case-cover" href="@card.Photos[0]" target="_blank" rel="noopener noreferrer"><img src="@card.Photos[0]" alt="Фото объекта из источника" referrerpolicy="no-referrer" /></a> }
-                else { <div class="case-cover empty">Фото объекта пока нет</div> }
-                <div class="case-object-facts"><h3>Рабочие факты</h3><div class="facts-grid"><div><small>Площадь</small><strong>@ProcurementLabels.Area(card.Item.Area)</strong></div><div><small>Кадастровый номер</small><strong>@(card.CadastralNumber??"Не указан")</strong></div><div><small>Источники</small><strong>@SourceSummary()</strong></div></div>
-                @if(card.Item.Changed) { <p class="case-warning">Источник изменился. Рабочие факты не перезаписаны — проверьте вкладку «Источники».</p> }</div>
-            </article>
-            <div class="case-side-stack">
-                <article class="surface"><h3>Цена и торг</h3><div class="price-grid"><div><small>Публичная / рабочая</small><strong>@ProcurementLabels.Money(card.Item.Price)</strong></div><div><small>Продавец</small><strong>@ProcurementLabels.Money(card.Negotiations.Select(x=>x.SellerPrice).FirstOrDefault(x=>x!=null))</strong></div><div><small>Мы</small><strong>@ProcurementLabels.Money(card.Negotiations.Select(x=>x.BuyerOffer).FirstOrDefault(x=>x!=null))</strong></div><div><small>@(card.Item.Stage=="acquired"?"Факт покупки":"Согласовано")</small><strong>@ProcurementLabels.Money(card.Item.Stage=="acquired"?card.AcquisitionPrice:card.Negotiations.Select(x=>x.AgreedPrice).FirstOrDefault(x=>x!=null))</strong></div></div><p class="subtle">Публичная цена источника и CRM-переговоры — разные факты.</p></article>
-                <article class="surface"><h3>Следующее действие</h3><strong>@NextAction()</strong>@if(!string.IsNullOrWhiteSpace(card.Item.NextActionDescription)){<p>@card.Item.NextActionDescription</p>}<p class="subtle">Ответственный: @(card.Item.Assignee??"не назначен") · срок: @ProcurementLabels.Time(card.Item.DueAt)</p></article>
-            </div>
-        </section>
+        <nav class="case-tabs" aria-label="Разделы карточки">
+            @foreach((string id,string label) in Tabs)
+            {
+                <button type="button" class="case-tab @(tab==id?"active":"")" aria-current="@(tab==id?"page":null)" @onclick="()=>tab=id">@label</button>
+            }
+        </nav>
 
-        <nav class="case-tabs" aria-label="Разделы карточки">@foreach((string id,string label) in Tabs) { <button type="button" class="case-tab @(tab==id?"active":"")" @onclick="()=>tab=id">@label</button> }</nav>
+        @if(tab=="overview")
+        {
+            <section class="case-hero">
+                <article class="surface case-object-card">
+                    <div class="case-gallery">
+                        @if(card.Photos.Length>0)
+                        {
+                            <a class="case-cover" href="@card.Photos[photoIndex]" target="_blank" rel="noopener noreferrer" aria-label="Открыть фото объекта в полном размере">
+                                <img src="@card.Photos[photoIndex]" alt="Фото объекта из источника" referrerpolicy="no-referrer" />
+                                <span class="case-photo-caption">@(photoIndex+1) / @card.Photos.Length · Открыть фото ↗</span>
+                            </a>
+                            @if(card.Photos.Length>1)
+                            {
+                                <div class="case-photo-controls">
+                                    <button class="btn secondary" aria-label="Предыдущее фото" @onclick="()=>MovePhoto(-1)">←</button>
+                                    <span>Фото @(photoIndex+1) из @card.Photos.Length</span>
+                                    <button class="btn secondary" aria-label="Следующее фото" @onclick="()=>MovePhoto(1)">→</button>
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <div class="case-cover empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg><strong>Фото пока нет</strong><span>Основные сведения об объекте — рядом</span></div>
+                        }
+                    </div>
+                    <div class="case-object-facts">
+                        <h3>Об объекте</h3>
+                        <dl class="case-facts">
+                            <div><dt>Площадь</dt><dd>@AreaInSotki()<small>@ProcurementLabels.Area(card.Item.Area)</small></dd></div>
+                            <div><dt>Кадастровый номер</dt><dd>@(string.IsNullOrWhiteSpace(card.CadastralNumber)?"Не указан":card.CadastralNumber)</dd></div>
+                            <div><dt>Ответственный</dt><dd>@(card.Item.Assignee??"Не назначен")</dd></div>
+                            <div><dt>Источники</dt><dd>@SourceSummary()</dd></div>
+                        </dl>
+                        @if(card.Item.Changed){<p class="case-warning">В источнике есть изменения. Сравните их с рабочими данными на вкладке «Источники».</p>}
+                        @if(!string.IsNullOrWhiteSpace(card.Description)){<details class="case-description"><summary>Описание объекта</summary><p>@card.Description</p></details>}
+                    </div>
+                </article>
+                <div class="case-side-stack">
+                    <article class="surface case-pricing">
+                        <h3>Цена и торг</h3>
+                        <div class="case-main-price"><span>Рабочая цена</span><strong>@ProcurementLabels.Money(card.Item.Price)</strong></div>
+                        <div class="price-grid">
+                            <div><small>Продавец</small><strong>@OptionalPrice(card.Negotiations.Select(x=>x.SellerPrice).FirstOrDefault(x=>x!=null))</strong></div>
+                            <div><small>Наше предложение</small><strong>@OptionalPrice(card.Negotiations.Select(x=>x.BuyerOffer).FirstOrDefault(x=>x!=null))</strong></div>
+                            <div><small>@(card.Item.Stage=="acquired"?"Куплено за":"Согласовано")</small><strong>@OptionalPrice(card.Item.Stage=="acquired"?card.AcquisitionPrice:card.Negotiations.Select(x=>x.AgreedPrice).FirstOrDefault(x=>x!=null))</strong></div>
+                        </div>
+                        <button class="btn quiet" @onclick='()=>tab="negotiations"'>Перейти к переговорам →</button>
+                    </article>
+                    <article class="surface case-next-action">
+                        <h3>Следующее действие</h3><strong>@NextAction()</strong>
+                        @if(!string.IsNullOrWhiteSpace(card.Item.NextActionDescription)){<p>@card.Item.NextActionDescription</p>}
+                        <p class="subtle">@(card.Item.Assignee??"Ответственный не назначен") · @(card.Item.DueAt==null?"Срок не назначен":ProcurementLabels.Time(card.Item.DueAt))</p>
+                    </article>
+                </div>
+            </section>
+        }
+        else
+        {
+            <section class="case-context" aria-label="Краткая сводка объекта">
+                <div><small>Рабочая цена</small><strong>@ProcurementLabels.Money(card.Item.Price)</strong></div>
+                <div><small>Площадь</small><strong>@AreaInSotki()</strong></div>
+                <div><small>Ответственный</small><strong>@(card.Item.Assignee??"Не назначен")</strong></div>
+                <div><small>Следующее действие</small><strong>@NextAction()</strong><small>@(card.Item.DueAt==null?"Срок не назначен":ProcurementLabels.Time(card.Item.DueAt))</small></div>
+            </section>
+        }
 
         @if(tab=="overview")
         {
@@ -58,7 +120,7 @@ else if(card!=null)
         }
         else if(tab=="negotiations")
         {
-            <section class="stack"><article class="surface"><div class="section-heading"><div><h3>Переговоры</h3><p class="subtle">Одна запись — одно событие коммуникации. Цена необязательна; несколько цен одного разговора сохраняются вместе.</p></div>@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<button class="btn primary" @onclick="OpenNegotiation">Добавить контакт</button>}</div>@if(card.Negotiations.Count==0){<PageState Kind="empty" Title="Переговоров пока нет" />}@foreach(var item in card.Negotiations){<div class="dossier-row"><div><strong>@NegotiationTitle(item)</strong><small>@Meta(item.Channel,item.Contact,item.Author,ProcurementLabels.Time(item.EffectiveAt))</small><p>@item.Outcome</p>@if(item.SellerPrice!=null||item.BuyerOffer!=null||item.AgreedPrice!=null){<p class="subtle">Продавец: @ProcurementLabels.Money(item.SellerPrice) · Мы: @ProcurementLabels.Money(item.BuyerOffer) · Согласовано: @ProcurementLabels.Money(item.AgreedPrice)</p>}@if(item.Conditions.Length>0){<p class="subtle">Условия: @item.Conditions</p>}@if(item.Comment.Length>0){<p>@item.Comment</p>}@if(item.NextStep.Length>0){<p class="subtle">Следующий шаг: @item.NextStep · @ProcurementLabels.Time(item.NextStepDueAt)</p>}</div></div>}</article>
+            <section class="stack"><article class="surface"><div class="section-heading"><div><h3>Переговоры</h3><p class="subtle">Контакты, предложения по цене и договорённости по объекту.</p></div>@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<button class="btn primary" @onclick="OpenNegotiation">Добавить контакт</button>}</div>@if(card.Negotiations.Count==0){<PageState Kind="empty" Title="Переговоров пока нет" />}@foreach(var item in card.Negotiations){<div class="dossier-row"><div><strong>@NegotiationTitle(item)</strong><small>@Meta(item.Channel,item.Contact,item.Author,ProcurementLabels.Time(item.EffectiveAt))</small><p>@item.Outcome</p>@if(item.SellerPrice!=null||item.BuyerOffer!=null||item.AgreedPrice!=null){<p class="subtle">Продавец: @ProcurementLabels.Money(item.SellerPrice) · Мы: @ProcurementLabels.Money(item.BuyerOffer) · Согласовано: @ProcurementLabels.Money(item.AgreedPrice)</p>}@if(item.Conditions.Length>0){<p class="subtle">Условия: @item.Conditions</p>}@if(item.Comment.Length>0){<p>@item.Comment</p>}@if(item.NextStep.Length>0){<p class="subtle">Следующий шаг: @item.NextStep · @ProcurementLabels.Time(item.NextStepDueAt)</p>}</div></div>}</article>
             </section>
         }
         else if(tab=="checks")
@@ -96,11 +158,16 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
 
 @code {
     [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public bool FullPage { get; set; }
+    private int photoIndex;
+    private void MovePhoto(int step) => photoIndex=(photoIndex+step+card!.Photos.Length)%card.Photos.Length;
+    private string AreaInSotki() => card!.Item.Area is {} area ? (area/100m).ToString("0.##",System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))+" сот." : "Не указана";
+    private static string OptionalPrice(decimal? price) => price is null ? "Не указано" : ProcurementLabels.Money(price);
     [Parameter] public EventCallback OnChanged { get; set; }
     private static readonly (string Id,string Label)[] Tabs=[("overview","Основное"),("negotiations","Переговоры"),("checks","Проверки"),("inspection","Осмотр"),("documents","Документы"),("history","История"),("sources","Источники")];
     private CaseCard? card; private Guid loaded; private string tab="overview"; private ProcurementAction? dialogAction; private string dialogTitle=""; private bool negotiationOpen; private bool checkOpen; private bool attachmentOpen; private bool documentRequirementOpen; private bool purchaseOpen; private bool correctionOpen;
     private NoteInput note=new(); private NegotiationInput negotiation=new(); private CheckInput check=new(); private CheckTemplateInput checkTemplate=new(); private AttachmentInput attachment=new(); private DocumentRequirementInput documentRequirement=new(); private PurchaseInput purchase=new(); private CorrectionInput correction=new(); private IBrowserFile? selectedFile; private Guid? retryAttachmentId; private IBrowserFile? retryFile;
-    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);loaded=CaseId;}
+    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);photoIndex=loaded==CaseId?Math.Clamp(photoIndex,0,Math.Max(0,card.Photos.Length-1)):0;loaded=CaseId;}
     protected override async Task OnParametersSetAsync(){if(loaded!=CaseId)await ReloadAsync();}
     private string SourceSummary()=>card!.Sources.Count==0?"Нет связанных":string.Join(" + ",card.Sources.Select(x=>ProcurementLabels.Source(x.Source)).Distinct());
     private static string NegotiationTitle(NegotiationView item)=>item.AgreedPrice!=null?"Согласована цена":item.BuyerOffer!=null?"Наше предложение":item.SellerPrice!=null?"Цена продавца":item.Outcome.Length>0?item.Outcome:"Событие коммуникации";

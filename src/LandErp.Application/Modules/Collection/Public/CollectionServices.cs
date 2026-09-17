@@ -54,6 +54,9 @@ public interface ICollectionScheduler
 }
 public interface ICollectorGateway
 {
+    Task<CollectorSearchView> UpdateSearchAsync(AgentCredential credential, UpdateCollectorSearch command, CancellationToken cancellationToken);
+    Task<CollectorGroupView> UpdateGroupAsync(AgentCredential credential, UpdateCollectorGroup command, CancellationToken cancellationToken);
+    Task EnqueueSearchAsync(AgentCredential credential, RunCollectorSearch command, CancellationToken cancellationToken);
     Task RegisterAsync(AgentCredential credential, AgentRegistration registration, CancellationToken cancellationToken);
     Task<AgentActivationReceipt> ActivateAsync(AgentActivation activation, CancellationToken cancellationToken);
     Task HeartbeatAsync(AgentCredential credential, AgentHeartbeat heartbeat, CancellationToken cancellationToken);

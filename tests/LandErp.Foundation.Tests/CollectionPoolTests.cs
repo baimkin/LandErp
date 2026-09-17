@@ -279,11 +279,31 @@ public sealed class CollectionPoolTests
         CollectorSearchView search = await gateway.CreateSearchAsync(manager, createSearch, CancellationToken.None);
         CollectorSearchView replayedSearch = await gateway.CreateSearchAsync(manager, createSearch, CancellationToken.None);
         Assert.AreEqual(search.Id, replayedSearch.Id);
+        Assert.AreEqual(CollectorErrorCodes.IdempotencyConflict, (await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
+            gateway.CreateSearchAsync(manager, createSearch with { MaxPages = 9 }, CancellationToken.None))).Code);
         CollectorWorkspace workspace = await gateway.ReadWorkspaceAsync(manager, CancellationToken.None);
         Assert.AreEqual(1, workspace.Groups.Length);
         Assert.AreEqual(1, workspace.Searches.Length);
 
-        await administration.EnqueueAsync(owner, search.Id, "parser-workspace", CancellationToken.None);
+        UpdateCollectorSearch edit = new(search.Id, search.Revision, "Изменён из Parser", search.Source, search.Url, 7,
+            group.Id, new(CollectorScheduleKind.Interval, 60), true);
+        Assert.AreEqual(CollectorErrorCodes.SearchPermissionRequired,
+            (await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() => gateway.UpdateSearchAsync(restricted, edit, CancellationToken.None))).Code);
+        Assert.AreEqual(CollectorErrorCodes.SearchPermissionRequired,
+            (await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() => gateway.UpdateGroupAsync(restricted, new(group.Id, group.Revision, group.Name, 30, true), CancellationToken.None))).Code);
+        Assert.AreEqual(CollectorErrorCodes.SearchPermissionRequired,
+            (await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() => gateway.EnqueueSearchAsync(restricted, new(search.Id), CancellationToken.None))).Code);
+        search = await gateway.UpdateSearchAsync(manager, edit, CancellationToken.None);
+        Assert.AreEqual(7, search.MaxPages); Assert.AreEqual(60, search.Schedule.IntervalMinutes);
+        await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => gateway.UpdateSearchAsync(manager, edit, CancellationToken.None));
+        group = await gateway.UpdateGroupAsync(manager, new(group.Id, group.Revision, "Переименована", 30, true), CancellationToken.None);
+        Assert.AreEqual("Переименована", group.Name);
+        Assert.AreEqual("GROUP_HAS_ACTIVE_SEARCHES", (await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
+            gateway.UpdateGroupAsync(manager, new(group.Id, group.Revision, group.Name, 30, false), CancellationToken.None))).Code);
+        await gateway.EnqueueSearchAsync(manager, new(search.Id), CancellationToken.None);
+        await gateway.EnqueueSearchAsync(manager, new(search.Id), CancellationToken.None);
+        Assert.AreEqual("SEARCH_BUSY", (await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
+            gateway.UpdateSearchAsync(manager, edit with { ExpectedRevision = search.Revision }, CancellationToken.None))).Code);
         CollectionWork firstClaim = (await gateway.ClaimAsync(manager, CancellationToken.None))!;
         CollectionWork resumedClaim = (await gateway.ClaimAsync(manager, CancellationToken.None))!;
         Assert.AreEqual(firstClaim.JobId, resumedClaim.JobId);
@@ -299,6 +319,10 @@ public sealed class CollectionPoolTests
             await db.CollectionJobs.Where(item => item.Id == firstClaim.JobId).Select(item => item.ResultCode).SingleAsync());
         Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.Action == "CollectionSearchGroupCreatedByParser"));
         Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.Action == "CollectionSearchCreatedByParser"));
+        Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.Action == "CollectionSearchUpdatedByParser"));
+        Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.Action == "CollectionSearchGroupUpdatedByParser"));
+        Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.Action == "CollectionJobQueuedByParser"));
+        Assert.AreEqual(1, await db.CollectionJobs.CountAsync(item => item.SearchId == search.Id));
     }
 
     private static async Task<AgentCredential> CreateRegisteredAsync(CollectionAdministration administration,

@@ -10,8 +10,13 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
     private readonly SemaphoreSlim commands = new(1, 1);
     private DateTimeOffset nextPoll;
     private int emptyClaims;
+    private volatile bool acceptNewWork = true;
+    public bool AcceptNewWork { get => acceptNewWork; set => acceptNewWork = value; }
     public string Status { get; private set; } = "Server mode подключён. Local mode доступен независимо.";
     public LocalServerWork? CurrentWork => outbox.ReadWork();
+    public Task<CollectorSearchView> UpdateSearchAsync(UpdateCollectorSearch command, CancellationToken token) => adapter.UpdateSearchAsync(command, token);
+    public Task<CollectorGroupView> UpdateGroupAsync(UpdateCollectorGroup command, CancellationToken token) => adapter.UpdateGroupAsync(command, token);
+    public Task EnqueueSearchAsync(Guid searchId, CancellationToken token) => adapter.EnqueueSearchAsync(searchId, token);
 
     public async Task StartWorkAsync(CancellationToken token)
     {
@@ -51,6 +56,11 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             if (work == null && outbox.Pending().Length == 0 && !runner.IsRunning)
             {
                 await adapter.RegisterAsync(token).ConfigureAwait(false);
+                if (!AcceptNewWork)
+                {
+                    await adapter.HeartbeatAsync(new(RuntimeState: AgentRuntimeState.Idle), token).ConfigureAwait(false);
+                    nextPoll = now.AddSeconds(45); Status = "На связи. Автоматическая работа выключена."; return;
+                }
                 CollectionWork? claimed = await adapter.ClaimAsync(token).ConfigureAwait(false);
                 if (claimed == null)
                 {
@@ -61,6 +71,20 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
                 }
                 emptyClaims = 0;
                 StartClaimedWork(claimed, token); return;
+            }
+            if (work is { LocalJobId: null } && !runner.IsRunning && AcceptNewWork)
+            {
+                // Revalidate ownership after stop/restart; the persisted lease may already have expired.
+                CollectionWork? claimed = await adapter.ClaimAsync(token).ConfigureAwait(false);
+                if (claimed == null) { outbox.SaveWork(null); Status = "Ожидаем новое задание."; return; }
+                StartClaimedWork(claimed, token); return;
+            }
+            if (work is { LocalJobId: null } && !AcceptNewWork)
+            {
+                // A claim that raced with Stop is completed explicitly without opening the source.
+                outbox.Enqueue(new(Guid.CreateVersion7(), work.Work.JobId, work.Work.LeaseId, CollectionOutcome.Interrupted, [], true));
+                await outbox.FlushAsync(adapter, token).ConfigureAwait(false); outbox.SaveWork(null);
+                Status = "Остановлено. Новые задания не запускаются."; return;
             }
             if (work?.LocalJobId != null && !runner.IsRunning)
             {
@@ -97,8 +121,21 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
         }
         catch (ServerDeliveryException exception)
         {
+            if (exception.Code is "LEASE_EXPIRED" or "LEASE_REPLACED" or "RESULT_SUPERSEDED" or "WORK_NOT_ACTIVE")
+            {
+                runner.Stop();
+                LocalServerWork? rejected = outbox.ReadWork();
+                if (!runner.IsRunning && rejected != null)
+                {
+                    PrepareResult(rejected); outbox.RetainLocally(rejected.Work.JobId, exception.Code); outbox.SaveWork(null);
+                }
+                nextPoll = now.AddSeconds(2);
+                Status = "Сервер больше не принимает это задание. Результаты сохранены на компьютере; ожидаем новое задание.";
+                return;
+            }
             nextPoll = now.AddSeconds(15 + Random.Shared.Next(0, 6));
-            Status = exception.Message + ". Локальный сбор и результаты сохранены. Повторите доставку/получение работы.";
+            Status = exception.Retryable ? "Нет связи с сервером. Результаты сохранены; повторим подключение автоматически."
+                : "Сервер отклонил запрос: " + exception.Code + ". Результаты сохранены на компьютере.";
         }
         finally { commands.Release(); }
     }
@@ -106,6 +143,8 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
     {
         token.ThrowIfCancellationRequested();
         outbox.SaveWork(new(work, null));
+        // Stop can be clicked while claim is in flight. Keep the lease, but never start a browser after that click.
+        if (!AcceptNewWork) return;
         SourceSite source = Enum.Parse<SourceSite>(work.Source.ToString());
         SearchLink link = store.EnsureServerWorkLink(work.Label, work.SearchUrl, source);
         CollectionSettings settings = store.Settings() with { MaxPages = work.MaxPages };

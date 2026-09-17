@@ -25,6 +25,42 @@ public sealed class LocalCollectionTests
     };
 
     [TestMethod]
+    public void UnifiedEditorIsAtomicAndRejectsStaleSchedule()
+    {
+        LocalStore store = new(Database());
+        LocalGroup group = store.SaveGroup("Моя группа", 10);
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => store.SaveSearch("Ошибка", Avito, group.Id, new(LocalScheduleKind.Interval)));
+        Assert.AreEqual(0, store.Links().Length);
+        LocalScheduledLink initial = store.SaveSearch("Первый", Avito, group.Id, new(LocalScheduleKind.Interval, 60));
+        Assert.ThrowsExactly<ArgumentException>(() => store.SaveSearch("Не сохранять", Cian, "missing", new(LocalScheduleKind.Manual), initial));
+        Assert.AreEqual("Первый", store.Links().Single().Label);
+        LocalScheduledLink updated = store.SaveSearch("Второй", Cian, null, new(LocalScheduleKind.FixedTimes, FixedTimes: ["09:00"]), initial);
+        Assert.ThrowsExactly<InvalidOperationException>(() => store.SaveSearch("Старое окно", Avito, null, new(LocalScheduleKind.Manual), initial));
+        Assert.AreEqual("Второй", store.Links().Single().Label); Assert.IsNull(updated.GroupId);
+    }
+
+    [TestMethod]
+    public void WorkspaceResultsAndHistoryNeverUseOtherModesLatestValues()
+    {
+        LocalStore store = new(Database());
+        SearchLink local = store.SaveLink("Локально", Avito);
+        SearchLink remote = store.EnsureServerWorkLink("Сервер", Avito, SourceSite.Avito);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string batch = store.StartBatch(new(), force: true, onlyLinkId: local.Id);
+        CollectionJob job = store.Claim(batch, SourceSite.Avito, "local")!;
+        store.SavePage(job, 1, Avito, [Item(time: now) with { Title = TextValue.Read("Локальная версия") }], true, new(NextKind.End), "complete");
+        store.SetState(job, JobState.Completed, "complete");
+        batch = store.StartBatch(new(), force: true, onlyLinkId: remote.Id);
+        job = store.Claim(batch, SourceSite.Avito, "server")!;
+        store.SavePage(job, 1, Avito, [Item(time: now.AddMinutes(1)) with { Title = TextValue.Read("Серверная версия") }], true, new(NextKind.End), "complete");
+        store.SetState(job, JobState.Completed, "complete");
+        Assert.AreEqual("Локальная версия", store.ReadListings(new(ServerWork: false)).Rows.Single().Title);
+        Assert.AreEqual("Серверная версия", store.ReadListings(new(ServerWork: true)).Rows.Single().Title);
+        Assert.AreEqual(1, store.History(SourceSite.Avito, "12345678", serverWork: false).Length);
+        Assert.AreEqual("Локальная версия", store.History(SourceSite.Avito, "12345678", serverWork: false).Single().Observation.Title.Raw);
+    }
+
+    [TestMethod]
     public void UrlsPreserveFiltersAndMultipleValuesRejectSecrets()
     {
         NormalizedSearch a = SearchUrls.Normalize(Cian + "&location%5B1%5D=2&location%5B0%5D=1&p=4&context=private");

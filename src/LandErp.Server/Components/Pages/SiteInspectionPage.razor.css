@@ -11,7 +11,7 @@
 
 .inspection-top {
     position: sticky;
-    top: 74px;
+    top: var(--topbar-h);
     z-index: 24;
     min-height: 68px;
     display: grid;
@@ -27,7 +27,7 @@
 
 .inspection-top strong {
     display: block;
-    font-size: 16px;
+    font-size: var(--text-body);
     line-height: 1.3;
 }
 
@@ -35,7 +35,7 @@
     display: block;
     margin-top: 3px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--text-sm);
     line-height: 1.35;
 }
 
@@ -53,13 +53,13 @@
 .inspection-cover h1 {
     margin-bottom: 8px;
     color: #fff;
-    font-size: 30px;
+    font-size: var(--text-title);
 }
 
 .inspection-cover p {
     margin: 4px 0;
     color: #edf4f8;
-    font-size: 14px;
+    font-size: var(--text-ui);
 }
 
 .inspection-progress {
@@ -69,7 +69,7 @@
     align-items: center;
     padding: 0 10px;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--text-ui);
 }
 
 .inspection-progress > div {
@@ -95,9 +95,9 @@
     margin-bottom: 8px;
 }
 
-.inspection-mobile > .surface h2 { font-size: 22px; }
-.inspection-mobile > .surface h3 { font-size: 18px; }
-.inspection-mobile > .surface .subtle { font-size: 13px; }
+.inspection-mobile > .surface h2 { font-size: var(--text-section); }
+.inspection-mobile > .surface h3 { font-size: var(--text-section); }
+.inspection-mobile > .surface .subtle { font-size: var(--text-ui); }
 
 .inspection-media .media-actions {
     display: flex;
@@ -115,7 +115,7 @@
     background: #fff;
     border: 1px solid var(--border-strong);
     border-radius: 8px;
-    font-size: 13px;
+    font-size: var(--text-ui);
 }
 
 .inspection-media input[type="file"]::file-selector-button {
@@ -127,19 +127,19 @@
     color: var(--text-strong);
     background: var(--surface-subtle);
     font: inherit;
-    font-weight: 650;
+    font-weight: var(--weight-semibold);
     cursor: pointer;
 }
 
 .inspection-media .media-actions > span {
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--text-sm);
 }
 
 .inspection-todo {
     margin: 0 0 16px;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: var(--text-ui);
 }
 
 .inspection-list {
@@ -165,7 +165,7 @@
 .inspection-item strong {
     display: block;
     color: var(--text-strong);
-    font-size: 14px;
+    font-size: var(--text-ui);
     line-height: 1.35;
 }
 
@@ -173,7 +173,7 @@
     display: block;
     margin-top: 4px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--text-sm);
 }
 
 .inspection-item textarea,
@@ -187,7 +187,7 @@
     background: #fff;
     border: 1px solid var(--border-strong);
     border-radius: 8px;
-    font-size: 13px;
+    font-size: var(--text-body);
     line-height: 1.4;
 }
 
@@ -209,14 +209,14 @@
     background: #fff;
     border: 1px solid var(--border-strong);
     border-radius: 8px;
-    font-size: 13px;
+    font-size: var(--text-ui);
 }
 
 .inspection-control button {
     min-height: 40px;
     padding: 0 13px;
     border-radius: 8px;
-    font-size: 12px;
+    font-size: var(--text-ui);
 }
 
 .inspection-done {
@@ -227,8 +227,8 @@
 .inspection-done summary {
     padding: 14px 2px 4px;
     cursor: pointer;
-    font-size: 13px;
-    font-weight: 700;
+    font-size: var(--text-ui);
+    font-weight: var(--weight-semibold);
 }
 
 .inspection-final .field {
@@ -236,20 +236,20 @@
 }
 
 .inspection-final .field > span {
-    font-size: 13px;
+    font-size: var(--text-ui);
 }
 
 .inspection-final select {
     min-height: 42px;
-    font-size: 13px;
+    font-size: var(--text-ui);
 }
 
 .inspection-footer {
     position: fixed;
-    left: calc((100vw + var(--sidebar-w, 248px)) / 2);
+    left: calc((100vw + var(--shell-sidebar-w)) / 2);
     bottom: 0;
     z-index: 35;
-    width: min(1120px, calc(100vw - var(--sidebar-w, 248px) - 48px));
+    width: min(1120px, calc(100vw - var(--shell-sidebar-w) - 48px));
     transform: translateX(-50%);
     display: grid;
     grid-template-columns: 1fr 1.2fr;
@@ -264,7 +264,7 @@
 
 .inspection-footer ::deep .btn {
     min-height: 44px;
-    font-size: 13px;
+    font-size: var(--text-sm);
 }
 
 @media (max-width: 1100px) {
@@ -284,7 +284,7 @@
     }
 
     .inspection-top {
-        top: 64px;
+        top: var(--topbar-h);
     }
 
     .inspection-footer {
@@ -312,7 +312,7 @@
         padding: 20px;
     }
 
-    .inspection-cover h1 { font-size: 24px; }
+    .inspection-cover h1 { font-size: var(--text-title); }
 
     .inspection-mobile > .surface {
         padding: 16px;

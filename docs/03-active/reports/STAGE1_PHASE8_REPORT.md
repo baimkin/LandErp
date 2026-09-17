@@ -93,6 +93,39 @@ stale-permission denial, bounded compact projection, tenant isolation, Team scop
 Browser automation по прямому требованию владельца не запускалась. Полный suite
 и unrelated проверки «на всякий случай» не выполнялись.
 
+## Интеграция Procurement V2 после review
+
+После реализации Overview перенесён коммит `e9900a2` с рабочей семантикой
+Procurement V2. В текущей ветке он зафиксирован как `b2e2e70`. Конфликты с
+Phase 8 разрешены с сохранением обоих независимых фильтров:
+
+- `MineOnly` для перехода Overview «Мои объекты»;
+- `PriceChangedOnly` для очереди с реальным изменением цены.
+
+Сохранены query-параметры Overview, общий tenant-safe `ProcurementVisibility`,
+новые server-side счётчики этапов, поиск по продавцу/CaseId, стартовая цена и
+дельта цены. Дублировавшийся scope-switch в `ProcurementWorkspace` удалён:
+Workspace, Queue V2 и Overview теперь используют один predicate для
+`Own / AssignedObjects / Team / Department / Organization`.
+
+Добавлены targeted regression assertions для сочетания `MineOnly +
+PriceChangedOnly`, server-side price counts/filter, стартовой цены и дельты,
+поиска по продавцу/CaseId, а также одинаковой видимости Workspace и Queue V2
+для Team, Department, Own и AssignedObjects.
+
+Фактическая проверка объединённого состояния:
+
+| Проверка | Результат |
+|---|---|
+| Release build `LandErp.Server.csproj` в отдельный временный output | green, 0 warnings / 0 errors |
+| Новый объединённый price semantics scenario | green, 1/1 |
+| `ProcurementQueueV2ReadTests` | green, 3/3 |
+| `OverviewTests` | green, 2/2 |
+| Сквозной `CaseScopesUseResponsibilityAndCatalogRemainsOrganizationShared` | green, 1/1 |
+
+Запущенный владельцем Server не останавливался; тестовые сборки направлялись во
+временный output. Миграции и browser automation не запускались.
+
 ## Известные ограничения
 
 - Тип участка выводится из source title/description по той же прикладной идее,

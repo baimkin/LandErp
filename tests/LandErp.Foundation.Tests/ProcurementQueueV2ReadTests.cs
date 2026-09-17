@@ -82,6 +82,12 @@ public sealed class ProcurementQueueV2ReadTests
         PropertyCase before = await fixture.ReadCaseAsync(taken.CaseId);
 
         await fixture.IngestChangedAvitoAsync(marketplace.Agent, marketplace.Administration, 1_700_000m);
+        await using (LandErpDbContext db = await fixture.Factory.CreateDbContextAsync())
+        {
+            Listing source = await db.Listings.SingleAsync(item => item.Id == avitoId);
+            source.SellerName = "Иван Иванов";
+            await db.SaveChangesAsync();
+        }
         ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
         ProcurementQueueV2Page page = await service.ReadPageAsync(fixture.Manager,
             new ProcurementQueueV2Filter(Text: "10001", Source: CatalogSource.Avito, SourceChangedOnly: true), CancellationToken.None);
@@ -92,9 +98,25 @@ public sealed class ProcurementQueueV2ReadTests
         Assert.IsTrue(row.SourceChanged);
         Assert.AreEqual(before.WorkingPrice, row.WorkingPrice, "Source revision must not become a working fact without ApplySourceFact.");
         Assert.IsTrue(row.Sources.Any(item => item.Source == CatalogSource.Avito));
+        Assert.AreEqual(1, page.Summary.Checking);
+        Assert.AreEqual(0, page.Summary.PendingHead);
+        Assert.AreEqual(1, page.Summary.PriceChanged);
+
+        ProcurementQueueV2Page changedPrice = await service.ReadPageAsync(fixture.Manager,
+            new ProcurementQueueV2Filter(MineOnly: true, PriceChangedOnly: true), CancellationToken.None);
+        Assert.AreEqual(1, changedPrice.Total, "MineOnly and PriceChangedOnly must compose without weakening scope.");
+        Assert.AreEqual(taken.CaseId, changedPrice.Items.Single().CaseId);
+        Assert.AreEqual(1, (await service.ReadPageAsync(fixture.Manager,
+            new ProcurementQueueV2Filter(Text: "Иван Иванов"), CancellationToken.None)).Total);
+        Assert.AreEqual(1, (await service.ReadPageAsync(fixture.Manager,
+            new ProcurementQueueV2Filter(Text: taken.CaseId.ToString()), CancellationToken.None)).Total);
 
         ProcurementQueueV2Detail detail = await service.ReadDetailAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
         Assert.AreEqual(before.WorkingPrice, detail.WorkingPrice);
+        Assert.AreEqual(2_000_000m, detail.StartPrice);
+        Assert.AreEqual(-300_000m, detail.PriceDeltaFromStart);
+        Assert.AreEqual(-15m, detail.PriceDeltaFromStartPercent);
+        Assert.IsTrue(detail.PriceChanged);
         ProcurementSourceDetail avito = detail.Sources.Single(item => item.CatalogItemId == avitoId);
         Assert.IsTrue(avito.Changed);
         Assert.IsTrue(avito.ApplicableFacts.Contains(CaseFactField.Price));
@@ -111,6 +133,7 @@ public sealed class ProcurementQueueV2ReadTests
         ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
 
         Assert.AreEqual(1, (await service.ReadPageAsync(fixture.Manager, new(), CancellationToken.None)).Total);
+        Assert.AreEqual(1, (await fixture.Workspace.ReadQueueAsync(fixture.Manager, new(), CancellationToken.None)).Total);
         Assert.AreEqual(0, (await service.ReadPageAsync(fixture.SecondManager, new(), CancellationToken.None)).Total);
 
         await using (LandErpDbContext db = await fixture.Factory.CreateDbContextAsync())
@@ -124,6 +147,14 @@ public sealed class ProcurementQueueV2ReadTests
         Assert.AreEqual(1, (await service.ReadPageAsync(fixture.Manager, new(), CancellationToken.None)).Total,
             "Changing source routing metadata must not change PropertyCase visibility.");
         Assert.AreEqual(0, (await service.ReadPageAsync(fixture.SecondManager, new(), CancellationToken.None)).Total);
+        foreach (AccessScope scope in new[] { AccessScope.Department, AccessScope.Own, AccessScope.AssignedObjects })
+        {
+            await fixture.ChangeScopeAsync("manager-phase1@test.invalid", scope, null);
+            Assert.AreEqual(1, (await service.ReadPageAsync(fixture.Manager, new(), CancellationToken.None)).Total,
+                $"Queue V2 must preserve {scope} visibility.");
+            Assert.AreEqual(1, (await fixture.Workspace.ReadQueueAsync(fixture.Manager, new(), CancellationToken.None)).Total,
+                $"Workspace and Queue V2 must share {scope} visibility.");
+        }
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ReadDetailAsync(fixture.SecondManager, taken.CaseId, CancellationToken.None));
     }
 }

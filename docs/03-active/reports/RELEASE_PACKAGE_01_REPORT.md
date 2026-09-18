@@ -12,7 +12,7 @@
 |---|---|---|---|
 | B1-01 — LR-09 / LR-19 | Код и тесты входят в коммит добавления этого отчёта | Не выполнялась | Ожидает B1-04 |
 | B1-02 — жизненный цикл и просроченные проверки | Код и targeted tests подготовлены и публикуются одним коммитом | Не выполнялась | Ожидает B1-04 |
-| B1-03 — назначения, Owner, политика шаблонов | Не начата | Не выполнялась | Нет |
+| B1-03 — назначения, Owner, политика шаблонов | Код и targeted tests подготовлены и публикуются одним коммитом; LR-23 остаётся decision item | Не выполнялась | Ожидает B1-04 |
 | B1-04 — передача работы и проверка пакета | Не начата | Не выполнялась | Нет |
 
 Публикация B1-01 подтверждается SHA коммита и удалённым ref в итоговом сообщении задачи. Собственный SHA не встраивается в содержимое файла, входящего в тот же коммит. Точный commit, впервые добавивший отчёт, определяется без зависимости от текущего HEAD:
@@ -176,3 +176,51 @@ PostgreSQL-тесты используют существующий `Phase1Fixtu
 4. Другое прошлое значение срока и новая проверка с прошлым дедлайном отклоняются; после отказов история и аудит содержат только две подтверждённые операции.
 
 **Не выполнялись:** restore, build, tests, browser, PostgreSQL execution, Server/Worker, migrations и production operations. Фактический запуск и регрессия acquisition/check/UI входят в B1-04.
+
+
+## B1-03 — назначения, Owner и политика шаблонов
+
+**Исходная база:** `017136fb67f1e0b379a69251f97fd705032c93dc`.  
+**Scope:** LR-02, LR-04 и техническое отделение LR-23.  
+**Статус:** реализация и targeted tests подготовлены; исполнение отложено до B1-04.
+
+### LR-02
+
+Добавлен единый расчёт eligibility получателя относительно фактической видимости case. Он различает текущее чтение, получение case assignment и получение manager+assignment. Семантика scope не расширяется: task/check сами по себе не превращают `AssignedObjects` или `Own` в доступ.
+
+Decision targets требуют `QueueRead` плюс нужное decision permission. Forward допускает AssignedObjects recipient, потому что после операции он становится case assignee; Own recipient без ownership отклоняется. Return может сделать manager новым manager+assignee, поэтому Own/AssignedObjects становятся корректными после операции.
+
+Для следующего действия и ответственного проверки используются только recipients, которые уже видят текущий case. В полной карточке появился отдельный `Assignees`, а Procurement V2 строит `AvailableAssignees` по той же модели.
+
+### LR-04
+
+Отключение сотрудника и изменение assignment/role получают общий organization-level advisory transaction lock до проверки последнего Owner. Проверка и изменение выполняются внутри транзакции. Два параллельных deactivate или смешанные deactivate/demote сериализуются и не могут оба удалить последние active Owner grants.
+
+### LR-23
+
+Эффективные права не менялись. Введены отдельные `CanManageTemplates` и `RequireTemplateManagementPermissionAsync`, которые сейчас повторяют прежнюю Manager/Head политику.
+
+**LR-23 остаётся открытым:** требуется продуктовая матрица read/use/edit/archive shared templates. B1-03 не присваивает себе это решение.
+
+### Файлы B1-03
+
+- `src/LandErp.Infrastructure/Modules/Procurement/ProcurementVisibility.cs`
+- `src/LandErp.Infrastructure/Modules/Procurement/ProcurementWorkspace.cs`
+- `src/LandErp.Infrastructure/Modules/Procurement/ProcurementQueueV2ReadService.cs`
+- `src/LandErp.Application/Modules/Procurement/Public/ProcurementContracts.cs`
+- `src/LandErp.Server/Components/Procurement/CaseWorkspace.razor`
+- `src/LandErp.Infrastructure/Modules/Organization/OrganizationWorkspace.cs`
+- `tests/LandErp.Foundation.Tests/ReleasePackageB103Tests.cs` — 3 новых PostgreSQL TestMethod
+- `docs/03-active/GATE-RELEASE-B1-03.md`
+- `docs/03-active/ACTIVE_TASK.md`
+- этот отчёт
+
+Миграций, EF model changes, новых packages и Parser/Collector изменений нет.
+
+### Новые tests, НЕ запущенные
+
+1. post-assignment visibility для Own/AssignedObjects, stale Forward/task/check payload и совпадение UI recipient lists с сервером;
+2. concurrent Owner deactivation и смешанный deactivate + role removal;
+3. сохранение текущей effective template policy через отдельный capability.
+
+**Не выполнялись:** restore, build, tests, browser, PostgreSQL execution, Server/Worker, migrations и production operations. Все фактические проверки — B1-04.

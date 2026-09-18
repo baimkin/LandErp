@@ -415,8 +415,12 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             .OrderByDescending(item => item.RecordedAt).ThenByDescending(item => item.Id).Take(200).ToArrayAsync(cancellationToken);
         CatalogObservation[] observations = await db.ListingObservations.Where(item => sourceIds.Contains(item.ListingId))
             .OrderByDescending(item => item.ObservedAt).ThenByDescending(item => item.Id).Take(200).ToArrayAsync(cancellationToken);
-        DecisionTarget[] heads = await TargetsAsync(db, row.Case, Permissions.HeadDecide, cancellationToken);
-        DecisionTarget[] managers = await TargetsAsync(db, row.Case, Permissions.ManagerDecide, cancellationToken);
+        DecisionTarget[] heads = await TargetsAsync(db, row.Case, row.Assignment.EmployeeId, Permissions.HeadDecide,
+            ProcurementRecipientAccess.BecomesCaseAssignee, cancellationToken);
+        DecisionTarget[] managers = await TargetsAsync(db, row.Case, row.Assignment.EmployeeId, Permissions.ManagerDecide,
+            ProcurementRecipientAccess.BecomesManagerAndCaseAssignee, cancellationToken);
+        DecisionTarget[] assignees = await DossierTargetsAsync(db, row.Case, row.Assignment.EmployeeId,
+            ProcurementRecipientAccess.CurrentVisibility, cancellationToken);
         bool manager = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken) && row.Assignment.EmployeeId == context.EmployeeId
             && row.Case.StageId is not ("pending_head" or "acquired")
             && (row.Case.StageId != "rejected" || SourcesChanged(sources));
@@ -424,6 +428,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             && row.Assignment.EmployeeId == context.EmployeeId && row.Case.ManagerEmployeeId != context.EmployeeId;
         bool canManageDossier = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken)
             || await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
+        bool canManageTemplates = canManageDossier;
         bool canManageBlockers = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
         bool canConfirmPurchase = await AllowedAsync(subject, Permissions.PurchaseConfirm, cancellationToken);
         CaseNegotiation[] negotiations = await db.CaseNegotiations.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
@@ -451,7 +456,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                 item.TargetEmployeeId == null ? null : names.GetValueOrDefault(item.TargetEmployeeId.Value, "Сотрудник"), item.RecordedAt, item.EffectiveAt, item.DueAt)).ToArray(),
             observations.Select(item => new ObservationView(item.Id, item.ListingId, item.ObservedAt, item.RecordedAt,
                 JsonSerializer.Deserialize<ListingData>(item.PayloadJson, CollectionJson.Options)!, JsonSerializer.Deserialize<string[]>(item.ChangesJson)!)).ToArray(),
-            heads.Where(item => item.EmployeeId != context.EmployeeId).ToArray(), managers, row.Case.ManagerEmployeeId, manager, head,
+            heads.Where(item => item.EmployeeId != context.EmployeeId).ToArray(), managers, assignees,
+            row.Case.ManagerEmployeeId, manager, head,
             negotiations.Select(item => new NegotiationView(item.Id, item.SellerPrice, item.BuyerOffer, item.AgreedPrice, item.Currency,
                 item.Channel, item.Contact, item.Outcome, item.Conditions, item.Comment, item.NextStep, item.NextStepDueAt,
                 names.GetValueOrDefault(item.AuthorEmployeeId, "Сотрудник"), item.EffectiveAt, item.RecordedAt)).ToArray(),
@@ -477,7 +483,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                     item.UnitSnapshot, item.NormalAnswerSnapshot, item.AllowAttachmentsSnapshot, item.RequiredSnapshot, item.Status,
                     item.Answer, item.Note, item.Version)).ToArray()),
             row.Case.CadastralNumber, row.Case.AcquisitionPrice, row.Case.AcquisitionDate, row.Case.AcquisitionComment,
-            canManageDossier, canManageBlockers, canConfirmPurchase);
+            canManageDossier, canManageTemplates, canManageBlockers, canConfirmPurchase);
     }
 
     public async Task<Guid?> ResolveLegacyListingAsync(Subject subject, Guid listingId, CancellationToken cancellationToken)
@@ -523,14 +529,18 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         if (command.Action == ProcurementAction.Forward)
         {
             target = command.TargetEmployeeId ?? throw new ArgumentException("Выберите руководителя закупки.");
-            if (target == context.EmployeeId || !(await TargetsAsync(db, propertyCase, Permissions.HeadDecide, cancellationToken)).Any(value => value.EmployeeId == target)) throw new AccessDeniedException();
+            if (target == context.EmployeeId || !(await TargetsAsync(db, propertyCase, row.Assignment.EmployeeId,
+                Permissions.HeadDecide, ProcurementRecipientAccess.BecomesCaseAssignee, cancellationToken))
+                .Any(value => value.EmployeeId == target)) throw new AccessDeniedException();
             propertyCase.PendingApprovalId = DataConventions.NewId();
         }
         if (headAction)
         {
             if (command.Action == ProcurementAction.Approve && SourcesChanged(sources)) throw new ArgumentException("Источники изменились после передачи. Верните объект менеджеру для обновления анализа.");
             target = command.Action == ProcurementAction.Return ? command.TargetEmployeeId ?? propertyCase.ManagerEmployeeId : propertyCase.ManagerEmployeeId;
-            if (!(await TargetsAsync(db, propertyCase, Permissions.ManagerDecide, cancellationToken)).Any(value => value.EmployeeId == target)) throw new AccessDeniedException();
+            if (!(await TargetsAsync(db, propertyCase, row.Assignment.EmployeeId,
+                Permissions.ManagerDecide, ProcurementRecipientAccess.BecomesManagerAndCaseAssignee, cancellationToken))
+                .Any(value => value.EmployeeId == target)) throw new AccessDeniedException();
             db.Approvals.Add(new()
             {
                 Id = propertyCase.PendingApprovalId ?? throw new AccessDeniedException(),
@@ -707,8 +717,13 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         if (row.Case.StageId is "rejected" or "monitor") throw new ArgumentException("Сначала возобновите PropertyCase.");
         if (command.Level == CaseCheckLevel.Deep && row.Case.StageId is not ("negotiation" or "approved"))
             throw new ArgumentException("Глубокая проверка доступна после решения руководителя продолжить работу.");
-        if (command.ResponsibleEmployeeId != null && !await db.Employees.AnyAsync(item => item.Id == command.ResponsibleEmployeeId
-            && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken)) throw new AccessDeniedException();
+        if (command.ResponsibleEmployeeId != null)
+        {
+            DecisionTarget[] responsibleTargets = await DossierTargetsAsync(db, row.Case, row.Assignment.EmployeeId,
+                ProcurementRecipientAccess.CurrentVisibility, cancellationToken);
+            if (!responsibleTargets.Any(item => item.EmployeeId == command.ResponsibleEmployeeId))
+                throw new AccessDeniedException();
+        }
         if (command.Cost < 0) throw new ArgumentException("Стоимость проверки не может быть отрицательной.");
 
         CaseCheck? check = command.CheckId == null ? null : await db.CaseChecks.SingleOrDefaultAsync(item => item.Id == command.CheckId
@@ -760,7 +775,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     {
         if (!Enum.IsDefined(command.Level) || command.SortOrder < 0) throw new ArgumentException("Некорректные параметры шаблона проверки.");
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
-        await RequireDossierPermissionAsync(subject, cancellationToken);
+        await RequireTemplateManagementPermissionAsync(subject, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         CaseCheckTemplateItem? item = null;
         if (command.Id != null)
@@ -784,7 +799,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     {
         if (!Enum.IsDefined(command.AnswerType) || command.SortOrder < 0) throw new ArgumentException("Некорректные параметры пункта осмотра.");
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
-        await RequireDossierPermissionAsync(subject, cancellationToken);
+        await RequireTemplateManagementPermissionAsync(subject, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         InspectionTemplateItem? item = null;
         if (command.Id != null)
@@ -1187,9 +1202,9 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         if (row.Case.StageId == "acquired")
             throw new ArgumentException("Закупка уже завершена. Следующее действие для купленного объекта изменить нельзя.");
 
-        DecisionTarget[] managers = await TargetsAsync(db, row.Case, Permissions.ManagerDecide, cancellationToken);
-        DecisionTarget[] heads = await TargetsAsync(db, row.Case, Permissions.HeadDecide, cancellationToken);
-        if (!managers.Concat(heads).Any(item => item.EmployeeId == command.AssigneeEmployeeId))
+        DecisionTarget[] assignees = await DossierTargetsAsync(db, row.Case, row.Assignment.EmployeeId,
+            ProcurementRecipientAccess.CurrentVisibility, cancellationToken);
+        if (!assignees.Any(item => item.EmployeeId == command.AssigneeEmployeeId))
             throw new AccessDeniedException();
 
         var before = new { row.Task.Type, row.Task.Title, row.Task.Description, row.Task.DueAt, row.Task.EmployeeId };
@@ -1201,7 +1216,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         row.Task.Completed = false;
         db.Entry(row.Case).Property(item => item.Version).IsModified = true;
 
-        string assigneeName = managers.Concat(heads).First(item => item.EmployeeId == command.AssigneeEmployeeId).Name;
+        string assigneeName = assignees.First(item => item.EmployeeId == command.AssigneeEmployeeId).Name;
         db.BusinessTimeline.Add(new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
@@ -1246,6 +1261,13 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
     private async Task RequireDossierPermissionAsync(Subject subject, CancellationToken cancellationToken)
     {
+        if (!await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken)
+            && !await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken)) throw new AccessDeniedException();
+    }
+
+    private async Task RequireTemplateManagementPermissionAsync(Subject subject, CancellationToken cancellationToken)
+    {
+        // LR-23 remains a product decision. Preserve current Manager/Head rights behind an explicit seam.
         if (!await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken)
             && !await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken)) throw new AccessDeniedException();
     }
@@ -1491,17 +1513,36 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         _ => status.ToString()
     };
 
-    private static Task<DecisionTarget[]> TargetsAsync(LandErpDbContext db, PropertyCase propertyCase, string permission, CancellationToken cancellationToken)
+    private static Task<DecisionTarget[]> TargetsAsync(LandErpDbContext db, PropertyCase propertyCase,
+        Guid currentCaseAssigneeId, string permission, ProcurementRecipientAccess recipientAccess,
+        CancellationToken cancellationToken)
     {
-        var query = from employee in db.Employees
-                    join assignment in db.EmployeeAssignments on employee.Id equals assignment.EmployeeId
-                    join grant in db.RolePermissions on assignment.RoleId equals grant.RoleId
-                    where employee.OrganizationId == propertyCase.OrganizationId && employee.Active && grant.PermissionId == permission
-                        && (assignment.Scope == AccessScope.Organization || assignment.Scope == AccessScope.Own || assignment.Scope == AccessScope.AssignedObjects
-                            || assignment.Scope == AccessScope.Department && propertyCase.DepartmentId != null && assignment.OrgUnitId == propertyCase.DepartmentId
-                            || assignment.Scope == AccessScope.Team && propertyCase.TeamId != null && assignment.TeamId == propertyCase.TeamId)
-                    select new { employee.Id, employee.DisplayName };
-        return query.Distinct().OrderBy(item => item.DisplayName).Select(item => new DecisionTarget(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);
+        IQueryable<EmployeeAssignment> eligible = ProcurementVisibility.EligibleRecipientAssignments(
+            db, propertyCase, currentCaseAssigneeId, recipientAccess);
+        var query =
+            from assignment in eligible
+            join employee in db.Employees on assignment.EmployeeId equals employee.Id
+            where db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.QueueRead)
+                && db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == permission)
+            select new { employee.Id, employee.DisplayName };
+        return query.Distinct().OrderBy(item => item.DisplayName)
+            .Select(item => new DecisionTarget(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);
+    }
+
+    private static Task<DecisionTarget[]> DossierTargetsAsync(LandErpDbContext db, PropertyCase propertyCase,
+        Guid currentCaseAssigneeId, ProcurementRecipientAccess recipientAccess, CancellationToken cancellationToken)
+    {
+        IQueryable<EmployeeAssignment> eligible = ProcurementVisibility.EligibleRecipientAssignments(
+            db, propertyCase, currentCaseAssigneeId, recipientAccess);
+        var query =
+            from assignment in eligible
+            join employee in db.Employees on assignment.EmployeeId equals employee.Id
+            where db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.QueueRead)
+                && (db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.ManagerDecide)
+                    || db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.HeadDecide))
+            select new { employee.Id, employee.DisplayName };
+        return query.Distinct().OrderBy(item => item.DisplayName)
+            .Select(item => new DecisionTarget(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);
     }
 
     private static async Task<Dictionary<Guid, List<(PropertyCaseSourceLink Link, Listing Item)>>> LoadSourcesAsync(

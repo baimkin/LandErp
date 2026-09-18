@@ -44,12 +44,13 @@ public sealed record SourceDiscrepancyView(Guid CatalogItemId, CatalogSource Sou
     string WorkingValue, string SourceValue, bool Different);
 public sealed record CaseCard(QueueItem Item, string? Description, string? SellerName, string[] Photos,
     IReadOnlyList<CaseSourceView> Sources, IReadOnlyList<TimelineItem> Timeline, IReadOnlyList<ObservationView> Observations,
-    IReadOnlyList<DecisionTarget> Heads, IReadOnlyList<DecisionTarget> Managers, Guid ManagerEmployeeId, bool CanManagerDecide, bool CanHeadDecide,
+    IReadOnlyList<DecisionTarget> Heads, IReadOnlyList<DecisionTarget> Managers, IReadOnlyList<DecisionTarget> Assignees,
+    Guid ManagerEmployeeId, bool CanManagerDecide, bool CanHeadDecide,
     IReadOnlyList<NegotiationView> Negotiations, IReadOnlyList<CheckView> Checks, IReadOnlyList<AttachmentView> Attachments,
     IReadOnlyList<DocumentRequirementView> DocumentRequirements,
     IReadOnlyList<SourceDiscrepancyView> Discrepancies, IReadOnlyList<CheckTemplateView> CheckTemplates, InspectionView? Inspection,
     string? CadastralNumber, decimal? AcquisitionPrice, DateOnly? AcquisitionDate, string? AcquisitionComment,
-    bool CanManageDossier, bool CanManageBlockers, bool CanConfirmPurchase);
+    bool CanManageDossier, bool CanManageTemplates, bool CanManageBlockers, bool CanConfirmPurchase);
 public sealed record DecisionCommand(Guid CaseId, long ExpectedCaseVersion, long ExpectedSourceRevision,
     ProcurementAction Action, string Reason, string Clarification, Guid? TargetEmployeeId, DateTimeOffset? DueAt);
 // Reuse CommandId for retries of the same addition. It is distinct from the per-attempt

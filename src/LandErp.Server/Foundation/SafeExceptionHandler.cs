@@ -17,6 +17,7 @@ public sealed class SafeExceptionHandler(IProblemDetailsService problems, ILogge
         Failure(logger, exception.GetType().Name, httpContext.TraceIdentifier, null);
         (int status, string code, string title) = exception switch
         {
+            FileUploadLimitException => (413, "FILE_TOO_LARGE", FileUploadLimits.TooLargeMessage),
             FileStorageException storage => (storage.Retryable ? 503 : 409, storage.Code, storage.Message),
             CollectorProtocolException protocol => (protocol.Code == CollectorErrorCodes.AgentUnauthorized ? 401
                 : protocol.Code == "ACTIVATION_INVALID" ? 401

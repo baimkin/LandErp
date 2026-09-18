@@ -1,6 +1,26 @@
 # Активная задача LandErp
 
-## Текущий Gate — B3-01, attachment lifecycle & recovery
+## Текущий Gate — B3-02, file limits & safe upload errors
+
+**Прямой запрос владельца от 18 сентября 2026 года:** начать B3-02 после публикации B3-01.  
+**Ветка:** `codex/release-package-03`.  
+**Исходный commit B3-02:** `5507a9e14a190a949fb9c683f6f4cec0aa1c31fd`.  
+**Scope:** LR-11 + LR-20 — oversize inspection stream и честный raw/base64/HTTP/storage file-size contract.  
+**Gate:** [GATE-RELEASE-B3-02](GATE-RELEASE-B3-02.md).  
+**Evidence:** [RELEASE_PACKAGE_03_B3_02_REPORT](reports/RELEASE_PACKAGE_03_B3_02_REPORT.md).
+
+Не начинать LR-06/LR-07/LR-12 inspection draft/conflict/semantic validation. Не менять пользовательский raw limit без необходимости: B3-02 сохраняет 8 MiB и согласует transport envelope. Фактические tests/build/browser выполняет владелец; здесь они **Not run**.
+
+### Required reading B3-02
+
+После README → START_HERE → этого файла читать только:
+1. application FileStorage contract и общий file limit;
+2. Server Kestrel/request handling + SafeExceptionHandler;
+3. Procurement Add/Retry attachment validation;
+4. CaseWorkspace и SiteInspectionPage upload handlers;
+5. Yandex options и targeted file tests.
+
+## Предыдущий Gate — B3-01, attachment lifecycle & recovery
 
 **Прямой запрос владельца от 18 сентября 2026 года:** начать Package 03 после B2-04.  
 **Ветка:** `codex/release-package-03`.  

@@ -21,6 +21,25 @@ public sealed class StoredFile
     public long Version { get; set; } = 1;
 }
 
+public static class FileUploadLimits
+{
+    public const int MaxRawFileMegabytes = 8;
+    public const int MaxRawFileBytes = MaxRawFileMegabytes * 1024 * 1024;
+    // 8 MiB raw becomes ~10.67 MiB as base64 before JSON fields/escaping.
+    public const long MaxJsonRequestBodyBytes = 12L * 1024 * 1024;
+    public const string TooLargeMessage = "Файл не должен превышать 8 МБ.";
+
+    public static bool IsRawFileSizeAllowed(long sizeBytes) => sizeBytes is > 0 and <= MaxRawFileBytes;
+
+    public static void EnsureRawFileSize(long sizeBytes)
+    {
+        if (sizeBytes <= 0) throw new ArgumentException("Файл должен быть непустым.");
+        if (sizeBytes > MaxRawFileBytes) throw new FileUploadLimitException();
+    }
+}
+
+public sealed class FileUploadLimitException() : ArgumentException(FileUploadLimits.TooLargeMessage);
+
 public sealed record FileWriteResult(string StorageKey, string Sha256, long SizeBytes);
 
 /// <summary>Only system IDs and a bounded category reach provider paths; never addresses or original names.</summary>

@@ -1,6 +1,27 @@
 # Активная задача LandErp
 
-## Текущий Gate — B2-03, UI/UX correction flows
+## Текущий Gate — B2-04, Package 02 validation handover
+
+**Прямой запрос владельца от 18 сентября 2026 года:** начать B2-04 после публикации B2-03.  
+**Ветка:** `codex/release-package-02`.  
+**Исходный commit B2-04:** `45c29428a40d79482ee5afd0a5ee029378339460`.  
+**Scope:** финальная статическая проверка B2-01–B2-03, P0 boundary review и точная validation-матрица владельцу.  
+**Gate:** [GATE-RELEASE-B2-04](GATE-RELEASE-B2-04.md).  
+**Package report:** [RELEASE_PACKAGE_02_REPORT](reports/RELEASE_PACKAGE_02_REPORT.md).
+
+По решению владельца restore/build/PostgreSQL/browser/manual проверки выполняет владелец самостоятельно. Поэтому B2-04 не запускает их и не объявляет Passed. Новые production-механизмы в B2-04 не добавляются без реального blocker.
+
+Статический review накопленного diff не выявил необходимости в migration, новой correction/history таблице, отдельном экране, новом permission или дополнительном API только ради Package 02. P0 Catalog → Procurement boundary сохранена.
+
+### Required reading B2-04
+
+После README → START_HERE → этого файла читать только:
+1. `GATE-RELEASE-B2-01.md`, `GATE-RELEASE-B2-02.md`, `GATE-RELEASE-B2-03.md`;
+2. `P0_CATALOG_PROCUREMENT_BOUNDARY.md`;
+3. `GATE-RELEASE-B2-04.md` и package report;
+4. накопленный diff Package 02 и относящиеся targeted tests.
+
+## Предыдущий Gate — B2-03, UI/UX correction flows
 
 **Прямой запрос владельца от 18 сентября 2026 года:** начать B2-03 после публикации B2-02.  
 **Ветка:** `codex/release-package-02`.  

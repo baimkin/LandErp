@@ -9,6 +9,9 @@ B3-01 и B3-02 вместе, исправить найденные мелкие 
 **Интеграционная ветка:** `codex/integrate-b2-b3`.
 **База:** `80750e29d11ac6f694d9d3724d3442a91c76cbc8`.
 **Исходная пакетная ветка:** `codex/release-package-03` до `a500aec`.
+**Статус:** интеграция реализована; Release build и 16 целевых тестов прошли,
+Server запущен для ручной приёмки владельцем.
+**Evidence:** [RELEASE_B2_B3_INTEGRATION_REPORT](reports/RELEASE_B2_B3_INTEGRATION_REPORT.md).
 
 Scope: audited corrections рабочих фактов и связей источников, UX этих операций,
 восстановление незавершённых загрузок, единые лимиты файлов, исправление Local

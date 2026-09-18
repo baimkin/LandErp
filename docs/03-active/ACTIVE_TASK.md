@@ -1,6 +1,25 @@
 # Активная задача LandErp
 
-## Текущий Gate — B1-04, передача работы и проверка первого release package
+## Текущий Gate — B2-01, audited PropertyCase corrections
+
+**Прямой запрос владельца от 18 сентября 2026 года:** начать Package 02 с B2-01 и решить LR-13 минимально достаточным изменением.  
+**Ветка:** `codex/release-package-02`.  
+**Исходный commit:** `92e952d0ecce6b5235b4c5d13dc0040dc2c236fc` — documentation/evidence HEAD Package 01.  
+**Scope:** только LR-13 — штатное исправление рабочих фактов PropertyCase с причиной, optimistic concurrency, server-side permission, before/after, timeline и audit.  
+**Gate:** [GATE-RELEASE-B2-01](GATE-RELEASE-B2-01.md).  
+**Evidence:** [RELEASE_PACKAGE_02_B2_01_REPORT](reports/RELEASE_PACKAGE_02_B2_01_REPORT.md).
+
+В рамках B2-01 не выполнять LR-14 unlink/relink, UI B2-03, миграции или новую permission-модель. Владелец отдельно указал, что фактические build/tests/browser проверки выполняет сам; в этой задаче они остаются **Not run**, а targeted tests добавляются как код.
+
+### Required reading B2-01
+
+После README → START_HERE → этого файла читать только:
+1. `P0_CATALOG_PROCUREMENT_BOUNDARY.md`;
+2. `STAGE-1_DATA_CONVENTIONS.md`;
+3. относящиеся к audit/timeline/access положения `docs/04-foundation/FP-004_Сквозное_ERP-ядро_и_общие_бизнес-механизмы.md`;
+4. текущий Gate и только затрагиваемый Procurement-код/тесты.
+
+## Предыдущий Gate — B1-04, передача работы и проверка первого release package
 
 **Прямой запрос владельца от 18 сентября 2026 года:** начать B1-04.  
 **Ветка:** `codex/release-package-01`.  

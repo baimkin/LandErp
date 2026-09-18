@@ -1190,6 +1190,44 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task CorrectCaseFactAsync(Subject subject, CorrectPropertyCaseFact command, string correlationId, CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(command.Field)) throw new ArgumentException("Поле не поддерживается.");
+        string reason = Required(command.Reason, 3, 4000, "Укажите причину исправления.");
+        (string? textValue, decimal? numericValue) = NormalizeCorrection(command);
+
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await RequireDossierPermissionAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.PropertyCases.FromSqlInterpolated(
+            $"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .LoadAsync(cancellationToken);
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken)
+            ?? throw new AccessDeniedException();
+        if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
+
+        string before = CaseFactValue(row.Case, command.Field);
+        ApplyCorrection(row.Case, command.Field, textValue, numericValue);
+        string after = CaseFactValue(row.Case, command.Field);
+        if (string.Equals(before, after, StringComparison.Ordinal))
+            throw new ArgumentException("Новое значение не отличается от текущего.");
+
+        DateTimeOffset now = time.GetUtcNow();
+        row.Case.FactsProvenance = $"Исправлено сотрудником {now:O}";
+        db.Entry(row.Case).Property(item => item.Version).IsModified = true;
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
+            ActorEmployeeId = context.EmployeeId, Kind = "FactCorrected", Title = "Рабочий факт исправлен",
+            Body = $"{CaseFactLabel(command.Field)}: {TimelineFactValue(before)} → {TimelineFactValue(after)}\nПричина: {reason}", RecordedAt = now
+        });
+        OrganizationWorkspace.AddAudit(db, context, subject, "PropertyCaseFactCorrected", "PropertyCase", row.Case.Id,
+            new { Field = command.Field.ToString(), Before = before, After = after, Reason = reason }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task SaveNextActionAsync(Subject subject, SaveNextAction command, string correlationId, CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(command.Type)) throw new ArgumentException("Выберите поддерживаемый тип следующего действия.");
@@ -1425,6 +1463,77 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         }
         return result.ToArray();
     }
+
+    private static (string? Text, decimal? Number) NormalizeCorrection(CorrectPropertyCaseFact command)
+    {
+        return command.Field switch
+        {
+            CaseFactField.Title when command.NumericValue == null
+                => (Required(command.TextValue, 1, 20000, "Укажите название объекта."), null),
+            CaseFactField.Price when command.TextValue == null && command.NumericValue is null
+                => (null, null),
+            CaseFactField.Price when command.TextValue == null && command.NumericValue > 0
+                => (null, DataConventions.RoundRubles(command.NumericValue.Value)),
+            CaseFactField.AreaSquareMeters when command.TextValue == null && command.NumericValue is null
+                => (null, null),
+            CaseFactField.AreaSquareMeters when command.TextValue == null && command.NumericValue > 0
+                => (null, decimal.Round(command.NumericValue.Value, 4, MidpointRounding.ToEven)),
+            CaseFactField.Location when command.NumericValue == null
+                => (Optional(command.TextValue, 20000), null),
+            CaseFactField.CadastralNumber when command.NumericValue == null
+                => (Optional(command.TextValue, 128), null),
+            CaseFactField.Price => throw new ArgumentException("Цена должна быть больше нуля или очищена."),
+            CaseFactField.AreaSquareMeters => throw new ArgumentException("Площадь должна быть больше нуля или очищена."),
+            _ => throw new ArgumentException("Передано значение неподходящего типа.")
+        };
+    }
+
+    private static void ApplyCorrection(PropertyCase propertyCase, CaseFactField field, string? textValue, decimal? numericValue)
+    {
+        switch (field)
+        {
+            case CaseFactField.Title:
+                propertyCase.WorkingTitle = textValue!;
+                break;
+            case CaseFactField.Price:
+                propertyCase.WorkingPrice = numericValue;
+                break;
+            case CaseFactField.AreaSquareMeters:
+                propertyCase.WorkingAreaSquareMeters = numericValue;
+                break;
+            case CaseFactField.Location:
+                propertyCase.WorkingLocation = textValue;
+                break;
+            case CaseFactField.CadastralNumber:
+                propertyCase.CadastralNumber = textValue;
+                break;
+            default:
+                throw new ArgumentException("Поле не поддерживается.");
+        }
+    }
+
+    private static string CaseFactValue(PropertyCase propertyCase, CaseFactField field) => field switch
+    {
+        CaseFactField.Title => propertyCase.WorkingTitle,
+        CaseFactField.Price => Format(propertyCase.WorkingPrice) ?? "—",
+        CaseFactField.AreaSquareMeters => Format(propertyCase.WorkingAreaSquareMeters) ?? "—",
+        CaseFactField.Location => propertyCase.WorkingLocation ?? "—",
+        CaseFactField.CadastralNumber => propertyCase.CadastralNumber ?? "—",
+        _ => throw new ArgumentException("Поле не поддерживается.")
+    };
+
+    private static string CaseFactLabel(CaseFactField field) => field switch
+    {
+        CaseFactField.Title => "Название",
+        CaseFactField.Price => "Цена",
+        CaseFactField.AreaSquareMeters => "Площадь",
+        CaseFactField.Location => "Локация",
+        CaseFactField.CadastralNumber => "Кадастровый номер",
+        _ => field.ToString()
+    };
+
+    private static string TimelineFactValue(string value) =>
+        value.Length <= 2000 ? value : value[..1999] + "…";
 
     private static string ApplyFact(PropertyCase propertyCase, Listing source, CaseFactField field)
     {

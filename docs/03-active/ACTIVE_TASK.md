@@ -1,6 +1,26 @@
 # Активная задача LandErp
 
-## Текущий Gate — B3-02, file limits & safe upload errors
+## Текущий Gate — B3-03, inspection draft / conflict / server validation
+
+**Прямой запрос владельца от 18 сентября 2026 года:** выполнить LR-06 + LR-07 + LR-12 вместе в B3-03.  
+**Ветка:** `codex/release-package-03`.  
+**Исходный commit B3-03:** `a500aecf3952c5c307082c1d172d1e60fade4e02`.  
+**Scope:** integrity локального inspection draft, version-conflict UX и server-authority validation по snapshot semantics.  
+**Gate:** [GATE-RELEASE-B3-03](GATE-RELEASE-B3-03.md).  
+**Evidence:** [RELEASE_PACKAGE_03_B3_03_REPORT](reports/RELEASE_PACKAGE_03_B3_03_REPORT.md).
+
+Не строить auto-merge между двумя осмотрами и не менять schema: при конфликте локальный draft сохраняется, save блокируется, переход на server version только явным discard. Не начинать B3-04 validation автоматически. Фактические build/tests/browser выполняет владелец; здесь они **Not run**.
+
+### Required reading B3-03
+
+После README → START_HERE → этого файла читать только:
+1. SiteInspectionPage + `landErpInspection` local draft JS;
+2. WorkspaceComponent command outcome;
+3. `SaveInspectionAsync` + inspection snapshot domain;
+4. Phase5/B3 targeted tests;
+5. screen spec 04 только как interaction boundary.
+
+## Предыдущий Gate — B3-02, file limits & safe upload errors
 
 **Прямой запрос владельца от 18 сентября 2026 года:** начать B3-02 после публикации B3-01.  
 **Ветка:** `codex/release-package-03`.  

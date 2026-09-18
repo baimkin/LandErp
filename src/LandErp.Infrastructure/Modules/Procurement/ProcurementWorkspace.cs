@@ -987,9 +987,11 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         foreach (InspectionAnswer answer in command.Answers)
         {
             SiteInspectionItem item = items.SingleOrDefault(value => value.Id == answer.ItemId) ?? throw new AccessDeniedException();
-            if (item.Version != answer.ExpectedItemVersion || !Enum.IsDefined(answer.Status)) throw new DbUpdateConcurrencyException();
-            string value = Optional(answer.Answer, 4000) ?? ""; string note = Optional(answer.Note, 4000) ?? "";
-            if (answer.Status == InspectionItemStatus.Answered && value.Length == 0) throw new ArgumentException("Укажите ответ для обработанного пункта.");
+            if (item.Version != answer.ExpectedItemVersion) throw new DbUpdateConcurrencyException();
+            if (!Enum.IsDefined(answer.Status)) throw new ArgumentException("Некорректное состояние пункта осмотра.");
+            string value = Optional(answer.Answer, 4000) ?? "";
+            string note = Optional(answer.Note, 4000) ?? "";
+            value = NormalizeInspectionAnswer(item, answer.Status, value);
             item.Status = answer.Status; item.Answer = value; item.Note = note;
         }
         inspection.OverallConclusion = Optional(command.OverallConclusion, 4000) ?? "";
@@ -1516,6 +1518,49 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             Description = value.Description, SortOrder = (index + 1) * 10, Active = true
         }).ToArray();
         db.CaseCheckTemplateItems.AddRange(created); await db.SaveChangesAsync(cancellationToken); return created;
+    }
+
+    private static string NormalizeInspectionAnswer(SiteInspectionItem item, InspectionItemStatus status, string value)
+    {
+        if (status == InspectionItemStatus.NotChecked) return "";
+        if (status != InspectionItemStatus.Answered) return value;
+        if (value.Length == 0) throw new ArgumentException($"Укажите ответ для «{item.TitleSnapshot}».");
+
+        return item.AnswerTypeSnapshot switch
+        {
+            InspectionAnswerType.Boolean => bool.TryParse(value, out bool boolean)
+                ? (boolean ? "true" : "false")
+                : throw new ArgumentException($"Для «{item.TitleSnapshot}» допустим только ответ Да / Нет."),
+            InspectionAnswerType.Number => ParseInspectionNumber(value, item.TitleSnapshot).ToString("G29", CultureInfo.InvariantCulture),
+            InspectionAnswerType.Percentage => NormalizePercentage(value, item.TitleSnapshot),
+            InspectionAnswerType.Choice => AllowedInspectionChoice(item, value),
+            InspectionAnswerType.Text => value,
+            _ => throw new ArgumentException("Неизвестный тип ответа пункта осмотра.")
+        };
+    }
+
+    private static decimal ParseInspectionNumber(string value, string title)
+    {
+        const NumberStyles styles = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint;
+        if (decimal.TryParse(value, styles, CultureInfo.InvariantCulture, out decimal number)
+            || decimal.TryParse(value, styles, CultureInfo.GetCultureInfo("ru-RU"), out number))
+            return number;
+        throw new ArgumentException($"Для «{title}» укажите числовое значение.");
+    }
+
+    private static string NormalizePercentage(string value, string title)
+    {
+        decimal number = ParseInspectionNumber(value, title);
+        if (number is < 0 or > 100) throw new ArgumentException($"Для «{title}» укажите процент от 0 до 100.");
+        return number.ToString("G29", CultureInfo.InvariantCulture);
+    }
+
+    private static string AllowedInspectionChoice(SiteInspectionItem item, string value)
+    {
+        string[] options = JsonSerializer.Deserialize<string[]>(item.OptionsJsonSnapshot) ?? [];
+        return options.Contains(value, StringComparer.Ordinal)
+            ? value
+            : throw new ArgumentException($"Для «{item.TitleSnapshot}» выберите значение из сохранённых вариантов.");
     }
 
     private static bool AllowedContentType(CaseAttachmentKind kind, string contentType) => kind switch

@@ -213,6 +213,22 @@ internal static class ProcurementUiScenario
             await StepAsync(async () =>
             {
                 await page.GetByLabel("Ответ: Дорога до ближайшего населённого пункта", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Щебень" });
+                await page.GetByLabel("Общий вывод", new() { Exact = true }).FillAsync("Несохранённый вывод перед фото");
+                await page.Locator("input[type=file]").SetInputFilesAsync(new FilePayload
+                {
+                    Name = "draft-photo.jpg", MimeType = "image/jpeg",
+                    Buffer = System.Text.Encoding.UTF8.GetBytes("b3-03 synthetic inspection photo")
+                });
+                await page.GetByRole(AriaRole.Button, new() { Name = "Загрузить материал", Exact = true }).ClickAsync();
+                await page.GetByText("Изменения сохранены", new() { Exact = true }).WaitForAsync();
+                Assert.AreEqual("Щебень", await page.GetByLabel("Ответ: Дорога до ближайшего населённого пункта", new() { Exact = true }).InputValueAsync());
+                Assert.AreEqual("Несохранённый вывод перед фото", await page.GetByLabel("Общий вывод", new() { Exact = true }).InputValueAsync());
+                await page.GetByText("Локальный черновик", new() { Exact = true }).WaitForAsync();
+            }, "media-upload-keeps-unsaved-draft");
+
+            await StepAsync(async () =>
+            {
+                await page.GetByLabel("Ответ: Дорога до ближайшего населённого пункта", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Щебень" });
                 await context.SetOfflineAsync(true);
                 await page.GetByLabel("Общий вывод", new() { Exact = true }).FillAsync("Локальный вывод после краткого разрыва связи");
                 await Task.Delay(200);

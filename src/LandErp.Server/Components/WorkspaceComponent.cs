@@ -30,6 +30,7 @@ public abstract class WorkspaceComponent : ComponentBase
     protected string OperationId { get; private set; } = "";
     protected WorkspaceWriteOutcome WriteOutcome { get; private set; }
     protected bool RefreshRequired { get; private set; }
+    protected bool LastWriteWasConflict { get; private set; }
 
     protected abstract Task ReadAsync();
 
@@ -73,6 +74,7 @@ public abstract class WorkspaceComponent : ComponentBase
         if (Busy || Loading) return false;
         Busy = true; Error = null; Success = null; Forbidden = false;
         WriteOutcome = WorkspaceWriteOutcome.NotSent;
+        LastWriteWasConflict = false;
         OperationId = Guid.CreateVersion7().ToString();
         try
         {
@@ -99,6 +101,7 @@ public abstract class WorkspaceComponent : ComponentBase
             catch (DbUpdateConcurrencyException exception)
             {
                 WriteOutcome = WorkspaceWriteOutcome.Rejected;
+                LastWriteWasConflict = true;
                 Error = FailureMessage(exception, "Command", operation,
                     "Данные уже изменены. Обновите данные и проверьте актуальное состояние перед повтором решения.");
                 return false;

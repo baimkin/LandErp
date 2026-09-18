@@ -3,6 +3,7 @@ using LandErp.Infrastructure.Persistence;
 using LandErp.Infrastructure.Modules.Collection;
 using LandErp.Worker;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 

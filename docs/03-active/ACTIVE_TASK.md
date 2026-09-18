@@ -1,5 +1,28 @@
 # Активная задача LandErp
 
+## Текущая работа — интеграция B3-03 и B4-01–B4-03
+
+**Прямой запрос владельца от 18 сентября 2026 года:** проверить B4-02/B4-03,
+самостоятельно внести небольшие исправления, объединить пакет с актуальным
+интерфейсом и запустить локальный Server для ручной приёмки.
+
+**Интеграционная ветка:** `codex/integrate-b3-03-b4`.
+**База:** `7958f92`.
+**Исходные пакетные commits:** B3-03 `74bc3dd`, B4-01 `6543e91`,
+B4-02 `4f0407c`, B4-03 `c6a4b7d`.
+**Статус:** интеграция реализована; Release build и 6 целевых PostgreSQL/storage
+тестов прошли, production PowerShell синтаксически проверен. Реальный production
+deploy/HTTPS/reboot/backup/restore остаётся отдельной B4-04 приёмкой.
+**Evidence:** [RELEASE_B3_03_B4_INTEGRATION_REPORT](reports/RELEASE_B3_03_B4_INTEGRATION_REPORT.md).
+
+Scope: защита локального черновика осмотра и server-side validation, исправление
+nullable heartbeat activity, operational health на актуальной странице Parser,
+repository-side production contour с безопасным backup/restore. Старый дизайн
+страниц не возвращать, production-задачи Windows и рабочую БД не изменять.
+
+Required reading: `GATE-RELEASE-B3-03.md`, `GATE-RELEASE-B4-01.md`–
+`GATE-RELEASE-B4-03.md`, `PRODUCTION_RUNBOOK.md` и их отчёты.
+
 ## Текущая работа — интеграция B2 и B3-01–B3-02 в актуальную карточку
 
 **Прямой запрос владельца от 18 сентября 2026 года:** принять реализованные B2,

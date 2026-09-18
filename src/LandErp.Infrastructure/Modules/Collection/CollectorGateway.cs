@@ -215,7 +215,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
                 || progress.MaxPages is < 1 or > 100 || progress.ProcessedCount < 0 || progress.TotalCount < 0
                 || progress.TotalCount != null && progress.ProcessedCount > progress.TotalCount
                 || progress.Page != null && progress.MaxPages != null && progress.Page > progress.MaxPages
-                || progress.LastUsefulActionAt?.Offset != TimeSpan.Zero))
+                || progress.LastUsefulActionAt is { } activity && activity.Offset != TimeSpan.Zero))
             throw new ArgumentException("HEARTBEAT_STATE_INVALID");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);

@@ -35,7 +35,7 @@ public static class FileStorageServices
     }
 }
 
-internal sealed class CachedFileStorageHealth(IFileStorageHealth inner) : IFileStorageHealth
+internal sealed class CachedFileStorageHealth(IFileStorageHealth inner) : IFileStorageHealth, IDisposable
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
@@ -62,4 +62,6 @@ internal sealed class CachedFileStorageHealth(IFileStorageHealth inner) : IFileS
         }
         finally { gate.Release(); }
     }
+
+    public void Dispose() => gate.Dispose();
 }

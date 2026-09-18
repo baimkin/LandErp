@@ -1,6 +1,24 @@
 # Активная задача LandErp
 
-## Текущий Gate — B2-01, audited PropertyCase corrections
+## Текущий Gate — B2-02, source unlink / relink correction
+
+**Прямой запрос владельца от 18 сентября 2026 года:** начать B2-02 после публикации B2-01.  
+**Ветка:** `codex/release-package-02`.  
+**Исходный commit B2-02:** `c039600af0360e90a3731763f4380c8c06d0c779`.  
+**Scope:** только LR-14 — штатное исправление ошибочной confirmed source relation: unlink и relink к другому PropertyCase с сохранением истории, server-side access, concurrency и audit/timeline.  
+**Gate:** [GATE-RELEASE-B2-02](GATE-RELEASE-B2-02.md).  
+**Evidence:** [RELEASE_PACKAGE_02_B2_02_REPORT](reports/RELEASE_PACKAGE_02_B2_02_REPORT.md).
+
+Реализация должна использовать существующую модель `PropertyCaseSourceLink` и filtered unique constraint. Не добавлять migration/новую relation-history таблицу без доказанной необходимости. LR-15 search/paging, UI B2-03 и последующие packages не входят. Фактические build/tests/browser проверки выполняет владелец; здесь они остаются **Not run**.
+
+### Required reading B2-02
+
+После README → START_HERE → этого файла читать только:
+1. `P0_CATALOG_PROCUREMENT_BOUNDARY.md`;
+2. относящиеся к audit/timeline/access положения `docs/04-foundation/FP-004_Сквозное_ERP-ядро_и_общие_бизнес-механизмы.md`;
+3. текущий Gate и только source-link/Catalog/Procurement код и targeted tests.
+
+## Предыдущий Gate — B2-01, audited PropertyCase corrections
 
 **Прямой запрос владельца от 18 сентября 2026 года:** начать Package 02 с B2-01 и решить LR-13 минимально достаточным изменением.  
 **Ветка:** `codex/release-package-02`.  

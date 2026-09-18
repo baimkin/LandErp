@@ -218,6 +218,105 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             .Select(row => new CaseLinkTarget(row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle)).ToArrayAsync(cancellationToken);
     }
 
+    public async Task CorrectCaseLinkAsync(Subject subject, CorrectCatalogItemCaseLink command,
+        string correlationId, CancellationToken cancellationToken)
+    {
+        string reason = Required(command.Reason, 3, 4000, "Укажите причину исправления связи.");
+        if (command.TargetCaseId == command.ExpectedCaseId)
+            throw new ArgumentException("Источник уже связан с выбранным PropertyCase.");
+
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        Listing catalogItem = (await db.Listings.FromSqlInterpolated(
+            $"SELECT * FROM catalog.listings WHERE id={command.CatalogItemId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
+        if (catalogItem.Version != command.ExpectedCatalogVersion) throw new DbUpdateConcurrencyException();
+
+        PropertyCaseSourceLink currentLink = await db.PropertyCaseSourceLinks.SingleOrDefaultAsync(
+            item => item.CatalogItemId == catalogItem.Id && item.Confirmed, cancellationToken)
+            ?? throw new DbUpdateConcurrencyException();
+        if (currentLink.PropertyCaseId != command.ExpectedCaseId) throw new DbUpdateConcurrencyException();
+
+        Row from = await VisibleCases(db, context).SingleOrDefaultAsync(
+            item => item.Case.Id == currentLink.PropertyCaseId, cancellationToken) ?? throw new AccessDeniedException();
+        Row? target = null;
+        if (command.TargetCaseId is Guid targetCaseId)
+        {
+            target = await VisibleCases(db, context).SingleOrDefaultAsync(
+                item => item.Case.Id == targetCaseId, cancellationToken) ?? throw new AccessDeniedException();
+        }
+
+        currentLink.Confirmed = false;
+        await db.SaveChangesAsync(cancellationToken);
+
+        DateTimeOffset now = time.GetUtcNow();
+        if (target != null)
+        {
+            PropertyCaseSourceLink? targetLink = await db.PropertyCaseSourceLinks.SingleOrDefaultAsync(
+                item => item.CatalogItemId == catalogItem.Id && item.PropertyCaseId == target.Case.Id, cancellationToken);
+            if (targetLink == null)
+            {
+                db.PropertyCaseSourceLinks.Add(new()
+                {
+                    Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, PropertyCaseId = target.Case.Id,
+                    CatalogItemId = catalogItem.Id, Confirmed = true, RelationType = "Source",
+                    ActorEmployeeId = context.EmployeeId, Provenance = "Correction relink",
+                    ReviewedDataRevision = catalogItem.DataRevision, RecordedAt = now
+                });
+            }
+            else
+            {
+                targetLink.Confirmed = true;
+                targetLink.ActorEmployeeId = context.EmployeeId;
+                targetLink.Provenance = "Correction relink";
+                targetLink.ReviewedDataRevision = catalogItem.DataRevision;
+                targetLink.RecordedAt = now;
+            }
+        }
+
+        catalogItem.Disposition = target == null ? CatalogDisposition.Incoming : CatalogDisposition.InWork;
+        catalogItem.AttentionRequired = target == null;
+        catalogItem.AttentionAt = target == null ? now : null;
+        catalogItem.QueueReason = target == null
+            ? "Связь PropertyCase исправлена: требуется повторная привязка."
+            : $"Перепривязан к {target.Case.BusinessNumber}.";
+        catalogItem.ChangedAt = now;
+        db.Entry(catalogItem).Property(item => item.Version).IsModified = true;
+
+        string sourceLabel = $"{catalogItem.Source}: {TimelineFactValue(catalogItem.Title ?? "источник")}";
+        db.BusinessTimeline.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+            ObjectId = from.Case.Id, ActorEmployeeId = context.EmployeeId, Kind = "SourceUnlinked",
+            Title = "Ошибочная связь источника исправлена",
+            Body = $"{sourceLabel}\nПричина: {reason}", RecordedAt = now
+        });
+        if (target != null)
+        {
+            db.BusinessTimeline.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+                ObjectId = target.Case.Id, ActorEmployeeId = context.EmployeeId, Kind = "SourceRelinked",
+                Title = "Источник перепривязан",
+                Body = $"{sourceLabel}\nИз {from.Case.BusinessNumber}\nПричина: {reason}", RecordedAt = now
+            });
+        }
+
+        OrganizationWorkspace.AddAudit(db, context, subject, "PropertyCaseSourceLinkCorrected", "PropertyCase", from.Case.Id,
+            new
+            {
+                CatalogItemId = catalogItem.Id,
+                FromCaseId = from.Case.Id,
+                FromBusinessNumber = from.Case.BusinessNumber,
+                ToCaseId = target?.Case.Id,
+                ToBusinessNumber = target?.Case.BusinessNumber,
+                Reason = reason
+            }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task<ManualPropertyCaseResult> CreateManualCaseAsync(Subject subject, CreateManualPropertyCase command,
         string correlationId, CancellationToken cancellationToken)
     {
@@ -294,19 +393,36 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                 .Select(row => row.Case).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
         }
 
-        db.PropertyCaseSourceLinks.Add(new()
+        DateTimeOffset linkedAt = time.GetUtcNow();
+        PropertyCaseSourceLink? historicalLink = await db.PropertyCaseSourceLinks.SingleOrDefaultAsync(
+            item => item.CatalogItemId == catalogItem.Id && item.PropertyCaseId == propertyCase.Id, cancellationToken);
+        if (historicalLink == null)
         {
-            Id = DataConventions.NewId(),
-            OrganizationId = context.OrganizationId,
-            PropertyCaseId = propertyCase.Id,
-            CatalogItemId = catalogItem.Id,
-            Confirmed = true,
-            RelationType = "Source",
-            ActorEmployeeId = context.EmployeeId,
-            Provenance = "User confirmed",
-            ReviewedDataRevision = catalogItem.DataRevision,
-            RecordedAt = time.GetUtcNow()
-        });
+            db.PropertyCaseSourceLinks.Add(new()
+            {
+                Id = DataConventions.NewId(),
+                OrganizationId = context.OrganizationId,
+                PropertyCaseId = propertyCase.Id,
+                CatalogItemId = catalogItem.Id,
+                Confirmed = true,
+                RelationType = "Source",
+                ActorEmployeeId = context.EmployeeId,
+                Provenance = "User confirmed",
+                ReviewedDataRevision = catalogItem.DataRevision,
+                RecordedAt = linkedAt
+            });
+        }
+        else
+        {
+            historicalLink.Confirmed = true;
+            historicalLink.ActorEmployeeId = context.EmployeeId;
+            historicalLink.Provenance = "User confirmed";
+            historicalLink.ReviewedDataRevision = catalogItem.DataRevision;
+            historicalLink.RecordedAt = linkedAt;
+            catalogItem.QueueReason = $"Повторно привязан к {propertyCase.BusinessNumber}.";
+            catalogItem.AttentionAt = null;
+            catalogItem.ChangedAt = linkedAt;
+        }
         catalogItem.Disposition = CatalogDisposition.InWork;
         catalogItem.AttentionRequired = false;
         db.Entry(catalogItem).Property(value => value.Version).IsModified = true;
@@ -321,7 +437,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             Kind = created ? "Decision" : "SourceLinked",
             Title = title,
             Body = $"{catalogItem.Source}: {catalogItem.Title ?? "источник"}",
-            RecordedAt = time.GetUtcNow()
+            RecordedAt = linkedAt
         });
         OrganizationWorkspace.AddAudit(db, context, subject, created ? "CatalogItemTakenToWork" : "CatalogItemLinkedToCase",
             "PropertyCase", propertyCase.Id, new { CatalogItemId = catalogItem.Id, propertyCase.BusinessNumber }, correlationId);

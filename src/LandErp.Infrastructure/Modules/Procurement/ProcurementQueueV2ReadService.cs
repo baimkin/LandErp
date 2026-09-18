@@ -1,5 +1,6 @@
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
+using LandErp.Application.Modules.Organization.Domain;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;

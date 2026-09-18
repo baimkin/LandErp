@@ -388,7 +388,7 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
             Cases.Count(item => item.PendingApproval), Candidates);
     }
 
-    private async Task<EmployeeWorkState> BuildEmployeeWorkStateAsync(LandErpDbContext db, Guid organizationId,
+    private static async Task<EmployeeWorkState> BuildEmployeeWorkStateAsync(LandErpDbContext db, Guid organizationId,
         Guid employeeId, CancellationToken cancellationToken)
     {
         Employee source = await db.Employees.AsNoTracking().SingleOrDefaultAsync(
@@ -475,7 +475,7 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         return true;
     }
 
-    private async Task TransferEmployeeWorkInternalAsync(LandErpDbContext db, AccessContext context, Subject subject,
+    private static async Task TransferEmployeeWorkInternalAsync(LandErpDbContext db, AccessContext context, Subject subject,
         EmployeeWorkState state, Guid recipientEmployeeId, string correlationId, CancellationToken cancellationToken)
     {
         if (!state.View.HasWork) return;
@@ -620,7 +620,7 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
             throw new AccessDeniedException();
     }
 
-    private static Task LockOwnerInvariantAsync(LandErpDbContext db, Guid organizationId, CancellationToken cancellationToken)
+    private static Task<int> LockOwnerInvariantAsync(LandErpDbContext db, Guid organizationId, CancellationToken cancellationToken)
     {
         string key = "LastActiveOwner:" + organizationId.ToString("N");
         return db.Database.ExecuteSqlInterpolatedAsync(

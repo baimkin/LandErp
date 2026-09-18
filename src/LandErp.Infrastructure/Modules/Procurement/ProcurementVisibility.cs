@@ -59,11 +59,11 @@ internal static class ProcurementVisibility
                 && propertyCase.TeamId != null && assignment.TeamId == propertyCase.TeamId
             || assignment.Scope == AccessScope.Own
                 && (assignment.EmployeeId == propertyCase.ManagerEmployeeId
-                    || access is ProcurementRecipientAccess.BecomesManager
-                        or ProcurementRecipientAccess.BecomesManagerAndCaseAssignee)
+                    || access == ProcurementRecipientAccess.BecomesManager
+                    || access == ProcurementRecipientAccess.BecomesManagerAndCaseAssignee)
             || assignment.Scope == AccessScope.AssignedObjects
                 && (assignment.EmployeeId == currentCaseAssigneeId
-                    || access is ProcurementRecipientAccess.BecomesCaseAssignee
-                        or ProcurementRecipientAccess.BecomesManagerAndCaseAssignee));
+                    || access == ProcurementRecipientAccess.BecomesCaseAssignee
+                    || access == ProcurementRecipientAccess.BecomesManagerAndCaseAssignee));
     }
 }

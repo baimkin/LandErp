@@ -1,6 +1,24 @@
 # Активная задача LandErp
 
-## Текущий Gate — B2-02, source unlink / relink correction
+## Текущий Gate — B2-03, UI/UX correction flows
+
+**Прямой запрос владельца от 18 сентября 2026 года:** начать B2-03 после публикации B2-02.  
+**Ветка:** `codex/release-package-02`.  
+**Исходный commit B2-03:** `d00fd7fd5d49bf1c83fe8d3608f14d357b7c64de`.  
+**Scope:** UI/UX для уже реализованных LR-13/LR-14: correction рабочих фактов, source unlink/relink, обязательная причина, before/after, stale-version recovery и отсутствие недоступных действий.  
+**Gate:** [GATE-RELEASE-B2-03](GATE-RELEASE-B2-03.md).  
+**Evidence:** [RELEASE_PACKAGE_02_B2_03_REPORT](reports/RELEASE_PACKAGE_02_B2_03_REPORT.md).
+
+Не добавлять новые backend semantics, migration, новую permission-модель или LR-15 search/paging. Допустим только минимальный read-model флаг существующего `ManagerDecide`, необходимый для корректного скрытия source-link correction в UI. Фактические build/tests/browser проверки выполняет владелец; здесь они остаются **Not run**.
+
+### Required reading B2-03
+
+После README → START_HERE → этого файла читать только:
+1. `GATE-RELEASE-B2-01.md` и `GATE-RELEASE-B2-02.md` как контракты уже реализованных команд;
+2. `docs/14-ui-kit/screens/03-property-case.md` только как визуальную/экранную границу;
+3. существующий `CaseWorkspace.razor`, ближайший CSS и browser scenario.
+
+## Предыдущий Gate — B2-02, source unlink / relink correction
 
 **Прямой запрос владельца от 18 сентября 2026 года:** начать B2-02 после публикации B2-01.  
 **Ветка:** `codex/release-package-02`.  

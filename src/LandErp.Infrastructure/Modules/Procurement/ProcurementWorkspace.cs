@@ -231,6 +231,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+        await EnsureActiveEmployeeAsync(db, context.EmployeeId, cancellationToken);
         ProcurementCommandReplay replay = await ProcurementCommandReplay.BeginAsync(db, context, subject,
             command.CommandId, "PropertyCaseCreatedManually", command with { CommandId = null }, cancellationToken);
         if (replay.ExistingCaseId is Guid existingId)
@@ -262,6 +264,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+        await EnsureActiveEmployeeAsync(db, context.EmployeeId, cancellationToken);
         Listing catalogItem = (await db.Listings.FromSqlInterpolated(
             $"SELECT * FROM catalog.listings WHERE id={command.CatalogItemId} AND organization_id={context.OrganizationId} FOR UPDATE")
             .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
@@ -331,6 +335,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+        await EnsureActiveEmployeeAsync(db, context.EmployeeId, cancellationToken);
         Listing catalogItem = (await db.Listings.FromSqlInterpolated(
             $"SELECT * FROM catalog.listings WHERE id={command.CatalogItemId} AND organization_id={context.OrganizationId} FOR UPDATE")
             .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
@@ -504,6 +510,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         AccessContext read = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, read.OrganizationId, cancellationToken);
+        await EnsureActiveEmployeeAsync(db, read.EmployeeId, cancellationToken);
         PropertyCase propertyCase = (await db.PropertyCases.FromSqlInterpolated(
             $"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={read.OrganizationId} FOR UPDATE")
             .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
@@ -710,6 +718,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         await RequireDossierPermissionAsync(subject, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+        await EnsureActiveEmployeeAsync(db, context.EmployeeId, cancellationToken);
         await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
         Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
         if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
@@ -1191,6 +1201,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         await RequireDossierPermissionAsync(subject, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+        await EnsureActiveEmployeeAsync(db, context.EmployeeId, cancellationToken);
         await db.PropertyCases.FromSqlInterpolated(
             $"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE")
             .LoadAsync(cancellationToken);
@@ -1253,6 +1265,13 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         InternalNotification item = await db.Notifications.SingleOrDefaultAsync(value => value.Id == id && value.OrganizationId == context.OrganizationId && value.EmployeeId == context.EmployeeId, cancellationToken) ?? throw new AccessDeniedException();
         item.ReadAt ??= time.GetUtcNow(); await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task EnsureActiveEmployeeAsync(LandErpDbContext db, Guid employeeId,
+        CancellationToken cancellationToken)
+    {
+        if (!await db.Employees.AnyAsync(item => item.Id == employeeId && item.Active, cancellationToken))
+            throw new AccessDeniedException();
     }
 
     private async Task<bool> AllowedAsync(Subject subject, string permission, CancellationToken cancellationToken)

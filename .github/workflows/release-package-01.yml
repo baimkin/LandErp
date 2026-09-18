@@ -1,0 +1,63 @@
+name: Release Package 01 Validation
+
+on:
+  push:
+    branches:
+      - codex/release-package-01
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-validation:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      LANDERP_TEST_ADMIN_CONNECTION: "Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=postgres;Pooling=false;Include Error Detail=false;Log Parameters=false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.112
+          cache: true
+          cache-dependency-path: |
+            **/packages.lock.json
+
+      - name: Restore locked dependencies
+        run: dotnet restore tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj --locked-mode
+
+      - name: Build targeted test graph
+        run: dotnet build tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj -c Release --no-restore
+
+      - name: Run release-package tests
+        run: >
+          dotnet test tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj
+          -c Release --no-build
+          --logger "trx;LogFileName=release-package-01.trx"
+          --filter "FullyQualifiedName~WorkspaceOperationTests|FullyQualifiedName~ProcurementCommandReplayTests|FullyQualifiedName~ProcurementCommandContractTests|FullyQualifiedName~ProcurementReplayAuditViewTests|FullyQualifiedName~ReleasePackageB102Tests|FullyQualifiedName~ReleasePackageB103Tests|FullyQualifiedName~ReleasePackageB104Tests|FullyQualifiedName~IdentityOrganizationTests|FullyQualifiedName~InspectionAcquisitionTests.InspectionSnapshotReconnectMediaAndAcquisitionAreSafeAndTerminal|FullyQualifiedName~ProcurementTests.CaseScopesUseResponsibilityAndCatalogRemainsOrganizationShared"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package-01-test-results
+          path: tests/LandErp.Foundation.Tests/TestResults/*.trx
+          if-no-files-found: ignore

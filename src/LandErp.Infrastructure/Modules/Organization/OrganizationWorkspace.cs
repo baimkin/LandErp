@@ -6,7 +6,10 @@ using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.IdentityAccess.Domain;
 using LandErp.Application.Modules.Organization.Contracts;
 using LandErp.Application.Modules.Organization.Domain;
+using LandErp.Application.Modules.Procurement.Domain;
+using LandErp.Application.Modules.Workflow.Domain;
 using LandErp.Infrastructure.Modules.IdentityAccess;
+using LandErp.Infrastructure.Modules.Procurement;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -209,6 +212,29 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         return new(employee.Id, user.UserName!, password);
     }
 
+    public async Task<EmployeeWorkImpact> ReadEmployeeWorkImpactAsync(Subject subject, Guid employeeId,
+        CancellationToken cancellationToken)
+    {
+        AccessContext context = await RequireOrganizationAdminAsync(subject, Permissions.UsersManage, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        return (await BuildEmployeeWorkStateAsync(db, context.OrganizationId, employeeId, cancellationToken)).View;
+    }
+
+    public async Task TransferEmployeeWorkAsync(Subject subject, TransferEmployeeWork command, string correlationId,
+        CancellationToken cancellationToken)
+    {
+        AccessContext context = await RequireOrganizationAdminAsync(subject, Permissions.UsersManage, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+        EmployeeWorkState state = await BuildEmployeeWorkStateAsync(
+            db, context.OrganizationId, command.EmployeeId, cancellationToken);
+        await TransferEmployeeWorkInternalAsync(db, context, subject, state, command.RecipientEmployeeId,
+            correlationId, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task SetEmployeeActiveAsync(Subject subject, SetEmployeeActive command, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await RequireOrganizationAdminAsync(subject, Permissions.UsersManage, cancellationToken);
@@ -216,12 +242,17 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         LandErpDbContext db = scope.ServiceProvider.GetRequiredService<LandErpDbContext>();
         UserManager<LandErpUser> users = scope.ServiceProvider.GetRequiredService<UserManager<LandErpUser>>();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
         await LockOwnerInvariantAsync(db, context.OrganizationId, cancellationToken);
 
         Employee employee = await db.Employees.SingleOrDefaultAsync(
             item => item.Id == command.EmployeeId && item.OrganizationId == context.OrganizationId, cancellationToken)
             ?? throw new AccessDeniedException();
         if (employee.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException("Сотрудник уже изменён. Обновите страницу.");
+        if (command.Active && (command.HandoverEmployeeId != null || command.EmergencyRevoke))
+            throw new ArgumentException("Переназначение используется только при отключении сотрудника.");
+        if (!command.Active && command.HandoverEmployeeId != null && command.EmergencyRevoke)
+            throw new ArgumentException("Выберите либо переназначение, либо срочный отзыв доступа без переназначения.");
         if (!command.Active && employee.UserId == subject.UserId) throw new ArgumentException("Нельзя отключить собственную учётную запись.");
         if (!command.Active && await IsLastActiveOwnerAsync(db, employee.Id, context.OrganizationId, cancellationToken))
             throw new ArgumentException("Нельзя отключить последнего активного Owner.");
@@ -230,11 +261,43 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         if (command.Active && user.PasswordHash == null)
             throw new ArgumentException("Сначала завершите активацию приглашённого сотрудника или создайте ему прямую учётную запись.");
 
+        EmployeeWorkImpact? impact = null;
+        if (!command.Active)
+        {
+            EmployeeWorkState state = await BuildEmployeeWorkStateAsync(db, context.OrganizationId, employee.Id, cancellationToken);
+            impact = state.View;
+            if (impact.HasWork)
+            {
+                if (command.HandoverEmployeeId is Guid recipientId)
+                {
+                    await TransferEmployeeWorkInternalAsync(db, context, subject, state, recipientId,
+                        correlationId, cancellationToken);
+                }
+                else if (!command.EmergencyRevoke)
+                {
+                    throw new ArgumentException("У сотрудника есть активная работа. Выберите получателя или используйте явный срочный отзыв доступа.");
+                }
+                else
+                {
+                    RecordHandoverPending(db, context, subject, state, correlationId);
+                }
+            }
+        }
+
         employee.Active = command.Active;
         EnsureIdentity(await users.SetLockoutEndDateAsync(user, command.Active ? null : DateTimeOffset.MaxValue));
         EnsureIdentity(await users.UpdateSecurityStampAsync(user));
         AddAudit(db, context, subject, command.Active ? "EmployeeRestored" : "EmployeeDeactivated", "Employee", employee.Id,
-            new { employee.DisplayName }, correlationId);
+            new
+            {
+                employee.DisplayName,
+                command.HandoverEmployeeId,
+                command.EmergencyRevoke,
+                AffectedCases = impact?.AffectedCases ?? 0,
+                OpenTasks = impact?.OpenTasks ?? 0,
+                OpenChecks = impact?.OpenChecks ?? 0,
+                PendingApprovals = impact?.PendingApprovals ?? 0
+            }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
@@ -276,6 +339,7 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         // committed Owner change instead of keeping a pre-lock Serializable snapshot.
         await using var transaction = await db.Database.BeginTransactionAsync(
             System.Data.IsolationLevel.ReadCommitted, cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
         await LockOwnerInvariantAsync(db, context.OrganizationId, cancellationToken);
 
         Employee employee = await db.Employees.SingleOrDefaultAsync(
@@ -314,6 +378,215 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
             new { Before = before, After = command }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private sealed record CaseWorkImpact(PropertyCase Case, Guid CaseAssigneeEmployeeId,
+        bool Manager, bool Assignment, bool OpenTask, int OpenChecks, bool PendingApproval);
+
+    private sealed record EmployeeWorkState(Employee Source, CaseWorkImpact[] Cases,
+        EmployeeHandoverCandidate[] Candidates)
+    {
+        public EmployeeWorkImpact View => new(Source.Id, Source.DisplayName, Cases.Length,
+            Cases.Count(item => item.Manager), Cases.Count(item => item.Assignment),
+            Cases.Count(item => item.OpenTask), Cases.Sum(item => item.OpenChecks),
+            Cases.Count(item => item.PendingApproval), Candidates);
+    }
+
+    private static async Task<EmployeeWorkState> BuildEmployeeWorkStateAsync(LandErpDbContext db, Guid organizationId,
+        Guid employeeId, CancellationToken cancellationToken)
+    {
+        Employee source = await db.Employees.AsNoTracking().SingleOrDefaultAsync(
+            item => item.Id == employeeId && item.OrganizationId == organizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
+
+        var caseRows = await (from propertyCase in db.PropertyCases.AsNoTracking()
+                              join assignment in db.WorkAssignments.AsNoTracking() on propertyCase.AssignmentId equals assignment.Id
+                              join task in db.WorkTasks.AsNoTracking() on propertyCase.WorkTaskId equals task.Id
+                              where propertyCase.OrganizationId == organizationId
+                                  && propertyCase.StageId != "acquired" && propertyCase.StageId != "rejected"
+                              select new
+                              {
+                                  Case = propertyCase,
+                                  AssigneeEmployeeId = assignment.EmployeeId,
+                                  TaskEmployeeId = task.EmployeeId,
+                                  task.Completed
+                              }).ToArrayAsync(cancellationToken);
+
+        var openCheckRows = await db.CaseChecks.AsNoTracking()
+            .Where(item => item.OrganizationId == organizationId && item.ResponsibleEmployeeId == employeeId
+                && item.Status != CaseCheckStatus.Passed && item.Status != CaseCheckStatus.Issue)
+            .GroupBy(item => item.PropertyCaseId)
+            .Select(group => new { CaseId = group.Key, Count = group.Count() })
+            .ToArrayAsync(cancellationToken);
+        Dictionary<Guid, int> openChecks = openCheckRows.ToDictionary(item => item.CaseId, item => item.Count);
+
+        CaseWorkImpact[] impacts = caseRows.Select(row =>
+        {
+            int checks = openChecks.GetValueOrDefault(row.Case.Id);
+            bool assignment = row.AssigneeEmployeeId == employeeId;
+            return new CaseWorkImpact(row.Case, row.AssigneeEmployeeId,
+                row.Case.ManagerEmployeeId == employeeId, assignment,
+                row.TaskEmployeeId == employeeId && !row.Completed, checks,
+                row.Case.PendingApprovalId != null && assignment);
+        }).Where(item => item.Manager || item.Assignment || item.OpenTask || item.OpenChecks > 0 || item.PendingApproval)
+          .ToArray();
+
+        if (impacts.Length == 0) return new(source, impacts, []);
+
+        var candidateRows = await (from employee in db.Employees.AsNoTracking()
+                                   join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
+                                   where employee.OrganizationId == organizationId && employee.Active && employee.Id != employeeId
+                                   select new { Employee = employee, Assignment = assignment })
+            .ToArrayAsync(cancellationToken);
+        Guid[] roleIds = candidateRows.Select(item => item.Assignment.RoleId).Distinct().ToArray();
+        var grantRows = await db.RolePermissions.AsNoTracking()
+            .Where(item => roleIds.Contains(item.RoleId))
+            .Select(item => new { item.RoleId, item.PermissionId })
+            .ToArrayAsync(cancellationToken);
+        Dictionary<Guid, HashSet<string>> permissions = grantRows.GroupBy(item => item.RoleId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.PermissionId).ToHashSet(StringComparer.Ordinal));
+
+        EmployeeHandoverCandidate[] candidates = candidateRows
+            .Where(candidate => CanReceiveAllWork(candidate.Employee.Id, candidate.Assignment,
+                permissions.GetValueOrDefault(candidate.Assignment.RoleId) ?? [], impacts))
+            .OrderBy(candidate => candidate.Employee.DisplayName)
+            .Select(candidate => new EmployeeHandoverCandidate(candidate.Employee.Id, candidate.Employee.DisplayName))
+            .ToArray();
+        return new(source, impacts, candidates);
+    }
+
+    private static bool CanReceiveAllWork(Guid candidateId, EmployeeAssignment candidateAssignment,
+        HashSet<string> permissions, CaseWorkImpact[] impacts)
+    {
+        if (!permissions.Contains(Permissions.QueueRead)) return false;
+        foreach (CaseWorkImpact impact in impacts)
+        {
+            Guid finalManager = impact.Manager ? candidateId : impact.Case.ManagerEmployeeId;
+            Guid finalAssignee = impact.Assignment ? candidateId : impact.CaseAssigneeEmployeeId;
+            if (!ProcurementVisibility.CanSeeAfterResponsibility(impact.Case, candidateAssignment, finalManager, finalAssignee))
+                return false;
+            if (impact.Manager && !permissions.Contains(Permissions.ManagerDecide)) return false;
+            if (impact.Assignment)
+            {
+                string required = impact.Case.StageId == "pending_head" ? Permissions.HeadDecide : Permissions.ManagerDecide;
+                if (!permissions.Contains(required)) return false;
+            }
+            if ((impact.OpenTask || impact.OpenChecks > 0) && !impact.Manager && !impact.Assignment
+                && !permissions.Contains(Permissions.ManagerDecide) && !permissions.Contains(Permissions.HeadDecide))
+                return false;
+            if (impact.PendingApproval && finalManager == candidateId) return false;
+        }
+        return true;
+    }
+
+    private static async Task TransferEmployeeWorkInternalAsync(LandErpDbContext db, AccessContext context, Subject subject,
+        EmployeeWorkState state, Guid recipientEmployeeId, string correlationId, CancellationToken cancellationToken)
+    {
+        if (!state.View.HasWork) return;
+        if (!state.Candidates.Any(item => item.EmployeeId == recipientEmployeeId))
+            throw new ArgumentException("Выбранный сотрудник не может получить всю активную работу с учётом прав и области доступа.");
+
+        Employee recipient = await db.Employees.SingleAsync(
+            item => item.Id == recipientEmployeeId && item.OrganizationId == context.OrganizationId && item.Active,
+            cancellationToken);
+        Guid[] caseIds = state.Cases.Select(item => item.Case.Id).ToArray();
+        PropertyCase[] cases = await db.PropertyCases.Where(item => caseIds.Contains(item.Id)).ToArrayAsync(cancellationToken);
+        Guid[] assignmentIds = cases.Select(item => item.AssignmentId).ToArray();
+        Guid[] taskIds = cases.Select(item => item.WorkTaskId).ToArray();
+        Assignment[] assignments = await db.WorkAssignments.Where(item => assignmentIds.Contains(item.Id)).ToArrayAsync(cancellationToken);
+        WorkTask[] tasks = await db.WorkTasks.Where(item => taskIds.Contains(item.Id)).ToArrayAsync(cancellationToken);
+        CaseCheck[] checks = await db.CaseChecks.Where(item => caseIds.Contains(item.PropertyCaseId)
+                && item.ResponsibleEmployeeId == state.Source.Id
+                && item.Status != CaseCheckStatus.Passed && item.Status != CaseCheckStatus.Issue)
+            .ToArrayAsync(cancellationToken);
+        Dictionary<Guid, PropertyCase> caseMap = cases.ToDictionary(item => item.Id);
+        Dictionary<Guid, Assignment> assignmentMap = assignments.ToDictionary(item => item.Id);
+        Dictionary<Guid, WorkTask> taskMap = tasks.ToDictionary(item => item.Id);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        foreach (CaseWorkImpact impact in state.Cases)
+        {
+            PropertyCase propertyCase = caseMap[impact.Case.Id];
+            Assignment assignment = assignmentMap[propertyCase.AssignmentId];
+            WorkTask task = taskMap[propertyCase.WorkTaskId];
+            List<string> responsibilities = [];
+
+            if (impact.Manager && propertyCase.ManagerEmployeeId == state.Source.Id)
+            {
+                propertyCase.ManagerEmployeeId = recipientEmployeeId;
+                responsibilities.Add("менеджер объекта");
+            }
+            if (impact.Assignment && assignment.EmployeeId == state.Source.Id)
+            {
+                assignment.EmployeeId = recipientEmployeeId;
+                responsibilities.Add(impact.PendingApproval ? "ожидающее решение руководителя" : "текущий исполнитель");
+            }
+            if (impact.OpenTask && task.EmployeeId == state.Source.Id && !task.Completed)
+            {
+                task.EmployeeId = recipientEmployeeId;
+                responsibilities.Add("следующее действие");
+            }
+
+            CaseCheck[] caseChecks = checks.Where(item => item.PropertyCaseId == propertyCase.Id).ToArray();
+            foreach (CaseCheck check in caseChecks) check.ResponsibleEmployeeId = recipientEmployeeId;
+            if (caseChecks.Length > 0) responsibilities.Add($"открытые проверки: {caseChecks.Length}");
+
+            db.Entry(propertyCase).Property(item => item.Version).IsModified = true;
+            db.BusinessTimeline.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+                ObjectId = propertyCase.Id, ActorEmployeeId = context.EmployeeId, Kind = "ResponsibilityTransferred",
+                Title = "Ответственность передана",
+                Body = $"{state.Source.DisplayName} → {recipient.DisplayName}. {string.Join(", ", responsibilities)}.",
+                TargetEmployeeId = recipientEmployeeId, RecordedAt = now
+            });
+            db.Notifications.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, EmployeeId = recipientEmployeeId,
+                ObjectType = "PropertyCase", ObjectId = propertyCase.Id,
+                Title = $"{propertyCase.BusinessNumber}: передана активная работа", RecordedAt = now
+            });
+        }
+
+        AddAudit(db, context, subject, "EmployeeWorkTransferred", "Employee", state.Source.Id,
+            new
+            {
+                RecipientEmployeeId = recipientEmployeeId,
+                Recipient = recipient.DisplayName,
+                state.View.AffectedCases,
+                state.View.ManagedCases,
+                state.View.AssignedCases,
+                state.View.OpenTasks,
+                state.View.OpenChecks,
+                state.View.PendingApprovals
+            }, correlationId);
+    }
+
+    private static void RecordHandoverPending(LandErpDbContext db, AccessContext context, Subject subject,
+        EmployeeWorkState state, string correlationId)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        foreach (CaseWorkImpact impact in state.Cases)
+        {
+            db.BusinessTimeline.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+                ObjectId = impact.Case.Id, ActorEmployeeId = context.EmployeeId, Kind = "ResponsibilityHandoverPending",
+                Title = "Доступ сотрудника отключён, работа требует переназначения",
+                Body = $"Доступ {state.Source.DisplayName} отозван срочно. Текущие ссылки ответственности сохранены до явной передачи.",
+                RecordedAt = now
+            });
+        }
+        AddAudit(db, context, subject, "EmployeeWorkHandoverPending", "Employee", state.Source.Id,
+            new
+            {
+                state.View.AffectedCases,
+                state.View.ManagedCases,
+                state.View.AssignedCases,
+                state.View.OpenTasks,
+                state.View.OpenChecks,
+                state.View.PendingApprovals
+            }, correlationId);
     }
 
     private async Task<AccessContext> RequireOrganizationAdminAsync(Subject subject, string permission, CancellationToken cancellationToken)

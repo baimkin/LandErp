@@ -4,7 +4,7 @@ using LandErp.Application.Foundation.Files;
 namespace LandErp.Infrastructure.Foundation.Files;
 
 /// <summary>Local/Test adapter for the provider-neutral storage contract. Production must configure another approved backend.</summary>
-public sealed class FileSystemFileStorage(string root) : IFileStorage
+public sealed class FileSystemFileStorage(string root) : IFileStorage, IFileStorageHealth
 {
     private readonly string root = Path.GetFullPath(root);
 
@@ -55,6 +55,27 @@ public sealed class FileSystemFileStorage(string root) : IFileStorage
         string actualHash = Convert.ToHexString(SHA256.HashData(existing)).ToLowerInvariant();
         if (!string.Equals(actualHash, expectedHash, StringComparison.Ordinal))
             throw new FileStorageException("STORAGE_CONTENT_CONFLICT", false, "Сохранённый файл не соответствует ожидаемому содержимому.");
+    }
+
+    public Task<FileStorageHealth> CheckAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Directory.Exists(root))
+            return Task.FromResult(new FileStorageHealth(false, "STORAGE_LOCAL_MISSING"));
+        try
+        {
+            using IEnumerator<string> entries = Directory.EnumerateFileSystemEntries(root).GetEnumerator();
+            _ = entries.MoveNext();
+            return Task.FromResult(new FileStorageHealth(true, "STORAGE_READY"));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Task.FromResult(new FileStorageHealth(false, "STORAGE_LOCAL_UNAVAILABLE"));
+        }
+        catch (IOException)
+        {
+            return Task.FromResult(new FileStorageHealth(false, "STORAGE_LOCAL_UNAVAILABLE"));
+        }
     }
 
     private string Resolve(string key)

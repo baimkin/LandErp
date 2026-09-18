@@ -1,11 +1,15 @@
 @page "/collectors"
 @attribute [Authorize(Policy = "collection.read")]
 @inherits WorkspaceComponent
+@using LandErp.Application.Foundation
+@using LandErp.Application.Foundation.Files
 @using LandErp.Application.Modules.Collection.Contracts
 @using LandErp.Application.Modules.Collection.Domain
 @using LandErp.Application.Modules.Catalog.Domain
 @using LandErp.Collector.Contracts.V1
 @inject ICollectionAdministration Administration
+@inject IDatabaseStatus DatabaseStatus
+@inject IFileStorageHealth StorageStatus
 @inject NavigationManager Navigation
 
 <PageTitle>Поиски и парсинг · LandErp</PageTitle>
@@ -17,6 +21,23 @@
 @if (refreshMessage is not null) { <p role="status" class="form-note">@refreshMessage</p> }
 @if (Error is not null && !HasOpenDialog) { <PageState Kind="error" Title="@Error" /> }
 @if (Success is not null && !HasOpenDialog) { <p role="status" class="success-notice">@Success</p> }
+@if (!Loading && !Forbidden)
+{
+    <section class="ops-health" aria-label="Состояние системы">
+        <div class="ops-health-head"><div><h2>Состояние системы</h2><p>Минимальный operational-контур. Обновляется вместе со страницей; storage проверяется не чаще раза в минуту.</p></div></div>
+        <div class="ops-health-grid">
+            <article class="health-item ok"><i></i><div><strong>Server</strong><span>Работает</span><small>веб-приложение отвечает</small></div></article>
+            <article class="health-item @HealthTone(databaseReady)"><i></i><div><strong>Database</strong><span>@(databaseReady?"Работает":"Недоступна")</span><small>PostgreSQL readiness</small></div></article>
+            <article class="health-item @HealthTone(WorkerHealthy)"><i></i><div><strong>Worker</strong><span>@WorkerState</span><small>последний цикл @Time(view?.Scheduler.LastStartedAt)</small></div></article>
+            <article class="health-item @HealthTone(SchedulerHealthy)"><i></i><div><strong>Scheduler</strong><span>@(view?.Scheduler.State??"Нет данных")</span><small>успешно @Time(view?.Scheduler.LastSucceededAt)</small></div></article>
+            <article class="health-item @(!databaseReady?"bad":StaleAgents+OfflineAgents>0?"warn":"ok")"><i></i><div><strong>Parser Agents</strong><span>@(databaseReady?$"{view?.OnlineAgents??0} online · {StaleAgents} stale · {OfflineAgents} offline":"Нет данных")</span><small>@(databaseReady?"stale: нет heartbeat 3–10 минут":"требуется Database")</small></div></article>
+            <article class="health-item @(!databaseReady?"bad":BacklogCount>0?"warn":"ok")"><i></i><div><strong>Backlog</strong><span>@(databaseReady?$"{BacklogCount} заданий":"Нет данных")</span><small>@(databaseReady?$"{view?.PendingJobs??0} pending · {ExpiredLeaseCount} reclaimable":"требуется Database")</small></div></article>
+            <article class="health-item @(!databaseReady?"bad":ExpiredLeaseCount>0?"bad":"ok")"><i></i><div><strong>Expired leases</strong><span>@(databaseReady?ExpiredLeaseCount.ToString():"Нет данных")</span><small>@(!databaseReady?"требуется Database":ExpiredLeaseCount==0?"просроченных назначений нет":"Parser может reclaim при следующем claim")</small></div></article>
+            <article class="health-item @HealthTone(StorageHealthy)"><i></i><div><strong>Storage</strong><span>@StorageLabel(storageHealth)</span><small>@(storageHealth.Available?"read-only probe успешен":storageHealth.Code)</small></div></article>
+        </div>
+    </section>
+    @if(!databaseReady){<PageState Kind="error" Title="База данных недоступна"><p>Server работает, но рабочие данные сейчас недоступны. Проверьте PostgreSQL перед продолжением работы.</p></PageState>}
+}
 @if (Loading) { <PageState Kind="loading" Title="Загружаем поиски и парсеры…" /> }
 else if (Forbidden) { <PageState Kind="forbidden" Title="Нет доступа" /> }
 else if (view is not null)
@@ -33,6 +54,7 @@ else if (view is not null)
     {
         <div class="attention-details" role="status">
             @if(!SchedulerHealthy){<p><strong>Служба расписаний: @view.Scheduler.State.</strong> Автоматические запуски требуют работающего Worker. Обратитесь к администратору; до восстановления можно запускать поиск вручную.</p>}
+            @if(ExpiredLeaseCount>0){<p><strong>Просроченных lease: @ExpiredLeaseCount.</strong> Эти задания доступны для повторного claim совместимым Parser.</p>}
             @foreach(var agent in view.Agents.Where(AgentNeedsAttention)){<p><strong>@agent.Name:</strong> @agent.OperationalStatus — откройте локальное приложение Parser.</p>}
             @foreach(var search in view.Searches.Where(NeedsAttention)){<p><strong>@search.Label:</strong> @LastRunTitle(search.LastRun). Проверьте последний запуск в истории.</p>}
         </div>

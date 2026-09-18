@@ -22,13 +22,44 @@ public static class FileStorageServices
             configuration.GetSection("Storage:YandexDisk").Bind(options);
             options.Validate();
             services.AddSingleton(_ => new YandexDiskFileStorage(options));
-            services.AddSingleton<IFileStorage>(sp =>
+            services.AddSingleton<RoutedFileStorage>(sp =>
             {
                 YandexDiskFileStorage cloud = sp.GetRequiredService<YandexDiskFileStorage>();
                 return new RoutedFileStorage(cloud, cloud, local);
             });
         }
-        else services.AddSingleton<IFileStorage>(new RoutedFileStorage(local!, null, local));
+        else services.AddSingleton(new RoutedFileStorage(local!, null, local));
+        services.AddSingleton<IFileStorage>(sp => sp.GetRequiredService<RoutedFileStorage>());
+        services.AddSingleton<IFileStorageHealth>(sp => new CachedFileStorageHealth(sp.GetRequiredService<RoutedFileStorage>()));
         return services;
+    }
+}
+
+internal sealed class CachedFileStorageHealth(IFileStorageHealth inner) : IFileStorageHealth
+{
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+    private readonly SemaphoreSlim gate = new(1, 1);
+    private FileStorageHealth cached = new(false, "NOT_CHECKED");
+    private DateTimeOffset validUntil;
+
+    public async Task<FileStorageHealth> CheckAsync(CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (now < validUntil) return cached;
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            now = DateTimeOffset.UtcNow;
+            if (now < validUntil) return cached;
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(ProbeTimeout);
+            try { cached = await inner.CheckAsync(timeout.Token); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            { cached = new(false, "STORAGE_TIMEOUT"); }
+            validUntil = now + CacheDuration;
+            return cached;
+        }
+        finally { gate.Release(); }
     }
 }

@@ -31,7 +31,7 @@ public sealed record CollectionSchedulerHealthView(string State, DateTimeOffset?
     DateTimeOffset? LastSucceededAt, DateTimeOffset? LastFailedAt, int LastQueuedCount, string LastFailureCode);
 public sealed record CollectionAdminView(IReadOnlyList<AgentView> Agents, IReadOnlyList<SearchGroupView> Groups,
     IReadOnlyList<SearchView> Searches, IReadOnlyList<CollectionJobView> Jobs, int ActiveSearches, int PendingJobs,
-    int AttentionJobs, int OnlineAgents, int BusyAgents, CollectionSchedulerHealthView Scheduler,
+    int ExpiredLeases, int AttentionJobs, int OnlineAgents, int BusyAgents, CollectionSchedulerHealthView Scheduler,
     string BusinessTimeZone = "Europe/Moscow");
 public sealed record CollectionSchedule(CollectionScheduleKind Kind, int? IntervalMinutes = null, string[]? FixedTimes = null);
 public sealed record CreateSearch(string Label, CatalogSource Source, string Url, int MaxPages,

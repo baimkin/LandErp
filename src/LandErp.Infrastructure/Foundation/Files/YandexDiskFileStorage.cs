@@ -8,7 +8,7 @@ namespace LandErp.Infrastructure.Foundation.Files;
 
 /// <summary>Private app-folder storage. OAuth is sent only to the fixed API origin.
 /// Download/upload URLs and raw provider errors must never escape this adapter.</summary>
-public sealed class YandexDiskFileStorage : IFileStorage, IDisposable
+public sealed class YandexDiskFileStorage : IFileStorage, IFileStorageHealth, IDisposable
 {
     private const string Api = "https://cloud-api.yandex.net/v1/disk/resources";
     private readonly HttpClient http;
@@ -83,6 +83,23 @@ public sealed class YandexDiskFileStorage : IFileStorage, IDisposable
             return new(Key(relative), hash, content.Length);
         }
         finally { transfers.Release(); }
+    }
+
+    public async Task<FileStorageHealth> CheckAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            Resource? root = await MetadataAsync(options.Root, cancellationToken);
+            // A missing application subfolder is valid before the first upload. A successful
+            // metadata request (including 404) proves provider reachability and authorization.
+            return root == null || root.Type == "dir"
+                ? new(true, "STORAGE_READY")
+                : new(false, "STORAGE_PATH_CONFLICT");
+        }
+        catch (FileStorageException exception)
+        {
+            return new(false, exception.Code);
+        }
     }
 
     public async Task<byte[]> ReadAsync(string storageKey, CancellationToken cancellationToken)

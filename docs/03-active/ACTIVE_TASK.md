@@ -1,6 +1,28 @@
 # Активная задача LandErp
 
-## Текущий Gate — B3-03, inspection draft / conflict / server validation
+## Текущий Gate — B4-01, Parser heartbeat / lease reliability
+
+**Прямой запрос владельца от 18 сентября 2026 года:** начать B4-01.  
+**Ветка:** `codex/release-package-04`.  
+**Исходный commit Package 04 / B4-01:** `74bc3dd7f39b1d5dffd9911e8072973df56478bc`.  
+**Scope:** LR-10 + только необходимые Parser lease/reclaim regressions.  
+**Gate:** [GATE-RELEASE-B4-01](GATE-RELEASE-B4-01.md).  
+**Evidence:** [RELEASE_PACKAGE_04_B4_01_REPORT](reports/RELEASE_PACKAGE_04_B4_01_REPORT.md).
+
+B3-04 validation владелец выполняет самостоятельно; старт B4-01 не считается автоматическим принятием Package 03.
+
+Не начинать B4-02 operational health, B4-03 deployment/backup или B4-04 UAT. Не переписывать shared queue/lease architecture без доказанного blocker. Фактические build/tests выполняет владелец; здесь они **Not run**.
+
+### Required reading B4-01
+
+После README → START_HERE → этого файла читать только:
+1. Collector V1 protocol;
+2. `CollectorGateway` heartbeat/claim/accept fencing;
+3. `ServerCoordinator` heartbeat/recovery path;
+4. `CollectionPoolTests` lease/reclaim suite;
+5. ParserSpike server transport recovery tests.
+
+## Предыдущий Gate — B3-03, inspection draft / conflict / server validation
 
 **Прямой запрос владельца от 18 сентября 2026 года:** выполнить LR-06 + LR-07 + LR-12 вместе в B3-03.  
 **Ветка:** `codex/release-package-03`.  

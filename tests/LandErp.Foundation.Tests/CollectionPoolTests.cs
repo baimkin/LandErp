@@ -78,6 +78,71 @@ public sealed class CollectionPoolTests
     }
 
     [TestMethod]
+    public async Task HeartbeatBeforeFirstUsefulActionRenewsLeaseAndNullDoesNotEraseKnownActivity()
+    {
+        await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
+        await using (LandErpDbContext migrator = sandbox.Context()) await migrator.Database.MigrateAsync();
+        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
+        Guid ownerId = await IdentityOrganizationTests.BootstrapAsync(bootstrap, "owner-heartbeat-b401@test.invalid", "Heartbeat B4-01");
+        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerId);
+        await sandbox.GrantRuntimeAsync();
+        await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
+        IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
+        TestClock clock = new();
+        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        Subject owner = new(ownerId, true);
+        AgentCredential agent = await CreateRegisteredAsync(administration, factory, clock, owner, "Heartbeat parser", ListingSource.Avito);
+        await administration.CreateSearchAsync(owner, new("Heartbeat", CatalogSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 5), "heartbeat-b401", CancellationToken.None);
+        Guid searchId = (await administration.ReadAsync(owner, CancellationToken.None)).Searches.Single().Id;
+        await administration.EnqueueAsync(owner, searchId, "heartbeat-b401", CancellationToken.None);
+
+        CollectorGateway gateway = new(factory, clock);
+        CollectionWork work = (await gateway.ClaimAsync(agent, CancellationToken.None))!;
+        DateTimeOffset firstExpiry = work.LeaseExpiresAt;
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        await gateway.HeartbeatAsync(agent, new(work.JobId, work.LeaseId,
+            RuntimeState: AgentRuntimeState.Parsing, SourceState: SourceRuntimeState.Ready,
+            Progress: new(1, 5, 0, null, CollectionProgressPhase.OpeningPage, null)), CancellationToken.None);
+
+        await using (LandErpDbContext db = await factory.CreateDbContextAsync())
+        {
+            ServerCollectionJob renewed = await db.CollectionJobs.AsNoTracking().SingleAsync(item => item.Id == work.JobId);
+            CollectorAgent heartbeatAgent = await db.CollectorAgents.AsNoTracking().SingleAsync(item => item.Id == agent.AgentId);
+            Assert.IsTrue(renewed.LeaseExpiresAt > firstExpiry, "Heartbeat before the first useful action must renew the lease.");
+            Assert.IsNull(heartbeatAgent.LastActivityAt, "No useful action has been reported yet.");
+            Assert.AreEqual(clock.GetUtcNow(), heartbeatAgent.LastHeartbeatAt);
+        }
+
+        clock.Advance(TimeSpan.FromSeconds(30));
+        DateTimeOffset usefulAt = clock.GetUtcNow();
+        await gateway.HeartbeatAsync(agent, new(work.JobId, work.LeaseId,
+            RuntimeState: AgentRuntimeState.Parsing, SourceState: SourceRuntimeState.Ready,
+            Progress: new(1, 5, 1, null, CollectionProgressPhase.ReadingPage, usefulAt)), CancellationToken.None);
+
+        clock.Advance(TimeSpan.FromSeconds(30));
+        await gateway.HeartbeatAsync(agent, new(work.JobId, work.LeaseId,
+            RuntimeState: AgentRuntimeState.Parsing, SourceState: SourceRuntimeState.Ready,
+            Progress: new(1, 5, 1, null, CollectionProgressPhase.ReadingPage, null)), CancellationToken.None);
+
+        AgentView active = (await administration.ReadAsync(owner, CancellationToken.None)).Agents.Single();
+        Assert.IsNotNull(active.LastActivityAt);
+        Assert.AreEqual(usefulAt, active.LastActivityAt.Value, "A later null heartbeat must not erase the last known useful action.");
+
+        await gateway.AcceptAsync(agent, new(Guid.CreateVersion7(), work.JobId, work.LeaseId,
+            CollectionOutcome.Success, [], true), CancellationToken.None);
+
+        AgentView completed = (await administration.ReadAsync(owner, CancellationToken.None)).Agents.Single();
+        Assert.IsNotNull(completed.LastActivityAt);
+        Assert.AreEqual(usefulAt, completed.LastActivityAt.Value, "Terminal cleanup must preserve the last useful action timestamp.");
+        Assert.AreEqual(0, completed.ProgressProcessed);
+        Assert.IsNull(completed.ProgressTotal);
+        Assert.IsNull(completed.ProgressCurrentPage);
+        Assert.IsNull(completed.ProgressMaxPages);
+    }
+
+    [TestMethod]
     public async Task RepeatedClaimReturnsTheSingleActiveLeaseAndLeavesOtherWorkPending()
     {
         await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();

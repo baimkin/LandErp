@@ -504,7 +504,12 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         agent.ProgressTotal = progress?.TotalCount;
         agent.ProgressCurrentPage = progress?.Page;
         agent.ProgressMaxPages = progress?.MaxPages;
-        agent.LastActivityAt = progress?.LastUsefulActionAt;
+        // V1 contract: null means "not reported", not "erase known activity".
+        // Keep the most recent useful-action timestamp across early heartbeats and
+        // after terminal result cleanup; only a newer explicit value advances it.
+        if (progress?.LastUsefulActionAt is { } useful
+            && (agent.LastActivityAt == null || useful > agent.LastActivityAt.Value))
+            agent.LastActivityAt = useful;
     }
 
     private static CollectionWork Work(ServerCollectionJob job, SearchConfiguration search) =>

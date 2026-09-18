@@ -13,7 +13,7 @@
 | B1-01 — LR-09 / LR-19 | Код и тесты входят в коммит добавления этого отчёта | Не выполнялась | Ожидает B1-04 |
 | B1-02 — жизненный цикл и просроченные проверки | Код и targeted tests подготовлены и публикуются одним коммитом | Не выполнялась | Ожидает B1-04 |
 | B1-03 — назначения, Owner, политика шаблонов | Код и targeted tests подготовлены и публикуются одним коммитом; LR-23 остаётся decision item | Не выполнялась | Ожидает B1-04 |
-| B1-04 — передача работы и проверка пакета | Не начата | Не выполнялась | Нет |
+| B1-04 — передача работы и проверка пакета | Реализация подготовлена к публикации | GitHub Actions запускается после публикации | Ожидает evidence |
 
 Публикация B1-01 подтверждается SHA коммита и удалённым ref в итоговом сообщении задачи. Собственный SHA не встраивается в содержимое файла, входящего в тот же коммит. Точный commit, впервые добавивший отчёт, определяется без зависимости от текущего HEAD:
 
@@ -224,3 +224,38 @@ Decision targets требуют `QueueRead` плюс нужное decision permi
 3. сохранение текущей effective template policy через отдельный capability.
 
 **Не выполнялись:** restore, build, tests, browser, PostgreSQL execution, Server/Worker, migrations и production operations. Все фактические проверки — B1-04.
+
+
+## B1-04 — передача работы и проверка пакета
+
+**Исходный SHA:** `54fbb73a233bbfe6a085423f0ab5fd8668b916aa`.  
+**Scope:** LR-03 и integration validation B1-01–B1-04.
+
+### Реализация
+
+Добавляется `EmployeeWorkImpact` с counts активных case responsibilities, task/check и pending approvals, а также списком recipients, которые способны принять весь набор работы.
+
+`SetEmployeeActiveAsync` при отключении:
+- сериализуется общим employee-work invariant;
+- проверяет last Owner;
+- при наличии активной работы требует recipient либо явный `EmergencyRevoke`;
+- при recipient атомарно передаёт текущие responsibilities и отзывает доступ;
+- при emergency revoke немедленно блокирует login/session через прежний Identity lifecycle, оставляет responsibility pointers на отключённом сотруднике и пишет timeline/audit о незавершённом handover.
+
+`TransferEmployeeWorkAsync` позволяет позднее завершить передачу от уже отключённого сотрудника.
+
+Procurement-команды, которые создают или меняют текущую responsibility, получают тот же organization-level advisory lock. Это закрывает гонку assignment ↔ deactivation.
+
+Исторические Author/Actor поля не меняются.
+
+### Проверки B1-04
+
+Новый `ReleasePackageB104Tests.cs` содержит сценарии:
+1. preview + обязательный explicit handover + атомарная передача manager/assignment/task/check;
+2. handover pending Head approval и последующее решение новым руководителем;
+3. emergency revoke с немедленным отказом доступа и поздним explicit handover;
+4. конкурентное новое назначение против deactivation — финально у disabled employee нет новой активной responsibility.
+
+Для исполнения добавлен branch-scoped GitHub Actions workflow с PostgreSQL 18. После публикации implementation commit фактические build/test результаты и SHA будут дописаны отдельным evidence/fix commit, если потребуется.
+
+**До запуска workflow эти проверки считаются Not run.**

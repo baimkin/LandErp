@@ -9,6 +9,7 @@ internal enum ProcurementRecipientAccess
 {
     CurrentVisibility,
     BecomesCaseAssignee,
+    BecomesManager,
     BecomesManagerAndCaseAssignee
 }
 
@@ -27,6 +28,16 @@ internal static class ProcurementVisibility
             _ => organizationCases.Where(item => item.ManagerEmployeeId == context.EmployeeId)
         };
     }
+
+    public static bool CanSeeAfterResponsibility(PropertyCase propertyCase, EmployeeAssignment assignment,
+        Guid managerEmployeeId, Guid caseAssigneeId) => assignment.Scope switch
+    {
+        AccessScope.Organization => true,
+        AccessScope.Department => propertyCase.DepartmentId != null && assignment.OrgUnitId == propertyCase.DepartmentId,
+        AccessScope.Team => propertyCase.TeamId != null && assignment.TeamId == propertyCase.TeamId,
+        AccessScope.AssignedObjects => assignment.EmployeeId == caseAssigneeId,
+        _ => assignment.EmployeeId == managerEmployeeId
+    };
 
     public static IQueryable<EmployeeAssignment> EligibleRecipientAssignments(
         LandErpDbContext db,
@@ -48,7 +59,8 @@ internal static class ProcurementVisibility
                 && propertyCase.TeamId != null && assignment.TeamId == propertyCase.TeamId
             || assignment.Scope == AccessScope.Own
                 && (assignment.EmployeeId == propertyCase.ManagerEmployeeId
-                    || access == ProcurementRecipientAccess.BecomesManagerAndCaseAssignee)
+                    || access is ProcurementRecipientAccess.BecomesManager
+                        or ProcurementRecipientAccess.BecomesManagerAndCaseAssignee)
             || assignment.Scope == AccessScope.AssignedObjects
                 && (assignment.EmployeeId == currentCaseAssigneeId
                     || access is ProcurementRecipientAccess.BecomesCaseAssignee

@@ -29,7 +29,16 @@ public sealed record InviteEmployee(string Name, string Login, Guid? DepartmentI
 public sealed record InvitationResult(Guid InvitationId, string OneTimeToken);
 public sealed record ChangeAssignment(Guid EmployeeId, Guid? DepartmentId, Guid? PositionId,
     Guid? TeamId, Guid? ManagerId, Guid RoleId, AccessScope Scope, long ExpectedVersion);
-public sealed record SetEmployeeActive(Guid EmployeeId, long ExpectedVersion, bool Active);
+public sealed record EmployeeHandoverCandidate(Guid EmployeeId, string Name);
+public sealed record EmployeeWorkImpact(Guid EmployeeId, string EmployeeName, int AffectedCases, int ManagedCases,
+    int AssignedCases, int OpenTasks, int OpenChecks, int PendingApprovals,
+    IReadOnlyList<EmployeeHandoverCandidate> Candidates)
+{
+    public bool HasWork => AffectedCases > 0 || OpenTasks > 0 || OpenChecks > 0 || PendingApprovals > 0;
+}
+public sealed record TransferEmployeeWork(Guid EmployeeId, Guid RecipientEmployeeId);
+public sealed record SetEmployeeActive(Guid EmployeeId, long ExpectedVersion, bool Active,
+    Guid? HandoverEmployeeId = null, bool EmergencyRevoke = false);
 public interface IOrganizationWorkspace
 {
     Task<OrganizationView> ReadAsync(Subject subject, CancellationToken cancellationToken);
@@ -44,6 +53,8 @@ public interface IOrganizationWorkspace
     Task SetPositionActiveAsync(Subject subject, SetOrganizationItemActive command, string correlationId, CancellationToken cancellationToken);
     Task<TemporaryCredential> CreateEmployeeAsync(Subject subject, CreateEmployee command, string correlationId, CancellationToken cancellationToken);
     Task<TemporaryCredential> ResetTemporaryPasswordAsync(Subject subject, Guid employeeId, string correlationId, CancellationToken cancellationToken);
+    Task<EmployeeWorkImpact> ReadEmployeeWorkImpactAsync(Subject subject, Guid employeeId, CancellationToken cancellationToken);
+    Task TransferEmployeeWorkAsync(Subject subject, TransferEmployeeWork command, string correlationId, CancellationToken cancellationToken);
     Task SetEmployeeActiveAsync(Subject subject, SetEmployeeActive command, string correlationId, CancellationToken cancellationToken);
     Task<InvitationResult> InviteAsync(Subject subject, InviteEmployee command, string correlationId, CancellationToken cancellationToken);
     Task ChangeAssignmentAsync(Subject subject, ChangeAssignment command, string correlationId, CancellationToken cancellationToken);

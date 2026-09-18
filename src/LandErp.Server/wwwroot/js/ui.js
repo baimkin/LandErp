@@ -31,8 +31,20 @@ window.landErpInspection = {
     save: function (key, value) { localStorage.setItem(key, JSON.stringify(value)); },
     attach: function (key, initial) {
         const root = document.querySelector("[data-inspection-root='true']");
-        if (!root || root.dataset.draftAttached === "true") return;
+        if (!root || !initial) return;
+        const version = String(initial.version ?? "");
+        const inspectionId = String(initial.inspectionId ?? "");
+        if (root.dataset.draftAttached === "true"
+            && root.dataset.draftVersion === version
+            && root.dataset.draftInspectionId === inspectionId) return;
+        if (root._landErpInspectionUpdate) {
+            root.removeEventListener("input", root._landErpInspectionUpdate);
+            root.removeEventListener("change", root._landErpInspectionUpdate);
+            root.removeEventListener("click", root._landErpInspectionUpdate);
+        }
         root.dataset.draftAttached = "true";
+        root.dataset.draftVersion = version;
+        root.dataset.draftInspectionId = inspectionId;
         const update = function (event) {
             const target = event.target;
             let draft = initial;
@@ -52,6 +64,7 @@ window.landErpInspection = {
             }
             localStorage.setItem(key, JSON.stringify(draft));
         };
+        root._landErpInspectionUpdate = update;
         root.addEventListener("input", update);
         root.addEventListener("change", update);
         root.addEventListener("click", update);

@@ -18,9 +18,10 @@ else if(card!=null)
 {
     <CaseToast Message="@Success"/>
     <main class="inspection-workspace" data-inspection-ready="true" data-inspection-root="true">
-        <header class="inspection-heading"><div><a class="back" href="/procurement/@CaseId">← Карточка объекта · @card.Item.BusinessNumber</a><h1>Осмотр участка</h1><p>@card.Item.Title · @card.Item.Location</p></div><span class="inspection-status">@(dirty?(localSaved?"Черновик на устройстве":"Есть несохранённые изменения"):card.Inspection?.Status==InspectionStatus.Completed?"Осмотр завершён":"Сохранено на сервере")</span></header>
+        <header class="inspection-heading"><div><a class="back" href="/procurement/@CaseId">← Карточка объекта · @card.Item.BusinessNumber</a><h1>Осмотр участка</h1><p>@card.Item.Title · @card.Item.Location</p></div><span class="inspection-status">@DraftStateLabel()</span></header>
         @if(Error!=null&&!mediaOpen&&!finishOpen){<div class="feedback" role="alert">@Error</div>}
-        @if(RefreshWarning!=null){<div class="feedback">@RefreshWarning <button class="btn secondary" @onclick="ReloadAsync">Обновить</button></div>}
+        @if(RefreshWarning!=null){<div class="feedback">@RefreshWarning <button class="btn secondary" @onclick="RefreshCommittedServerAsync">Обновить</button></div>}
+        @if(inspectionConflict){<div class="feedback" role="alert"><strong>Конфликт версии.</strong> Серверный осмотр изменился после создания локального черновика. Ответы сохранены на этом устройстве и не будут записаны поверх новой версии. <button class="btn secondary" @onclick="UseServerVersionAsync">Отбросить локальный черновик и загрузить серверную версию</button></div>}
         @if(card.Inspection==null){<article class="panel"><h2>Осмотр ещё не начат</h2><p>Чек-лист поможет зафиксировать состояние участка и материалы проверки.</p>@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<ActionButton Label="Начать осмотр" OnClick="StartAsync" Busy="Busy"/>}</article>}
         else
         {
@@ -39,19 +40,20 @@ else if(card!=null)
                     @foreach(var file in card.Attachments.Where(x=>x.OwnerId==item.Id)){<a class="material-link" href="/api/procurement/attachments/@file.Id" target="_blank" rel="noopener">@file.Label · @ProcurementLabels.FileStatus(file.Status)</a>}
                     </article>
                 }
-            </article><footer class="inspection-footer"><small>@(dirty?(localSaved?"Черновик сохранён на этом устройстве":"Сохраните изменения на сервере"):"Серверная версия")</small><div><ActionButton Label="Сохранить черновик" Tone="secondary" OnClick="()=>SaveAsync(false)" Busy="Busy" Disabled="@(!Editable)"/><button class="btn primary" @onclick="()=>{ClearFeedback();finishOpen=true;}" disabled="@(!Editable||Busy)">Завершить осмотр</button></div></footer></div></section>
+            </article><footer class="inspection-footer"><small>@DraftStateLabel()</small><div><ActionButton Label="Сохранить черновик" Tone="secondary" OnClick="()=>SaveAsync(false)" Busy="Busy" Disabled="@(!Editable)"/><button class="btn primary" @onclick="()=>{ClearFeedback();finishOpen=true;}" disabled="@(!Editable||Busy)">Завершить осмотр</button></div></footer></div></section>
             <section class="panel inspection-summary"><h3>Общие материалы и вывод</h3>@foreach(var file in card.Attachments.Where(x=>x.OwnerType==CaseAttachmentOwner.Inspection)){<a class="material-link" href="/api/procurement/attachments/@file.Id" target="_blank" rel="noopener">@file.Label</a>}<p>@conclusion</p><p>@decision</p></section>
         }
     </main>
-    @if(mediaOpen){<CaseModal Title="Добавить материал осмотра" Error="@Error" Busy="Busy" OnClose="()=>mediaOpen=false"><label class="upload"><strong>@(selectedFile?.Name??"＋ Выберите или перетащите файл")</strong><small>Фото, видео, аудио или документ · до @FileUploadLimits.MaxRawFileMegabytes МБ</small><InputFile OnChange="SelectMedia" accept="image/*,video/*,audio/*,.pdf"/>@if(UploadFileTooLarge(selectedFile)){<small class="case-problem">@FileUploadLimits.TooLargeMessage</small>}</label><div class="form-grid"><label class="field dossier-wide"><span>Название</span><input @bind="media.Label"/></label><label class="field"><span>Тип</span><select @bind="media.Kind"><option value="Photo">Фото</option><option value="Video">Видео</option><option value="Audio">Аудио</option><option value="Document">Документ</option></select></label><label class="field"><span>Относится к</span><select @bind="media.Owner"><option value="inspection">Осмотр в целом</option>@foreach(var item in answers.Where(x=>x.AllowAttachments)){<option value="@item.Id">@item.Title</option>}</select></label><label class="field dossier-wide"><span>Комментарий</span><textarea @bind="media.Description"/></label><div class="form-actions"><ActionButton Label="Загрузить материал" OnClick="UploadMediaAsync" Busy="Busy" Disabled="@(selectedFile==null||UploadFileTooLarge(selectedFile))"/></div></div></CaseModal>}
+    @if(mediaOpen){<CaseModal Title="Добавить материал осмотра" Error="@Error" Busy="Busy" OnClose="()=>mediaOpen=false"><label class="upload"><strong>@(selectedFile?.Name??"＋ Выберите или перетащите файл")</strong><small>Фото, видео, аудио или документ · до @FileUploadLimits.MaxRawFileMegabytes МБ</small><InputFile OnChange="SelectMedia" accept="image/*,video/*,audio/*,.pdf"/>@if(UploadFileTooLarge(selectedFile)){<small class="case-problem">@FileUploadLimits.TooLargeMessage</small>}</label><div class="form-grid"><label class="field dossier-wide"><span>Название</span><input @bind="media.Label"/></label><label class="field"><span>Тип</span><select @bind="media.Kind"><option value="Photo">Фото</option><option value="Video">Видео</option><option value="Audio">Аудио</option><option value="Document">Документ</option></select></label><label class="field"><span>Относится к</span><select @bind="media.Owner"><option value="inspection">Осмотр в целом</option>@foreach(var item in answers.Where(x=>x.AllowAttachments)){<option value="@item.Id">@item.Title</option>}</select></label><label class="field dossier-wide"><span>Комментарий</span><textarea @bind="media.Description"/></label><div class="form-actions"><ActionButton Label="Загрузить материал" OnClick="UploadMediaAsync" Busy="Busy" Disabled="@(selectedFile==null||UploadFileTooLarge(selectedFile)||inspectionConflict)"/></div></div></CaseModal>}
     @if(finishOpen){<CaseModal Title="Завершить осмотр" Subtitle="Проверьте ответы и зафиксируйте общий вывод" Error="@Error" Busy="Busy" OnClose="()=>finishOpen=false"><p class="subtle">Обработано @DoneCount из @answers.Count пунктов. Для обязательных пунктов нужен ответ либо явная отметка «Не удалось проверить».</p><label class="field"><span>Общий вывод</span><textarea data-inspection-conclusion="true" @bind="conclusion" @bind:event="oninput" @bind:after="SaveLocalSoon"/></label><label class="field"><span>Предварительное решение</span><select data-inspection-decision="true" @bind="decision" @bind:after="SaveLocalSoon"><option value="">Не выбрано</option><option>Осмотр пройден, критичных проблем нет</option><option>Нужны дополнительные проверки</option><option>Есть существенные технические риски</option><option>Рекомендую отказаться</option></select></label><div class="form-actions"><ActionButton Label="Завершить осмотр" OnClick="()=>SaveAsync(true)" Busy="Busy"/></div></CaseModal>}
 }
 @code {
     [Parameter] public Guid CaseId { get; set; }
     private IJSObjectReference? draftModule;
     public async ValueTask DisposeAsync(){if(draftModule!=null){try{await draftModule.DisposeAsync();}catch(JSDisconnectedException){}}}
-    private bool mediaOpen,finishOpen,dirty,localSaved,preserveAnswers; private int section; private bool onlyUnanswered;
-    private bool Editable=>card?.CanManageDossier==true&&card.Item.Stage!="acquired"&&card.Inspection?.Status!=InspectionStatus.Completed;
+    private bool mediaOpen,finishOpen,hasLocalDraft,localSaved,inspectionConflict,acceptServerInspectionRead; private int section; private bool onlyUnanswered;
+    private Guid draftInspectionId; private long draftVersion;
+    private bool Editable=>card?.CanManageDossier==true&&card.Item.Stage!="acquired"&&card.Inspection?.Status!=InspectionStatus.Completed&&!inspectionConflict&&!RefreshRequired;
     private IEnumerable<AnswerDraft> VisibleAnswers=>answers.OrderBy(x=>x.SortOrder).Skip(section*5).Take(5).Where(x=>!onlyUnanswered||x.Status==InspectionItemStatus.Unanswered);
     private int SectionCount=>Math.Max(1,(answers.Count+4)/5);
     private CaseCard? card; private Guid loaded; private bool localChecked;
@@ -59,33 +61,50 @@ else if(card!=null)
     private string StorageKey=>$"landerp.inspection.{CaseId}";
     private int DoneCount=>answers.Count(x=>x.Status!=InspectionItemStatus.Unanswered);
     private decimal ProgressPercent=>answers.Count==0?0:decimal.Round(100m*DoneCount/answers.Count,0);
-    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);loaded=CaseId;if(!preserveAnswers)MapServer();}
-    protected override async Task OnParametersSetAsync(){if(loaded!=CaseId){localChecked=false;dirty=false;localSaved=false;section=0;await ReloadAsync();}}
-    protected override async Task OnAfterRenderAsync(bool firstRender){draftModule??=await Js.InvokeAsync<IJSObjectReference>("import","./Components/Pages/SiteInspectionPage.razor.js");if(!localChecked&&card?.Inspection!=null){localChecked=true;InspectionDraft? saved=await draftModule.InvokeAsync<InspectionDraft?>("load",StorageKey);if(saved?.InspectionId==card.Inspection.Id&&saved.Version==card.Inspection.Version){conclusion=saved.Conclusion;decision=saved.Decision;answers=saved.Answers;dirty=true;localSaved=true;StateHasChanged();return;}}if(card?.Inspection!=null)await draftModule.InvokeVoidAsync("attach",StorageKey,new InspectionDraft(card.Inspection.Id,card.Inspection.Version,conclusion,decision,answers));}
-    private void MapServer(){if(card?.Inspection is not { } inspection)return;conclusion=inspection.OverallConclusion;decision=inspection.PreliminaryDecision;answers=inspection.Items.Select(x=>new AnswerDraft(x)).ToList();}
-    private async Task StartAsync(){await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,null,null,"","",[],false),OperationId,CancellationToken.None));}
-    private async Task SetAnswerAsync(AnswerDraft item,string value){item.Answer=value;item.Status=value.Length==0?InspectionItemStatus.Unanswered:InspectionItemStatus.Answered;await SaveLocalAsync();}
-    private async Task SetNoteAsync(AnswerDraft item,string value){item.Note=value;await SaveLocalAsync();}
-    private async Task NotCheckedAsync(AnswerDraft item){item.Answer="";item.Status=InspectionItemStatus.NotChecked;await SaveLocalAsync();}
-    private async Task EditAnswerAsync(AnswerDraft item){item.Status=InspectionItemStatus.Unanswered;await SaveLocalAsync();}
+    private string DraftStateLabel()=>inspectionConflict?"Конфликт версии":Busy?"Синхронизация…":hasLocalDraft?(localSaved?"Черновик на устройстве":"Есть несохранённые изменения"):card?.Inspection?.Status==InspectionStatus.Completed?"Осмотр завершён":"Сохранено на сервере";
+    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);loaded=CaseId;if(card.Inspection is not { } inspection)return;if(!acceptServerInspectionRead&&hasLocalDraft&&draftInspectionId==inspection.Id){if(draftVersion!=inspection.Version)inspectionConflict=true;return;}MapServer();}
+    protected override async Task OnParametersSetAsync(){if(loaded!=CaseId){localChecked=false;hasLocalDraft=false;localSaved=false;inspectionConflict=false;draftInspectionId=Guid.Empty;draftVersion=0;section=0;await ReloadAsync();}}
+    protected override async Task OnAfterRenderAsync(bool firstRender){draftModule??=await Js.InvokeAsync<IJSObjectReference>("import","./Components/Pages/SiteInspectionPage.razor.js");if(!localChecked&&card?.Inspection!=null){localChecked=true;InspectionDraft? saved=await draftModule.InvokeAsync<InspectionDraft?>("load",StorageKey);if(saved?.InspectionId==card.Inspection.Id){RestoreDraft(saved);hasLocalDraft=true;localSaved=true;inspectionConflict=saved.Version!=card.Inspection.Version;StateHasChanged();return;}}if(card?.Inspection!=null)await draftModule.InvokeVoidAsync("attach",StorageKey,CurrentDraft());}
+    private InspectionDraft CurrentDraft()=>new(draftInspectionId,draftVersion,conclusion,decision,answers);
+    private void RestoreDraft(InspectionDraft draft){draftInspectionId=draft.InspectionId;draftVersion=draft.Version;conclusion=draft.Conclusion;decision=draft.Decision;answers=draft.Answers;}
+    private void MapServer(){if(card?.Inspection is not { } inspection)return;draftInspectionId=inspection.Id;draftVersion=inspection.Version;conclusion=inspection.OverallConclusion;decision=inspection.PreliminaryDecision;answers=inspection.Items.Select(x=>new AnswerDraft(x)).ToList();inspectionConflict=false;}
+    private async Task StartAsync(){if(RefreshRequired)return;await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,null,null,"","",[],false),OperationId,CancellationToken.None));}
+    private async Task SetAnswerAsync(AnswerDraft item,string value){item.Answer=value;item.Status=value.Length==0?InspectionItemStatus.Unanswered:InspectionItemStatus.Answered;await MarkLocalDraftAsync();}
+    private async Task SetNoteAsync(AnswerDraft item,string value){item.Note=value;await MarkLocalDraftAsync();}
+    private async Task NotCheckedAsync(AnswerDraft item){item.Answer="";item.Status=InspectionItemStatus.NotChecked;await MarkLocalDraftAsync();}
+    private async Task EditAnswerAsync(AnswerDraft item){item.Status=InspectionItemStatus.Unanswered;await MarkLocalDraftAsync();}
     private void PrepareItemMedia(AnswerDraft item){ClearFeedback();mediaOpen=true;media.Owner=item.Id.ToString();media.Label="Материал · "+item.Title;}
-    private async Task SaveLocalSoon(){await SaveLocalAsync();}
-    private async ValueTask SaveLocalAsync(){dirty=true;try{await draftModule!.InvokeVoidAsync("save",StorageKey,new InspectionDraft(card!.Inspection!.Id,card.Inspection.Version,conclusion,decision,answers));localSaved=true;}catch(JSException){localSaved=false;}}
-    private async Task SaveAsync(bool complete){InspectionView inspection=card!.Inspection!;await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,inspection.Id,inspection.Version,conclusion,decision,answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),OperationId,CancellationToken.None));if(Success!=null&&!NeedsRefresh){try{await draftModule!.InvokeVoidAsync("remove",StorageKey);}catch(JSException){}dirty=false;localSaved=false;finishOpen=false;}}
+    private async Task SaveLocalSoon(){await MarkLocalDraftAsync();}
+    private async Task MarkLocalDraftAsync(){hasLocalDraft=true;await SaveLocalAsync();}
+    private async ValueTask SaveLocalAsync(){if(draftInspectionId==Guid.Empty)return;try{await draftModule!.InvokeVoidAsync("save",StorageKey,CurrentDraft());localSaved=true;}catch(JSException){localSaved=false;}}
+    private async Task UseServerVersionAsync(){if(Busy)return;await draftModule!.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;await ReloadAsync();}
+    private async Task RefreshCommittedServerAsync(){if(Busy)return;acceptServerInspectionRead=true;try{await ReloadAsync();}finally{acceptServerInspectionRead=false;}if(!RefreshRequired&&Error==null){await draftModule!.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;}}
+    private async Task SaveAsync(bool complete)
+    {
+        if(RefreshRequired||inspectionConflict)return;
+        hasLocalDraft=true;
+        await SaveLocalAsync();
+        acceptServerInspectionRead=true;
+        bool committed;
+        try{committed=await ExecuteConfirmedAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,draftInspectionId,draftVersion,conclusion,decision,answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),OperationId,CancellationToken.None));}
+        finally{acceptServerInspectionRead=false;}
+        if(committed&&!RefreshRequired){await draftModule!.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;finishOpen=false;}
+        else if(LastWriteWasConflict){inspectionConflict=true;hasLocalDraft=true;await SaveLocalAsync();}
+    }
     private void SelectMedia(InputFileChangeEventArgs args){selectedFile=args.File;media.Kind=selectedFile.ContentType.StartsWith("image/")?CaseAttachmentKind.Photo:selectedFile.ContentType.StartsWith("video/")?CaseAttachmentKind.Video:selectedFile.ContentType.StartsWith("audio/")?CaseAttachmentKind.Audio:CaseAttachmentKind.Document;media.Label=selectedFile.Name;}
     private static bool UploadFileTooLarge(IBrowserFile? file)=>file?.Size>FileUploadLimits.MaxRawFileBytes;
     private static async Task<byte[]> ReadUploadAsync(IBrowserFile file){FileUploadLimits.EnsureRawFileSize(file.Size);await using Stream input=file.OpenReadStream(FileUploadLimits.MaxRawFileBytes);using MemoryStream buffer=new();await input.CopyToAsync(buffer);return buffer.ToArray();}
     private async Task UploadMediaAsync()
     {
-        preserveAnswers=true;
-        try { await ExecuteAsync(async()=>{
+        if(inspectionConflict)return;
+        if(hasLocalDraft)await SaveLocalAsync();
+        await ExecuteAsync(async()=>{
             if(selectedFile==null)throw new ArgumentException("Выберите файл.");
             if(string.IsNullOrWhiteSpace(media.Label))throw new ArgumentException("Укажите название материала.");
             byte[] content=await ReadUploadAsync(selectedFile);
-            Guid owner=media.Owner=="inspection"?card!.Inspection!.Id:Guid.Parse(media.Owner);CaseAttachmentOwner type=media.Owner=="inspection"?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;
+            Guid owner=media.Owner=="inspection"?draftInspectionId:Guid.Parse(media.Owner);CaseAttachmentOwner type=media.Owner=="inspection"?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;
             await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,media.Kind,media.Label,media.Description,selectedFile.Name,selectedFile.ContentType,content,null),OperationId,CancellationToken.None);
-        },"Материал осмотра добавлен");if(Success!=null){selectedFile=null;media=new();mediaOpen=false;}}
-        finally{preserveAnswers=false;}
+        },"Материал осмотра добавлен");if(Success!=null){selectedFile=null;media=new();mediaOpen=false;}
     }
     private static string AnswerLabel(AnswerDraft item)=>item.Status==InspectionItemStatus.NotChecked?"Не удалось проверить":(item.AnswerType==InspectionAnswerType.Boolean?(item.Answer=="true"?"Да":"Нет"):item.Answer)+(item.Unit.Length==0?"":" "+item.Unit);
     private sealed class AnswerDraft{public Guid Id{get;set;}public long Version{get;set;}public string Title{get;set;}="";public int SortOrder{get;set;}public InspectionAnswerType AnswerType{get;set;}public string[] Options{get;set;}=[];public string Unit{get;set;}="";public bool AllowAttachments{get;set;}public bool Required{get;set;}public InspectionItemStatus Status{get;set;}public string Answer{get;set;}="";public string Note{get;set;}="";public AnswerDraft(){}public AnswerDraft(InspectionItemView value){Id=value.Id;Version=value.Version;Title=value.Title;SortOrder=value.SortOrder;AnswerType=value.AnswerType;Options=value.Options;Unit=value.Unit;AllowAttachments=value.AllowAttachments;Required=value.Required;Status=value.Status;Answer=value.Answer;Note=value.Note;}}

@@ -8,6 +8,8 @@ using LandErp.Application.Modules.Organization.Contracts;
 using LandErp.Server.Security;
 using LandErp.Server.Components;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -17,8 +19,10 @@ using System.Threading.RateLimiting;
 using LandErp.Infrastructure.Modules.Collection;
 using LandErp.Infrastructure.Modules.Procurement;
 using System.Text.Json.Serialization;
+using System.Net;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+LoadExternalConfiguration(builder);
 if (builder.Environment.IsEnvironment("Local") || builder.Environment.IsEnvironment("Test"))
     builder.WebHost.UseStaticWebAssets();
 builder.Logging.ClearProviders();
@@ -26,6 +30,24 @@ builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.None);
 builder.Services.AddLandErpPersistence(builder.Configuration);
 builder.Services.AddLandErpIdentity();
+if (builder.Environment.IsProduction())
+{
+    string keyPath = builder.Configuration["Security:DataProtectionKeysPath"]?.Trim() ?? "";
+    if (!Path.IsPathRooted(keyPath) || !Directory.Exists(keyPath))
+        throw new InvalidOperationException("Production Data Protection directory is missing. Run the production initialization script.");
+    builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(keyPath)).SetApplicationName("LandErp");
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        options.ForwardLimit = 1;
+        foreach (var section in builder.Configuration.GetSection("ReverseProxy:KnownProxies").GetChildren())
+        {
+            if (!IPAddress.TryParse(section.Value, out IPAddress? address))
+                throw new InvalidOperationException("ReverseProxy:KnownProxies contains an invalid address.");
+            if (!options.KnownProxies.Contains(address)) options.KnownProxies.Add(address);
+        }
+    });
+}
 builder.Services.AddLandErpCollection();
 builder.Services.AddLandErpProcurement(builder.Configuration, builder.Environment);
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -111,6 +133,11 @@ builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = 
 builder.Services.AddExceptionHandler<SafeExceptionHandler>();
 
 WebApplication app = builder.Build();
+if (app.Environment.IsProduction())
+{
+    app.UseForwardedHeaders();
+    app.UseHsts();
+}
 app.UseMiddleware<CorrelationMiddleware>();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
@@ -189,3 +216,18 @@ static AuditQuery ParseAuditQuery(IQueryCollection values)
 }
 
 await app.RunAsync();
+
+static void LoadExternalConfiguration(WebApplicationBuilder builder)
+{
+    string? configured = Environment.GetEnvironmentVariable("LANDERP_CONFIG_FILE");
+    if (string.IsNullOrWhiteSpace(configured))
+    {
+        if (builder.Environment.IsProduction())
+            throw new InvalidOperationException("LANDERP_CONFIG_FILE is required in Production.");
+        return;
+    }
+    string path = Path.GetFullPath(configured);
+    if (!File.Exists(path)) throw new InvalidOperationException("External LandErp configuration file was not found.");
+    builder.Configuration.AddJsonFile(path, optional: false, reloadOnChange: false);
+    builder.Configuration.AddEnvironmentVariables();
+}

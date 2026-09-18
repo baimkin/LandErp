@@ -72,6 +72,12 @@ Local mode Collector доступен независимо от Server. При �
 После истечения lease повторное получение работы обновляет fencing token и
 доставляет сохранённый результат. Heartbeat/retry требуют открытого Collector.
 
+## Production preparation
+
+Первый production-контур Windows — versioned publish, managed Server/Worker, HTTPS reverse proxy, persistent Data Protection keys, backup/restore и rollback — описан в [Production Runbook](docs/03-active/PRODUCTION_RUNBOOK.md).
+
+Локальный `Start-Local.ps1` остаётся только development launcher и не является production supervisor.
+
 ## Проверки
 
 Яндекс Диск как пилотное хранилище вложений: [настройка и отключение](docs/03-active/YANDEX_DISK_SETUP.md).

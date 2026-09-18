@@ -1,0 +1,21 @@
+{
+  "Database": {
+    "ConnectionString": "REPLACE_WITH_RUNTIME_CONNECTION"
+  },
+  "Storage": {
+    "Provider": "YandexDisk",
+    "YandexDisk": {
+      "Token": "REPLACE_WITH_YANDEX_OAUTH_TOKEN",
+      "ConnectionId": "REPLACE_WITH_32_HEX_CONNECTION_ID",
+      "Root": "app:/LandErp/production",
+      "MaxFileBytes": 8388608
+    }
+  },
+  "Security": {
+    "DataProtectionKeysPath": "C:\\ProgramData\\LandErp\\data-protection"
+  },
+  "AllowedHosts": "REPLACE_WITH_PUBLIC_HOST",
+  "ReverseProxy": {
+    "KnownProxies": ["127.0.0.1", "::1"]
+  }
+}

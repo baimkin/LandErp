@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
+LoadExternalConfiguration(builder);
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole();
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.None);
@@ -22,3 +23,18 @@ Action<ILogger, string, bool, Exception?> logStarted = LoggerMessage.Define<stri
     "Worker started with collection scheduler; environment {Environment}; database ready {Ready}");
 logStarted(logger, builder.Environment.EnvironmentName, ready, null);
 await host.RunAsync();
+
+static void LoadExternalConfiguration(HostApplicationBuilder builder)
+{
+    string? configured = Environment.GetEnvironmentVariable("LANDERP_CONFIG_FILE");
+    if (string.IsNullOrWhiteSpace(configured))
+    {
+        if (builder.Environment.IsProduction())
+            throw new InvalidOperationException("LANDERP_CONFIG_FILE is required in Production.");
+        return;
+    }
+    string path = Path.GetFullPath(configured);
+    if (!File.Exists(path)) throw new InvalidOperationException("External LandErp configuration file was not found.");
+    builder.Configuration.AddJsonFile(path, optional: false, reloadOnChange: false);
+    builder.Configuration.AddEnvironmentVariables();
+}

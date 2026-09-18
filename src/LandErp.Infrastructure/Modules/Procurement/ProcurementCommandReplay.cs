@@ -44,7 +44,7 @@ internal sealed record ProcurementCommandReplay(Guid AuditId, string Action, str
             || !json.RootElement.TryGetProperty("CommandReplay", out JsonElement replay)
             || replay.ValueKind != JsonValueKind.Object
             || !replay.TryGetProperty("Version", out JsonElement version) || !version.TryGetInt32(out int value) || value != 1
-            || !replay.TryGetProperty("PayloadHash", out JsonElement storedHash) || storedHash.ValueKind != JsonValueKind.String
+            || !replay.TryGetProperty(nameof(PayloadHash), out JsonElement storedHash) || storedHash.ValueKind != JsonValueKind.String
             || !string.Equals(storedHash.GetString(), hash, StringComparison.Ordinal)
             || !replay.TryGetProperty("ResultId", out JsonElement result) || result.ValueKind != JsonValueKind.String
             || !result.TryGetGuid(out Guid resultId))

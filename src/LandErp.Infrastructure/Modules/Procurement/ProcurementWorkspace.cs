@@ -230,6 +230,15 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        ProcurementCommandReplay replay = await ProcurementCommandReplay.BeginAsync(db, context, subject,
+            command.CommandId, "PropertyCaseCreatedManually", command with { CommandId = null }, cancellationToken);
+        if (replay.ExistingCaseId is Guid existingId)
+        {
+            PropertyCase existing = await VisibleCases(db, context).Where(row => row.Case.Id == existingId)
+                .Select(row => row.Case).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
+            await transaction.CommitAsync(cancellationToken);
+            return new(existing.Id, existing.BusinessNumber);
+        }
         PropertyCase propertyCase = await CreatePropertyCaseAsync(db, context, title, command.Price, command.AreaSquareMeters,
             location, cadastralNumber, "Прямое создание PropertyCase: " + comment, "CreateManual", cancellationToken);
         DateTimeOffset now = time.GetUtcNow();
@@ -239,9 +248,9 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             ObjectId = propertyCase.Id, ActorEmployeeId = context.EmployeeId, Kind = "Created",
             Title = "PropertyCase создан вручную", Body = comment, RecordedAt = now
         });
-        OrganizationWorkspace.AddAudit(db, context, subject, "PropertyCaseCreatedManually", "PropertyCase", propertyCase.Id,
+        replay.Record(db, context, subject, propertyCase.Id, propertyCase.Id,
             new { propertyCase.BusinessNumber, Title = title, Location = location, CadastralNumber = cadastralNumber,
-                command.Price, command.AreaSquareMeters, Comment = comment }, correlationId);
+                command.Price, command.AreaSquareMeters, Comment = comment }, correlationId, now);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new(propertyCase.Id, propertyCase.BusinessNumber);
@@ -590,8 +599,19 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // The expected version protects the first write, not a replay of its committed result.
+        ProcurementCommandReplay replay = await ProcurementCommandReplay.BeginAsync(db, context, subject,
+            command.CommandId, command.Contact ? "SellerContactRecorded" : "CaseNoteAdded",
+            command with { CommandId = null, ExpectedCaseVersion = 0 }, cancellationToken);
         await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
         Row row = await VisibleCases(db, context).SingleOrDefaultAsync(value => value.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
+        if (replay.ExistingResultId != null)
+        {
+            await RequireDossierPermissionAsync(subject, cancellationToken);
+            if (replay.ExistingCaseId != row.Case.Id) throw new AccessDeniedException();
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
         if (row.Assignment.EmployeeId != context.EmployeeId) throw new AccessDeniedException();
         await access.RequireAsync(subject, row.Case.StageId == "pending_head" ? Permissions.HeadDecide : Permissions.ManagerDecide, cancellationToken);
         if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
@@ -612,8 +632,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             EffectiveAt = command.EffectiveAt,
             RecordedAt = time.GetUtcNow()
         });
-        OrganizationWorkspace.AddAudit(db, context, subject, command.Contact ? "SellerContactRecorded" : "CaseNoteAdded", "PropertyCase", row.Case.Id,
-            new { command.Contact, command.EffectiveAt }, correlationId);
+        replay.Record(db, context, subject, row.Case.Id, row.Case.Id,
+            new { command.Contact, command.EffectiveAt }, correlationId, time.GetUtcNow());
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
     }
 
@@ -637,8 +657,16 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             throw new ArgumentException("Зафиксируйте хотя бы результат, комментарий, следующий шаг или цену.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        ProcurementCommandReplay replay = await ProcurementCommandReplay.BeginAsync(db, context, subject,
+            command.CommandId, "CaseNegotiationAdded", command with { CommandId = null, ExpectedCaseVersion = 0 }, cancellationToken);
         await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
         Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
+        if (replay.ExistingResultId is Guid existingId)
+        {
+            if (replay.ExistingCaseId != row.Case.Id) throw new AccessDeniedException();
+            await transaction.CommitAsync(cancellationToken);
+            return existingId;
+        }
         if (row.Case.StageId is "rejected" or "monitor") throw new ArgumentException("Сначала возобновите PropertyCase.");
         CaseNegotiation negotiation = new()
         {
@@ -656,8 +684,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             ActorEmployeeId = context.EmployeeId, Kind = "Negotiation", Title = NegotiationLabel(negotiation),
             Body = NegotiationBody(negotiation), EffectiveAt = negotiation.EffectiveAt, DueAt = negotiation.NextStepDueAt, RecordedAt = negotiation.RecordedAt
         });
-        OrganizationWorkspace.AddAudit(db, context, subject, "CaseNegotiationAdded", "PropertyCase", row.Case.Id,
-            new { negotiation.SellerPrice, negotiation.BuyerOffer, negotiation.AgreedPrice, negotiation.EffectiveAt }, correlationId);
+        replay.Record(db, context, subject, row.Case.Id, negotiation.Id,
+            new { negotiation.SellerPrice, negotiation.BuyerOffer, negotiation.AgreedPrice, negotiation.EffectiveAt }, correlationId, negotiation.RecordedAt);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return negotiation.Id;

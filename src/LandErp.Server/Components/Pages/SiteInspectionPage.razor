@@ -16,10 +16,11 @@ else if(card!=null)
 {
     <main class="inspection-mobile" data-inspection-ready="true" data-inspection-root="true">
         <header class="inspection-top"><a class="btn secondary" href="/procurement/@CaseId">‹ Карточка</a><div><strong>Осмотр участка</strong><small>@card.Item.BusinessNumber · @card.Item.Title</small></div><span class="badge @(draftRestored?"warning":"success")">@(draftRestored?"Локальный черновик":"Сохранено")</span></header>
-        @if(Error!=null){<PageState Kind="error" Title="@Error"><p>Данные не перезаписаны. Обновите серверную версию и повторите сохранение.</p></PageState>}
+        @if(Error!=null){<PageState Kind="error" Title="@Error" />}
+        @if(Success!=null){<PageState Kind="success" Title="@Success">@if(RefreshRequired){<ActionButton Label="Обновить серверную версию" OnClick="ReloadAsync" />}</PageState>}
         @if(card.Inspection==null)
         {
-            <section class="surface"><h2>Осмотр ещё не начат</h2><p class="subtle">При старте текущий активный шаблон копируется в осмотр. Последующие изменения справочника не перепишут этот осмотр.</p><ActionButton Label="Начать осмотр" OnClick="StartAsync" Busy="Busy" /></section>
+            <section class="surface"><h2>Осмотр ещё не начат</h2><p class="subtle">При старте текущий активный шаблон копируется в осмотр. Последующие изменения справочника не перепишут этот осмотр.</p><ActionButton Label="Начать осмотр" OnClick="StartAsync" Busy="Busy" Disabled="@RefreshRequired" /></section>
         }
         else
         {
@@ -30,7 +31,7 @@ else if(card!=null)
                 <details class="inspection-done"><summary>Заполнено · @DoneCount</summary>@foreach(var item in answers.Where(x=>x.Status!=InspectionItemStatus.Unanswered).OrderBy(x=>x.SortOrder)){<article class="inspection-item"><div><strong>@item.Title</strong><small>@AnswerLabel(item)</small>@if(item.Note.Length>0){<p>@item.Note</p>}</div><button class="btn quiet" @onclick="()=>EditAnswerAsync(item)">Изменить</button></article>}</details>
             </section>
             <section class="surface inspection-final"><label class="field"><span>Общий вывод</span><textarea data-inspection-conclusion="true" @bind="conclusion" @bind:event="oninput" @bind:after="SaveLocalSoon"></textarea></label><label class="field"><span>Предварительное решение</span><select data-inspection-decision="true" @bind="decision" @bind:after="SaveLocalSoon"><option value="">Не выбрано</option><option>Осмотр пройден, критичных проблем нет</option><option>Нужны дополнительные проверки</option><option>Есть существенные технические риски</option><option>Рекомендую отказаться</option></select></label></section>
-            <footer class="inspection-footer"><ActionButton Label="Сохранить черновик" Tone="secondary" OnClick="()=>SaveAsync(false)" Busy="Busy" /><ActionButton Label="Завершить осмотр" OnClick="()=>SaveAsync(true)" Busy="Busy" Disabled="@(card.Inspection.Status==InspectionStatus.Completed)" /></footer>
+            <footer class="inspection-footer"><ActionButton Label="Сохранить черновик" Tone="secondary" OnClick="()=>SaveAsync(false)" Busy="Busy" Disabled="@RefreshRequired" /><ActionButton Label="Завершить осмотр" OnClick="()=>SaveAsync(true)" Busy="Busy" Disabled="@(RefreshRequired||card.Inspection.Status==InspectionStatus.Completed)" /></footer>
         }
     </main>
 }
@@ -46,7 +47,7 @@ else if(card!=null)
     protected override async Task OnParametersSetAsync(){if(loaded!=CaseId)await ReloadAsync();}
     protected override async Task OnAfterRenderAsync(bool firstRender){if(!localChecked&&card?.Inspection!=null){localChecked=true;InspectionDraft? saved=await Js.InvokeAsync<InspectionDraft?>("landErpInspection.load",StorageKey);if(saved?.InspectionId==card.Inspection.Id&&saved.Version==card.Inspection.Version){conclusion=saved.Conclusion;decision=saved.Decision;answers=saved.Answers;draftRestored=true;StateHasChanged();return;}}if(card?.Inspection!=null)await Js.InvokeVoidAsync("landErpInspection.attach",StorageKey,new InspectionDraft(card.Inspection.Id,card.Inspection.Version,conclusion,decision,answers));}
     private void MapServer(){if(card?.Inspection is not { } inspection)return;conclusion=inspection.OverallConclusion;decision=inspection.PreliminaryDecision;answers=inspection.Items.Select(x=>new AnswerDraft(x)).ToList();}
-    private async Task StartAsync(){await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,null,null,"","",[],false),Guid.CreateVersion7().ToString(),CancellationToken.None));}
+    private async Task StartAsync(){if(RefreshRequired)return;await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,null,null,"","",[],false),OperationId,CancellationToken.None));}
     private async Task SetAnswerAsync(AnswerDraft item,string value){if(value.Length==0)return;item.Answer=value;item.Status=InspectionItemStatus.Answered;await SaveLocalAsync();}
     private async Task SetNoteAsync(AnswerDraft item,string value){item.Note=value;await SaveLocalAsync();}
     private async Task NotCheckedAsync(AnswerDraft item){item.Answer="";item.Status=InspectionItemStatus.NotChecked;await SaveLocalAsync();}
@@ -54,7 +55,18 @@ else if(card!=null)
     private void PrepareItemMedia(AnswerDraft item){media.Owner=item.Id.ToString();media.Label="Материал · "+item.Title;}
     private async Task SaveLocalSoon(){await SaveLocalAsync();}
     private ValueTask SaveLocalAsync()=>Js.InvokeVoidAsync("landErpInspection.save",StorageKey,new InspectionDraft(card!.Inspection!.Id,card.Inspection.Version,conclusion,decision,answers));
-    private async Task SaveAsync(bool complete){InspectionView inspection=card!.Inspection!;await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,inspection.Id,inspection.Version,conclusion,decision,answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),Guid.CreateVersion7().ToString(),CancellationToken.None));if(Success!=null){await Js.InvokeVoidAsync("landErpInspection.remove",StorageKey);draftRestored=false;}}
+    private async Task SaveAsync(bool complete)
+    {
+        if(RefreshRequired)return;
+        InspectionView inspection=card!.Inspection!;
+        bool committed=await ExecuteConfirmedAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,
+            new(CaseId,inspection.Id,inspection.Version,conclusion,decision,
+                answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),
+            OperationId,CancellationToken.None));
+        // Confirmation alone does not mean the editor has received the new server version.
+        // Keep the local draft until both the write and refresh are confirmed (LR-06/07 remain separate).
+        if(committed&&!RefreshRequired){await Js.InvokeVoidAsync("landErpInspection.remove",StorageKey);draftRestored=false;}
+    }
     private void SelectMedia(InputFileChangeEventArgs args){selectedFile=args.File;media.Kind=selectedFile.ContentType.StartsWith("image/")?CaseAttachmentKind.Photo:selectedFile.ContentType.StartsWith("video/")?CaseAttachmentKind.Video:selectedFile.ContentType.StartsWith("audio/")?CaseAttachmentKind.Audio:CaseAttachmentKind.Document;media.Label=selectedFile.Name;}
     private async Task UploadMediaAsync(){if(selectedFile==null)return;await using Stream input=selectedFile.OpenReadStream(8*1024*1024);using MemoryStream buffer=new();await input.CopyToAsync(buffer);Guid owner=media.Owner=="inspection"?card!.Inspection!.Id:Guid.Parse(media.Owner);CaseAttachmentOwner type=media.Owner=="inspection"?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;await ExecuteAsync(()=>Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,media.Kind,media.Label,media.Description,selectedFile.Name,selectedFile.ContentType,buffer.ToArray(),null),Guid.CreateVersion7().ToString(),CancellationToken.None));if(Success!=null){selectedFile=null;media=new();}}
     private static string AnswerLabel(AnswerDraft item)=>item.Status==InspectionItemStatus.NotChecked?"Не проверено":item.Answer+(item.Unit.Length==0?"":" "+item.Unit);

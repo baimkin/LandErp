@@ -254,7 +254,9 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
         return "Обновлено";
     }
 
-    private static bool Useful(string name) => !name.Contains("Password", StringComparison.OrdinalIgnoreCase)
+    // Replay metadata is available only in authorized technical details, not business changes or CSV.
+    private static bool Useful(string name) => !name.Equals("CommandReplay", StringComparison.OrdinalIgnoreCase)
+        && !name.Contains("Password", StringComparison.OrdinalIgnoreCase)
         && !name.Contains("Token", StringComparison.OrdinalIgnoreCase) && !name.Contains("Credential", StringComparison.OrdinalIgnoreCase)
         && !name.Contains("Secret", StringComparison.OrdinalIgnoreCase) && !name.Contains("Cookie", StringComparison.OrdinalIgnoreCase)
         && name is not ("ExpectedVersion" or "Version" or "DataRevision" or "PreviousRevision");

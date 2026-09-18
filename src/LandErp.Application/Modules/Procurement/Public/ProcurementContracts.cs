@@ -52,10 +52,13 @@ public sealed record CaseCard(QueueItem Item, string? Description, string? Selle
     bool CanManageDossier, bool CanManageBlockers, bool CanConfirmPurchase);
 public sealed record DecisionCommand(Guid CaseId, long ExpectedCaseVersion, long ExpectedSourceRevision,
     ProcurementAction Action, string Reason, string Clarification, Guid? TargetEmployeeId, DateTimeOffset? DueAt);
-public sealed record AddCaseNote(Guid CaseId, long ExpectedCaseVersion, string Text, bool Contact, string ContactResult, DateTimeOffset? EffectiveAt);
+// Reuse CommandId for retries of the same addition. It is distinct from the per-attempt
+// diagnostic correlation ID. Null retains legacy behavior without replay protection.
+public sealed record AddCaseNote(Guid CaseId, long ExpectedCaseVersion, string Text, bool Contact, string ContactResult,
+    DateTimeOffset? EffectiveAt, Guid? CommandId = null);
 public sealed record AddNegotiation(Guid CaseId, long ExpectedCaseVersion, decimal? SellerPrice, decimal? BuyerOffer,
     decimal? AgreedPrice, string Channel, string Contact, string Outcome, string Conditions, string Comment,
-    string NextStep, DateTimeOffset? NextStepDueAt, DateTimeOffset EffectiveAt);
+    string NextStep, DateTimeOffset? NextStepDueAt, DateTimeOffset EffectiveAt, Guid? CommandId = null);
 public sealed record SaveCaseCheck(Guid CaseId, Guid? CheckId, long ExpectedCaseVersion, long? ExpectedCheckVersion,
     CaseCheckLevel Level, string Title, CaseCheckStatus Status, Guid? ResponsibleEmployeeId, bool UpdateResponsible,
     DateTimeOffset? DueAt, decimal? Cost, string Result, bool Blocker, Guid? TemplateItemId = null);
@@ -81,7 +84,7 @@ public sealed record ApplySourceFact(Guid CaseId, Guid CatalogItemId, long Expec
 public sealed record SaveNextAction(Guid CaseId, long ExpectedCaseVersion, long ExpectedTaskVersion,
     WorkTaskType Type, string Title, string Description, DateTimeOffset? DueAt, Guid AssigneeEmployeeId);
 public sealed record CreateManualPropertyCase(string Title, string? Location, string? CadastralNumber,
-    decimal? Price, decimal? AreaSquareMeters, string Comment);
+    decimal? Price, decimal? AreaSquareMeters, string Comment, Guid? CommandId = null);
 public sealed record ManualPropertyCaseResult(Guid CaseId, string BusinessNumber);
 public sealed record NotificationView(Guid Id, Guid CaseId, string Title, DateTimeOffset RecordedAt, bool Read);
 public interface IProcurementWorkspace

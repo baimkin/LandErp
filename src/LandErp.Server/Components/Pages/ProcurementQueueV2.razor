@@ -22,7 +22,7 @@
                 <h1>Очередь закупки</h1>
                 <p>Только уже выбранные PropertyCase. В очереди — минимум информации; детали открываются справа.</p>
             </div>
-            <button type="button" class="btn primary" disabled="@(queuePage?.CanCreateManualCase != true)" @onclick="OpenManualCase">+ Создать объект вручную</button>
+            <button type="button" class="btn primary" disabled="@(queuePage?.CanCreateManualCase != true || Busy || savingNegotiation)" @onclick="OpenManualCase">+ Создать объект вручную</button>
         </div>
 
         @if (Loading)
@@ -37,7 +37,11 @@
         {
             @if (Error != null)
             {
-                <div class="state error"><strong>@Error</strong><button type="button" class="btn" @onclick="ReloadAsync">Повторить</button></div>
+                <div class="state error"><strong>@Error</strong><button type="button" class="btn" @onclick="ReloadAsync">Обновить данные</button></div>
+            }
+            @if (Success != null)
+            {
+                <div class="state" role="status"><strong>@Success</strong>@if (RefreshRequired) { <button type="button" class="btn" @onclick="ReloadAsync">Обновить данные</button> }</div>
             }
 
             @if (queuePage != null)
@@ -191,6 +195,8 @@
                 <button class="btn" type="button" @onclick="CloseDrawer">×</button>
             </div>
             <div class="db">
+                @if (Success != null) { <div class="state" role="status"><strong>@Success</strong>@if (RefreshRequired) { <button class="btn" type="button" @onclick="ReloadAsync">Обновить данные</button> }</div> }
+                @if (Error != null) { <div class="state error" role="alert">@Error</div> }
                 <div class="card hero">
                     @if (!string.IsNullOrWhiteSpace(detail.ThumbnailUrl))
                     {
@@ -372,6 +378,7 @@
                 <DataAnnotationsValidator />
                 <div class="mb">
                     <ValidationSummary />
+                    @if (Error != null) { <div class="modal-state error" role="alert">@Error</div> }
                     <div class="form">
                         <div class="field full"><label>Название объекта</label><input @bind="manualCase.Title" maxlength="512" placeholder="Например, участок у деревни Новая" /></div>
                         <div class="field"><label>Локация</label><input @bind="manualCase.Location" maxlength="20000" /></div>
@@ -402,6 +409,7 @@
                 <DataAnnotationsValidator />
                 <div class="mb">
                     <ValidationSummary />
+                    @if (Error != null) { <div class="modal-state error" role="alert">@Error</div> }
                     <div class="form">
                         <div class="field"><label>Тип</label><select @bind="negotiation.Channel"><option>Телефон</option><option>Сообщение</option><option>Встреча</option></select></div>
                         <div class="field"><label>Результат</label><input @bind="negotiation.Outcome" maxlength="500" /></div>
@@ -413,7 +421,7 @@
                             <small>@(negotiationFiles.Count == 0 ? "Можно выбрать до 6 файлов, каждый не больше 8 МБ." : string.Join(" · ", negotiationFiles.Select(file => file.Name)))</small></div>
                     </div>
                 </div>
-                <div class="mf"><button class="btn" type="button" @onclick="CloseNegotiation">Отмена</button><button class="btn primary" type="submit" disabled="@Busy">Сохранить</button></div>
+                <div class="mf"><button class="btn" type="button" @onclick="CloseNegotiation">Отмена</button><button class="btn primary" type="submit" disabled="@(Busy || savingNegotiation)">Сохранить</button></div>
             </EditForm>
         </div>
     </div>
@@ -541,6 +549,7 @@
                 <DataAnnotationsValidator />
                 <div class="mb">
                     <ValidationSummary />
+                    @if (Error != null) { <div class="modal-state error" role="alert">@Error</div> }
                     <div class="form">
                         <div class="field"><label>Тип</label><select @bind="nextAction.Type"><option value="@WorkTaskType.General">Другое</option><option value="@WorkTaskType.Call">Звонок</option><option value="@WorkTaskType.Meeting">Встреча</option><option value="@WorkTaskType.Check">Проверка</option><option value="@WorkTaskType.Documents">Документы</option><option value="@WorkTaskType.Decision">Решение</option></select></div>
                         <div class="field"><label>Ответственный</label><select @bind="nextAction.AssigneeEmployeeId">@foreach (ProcurementQueueV2Assignee assignee in detail.AvailableAssignees) { <option value="@assignee.Id">@assignee.Name</option> }</select></div>
@@ -579,6 +588,7 @@
     private CaseCard? decisionCard;
     private ProcurementAction decisionAction;
     private bool negotiationOpen;
+    private bool savingNegotiation;
     private NegotiationDraft negotiation = new();
     private bool nextActionOpen;
     private NextActionDraft nextAction = new();
@@ -652,16 +662,17 @@
 
     private async Task OpenDrawerAsync(Guid caseId)
     {
+        if (Busy || savingNegotiation) return;
         selectedCaseId = caseId; detail = null; drawerError = null; drawerLoading = true;
         try { detail = await ReadModel.ReadDetailAsync(CurrentSubject, caseId, CancellationToken.None); }
-        catch (AccessDeniedException) { drawerError = "Нет доступа к этому объекту."; }
-        catch (Exception) { drawerError = "Не удалось загрузить объект. Повторите после восстановления соединения."; }
+        catch (AccessDeniedException exception) { drawerError = ReadFailure(exception, "Нет доступа к этому объекту."); }
+        catch (Exception exception) { drawerError = ReadFailure(exception, "Не удалось загрузить объект. Повторите после восстановления соединения."); }
         finally { drawerLoading = false; }
     }
 
-    private void CloseDrawer() { selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = nextActionOpen = negotiationsOpen = inspectionReportOpen = false; }
-    private void OpenFullCase() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}"); }
-    private void OpenInspectionEditor() { if (detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}/inspection"); }
+    private void CloseDrawer() { if (Busy || savingNegotiation) return; selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = nextActionOpen = negotiationsOpen = inspectionReportOpen = false; }
+    private void OpenFullCase() { if (!Busy && !savingNegotiation && detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}"); }
+    private void OpenInspectionEditor() { if (!Busy && !savingNegotiation && detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}/inspection"); }
 
     private async Task OpenNegotiationsAsync()
     {
@@ -677,8 +688,8 @@
         negotiationsLoading = true;
         negotiationsError = null;
         try { negotiationHistory = await ReadModel.ReadNegotiationsAsync(CurrentSubject, detail.CaseId, negotiationOffset, NegotiationPageSize, CancellationToken.None); }
-        catch (AccessDeniedException) { negotiationsError = "Нет доступа к истории переговоров."; }
-        catch (Exception) { negotiationsError = "Не удалось загрузить историю переговоров."; }
+        catch (AccessDeniedException exception) { negotiationsError = ReadFailure(exception, "Нет доступа к истории переговоров."); }
+        catch (Exception exception) { negotiationsError = ReadFailure(exception, "Не удалось загрузить историю переговоров."); }
         finally { negotiationsLoading = false; }
     }
 
@@ -693,8 +704,8 @@
         inspectionReportLoading = true;
         inspectionReportError = null;
         try { inspectionReport = await ReadModel.ReadInspectionReportAsync(CurrentSubject, detail.CaseId, CancellationToken.None); }
-        catch (AccessDeniedException) { inspectionReportError = "Нет доступа к результату осмотра."; }
-        catch (Exception) { inspectionReportError = "Не удалось загрузить результат осмотра."; }
+        catch (AccessDeniedException exception) { inspectionReportError = ReadFailure(exception, "Нет доступа к результату осмотра."); }
+        catch (Exception exception) { inspectionReportError = ReadFailure(exception, "Не удалось загрузить результат осмотра."); }
         finally { inspectionReportLoading = false; }
     }
 
@@ -702,63 +713,64 @@
 
     private void OpenManualCase()
     {
-        if (queuePage?.CanCreateManualCase != true) return;
+        if (Busy || savingNegotiation || queuePage?.CanCreateManualCase != true) return;
         manualCase = new();
         manualCaseOpen = true;
     }
 
-    private void CloseManualCase() => manualCaseOpen = false;
+    private void CloseManualCase() { if (!Busy) manualCaseOpen = false; }
 
     private async Task CreateManualCaseAsync()
     {
         ManualPropertyCaseResult? result = null;
-        await ExecuteAsync(async () => result = await Workspace.CreateManualCaseAsync(CurrentSubject,
+        bool committed = await ExecuteConfirmedAsync(async () => result = await Workspace.CreateManualCaseAsync(CurrentSubject,
             new CreateManualPropertyCase(manualCase.Title, manualCase.Location, manualCase.CadastralNumber,
-                manualCase.Price, manualCase.AreaSquareMeters, manualCase.Comment), Correlation(), CancellationToken.None));
-        if (Error == null && result != null)
+                manualCase.Price, manualCase.AreaSquareMeters, manualCase.Comment, manualCase.CommandId), OperationId, CancellationToken.None));
+        if (committed && result != null)
         {
             manualCaseOpen = false;
-            await OpenDrawerAsync(result.CaseId);
+            manualCase = new();
+            if (!Forbidden) await OpenDrawerAsync(result.CaseId);
         }
     }
 
     private async Task OpenDecisionAsync(ProcurementAction action)
     {
-        if (detail == null) return;
+        if (Busy || savingNegotiation || detail == null) return;
         drawerError = null;
         try { decisionAction = action; decisionCard = await Workspace.ReadCardAsync(CurrentSubject, detail.CaseId, CancellationToken.None); }
-        catch (AccessDeniedException) { drawerError = "Нет права на это решение."; }
-        catch (Exception) { drawerError = "Не удалось подготовить действие."; }
+        catch (AccessDeniedException exception) { drawerError = ReadFailure(exception, "Нет права на это решение."); }
+        catch (Exception exception) { drawerError = ReadFailure(exception, "Не удалось подготовить действие."); }
     }
 
-    private void CloseDecision() => decisionCard = null;
+    private void CloseDecision() { if (!Busy) decisionCard = null; }
 
     private async Task ConfirmDecisionAsync(DecisionDraft draft)
     {
         if (decisionCard == null) return;
         CaseCard card = decisionCard;
-        await ExecuteAsync(() => Workspace.DecideAsync(CurrentSubject,
+        bool committed = await ExecuteConfirmedAsync(() => Workspace.DecideAsync(CurrentSubject,
             new DecisionCommand(card.Item.CaseId, card.Item.CaseVersion, card.Item.SourceRevision, decisionAction,
                 draft.Reason, draft.Clarification, draft.Target, ProcurementLabels.ParseLocal(draft.Due)),
-            Correlation(), CancellationToken.None));
-        if (Error == null) decisionCard = null;
+            OperationId, CancellationToken.None));
+        if (committed) decisionCard = null;
     }
 
     private void OpenNegotiation()
     {
-        if (detail == null || !detail.CanManageDossier) return;
+        if (Busy || savingNegotiation || detail == null || !detail.CanManageDossier) return;
         negotiation = new() { Effective = ProcurementLabels.LocalInput(DateTimeOffset.UtcNow) };
         negotiationFiles = [];
         negotiationOpen = true;
     }
 
-    private void CloseNegotiation() { negotiationOpen = false; negotiationFiles = []; }
+    private void CloseNegotiation() { if (Busy || savingNegotiation) return; negotiationOpen = false; negotiationFiles = []; }
 
     private void SelectNegotiationFiles(InputFileChangeEventArgs args) => negotiationFiles = args.GetMultipleFiles(int.MaxValue).Take(6).ToArray();
 
     private void OpenNextAction()
     {
-        if (detail == null || !detail.CanManageDossier) return;
+        if (Busy || savingNegotiation || detail == null || !detail.CanManageDossier) return;
         nextAction = new()
         {
             Type = detail.NextActionType,
@@ -770,7 +782,7 @@
         nextActionOpen = true;
     }
 
-    private void CloseNextAction() => nextActionOpen = false;
+    private void CloseNextAction() { if (!Busy) nextActionOpen = false; }
 
     private async Task SaveNextActionAsync()
     {
@@ -778,47 +790,71 @@
         Guid caseId = detail.CaseId;
         long caseVersion = detail.CaseVersion;
         long taskVersion = detail.TaskVersion;
-        await ExecuteAsync(() => Workspace.SaveNextActionAsync(CurrentSubject,
+        bool committed = await ExecuteConfirmedAsync(() => Workspace.SaveNextActionAsync(CurrentSubject,
             new SaveNextAction(caseId, caseVersion, taskVersion, nextAction.Type, nextAction.Title, nextAction.Description,
-                ProcurementLabels.ParseLocal(nextAction.Due), nextAction.AssigneeEmployeeId), Correlation(), CancellationToken.None));
-        if (Error == null) nextActionOpen = false;
+                ProcurementLabels.ParseLocal(nextAction.Due), nextAction.AssigneeEmployeeId), OperationId, CancellationToken.None));
+        if (committed) nextActionOpen = false;
     }
 
     private async Task SaveNegotiationAsync()
     {
-        if (detail == null) return;
+        if (Busy || Loading || savingNegotiation || detail == null) return;
+        savingNegotiation = true;
         Guid caseId = detail.CaseId;
         long version = detail.CaseVersion;
         Guid? negotiationId = null;
-        await ExecuteAsync(async () =>
+        try
         {
+            NegotiationDraft draft = negotiation;
+            IBrowserFile[] files = negotiationFiles.ToArray();
             List<PendingAttachment> pending = [];
-            foreach (IBrowserFile file in negotiationFiles)
+            bool committed = await ExecuteConfirmedAsync(async () =>
             {
-                await using Stream input = file.OpenReadStream(8 * 1024 * 1024);
-                using MemoryStream buffer = new();
-                await input.CopyToAsync(buffer);
-                pending.Add(new(file.Name, file.ContentType, AttachmentKind(file), buffer.ToArray()));
-            }
-            DateTimeOffset effective = ProcurementLabels.ParseLocal(negotiation.Effective) ?? DateTimeOffset.UtcNow;
-            negotiationId = await Workspace.AddNegotiationWithIdAsync(CurrentSubject,
-                new AddNegotiation(caseId, version, negotiation.SellerPrice, negotiation.BuyerOffer, negotiation.AgreedPrice,
-                    negotiation.Channel, "", negotiation.Outcome, "", negotiation.Comment, "", null, effective),
-                Correlation(), CancellationToken.None);
-            foreach (PendingAttachment attachment in pending)
-                await Workspace.AddAttachmentAsync(CurrentSubject, new AddCaseAttachment(caseId, CaseAttachmentOwner.Negotiation,
-                    negotiationId, attachment.Kind, attachment.Name, "Материал к контакту", attachment.Name,
-                    attachment.ContentType, attachment.Content, null), Correlation(), CancellationToken.None);
-        });
-        if (negotiationId != null)
-        {
+                // Read selected bytes before creating the contact. No file operation can
+                // turn its successful write into an apparent failure of the same command.
+                foreach (IBrowserFile file in files)
+                {
+                    await using Stream input = file.OpenReadStream(8 * 1024 * 1024);
+                    using MemoryStream buffer = new();
+                    await input.CopyToAsync(buffer);
+                    pending.Add(new(file.Name, file.ContentType, AttachmentKind(file), buffer.ToArray()));
+                }
+                DateTimeOffset effective = ProcurementLabels.ParseLocal(draft.Effective) ?? draft.FallbackEffectiveAt;
+                negotiationId = await Workspace.AddNegotiationWithIdAsync(CurrentSubject,
+                    new AddNegotiation(caseId, version, draft.SellerPrice, draft.BuyerOffer, draft.AgreedPrice,
+                        draft.Channel, "", draft.Outcome, "", draft.Comment, "", null, effective, draft.CommandId),
+                    OperationId, CancellationToken.None);
+            });
+            if (!committed || negotiationId == null) return;
+            // A confirmed contact must not remain sendable merely because a read/upload fails.
             negotiationOpen = false;
             negotiationFiles = [];
-            await OpenDrawerAsync(caseId);
+            negotiation = new();
+            if (Forbidden) return;
+
+            int uploaded = 0;
+            foreach (PendingAttachment attachment in pending)
+            {
+                bool materialCommitted = await ExecuteConfirmedAsync(() => Workspace.AddAttachmentAsync(CurrentSubject,
+                    new AddCaseAttachment(caseId, CaseAttachmentOwner.Negotiation, negotiationId, attachment.Kind,
+                        attachment.Name, "Материал к контакту", attachment.Name, attachment.ContentType, attachment.Content, null),
+                    OperationId, CancellationToken.None));
+                if (!materialCommitted)
+                {
+                    // LR-08 owns provider recovery. Do not blindly create the material or
+                    // the contact again after an uncertain upload; retain the diagnostic.
+                    Success = $"Контакт сохранён. Подтверждено материалов: {uploaded} из {pending.Count}. Проверьте вложения в карточке; повторять контакт не нужно.";
+                    break;
+                }
+                uploaded++;
+            }
+            if (pending.Count > 0 && uploaded == pending.Count)
+                Success = $"Контакт сохранён. Материалы загружены: {uploaded}." + (RefreshRequired ? " " + Success : "");
         }
+        finally { savingNegotiation = false; }
+        if (!Forbidden) await OpenDrawerAsync(caseId);
     }
 
-    private static string Correlation() => $"procurement-v2-{Guid.NewGuid():N}";
     private static string DecisionTitle(ProcurementAction action) => action switch
     {
         ProcurementAction.Forward => "Передать руководителю",
@@ -964,6 +1000,8 @@
 
     private sealed class NegotiationDraft
     {
+        public Guid CommandId { get; } = Guid.CreateVersion7();
+        public DateTimeOffset FallbackEffectiveAt { get; } = DateTimeOffset.UtcNow;
         [Required, MaxLength(100)] public string Channel { get; set; } = "Телефон";
         [MaxLength(500)] public string Outcome { get; set; } = "";
         [MaxLength(4000)] public string Comment { get; set; } = "";
@@ -986,6 +1024,7 @@
 
     private sealed class ManualCaseDraft
     {
+        public Guid CommandId { get; } = Guid.CreateVersion7();
         [Required, MinLength(3), MaxLength(512)] public string Title { get; set; } = "";
         [MaxLength(20000)] public string? Location { get; set; }
         [MaxLength(128)] public string? CadastralNumber { get; set; }

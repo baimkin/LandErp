@@ -554,6 +554,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         bool canManageTemplates = canManageDossier;
         bool canManageBlockers = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
         bool canConfirmPurchase = await AllowedAsync(subject, Permissions.PurchaseConfirm, cancellationToken);
+        bool canCorrectSourceLinks = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken);
         CaseNegotiation[] negotiations = await db.CaseNegotiations.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.Id).ToArrayAsync(cancellationToken);
         CaseCheck[] checks = await db.CaseChecks.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
@@ -606,7 +607,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                     item.UnitSnapshot, item.NormalAnswerSnapshot, item.AllowAttachmentsSnapshot, item.RequiredSnapshot, item.Status,
                     item.Answer, item.Note, item.Version)).ToArray()),
             row.Case.CadastralNumber, row.Case.AcquisitionPrice, row.Case.AcquisitionDate, row.Case.AcquisitionComment,
-            canManageDossier, canManageTemplates, canManageBlockers, canConfirmPurchase);
+            canManageDossier, canManageTemplates, canManageBlockers, canConfirmPurchase, canCorrectSourceLinks);
     }
 
     public async Task<Guid?> ResolveLegacyListingAsync(Subject subject, Guid listingId, CancellationToken cancellationToken)

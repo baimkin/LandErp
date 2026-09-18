@@ -160,6 +160,27 @@ internal static class ProcurementUiScenario
                 await attachmentForm.GetByRole(AriaRole.Button, new() { Name = "Добавить вложение", Exact = true }).ClickAsync();
                 await page.GetByText("Публичная кадастровая карта", new() { Exact = true }).WaitForAsync(); }, "save-attachment");
 
+            await StepAsync(async () => { await page.GetByRole(AriaRole.Button, new() { Name = "Основное", Exact = true }).ClickAsync();
+                await page.GetByRole(AriaRole.Button, new() { Name = "Исправить рабочие данные", Exact = true }).ClickAsync();
+                ILocator correction = await StableDialogAsync(page);
+                await correction.GetByLabel("Поле", new() { Exact = true }).SelectOptionAsync("Price");
+                await correction.GetByText("Сейчас", new() { Exact = true }).WaitForAsync();
+                await correction.GetByText("После исправления", new() { Exact = true }).WaitForAsync();
+                await correction.GetByLabel("Новое значение, ₽", new() { Exact = true }).FillAsync("18500000");
+                await correction.GetByLabel("Причина исправления", new() { Exact = true }).FillAsync("UI correction B2-03");
+                await correction.GetByRole(AriaRole.Button, new() { Name = "Сохранить исправление", Exact = true }).ClickAsync();
+                await correction.WaitForAsync(new() { State = WaitForSelectorState.Detached }); }, "correct-working-fact-ui");
+
+            await StepAsync(async () => { await page.GetByRole(AriaRole.Button, new() { Name = "Источники", Exact = true }).ClickAsync();
+                ILocator sourceRow = page.Locator(".dossier-row", new() { HasText = "UI PropertyCase Phase 4" }).First;
+                await sourceRow.GetByRole(AriaRole.Button, new() { Name = "Исправить связь", Exact = true }).ClickAsync();
+                ILocator linkCorrection = await StableDialogAsync(page);
+                await linkCorrection.GetByLabel("Новая связь", new() { Exact = true }).WaitForAsync();
+                await linkCorrection.GetByText("Текущая связь", new() { Exact = true }).WaitForAsync();
+                await linkCorrection.GetByText("Старая связь останется в истории.", new() { Exact = false }).WaitForAsync();
+                await linkCorrection.GetByRole(AriaRole.Button, new() { Name = "Отмена", Exact = true }).ClickAsync();
+                await linkCorrection.WaitForAsync(new() { State = WaitForSelectorState.Detached }); }, "open-source-link-correction-ui");
+
             string images = Path.Combine(FoundationTests.RepositoryRoot(), "artifacts", "stage1", "phase4-ui");
             Directory.CreateDirectory(images);
             await page.ScreenshotAsync(new() { Path = Path.Combine(images, "property-case-desktop.png"), FullPage = true });

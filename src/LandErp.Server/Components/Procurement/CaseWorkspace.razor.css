@@ -105,3 +105,9 @@
 .document-table small{display:block;color:var(--text-muted);font-size:var(--text-sm);margin-top:6px}
 .document-file{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding-top:8px;font-size:var(--text-sm)}
 .document-actions{display:flex;flex-wrap:wrap;gap:6px}
+.correction-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.correction-preview>div{min-width:0;padding:14px;border:1px solid var(--border);border-radius:8px;background:var(--surface-subtle)}
+.correction-preview small,.correction-preview strong{display:block;overflow-wrap:anywhere}
+.correction-preview small{color:var(--text-muted);font-size:var(--text-sm);margin-bottom:4px}
+.correction-error{display:grid;gap:8px;justify-items:start}
+@container property-card (max-width:760px){.correction-preview{grid-template-columns:1fr}}

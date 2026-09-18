@@ -50,7 +50,8 @@ public sealed record CaseCard(QueueItem Item, string? Description, string? Selle
     IReadOnlyList<DocumentRequirementView> DocumentRequirements,
     IReadOnlyList<SourceDiscrepancyView> Discrepancies, IReadOnlyList<CheckTemplateView> CheckTemplates, InspectionView? Inspection,
     string? CadastralNumber, decimal? AcquisitionPrice, DateOnly? AcquisitionDate, string? AcquisitionComment,
-    bool CanManageDossier, bool CanManageTemplates, bool CanManageBlockers, bool CanConfirmPurchase);
+    bool CanManageDossier, bool CanManageTemplates, bool CanManageBlockers, bool CanConfirmPurchase,
+    bool CanCorrectSourceLinks);
 public sealed record DecisionCommand(Guid CaseId, long ExpectedCaseVersion, long ExpectedSourceRevision,
     ProcurementAction Action, string Reason, string Clarification, Guid? TargetEmployeeId, DateTimeOffset? DueAt);
 // Reuse CommandId for retries of the same addition. It is distinct from the per-attempt

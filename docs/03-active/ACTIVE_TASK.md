@@ -1,6 +1,29 @@
 # Активная задача LandErp
 
-## Текущий Gate — B2-04, Package 02 validation handover
+## Текущий Gate — B3-01, attachment lifecycle & recovery
+
+**Прямой запрос владельца от 18 сентября 2026 года:** начать Package 03 после B2-04.  
+**Ветка:** `codex/release-package-03`.  
+**Исходный commit Package 03 / B3-01:** `936286ef53cc135bdc5c892d62b41332724cd882`.  
+**Package:** Reliable Files & Field Inspection.  
+**Scope B3-01:** только LR-08 — incomplete attachment recovery / PendingUpload.  
+**Gate:** [GATE-RELEASE-B3-01](GATE-RELEASE-B3-01.md).  
+**Evidence:** [RELEASE_PACKAGE_03_B3_01_REPORT](reports/RELEASE_PACKAGE_03_B3_01_REPORT.md).
+
+Package 02 executable/manual acceptance остаётся pending owner validation, но владелец явно разрешил начать Package 03. Не считать это автоматическим принятием Package 02.
+
+B3-01 использует существующий StoredFile lifecycle и stable FileId. Не строить новую storage subsystem, не добавлять migration, не начинать LR-11/LR-20 file limits и LR-06/LR-07/LR-12 inspection semantics. Фактические tests/build/browser владелец запускает самостоятельно; здесь они **Not run**.
+
+### Required reading B3-01
+
+После README → START_HERE → этого файла читать только:
+1. application FileStorage contract;
+2. current Procurement attachment add/read/retry path;
+3. current storage providers и Yandex recovery tests;
+4. attachment/document UI;
+5. этот Gate и относящиеся targeted tests.
+
+## Предыдущий Gate — B2-04, Package 02 validation handover
 
 **Прямой запрос владельца от 18 сентября 2026 года:** начать B2-04 после публикации B2-03.  
 **Ветка:** `codex/release-package-02`.  

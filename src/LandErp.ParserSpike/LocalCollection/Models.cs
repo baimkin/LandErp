@@ -11,6 +11,7 @@ public enum PageKind { SearchResults, Captcha, AuthenticationRequired, RateLimit
 public enum NextKind { Next, End, UnknownInvalid }
 public enum ErrorPolicy { Continue, PauseSource }
 public enum LocalScheduleKind { Manual, Interval, FixedTimes }
+public enum CollectionCompletionKind { Success, LimitReached, Partial, RateLimited, SourceError, Interrupted, Captcha, AuthenticationRequired }
 
 public sealed record LocalGroup(string Id, string Name, int SortOrder, bool Active, long Revision);
 
@@ -145,6 +146,8 @@ public sealed record PageJournal(string JobId, int Page, string Url, DateTimeOff
     public int RepeatCount { get; init; }
     public bool Completed { get; init; }
 }
+public sealed record CollectionCompletionFacts(CollectionCompletionKind Kind, bool EndReached,
+    bool LoadingCompleted, int StableRounds, string ReasonCode, string[] Warnings);
 public sealed record ListingRow(ListingObservation Observation, DateTimeOffset FirstSeen, DateTimeOffset LastSeen)
 {
     public SourceSite Source => Observation.Source;

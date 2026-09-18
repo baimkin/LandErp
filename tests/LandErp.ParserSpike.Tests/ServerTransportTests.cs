@@ -50,6 +50,8 @@ public sealed class ServerTransportTests
             {
                 CollectionResult result = JsonSerializer.Deserialize<CollectionResult>(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult(), CollectionJson.Options)!;
                 Assert.AreEqual(CollectionOutcome.Interrupted, result.Outcome); Assert.AreEqual(0, result.Observations.Length); interrupted++;
+                Assert.AreEqual(CollectionResultReasonCodes.AgentInterrupted, result.ReasonCode);
+                Assert.IsNotNull(result.Coverage); Assert.IsFalse(result.Coverage.EndReached);
                 return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new CollectionReceipt(result.ResultId, "Interrupted", 0, 0), CollectionJson.Options));
             }
             return Json(HttpStatusCode.OK, "{}");
@@ -87,6 +89,40 @@ public sealed class ServerTransportTests
         Assert.AreEqual(0, sessions.Created); Assert.IsNull(outbox.ReadWork()); Assert.AreEqual(0, outbox.Pending().Length);
         Assert.IsTrue(outbox.HasDelivery(work.JobId, work.LeaseId));
         StringAssert.Contains(coordinator.Status, "сохранены на компьютере");
+    }
+
+    [TestMethod]
+    public async Task AcceptedFinalClearsLocalWorkAndReturnsToAutomaticClaimLoop()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "LandErp-FinalAutoClaim", Guid.NewGuid().ToString("N"));
+        LocalStore store = new(Path.Combine(root, "local.sqlite"));
+        SearchLink link = store.EnsureServerWorkLink("Server search", "https://www.avito.ru/moskva/zemelnye_uchastki", SourceSite.Avito);
+        CollectionJob local = store.Claim(store.StartBatch(new(), force: true, onlyLinkId: link.Id), SourceSite.Avito, "test")!;
+        Assert.IsTrue(store.Finish(local, JobState.Completed, "done",
+            new(CollectionCompletionKind.Success, true, true, 3, "", [])));
+        CollectionWork work = new(Guid.CreateVersion7(), Guid.CreateVersion7(), DateTimeOffset.UtcNow.AddMinutes(3),
+            ListingSource.Avito, link.Url, 1, "Server search");
+        ServerOutbox outbox = new(Path.Combine(root, "outbox.sqlite")); outbox.SaveWork(new(work, local.Id));
+        int claims = 0; int finals = 0;
+        using HttpClient http = new(new ReplyHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("work/claim", StringComparison.Ordinal))
+            { claims++; return new HttpResponseMessage(HttpStatusCode.NoContent); }
+            if (request.RequestUri.AbsolutePath.EndsWith("results", StringComparison.Ordinal))
+            {
+                CollectionResult result = JsonSerializer.Deserialize<CollectionResult>(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult(), CollectionJson.Options)!;
+                if (result.Final) finals++;
+                return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new CollectionReceipt(result.ResultId, "Completed", 0, 0), CollectionJson.Options));
+            }
+            return Json(HttpStatusCode.OK, "{}");
+        }));
+        await using QueueRunner runner = new(store, new NoSessions());
+        await using ServerCoordinator coordinator = new(store, runner, outbox, Adapter(http));
+
+        await coordinator.TickAsync(CancellationToken.None);
+        Assert.AreEqual(1, finals); Assert.IsNull(outbox.ReadWork()); Assert.AreEqual(0, outbox.Pending().Length);
+        await coordinator.TickAsync(CancellationToken.None);
+        Assert.AreEqual(1, claims); StringAssert.Contains(coordinator.Status, "Ожидаем");
     }
 
     [TestMethod]

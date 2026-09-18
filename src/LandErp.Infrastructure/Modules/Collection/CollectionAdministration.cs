@@ -42,21 +42,21 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
             join agentValue in db.CollectorAgents on job.AgentId equals (Guid?)agentValue.Id into agentValues
             from agent in agentValues.DefaultIfEmpty()
             where job.OrganizationId == context.OrganizationId && job.CompletedAt != null
-            orderby job.CompletedAt descending
+            orderby job.CompletedAt descending, job.CreatedAt descending, job.Id descending
             select new { Job = job, Agent = agent == null ? null : agent.Name }).ToArrayAsync(cancellationToken);
         var lastBySearch = lastResults.GroupBy(item => item.Job.SearchId).ToDictionary(group => group.Key, group => group.First());
         var searches = rawSearches.Select(item => new SearchView(item.Id, item.Label, item.Source, item.Url, item.MaxPages, item.SearchGroupId,
             groups.FirstOrDefault(group => group.Id == item.SearchGroupId)?.Name ?? "Без группы", CollectionScheduleRules.Display(item), item.ScheduleKind, item.IntervalMinutes,
             System.Text.Json.JsonSerializer.Deserialize<string[]>(item.FixedTimesJson) ?? [], item.Enabled,
             item.NextRunAt, item.Version, lastBySearch.TryGetValue(item.Id, out var last) ? Run(last.Job, last.Agent) : null)).ToArray();
-        var jobs = await (from job in db.CollectionJobs join search in db.SearchConfigurations on job.SearchId equals search.Id
-                          join agentValue in db.CollectorAgents on job.AgentId equals (Guid?)agentValue.Id into agentValues
-                          from agent in agentValues.DefaultIfEmpty() where job.OrganizationId == context.OrganizationId
-                          orderby job.CreatedAt descending select new CollectionJobView(job.Id, job.SearchId, search.Label, agent == null ? null : agent.Name,
-                              job.State.ToString(), job.CreatedAt, job.ScheduledFor, job.LeaseExpiresAt, job.CompletedAt, job.ResultCode, job.ProcessedCount, job.AcceptedCount,
-                              job.NewListingsCount, job.ChangedListingsCount)).Take(100).ToArrayAsync(cancellationToken);
+        var rawJobs = await (from job in db.CollectionJobs join search in db.SearchConfigurations on job.SearchId equals search.Id
+                             join agentValue in db.CollectorAgents on job.AgentId equals (Guid?)agentValue.Id into agentValues
+                             from agent in agentValues.DefaultIfEmpty() where job.OrganizationId == context.OrganizationId
+                             orderby job.CreatedAt descending, job.Id descending select new { Job = job, search.Label, Agent = agent == null ? null : agent.Name })
+            .Take(100).ToArrayAsync(cancellationToken);
+        CollectionJobView[] jobs = rawJobs.Select(item => Job(item.Job, item.Label, item.Agent)).ToArray();
         int pending = await db.CollectionJobs.CountAsync(item => item.OrganizationId == context.OrganizationId && item.State == CollectionJobState.Pending, cancellationToken);
-        int attention = lastBySearch.Values.Count(item => item.Job.State is CollectionJobState.AwaitingManualAction or CollectionJobState.Failed or CollectionJobState.Interrupted);
+        int attention = lastBySearch.Values.Count(item => item.Job.RequiresOperatorAttention);
         CollectionSchedulerStatus? scheduler = await db.CollectionSchedulerStatuses.AsNoTracking().SingleOrDefaultAsync(item => item.Id == 1, cancellationToken);
         CollectionSchedulerHealthView schedulerView = Scheduler(scheduler, now);
         string businessTimeZone = await db.Organizations.Where(item => item.Id == context.OrganizationId)
@@ -178,6 +178,13 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
         search.MaxPages = command.MaxPages; search.SearchGroupId = command.SearchGroupId; search.Enabled = command.Enabled;
         string zone = await db.Organizations.Where(item => item.Id == context.OrganizationId).Select(item => item.BusinessTimeZone).SingleAsync(cancellationToken);
         CollectionScheduleRules.Apply(search, command.Schedule, time.GetUtcNow(), zone, preserveNextRun: sameEnabled);
+        if (!search.Enabled)
+        {
+            ServerCollectionJob[] retries = await db.CollectionJobs
+                .Where(item => item.SearchId == search.Id && item.RetryAt != null)
+                .ToArrayAsync(cancellationToken);
+            foreach (ServerCollectionJob retry in retries) retry.RetryAt = null;
+        }
         OrganizationWorkspace.AddAudit(db, context, subject, "CollectionSearchUpdated", "SearchConfiguration", search.Id, new { search.Enabled, search.ScheduleKind }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -233,6 +240,8 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
         if (!search.Enabled) throw new AccessDeniedException();
         if (await db.CollectionJobs.AnyAsync(item => item.SearchId == searchId && (item.State == CollectionJobState.Pending || item.State == CollectionJobState.Leased), cancellationToken))
             throw new ArgumentException("Для поиска уже есть активная работа.");
+        ServerCollectionJob[] retries = await db.CollectionJobs.Where(item => item.SearchId == searchId && item.RetryAt != null).ToArrayAsync(cancellationToken);
+        foreach (ServerCollectionJob retry in retries) retry.RetryAt = null;
         ServerCollectionJob job = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
             SearchId = search.Id, AgentId = null, CreatedAt = time.GetUtcNow(), State = CollectionJobState.Pending };
         db.CollectionJobs.Add(job);
@@ -242,7 +251,19 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
 
     private static CollectionRunView Run(ServerCollectionJob job, string? agent) => new(job.Id, agent,
         job.State.ToString(), job.CreatedAt, job.ScheduledFor, job.CompletedAt, job.ResultCode, job.ProcessedCount,
-        job.AcceptedCount, job.NewListingsCount, job.ChangedListingsCount);
+        job.AcceptedCount, job.NewListingsCount, job.ChangedListingsCount, job.ReasonCode, Warnings(job), Coverage(job),
+        job.RetryAttempt, job.RetryAt, job.RequiresOperatorAttention);
+
+    private static CollectionJobView Job(ServerCollectionJob job, string label, string? agent) => new(job.Id, job.SearchId,
+        label, agent, job.State.ToString(), job.CreatedAt, job.ScheduledFor, job.LeaseExpiresAt, job.CompletedAt,
+        job.ResultCode, job.ProcessedCount, job.AcceptedCount, job.NewListingsCount, job.ChangedListingsCount,
+        job.ReasonCode, Warnings(job), Coverage(job), job.RetryAttempt, job.RetryAt, job.RequiresOperatorAttention);
+
+    private static string[] Warnings(ServerCollectionJob job) =>
+        System.Text.Json.JsonSerializer.Deserialize<string[]>(job.WarningsJson, CollectionJson.Options) ?? [];
+
+    private static CollectionCoverage? Coverage(ServerCollectionJob job) => job.CoverageJson is null ? null
+        : System.Text.Json.JsonSerializer.Deserialize<CollectionCoverage>(job.CoverageJson, CollectionJson.Options);
 
     private static CollectionSchedulerHealthView Scheduler(CollectionSchedulerStatus? status, DateTimeOffset now)
     {

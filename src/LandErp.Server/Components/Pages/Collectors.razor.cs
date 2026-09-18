@@ -108,7 +108,7 @@ public partial class Collectors : IAsyncDisposable
             (j.Agent?.Contains(historyQuery, StringComparison.OrdinalIgnoreCase) ?? false)) &&
         (historyFilter == "all" || historyFilter == "completed" && j.State is "Completed" or "LimitReached" ||
             historyFilter == "running" && j.State is "Pending" or "Leased" ||
-            historyFilter == "attention" && j.State is "AwaitingManualAction" or "Failed" or "Interrupted")).ToList() ?? [];
+            historyFilter == "attention" && j.AttentionRequired)).ToList() ?? [];
     private int HistoryPages => Math.Max(1, (int)Math.Ceiling(FilteredJobs.Count / (double)PageSize));
     private IEnumerable<CollectionJobView> PagedJobs => FilteredJobs.Skip((Math.Min(historyPage, HistoryPages) - 1) * PageSize).Take(PageSize);
     private bool Matches(SearchView s) =>
@@ -230,7 +230,7 @@ public partial class Collectors : IAsyncDisposable
         var payload = $"{Navigation.BaseUri}|{code.AgentId:N}|{code.ActivationSecret}";
         return "LDP1." + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payload)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
-    private static bool NeedsAttention(SearchView search) => search.LastRun?.State is "AwaitingManualAction" or "Interrupted" or "Failed";
+    private static bool NeedsAttention(SearchView search) => search.LastRun?.AttentionRequired == true;
     private static bool AgentNeedsAttention(AgentView agent) => agent.Enabled && (agent.RuntimeState == AgentRuntimeState.AwaitingManualAction || !string.IsNullOrWhiteSpace(agent.AttentionCode));
     private string Time(DateTimeOffset? instant) => instant.HasValue
         ? TimeZoneInfo.ConvertTime(instant.Value, TimeZoneInfo.FindSystemTimeZoneById(ZoneLabel)).ToString("dd.MM HH:mm", CultureInfo.InvariantCulture) : "—";
@@ -238,12 +238,32 @@ public partial class Collectors : IAsyncDisposable
     private static string JobLabel(string state) => state switch
     {
         "Pending" => "В очереди", "Leased" => "Выполняется", "Completed" => "Завершён",
-        "LimitReached" => "Завершён по лимиту", "AwaitingManualAction" => "Нужно действие", "Interrupted" => "Прерван", _ => "Ошибка"
+        "LimitReached" => "Завершён по лимиту", "Partial" => "Собрано частично", "RateLimited" => "Отложен источником",
+        "AwaitingManualAction" => "Нужно действие", "Interrupted" => "Прерван", _ => "Ошибка"
     };
     private static string JobTone(string state) => state switch
     {
-        "Completed" => "success", "LimitReached" => "neutral", "Pending" or "Leased" => "info", "AwaitingManualAction" => "warning", _ => "danger"
+        "Completed" => "success", "LimitReached" => "neutral", "Pending" or "Leased" => "info",
+        "Partial" or "RateLimited" or "AwaitingManualAction" => "warning", _ => "danger"
     };
+    private static string ReasonLabel(string code) => code switch
+    {
+        CollectionResultReasonCodes.CountHintMismatch => "Количество на странице отличается от подсказки источника",
+        CollectionResultReasonCodes.EndNotConfirmed => "Конец выдачи не подтверждён",
+        CollectionResultReasonCodes.LoadingInterrupted => "Загрузка выдачи прервалась",
+        CollectionResultReasonCodes.NetworkTimeout => "Источник не ответил вовремя",
+        CollectionResultReasonCodes.SourceUnavailable => "Источник временно недоступен",
+        CollectionResultReasonCodes.LayoutChanged => "Структура страницы изменилась",
+        CollectionResultReasonCodes.InvalidSearchUrl => "Ссылка поиска некорректна",
+        CollectionResultReasonCodes.InvalidSourceResponse => "Ответ источника не распознан",
+        CollectionResultReasonCodes.PageLimitReached => "Достигнут настроенный предел страниц",
+        CollectionResultReasonCodes.AgentInterrupted => "Работа Parser была прервана",
+        CollectionResultReasonCodes.LeaseExpiredOrReplaced => "Назначение Parser устарело или заменено",
+        _ => code
+    };
+    private static string CoverageText(CollectionCoverage coverage) => coverage.SourceCountHint.HasValue
+        ? $"Собрано {coverage.UniqueObserved}; источник сообщил {coverage.SourceCountHint}; конец {(coverage.EndReached ? "подтверждён" : "не подтверждён")}."
+        : $"Собрано {coverage.UniqueObserved}; конец {(coverage.EndReached ? "подтверждён" : "не подтверждён")}.";
     private static string AgentBadgeTone(AgentView agent) => AgentNeedsAttention(agent) ? "warning" : agent.Online ? "success" : "neutral";
     private static string AgentTone(AgentView agent) => AgentNeedsAttention(agent) ? "attention" : agent.Online ? "online" : "offline";
     private static string Capabilities(string value) => string.IsNullOrWhiteSpace(value) ? "источники не зарегистрированы" : value.Replace(",", ", ");

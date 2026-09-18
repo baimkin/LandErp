@@ -215,18 +215,28 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
         LandErpDbContext db = scope.ServiceProvider.GetRequiredService<LandErpDbContext>();
         UserManager<LandErpUser> users = scope.ServiceProvider.GetRequiredService<UserManager<LandErpUser>>();
-        Employee employee = await db.Employees.SingleOrDefaultAsync(item => item.Id == command.EmployeeId && item.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await LockOwnerInvariantAsync(db, context.OrganizationId, cancellationToken);
+
+        Employee employee = await db.Employees.SingleOrDefaultAsync(
+            item => item.Id == command.EmployeeId && item.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
         if (employee.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException("Сотрудник уже изменён. Обновите страницу.");
         if (!command.Active && employee.UserId == subject.UserId) throw new ArgumentException("Нельзя отключить собственную учётную запись.");
-        if (!command.Active && await IsLastActiveOwnerAsync(db, employee.Id, context.OrganizationId, cancellationToken)) throw new ArgumentException("Нельзя отключить последнего активного Owner.");
+        if (!command.Active && await IsLastActiveOwnerAsync(db, employee.Id, context.OrganizationId, cancellationToken))
+            throw new ArgumentException("Нельзя отключить последнего активного Owner.");
+
         LandErpUser user = await users.FindByIdAsync(employee.UserId.ToString()) ?? throw new AccessDeniedException();
-        if (command.Active && user.PasswordHash == null) throw new ArgumentException("Сначала завершите активацию приглашённого сотрудника или создайте ему прямую учётную запись.");
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (command.Active && user.PasswordHash == null)
+            throw new ArgumentException("Сначала завершите активацию приглашённого сотрудника или создайте ему прямую учётную запись.");
+
         employee.Active = command.Active;
         EnsureIdentity(await users.SetLockoutEndDateAsync(user, command.Active ? null : DateTimeOffset.MaxValue));
         EnsureIdentity(await users.UpdateSecurityStampAsync(user));
-        AddAudit(db, context, subject, command.Active ? "EmployeeRestored" : "EmployeeDeactivated", "Employee", employee.Id, new { employee.DisplayName }, correlationId);
-        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        AddAudit(db, context, subject, command.Active ? "EmployeeRestored" : "EmployeeDeactivated", "Employee", employee.Id,
+            new { employee.DisplayName }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<InvitationResult> InviteAsync(Subject subject, InviteEmployee command, string correlationId, CancellationToken cancellationToken)
@@ -261,27 +271,49 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
         LandErpDbContext db = scope.ServiceProvider.GetRequiredService<LandErpDbContext>();
         UserManager<LandErpUser> users = scope.ServiceProvider.GetRequiredService<UserManager<LandErpUser>>();
-        Employee employee = await db.Employees.SingleOrDefaultAsync(item => item.Id == command.EmployeeId && item.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
+        // The organization-scoped advisory lock is the serialization boundary. ReadCommitted
+        // is intentional: after waiting for the lock this transaction must observe the winner's
+        // committed Owner change instead of keeping a pre-lock Serializable snapshot.
+        await using var transaction = await db.Database.BeginTransactionAsync(
+            System.Data.IsolationLevel.ReadCommitted, cancellationToken);
+        await LockOwnerInvariantAsync(db, context.OrganizationId, cancellationToken);
+
+        Employee employee = await db.Employees.SingleOrDefaultAsync(
+            item => item.Id == command.EmployeeId && item.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
         EmployeeAssignment assignment = await db.EmployeeAssignments.SingleAsync(item => item.EmployeeId == employee.Id, cancellationToken);
         if (assignment.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException("Назначение уже изменено. Обновите страницу.");
-        if (assignment.RoleId != command.RoleId || assignment.Scope != command.Scope) await access.RequireAsync(subject, Permissions.RolesManage, cancellationToken);
-        await ValidateAssignmentAsync(db, context, command.DepartmentId, command.PositionId, command.TeamId, command.ManagerId, command.RoleId, command.Scope, subject, employee.Active, cancellationToken);
+        if (assignment.RoleId != command.RoleId || assignment.Scope != command.Scope)
+            await access.RequireAsync(subject, Permissions.RolesManage, cancellationToken);
+        await ValidateAssignmentAsync(db, context, command.DepartmentId, command.PositionId, command.TeamId,
+            command.ManagerId, command.RoleId, command.Scope, subject, employee.Active, cancellationToken);
         if (command.ManagerId == employee.Id) throw new ArgumentException("Сотрудник не может быть собственным руководителем.");
-        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+
         string oldRole = await db.Roles.Where(item => item.Id == assignment.RoleId).Select(item => item.Name!).SingleAsync(cancellationToken);
         string newRole = await db.Roles.Where(item => item.Id == command.RoleId).Select(item => item.Name!).SingleAsync(cancellationToken);
-        if (oldRole == "Owner" && newRole != "Owner" && await IsLastActiveOwnerAsync(db, employee.Id, context.OrganizationId, cancellationToken)) throw new ArgumentException("Нельзя снять роль последнего активного Owner.");
+        if (oldRole == "Owner" && newRole != "Owner"
+            && await IsLastActiveOwnerAsync(db, employee.Id, context.OrganizationId, cancellationToken))
+            throw new ArgumentException("Нельзя снять роль последнего активного Owner.");
+
         var before = new { assignment.OrgUnitId, assignment.PositionId, assignment.TeamId, assignment.ManagerEmployeeId, Role = oldRole, assignment.Scope };
-        assignment.OrgUnitId = command.DepartmentId; assignment.PositionId = command.PositionId; assignment.TeamId = command.TeamId;
-        assignment.ManagerEmployeeId = command.ManagerId; assignment.RoleId = command.RoleId; assignment.Scope = command.Scope;
+        assignment.OrgUnitId = command.DepartmentId;
+        assignment.PositionId = command.PositionId;
+        assignment.TeamId = command.TeamId;
+        assignment.ManagerEmployeeId = command.ManagerId;
+        assignment.RoleId = command.RoleId;
+        assignment.Scope = command.Scope;
+
         LandErpUser user = await users.FindByIdAsync(employee.UserId.ToString()) ?? throw new AccessDeniedException();
         if (oldRole != newRole)
         {
-            EnsureIdentity(await users.RemoveFromRoleAsync(user, oldRole)); EnsureIdentity(await users.AddToRoleAsync(user, newRole));
+            EnsureIdentity(await users.RemoveFromRoleAsync(user, oldRole));
+            EnsureIdentity(await users.AddToRoleAsync(user, newRole));
             EnsureIdentity(await users.UpdateSecurityStampAsync(user));
         }
-        AddAudit(db, context, subject, "AssignmentChanged", "Employee", employee.Id, new { Before = before, After = command }, correlationId);
-        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        AddAudit(db, context, subject, "AssignmentChanged", "Employee", employee.Id,
+            new { Before = before, After = command }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private async Task<AccessContext> RequireOrganizationAdminAsync(Subject subject, string permission, CancellationToken cancellationToken)
@@ -317,6 +349,13 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         if (roleName == "Owner" && !await (from employee in db.Employees join assignment in db.EmployeeAssignments on employee.Id equals assignment.EmployeeId
             join currentRole in db.Roles on assignment.RoleId equals currentRole.Id where employee.UserId == subject.UserId && currentRole.Name == "Owner" select employee.Id).AnyAsync(cancellationToken))
             throw new AccessDeniedException();
+    }
+
+    private static Task<int> LockOwnerInvariantAsync(LandErpDbContext db, Guid organizationId, CancellationToken cancellationToken)
+    {
+        string key = "LastActiveOwner:" + organizationId.ToString("N");
+        return db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({key},0))", cancellationToken);
     }
 
     private static async Task<bool> IsLastActiveOwnerAsync(LandErpDbContext db, Guid employeeId, Guid organizationId, CancellationToken cancellationToken)

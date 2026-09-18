@@ -18,6 +18,8 @@ internal static class CollectionMappings
         builder.Entity<SearchConfiguration>().Property(item => item.Source).HasConversion<string>();
         builder.Entity<SearchConfiguration>().Property(item => item.ScheduleKind).HasConversion<string>();
         builder.Entity<SearchConfiguration>().Property(item => item.FixedTimesJson).HasColumnType("jsonb");
+        builder.Entity<SearchConfiguration>().Property(item => item.ConsecutiveFailures)
+            .HasComment("Число последовательных неуспешных запусков; успешный или ограниченный лимитом запуск сбрасывает счётчик.");
         builder.Entity<SearchConfiguration>().Property(item => item.Url).HasMaxLength(2000);
         // Compatibility-only columns remain physically present until final cleanup; runtime routing never reads them.
         builder.Entity<SearchConfiguration>().Property<Guid?>("AgentId");
@@ -37,10 +39,22 @@ internal static class CollectionMappings
         builder.Entity<SearchGroupMarketSettings>().HasIndex(item => new { item.OrganizationId, item.SearchGroupId }).IsUnique();
         builder.Entity<ServerCollectionJob>().ToTable("jobs", "collection");
         builder.Entity<ServerCollectionJob>().Property(item => item.State).HasConversion<string>();
+        builder.Entity<ServerCollectionJob>().Property(item => item.ReasonCode).HasMaxLength(64);
+        builder.Entity<ServerCollectionJob>().Property(item => item.ReasonCode).HasComment("Машинный код причины финального результата Parser.");
+        builder.Entity<ServerCollectionJob>().Property(item => item.WarningsJson).HasColumnType("jsonb")
+            .HasDefaultValueSql("'[]'::jsonb").HasComment("Ограниченный список машинных предупреждений финального результата.");
+        builder.Entity<ServerCollectionJob>().Property(item => item.CoverageJson).HasColumnType("jsonb")
+            .HasComment("Факты о полноте выдачи, переданные Parser; заявленное источником количество является подсказкой.");
+        builder.Entity<ServerCollectionJob>().Property(item => item.RetryAt).HasComment("Срок дополнительной серверной попытки, независимый от обычного расписания поиска.");
+        builder.Entity<ServerCollectionJob>().Property(item => item.RetryAttempt).HasComment("Номер дополнительной попытки в ограниченной цепочке восстановления.");
+        builder.Entity<ServerCollectionJob>().Property(item => item.RequiresOperatorAttention).HasComment("Требуется действие оператора; ожидаемый автоматический повтор сам по себе внимания не требует.");
         builder.Entity<ServerCollectionJob>().HasOne<CollectorAgent>().WithMany().HasForeignKey(item => item.AgentId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<ServerCollectionJob>().HasOne<SearchConfiguration>().WithMany().HasForeignKey(item => item.SearchId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ServerCollectionJob>().HasOne<ServerCollectionJob>().WithMany().HasForeignKey(item => item.RetryOfJobId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<ServerCollectionJob>().HasIndex(item => new { item.SearchId, item.State });
         builder.Entity<ServerCollectionJob>().HasIndex(item => new { item.SearchId, item.ScheduledFor }).IsUnique().HasFilter("scheduled_for IS NOT NULL");
+        builder.Entity<ServerCollectionJob>().HasIndex(item => item.RetryAt).HasFilter("retry_at IS NOT NULL");
+        builder.Entity<ServerCollectionJob>().HasIndex(item => item.RetryOfJobId).IsUnique().HasFilter("retry_of_job_id IS NOT NULL");
         builder.Entity<CollectionDelivery>().ToTable("deliveries", "collection");
         builder.Entity<CollectionDelivery>().Property(item => item.ReceiptJson).HasColumnType("jsonb");
         builder.Entity<CollectionDelivery>().HasOne<ServerCollectionJob>().WithMany().HasForeignKey(item => item.JobId).OnDelete(DeleteBehavior.Restrict);

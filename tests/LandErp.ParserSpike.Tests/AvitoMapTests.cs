@@ -148,19 +148,19 @@ public sealed class AvitoMapTests
         Assert.AreEqual(1L,migrated.ReadListings(new()).Total);Assert.AreEqual(1,migrated.History(SourceSite.Avito,"12345678").Length);
         Assert.AreEqual(1L,migrated.ReadListings(new(JobId:job.Id)).Total);
     }
-    private sealed class MapSessions(PageObservation observation) : ISourceSessions
+    private sealed class MapSessions(PageObservation observation, bool bottom = true) : ISourceSessions
     {
         public int Wheels;
-        public Task<ISourcePage> CreatePageAsync(SourceSite source,CollectionSettings settings,CancellationToken cancellationToken) => Task.FromResult<ISourcePage>(new MapPage(this,observation));
+        public Task<ISourcePage> CreatePageAsync(SourceSite source,CollectionSettings settings,CancellationToken cancellationToken) => Task.FromResult<ISourcePage>(new MapPage(this,observation,bottom));
         public ValueTask DisposeAsync()=>ValueTask.CompletedTask;
     }
-    private sealed class MapPage(MapSessions owner,PageObservation observation):ISourcePage
+    private sealed class MapPage(MapSessions owner,PageObservation observation,bool bottom):ISourcePage
     {
         public SourceSite Source=>SourceSite.Avito;
         public string CurrentUrl{get;private set;}=Url;
         public Task OpenAsync(string url,CancellationToken cancellationToken){CurrentUrl=url;return Task.CompletedTask;}
         public Task<PageObservation> ReadAsync(CancellationToken cancellationToken)=>Task.FromResult(observation);
-        public Task<bool> WheelAsync(CollectionSettings settings,CancellationToken cancellationToken){owner.Wheels++;return Task.FromResult(true);}
+        public Task<bool> WheelAsync(CollectionSettings settings,CancellationToken cancellationToken){owner.Wheels++;return Task.FromResult(bottom);}
         public Task<Pagination> NextAsync(CancellationToken cancellationToken)=>Task.FromResult(new Pagination(NextKind.End));
         public Task FollowAsync(Pagination pagination,CancellationToken cancellationToken)=>throw new InvalidOperationException();
         public Task ActivateAsync(CancellationToken cancellationToken)=>Task.CompletedTask;
@@ -169,10 +169,10 @@ public sealed class AvitoMapTests
     [TestMethod]
     public async Task IncompleteMapIsSavedButNeverBecomesFreshCompletedCoverage()
     {
-        LocalStore store=Store();store.SaveLink("Map",Url);MapSessions sessions=new(Data(2).Read(Url,false));
+        LocalStore store=Store();store.SaveLink("Map",Url);MapSessions sessions=new(Data(2).Read(Url,false),bottom:false);
         DiagnosticJournal journal=new(Path.Combine(Path.GetDirectoryName(store.Path)!,"diagnostic.jsonl"));
         await using QueueRunner runner=new(store,sessions,journal);
-        await runner.StartAsync(new(){MaxPages=10,StabilitySeconds=1,LoadWaitSeconds=2,ScrollPauseMilliseconds=100});
+        await runner.StartAsync(new(){MaxPages=10,MaxScrollSteps=20,StabilitySeconds=1,LoadWaitSeconds=2,ScrollPauseMilliseconds=0});
         CollectionJob job=store.Jobs().Single();Assert.AreEqual(JobState.Failed,job.State);
         StringAssert.Contains(job.Reason,"1 / 2");Assert.IsFalse(store.Journal(job.Id).Single().Completed);
         DiagnosticEvent entry=journal.Read().Single(x=>x.Action=="Диагностика карты" && x.Outcome=="Итог");
@@ -180,14 +180,12 @@ public sealed class AvitoMapTests
         Assert.AreEqual(JobState.Pending,store.Jobs(store.StartBatch(new())).Single().State);
     }
     [TestMethod]
-    public async Task MapBatchLimitStopsWithoutFurtherWheelAndSuccessfulMapIsFresh()
+    public async Task MapIgnoresPageLimitAndCountHintWhenRealEndIsStable()
     {
         LocalStore store=Store();store.SaveLink("Map",Url);MapSessions sessions=new(Data(2).Read(Url,false));
-        await using QueueRunner runner=new(store,sessions);await runner.StartAsync(new(){MaxPages=1});
-        Assert.AreEqual(JobState.LimitReached,store.Jobs().Single().State);Assert.AreEqual(0,sessions.Wheels);
-        sessions=new(Data().Read(Url,false));await using QueueRunner complete=new(store,sessions);
-        await complete.StartAsync(new(){MaxPages=10,StabilitySeconds=1,LoadWaitSeconds=2,ScrollPauseMilliseconds=100});
-        Assert.AreEqual(JobState.Completed,store.Jobs().First().State);
+        await using QueueRunner runner=new(store,sessions);await runner.StartAsync(new(){MaxPages=1,StabilitySeconds=1,LoadWaitSeconds=2,ScrollPauseMilliseconds=100});
+        Assert.AreEqual(JobState.Completed,store.Jobs().Single().State);Assert.IsTrue(sessions.Wheels>0);
+        Assert.AreEqual(CollectionCompletionKind.Success,store.Completion(store.Jobs().Single().Id)!.Kind);
         Assert.AreEqual(JobState.SkippedFresh,store.Jobs(store.StartBatch(new())).Single().State);
     }
     [TestMethod]

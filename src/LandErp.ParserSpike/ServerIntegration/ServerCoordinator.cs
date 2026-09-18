@@ -82,14 +82,32 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             if (work is { LocalJobId: null } && !AcceptNewWork)
             {
                 // A claim that raced with Stop is completed explicitly without opening the source.
-                outbox.Enqueue(new(Guid.CreateVersion7(), work.Work.JobId, work.Work.LeaseId, CollectionOutcome.Interrupted, [], true));
+                outbox.Enqueue(new(Guid.CreateVersion7(), work.Work.JobId, work.Work.LeaseId, CollectionOutcome.Interrupted, [], true,
+                    CollectionResultReasonCodes.AgentInterrupted, [], new(0, null, false, false, 0, 0, work.Work.MaxPages)));
                 await outbox.FlushAsync(adapter, token).ConfigureAwait(false); outbox.SaveWork(null);
+                nextPoll = DateTimeOffset.UtcNow;
                 Status = "Остановлено. Новые задания не запускаются."; return;
             }
             if (work?.LocalJobId != null && !runner.IsRunning)
             {
+                if (work.ResultReasonCode == CollectionResultReasonCodes.LeaseExpiredOrReplaced)
+                {
+                    CollectionWork? reclaimed = await adapter.ClaimAsync(token).ConfigureAwait(false);
+                    if (reclaimed?.JobId == work.Work.JobId)
+                    {
+                        outbox.SupersedeLease(reclaimed.JobId, reclaimed.LeaseId);
+                        LocalServerWork renewed = new(reclaimed, work.LocalJobId); outbox.SaveWork(renewed);
+                        PrepareResult(renewed); await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
+                        outbox.SaveWork(null); nextPoll = DateTimeOffset.UtcNow;
+                        Status = "Сохранённый результат доставлен после обновления lease."; return;
+                    }
+                    PrepareResult(work); outbox.RetainLocally(work.Work.JobId, work.ResultReasonCode); outbox.SaveWork(null);
+                    if (reclaimed != null) { StartClaimedWork(reclaimed, token); return; }
+                    nextPoll = DateTimeOffset.UtcNow.AddSeconds(2); Status = "Старое выполнение завершено; ожидаем повтор от Server."; return;
+                }
                 PrepareResult(work); await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
-                outbox.SaveWork(null); Status = "Работа и локальные наблюдения доставлены в Server.";
+                outbox.SaveWork(null); nextPoll = DateTimeOffset.UtcNow;
+                Status = "Работа и локальные наблюдения доставлены в Server.";
             }
             else
             {
@@ -121,13 +139,28 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
         }
         catch (ServerDeliveryException exception)
         {
-            if (exception.Code is "LEASE_EXPIRED" or "LEASE_REPLACED" or "RESULT_SUPERSEDED" or "WORK_NOT_ACTIVE")
+            if (exception.Code is "LEASE_EXPIRED" or "LEASE_REPLACED")
             {
-                runner.Stop();
                 LocalServerWork? rejected = outbox.ReadWork();
+                if (rejected?.LocalJobId == null)
+                {
+                    if (rejected != null) outbox.RetainLocally(rejected.Work.JobId, exception.Code);
+                    outbox.SaveWork(null); nextPoll = now.AddSeconds(2);
+                    Status = "Lease изменился до запуска. Результаты сохранены на компьютере; ожидаем следующую работу Server."; return;
+                }
+                outbox.SaveWork(rejected with { ResultReasonCode = CollectionResultReasonCodes.LeaseExpiredOrReplaced });
+                runner.Stop();
+                nextPoll = now.AddSeconds(2);
+                Status = "Lease изменился. Полезные данные сохранены; автоматически сверяемся с Server.";
+                return;
+            }
+            if (exception.Code is "RESULT_SUPERSEDED" or "WORK_NOT_ACTIVE")
+            {
+                runner.Stop(); LocalServerWork? rejected = outbox.ReadWork();
                 if (!runner.IsRunning && rejected != null)
                 {
-                    PrepareResult(rejected); outbox.RetainLocally(rejected.Work.JobId, exception.Code); outbox.SaveWork(null);
+                    PrepareResult(rejected with { ResultReasonCode = CollectionResultReasonCodes.LeaseExpiredOrReplaced });
+                    outbox.RetainLocally(rejected.Work.JobId, exception.Code); outbox.SaveWork(null);
                 }
                 nextPoll = now.AddSeconds(2);
                 Status = "Сервер больше не принимает это задание. Результаты сохранены на компьютере; ожидаем новое задание.";
@@ -148,7 +181,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
         SourceSite source = Enum.Parse<SourceSite>(work.Source.ToString());
         SearchLink link = store.EnsureServerWorkLink(work.Label, work.SearchUrl, source);
         CollectionSettings settings = store.Settings() with { MaxPages = work.MaxPages };
-        _ = runner.StartAsync(settings, force: true, onlyLinkId: link.Id);
+        _ = runner.StartAsync(settings, force: true, onlyLinkId: link.Id, serverManaged: true);
         CollectionJob local = store.Jobs(runner.BatchId).Single();
         outbox.SaveWork(new(work, local.Id)); nextPoll = DateTimeOffset.UtcNow.AddSeconds(45);
         Status = "Разрешённая работа запущена локально. CAPTCHA и авторизация — вручную.";
@@ -193,14 +226,8 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
         using JsonDocument document = JsonDocument.Parse(stream.ToArray());
         ObservationEnvelope[] observations = document.RootElement.GetProperty("observations").EnumerateArray().Select(item =>
             new ObservationEnvelope(item.GetProperty("resultId").GetString()!, Map(LocalJson.Read<ListingObservation>(item.GetProperty("observation").GetRawText())))).ToArray();
-        CollectionOutcome outcome = job.State switch { JobState.Completed => CollectionOutcome.Success,
-            JobState.LimitReached => CollectionOutcome.LimitReached, JobState.StoppedInterrupted => CollectionOutcome.Interrupted,
-            _ => job.Reason.StartsWith("Captcha", StringComparison.Ordinal) ? CollectionOutcome.Captcha
-                : job.Reason.StartsWith("AuthenticationRequired", StringComparison.Ordinal) ? CollectionOutcome.AuthenticationRequired
-                : job.Reason.StartsWith("RateLimited", StringComparison.Ordinal) ? CollectionOutcome.RateLimited : CollectionOutcome.SourceError };
-        List<CollectionResult> results = [];
-        foreach (ObservationEnvelope[] chunk in observations.Chunk(10)) results.Add(new(Guid.CreateVersion7(), work.Work.JobId, work.Work.LeaseId, CollectionOutcome.Success, chunk, false));
-        results.Add(new(Guid.CreateVersion7(), work.Work.JobId, work.Work.LeaseId, outcome, [], true));
+        CollectionResult[] results = CollectionResultClassifier.Build(work.Work.JobId, work.Work.LeaseId, job,
+            observations, store.Journal(job.Id), store.ReadMapScope(job.Id), store.Completion(job.Id), work.ResultReasonCode);
         outbox.EnqueueMany(results);
     }
     public static ListingData Map(ListingObservation observation) => new()

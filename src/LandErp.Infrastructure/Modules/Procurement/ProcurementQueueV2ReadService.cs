@@ -1,5 +1,6 @@
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
+using LandErp.Application.Modules.Organization.Domain;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;
@@ -125,15 +126,13 @@ public sealed partial class ProcurementQueueV2ReadService(
 
         CheckDb[] checks = await db.CaseChecks.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .Select(item => new CheckDb(item.PropertyCaseId, item.Level, item.Status, item.Blocker, item.ResponsibleEmployeeId)).ToArrayAsync(cancellationToken);
-        var assigneeRows = await (from employee in db.Employees.AsNoTracking()
-                                  join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
-                                  join grant in db.RolePermissions.AsNoTracking() on assignment.RoleId equals grant.RoleId
-                                  where employee.OrganizationId == context.OrganizationId && employee.Active
-                                      && (grant.PermissionId == Permissions.ManagerDecide || grant.PermissionId == Permissions.HeadDecide)
-                                      && (assignment.Scope == AccessScope.Organization || assignment.Scope == AccessScope.Own
-                                          || assignment.Scope == AccessScope.AssignedObjects
-                                          || assignment.Scope == AccessScope.Department && row.Case.DepartmentId != null && assignment.OrgUnitId == row.Case.DepartmentId
-                                          || assignment.Scope == AccessScope.Team && row.Case.TeamId != null && assignment.TeamId == row.Case.TeamId)
+        IQueryable<EmployeeAssignment> visibleRecipientAssignments = ProcurementVisibility.EligibleRecipientAssignments(
+            db, row.Case, row.Assignment.EmployeeId, ProcurementRecipientAccess.CurrentVisibility);
+        var assigneeRows = await (from assignment in visibleRecipientAssignments
+                                  join employee in db.Employees.AsNoTracking() on assignment.EmployeeId equals employee.Id
+                                  where db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.QueueRead)
+                                      && (db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.ManagerDecide)
+                                          || db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.HeadDecide))
                                   select new { employee.Id, Name = employee.DisplayName })
             .Distinct().OrderBy(item => item.Name).ToArrayAsync(cancellationToken);
         ProcurementQueueV2Assignee[] availableAssignees = assigneeRows.Select(item => new ProcurementQueueV2Assignee(item.Id, item.Name)).ToArray();
@@ -157,7 +156,8 @@ public sealed partial class ProcurementQueueV2ReadService(
         bool managerPermission = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken);
         bool headPermission = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
         bool canManagerDecide = managerPermission && row.Assignment.EmployeeId == context.EmployeeId
-            && row.Case.StageId != "pending_head" && (row.Case.StageId != "rejected" || sourceChanged);
+            && row.Case.StageId is not ("pending_head" or "acquired")
+            && (row.Case.StageId != "rejected" || sourceChanged);
         bool canHeadDecide = headPermission && row.Case.StageId == "pending_head"
             && row.Assignment.EmployeeId == context.EmployeeId && row.Case.ManagerEmployeeId != context.EmployeeId;
 

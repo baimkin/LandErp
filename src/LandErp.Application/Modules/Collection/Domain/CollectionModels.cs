@@ -40,6 +40,7 @@ public sealed class SearchConfiguration
     public int? IntervalMinutes { get; set; }
     public string FixedTimesJson { get; set; } = "[]";
     public DateTimeOffset? NextRunAt { get; set; }
+    public int ConsecutiveFailures { get; set; }
     public bool Enabled { get; set; } = true;
     public long Version { get; set; } = 1;
 }
@@ -54,7 +55,7 @@ public sealed class SearchGroup
     public long Version { get; set; } = 1;
 }
 public enum CollectionScheduleKind { Manual, Interval, FixedTimes }
-public enum CollectionJobState { Pending, Leased, Completed, LimitReached, AwaitingManualAction, Failed, Interrupted }
+public enum CollectionJobState { Pending, Leased, Completed, LimitReached, Partial, RateLimited, AwaitingManualAction, Failed, Interrupted }
 public sealed class ServerCollectionJob
 {
     public Guid Id { get; set; }
@@ -69,6 +70,13 @@ public sealed class ServerCollectionJob
     public DateTimeOffset? ScheduledFor { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public string ResultCode { get; set; } = "";
+    public string ReasonCode { get; set; } = "";
+    public string WarningsJson { get; set; } = "[]";
+    public string? CoverageJson { get; set; }
+    public int RetryAttempt { get; set; }
+    public Guid? RetryOfJobId { get; set; }
+    public DateTimeOffset? RetryAt { get; set; }
+    public bool RequiresOperatorAttention { get; set; }
     public int AcceptedCount { get; set; }
     public int ProcessedCount { get; set; }
     public int NewListingsCount { get; set; }

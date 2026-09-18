@@ -62,7 +62,7 @@ else if(card!=null)
     protected override async Task OnParametersSetAsync(){if(loaded!=CaseId){localChecked=false;dirty=false;localSaved=false;section=0;await ReloadAsync();}}
     protected override async Task OnAfterRenderAsync(bool firstRender){draftModule??=await Js.InvokeAsync<IJSObjectReference>("import","./Components/Pages/SiteInspectionPage.razor.js");if(!localChecked&&card?.Inspection!=null){localChecked=true;InspectionDraft? saved=await draftModule.InvokeAsync<InspectionDraft?>("load",StorageKey);if(saved?.InspectionId==card.Inspection.Id&&saved.Version==card.Inspection.Version){conclusion=saved.Conclusion;decision=saved.Decision;answers=saved.Answers;dirty=true;localSaved=true;StateHasChanged();return;}}if(card?.Inspection!=null)await draftModule.InvokeVoidAsync("attach",StorageKey,new InspectionDraft(card.Inspection.Id,card.Inspection.Version,conclusion,decision,answers));}
     private void MapServer(){if(card?.Inspection is not { } inspection)return;conclusion=inspection.OverallConclusion;decision=inspection.PreliminaryDecision;answers=inspection.Items.Select(x=>new AnswerDraft(x)).ToList();}
-    private async Task StartAsync(){await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,null,null,"","",[],false),Guid.CreateVersion7().ToString(),CancellationToken.None));}
+    private async Task StartAsync(){await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,null,null,"","",[],false),OperationId,CancellationToken.None));}
     private async Task SetAnswerAsync(AnswerDraft item,string value){item.Answer=value;item.Status=value.Length==0?InspectionItemStatus.Unanswered:InspectionItemStatus.Answered;await SaveLocalAsync();}
     private async Task SetNoteAsync(AnswerDraft item,string value){item.Note=value;await SaveLocalAsync();}
     private async Task NotCheckedAsync(AnswerDraft item){item.Answer="";item.Status=InspectionItemStatus.NotChecked;await SaveLocalAsync();}
@@ -70,7 +70,7 @@ else if(card!=null)
     private void PrepareItemMedia(AnswerDraft item){ClearFeedback();mediaOpen=true;media.Owner=item.Id.ToString();media.Label="Материал · "+item.Title;}
     private async Task SaveLocalSoon(){await SaveLocalAsync();}
     private async ValueTask SaveLocalAsync(){dirty=true;try{await draftModule!.InvokeVoidAsync("save",StorageKey,new InspectionDraft(card!.Inspection!.Id,card.Inspection.Version,conclusion,decision,answers));localSaved=true;}catch(JSException){localSaved=false;}}
-    private async Task SaveAsync(bool complete){InspectionView inspection=card!.Inspection!;await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,inspection.Id,inspection.Version,conclusion,decision,answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),Guid.CreateVersion7().ToString(),CancellationToken.None));if(Success!=null){try{await draftModule!.InvokeVoidAsync("remove",StorageKey);}catch(JSException){}dirty=false;localSaved=false;finishOpen=false;}}
+    private async Task SaveAsync(bool complete){InspectionView inspection=card!.Inspection!;await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,inspection.Id,inspection.Version,conclusion,decision,answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),OperationId,CancellationToken.None));if(Success!=null&&!NeedsRefresh){try{await draftModule!.InvokeVoidAsync("remove",StorageKey);}catch(JSException){}dirty=false;localSaved=false;finishOpen=false;}}
     private void SelectMedia(InputFileChangeEventArgs args){selectedFile=args.File;media.Kind=selectedFile.ContentType.StartsWith("image/")?CaseAttachmentKind.Photo:selectedFile.ContentType.StartsWith("video/")?CaseAttachmentKind.Video:selectedFile.ContentType.StartsWith("audio/")?CaseAttachmentKind.Audio:CaseAttachmentKind.Document;media.Label=selectedFile.Name;}
     private async Task UploadMediaAsync()
     {
@@ -81,7 +81,7 @@ else if(card!=null)
             if(selectedFile.Size>8*1024*1024)throw new ArgumentException("Файл больше 8 МБ.");
             await using Stream input=selectedFile.OpenReadStream(8*1024*1024);using MemoryStream buffer=new();await input.CopyToAsync(buffer);
             Guid owner=media.Owner=="inspection"?card!.Inspection!.Id:Guid.Parse(media.Owner);CaseAttachmentOwner type=media.Owner=="inspection"?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;
-            await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,media.Kind,media.Label,media.Description,selectedFile.Name,selectedFile.ContentType,buffer.ToArray(),null),Guid.CreateVersion7().ToString(),CancellationToken.None);
+            await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,media.Kind,media.Label,media.Description,selectedFile.Name,selectedFile.ContentType,buffer.ToArray(),null),OperationId,CancellationToken.None);
         },"Материал осмотра добавлен");if(Success!=null){selectedFile=null;media=new();mediaOpen=false;}}
         finally{preserveAnswers=false;}
     }

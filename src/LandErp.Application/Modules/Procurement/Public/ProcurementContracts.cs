@@ -82,6 +82,8 @@ public sealed record CorrectCaseAcquisition(Guid CaseId, long ExpectedCaseVersio
 public sealed record AttachmentContent(string OriginalName, string ContentType, byte[]? Content, string? ExternalUrl);
 public sealed record ApplySourceFact(Guid CaseId, Guid CatalogItemId, long ExpectedCaseVersion,
     CaseFactField Field);
+public sealed record CorrectPropertyCaseFact(Guid CaseId, long ExpectedCaseVersion, CaseFactField Field,
+    string? TextValue, decimal? NumericValue, string Reason);
 public sealed record SaveNextAction(Guid CaseId, long ExpectedCaseVersion, long ExpectedTaskVersion,
     WorkTaskType Type, string Title, string Description, DateTimeOffset? DueAt, Guid AssigneeEmployeeId);
 public sealed record CreateManualPropertyCase(string Title, string? Location, string? CadastralNumber,
@@ -108,6 +110,7 @@ public interface IProcurementWorkspace
     Task CorrectAcquisitionAsync(Subject subject, CorrectCaseAcquisition command, string correlationId, CancellationToken cancellationToken);
     Task<AttachmentContent> ReadAttachmentAsync(Subject subject, Guid attachmentId, CancellationToken cancellationToken);
     Task ApplySourceFactAsync(Subject subject, ApplySourceFact command, string correlationId, CancellationToken cancellationToken);
+    Task CorrectCaseFactAsync(Subject subject, CorrectPropertyCaseFact command, string correlationId, CancellationToken cancellationToken);
     Task SaveNextActionAsync(Subject subject, SaveNextAction command, string correlationId, CancellationToken cancellationToken);
     Task<ManualPropertyCaseResult> CreateManualCaseAsync(Subject subject, CreateManualPropertyCase command, string correlationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<NotificationView>> ReadNotificationsAsync(Subject subject, CancellationToken cancellationToken);

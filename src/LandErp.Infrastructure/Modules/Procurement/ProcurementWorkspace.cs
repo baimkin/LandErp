@@ -1134,7 +1134,9 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             Label = Required(command.Label, 2, 512, "Укажите понятное название вложения."),
             Description = Optional(command.Description, 4000) ?? "", ActorEmployeeId = context.EmployeeId, RecordedAt = now
         });
-        await db.SaveChangesAsync(cancellationToken);
+        // Files need a durable recovery record before provider I/O. External links have no
+        // provider step and can be committed atomically with their business metadata below.
+        if (!external) await db.SaveChangesAsync(cancellationToken);
         if (!external)
         {
             try
@@ -1143,7 +1145,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                     row.Case.Id, command.Kind.ToString(), contentType), command.Content!, cancellationToken);
                 stored.StorageKey = write.StorageKey; stored.Sha256 = write.Sha256; stored.SizeBytes = write.SizeBytes;
                 stored.Status = StoredFileStatus.Available;
-                await db.SaveChangesAsync(cancellationToken);
+                // Do not persist Available separately. If the final DB commit is interrupted,
+                // PendingUpload remains authoritative and retry continues this same StoredFile.
             }
             catch
             {
@@ -1247,28 +1250,38 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         if (value.File.Status is not (StoredFileStatus.UploadFailed or StoredFileStatus.PendingUpload)) throw new ArgumentException("Повторная загрузка этому вложению не требуется.");
         string contentType = Required(command.ContentType, 3, 256, "Укажите MIME-тип файла.");
         if (!AllowedContentType(value.Link.Kind, contentType)) throw new ArgumentException("Тип файла не разрешён для выбранного вложения.");
+        FileWriteResult write;
         try
         {
-            FileWriteResult write = await fileStorage.WriteAsync(new FileWriteRequest(value.File.Id, context.OrganizationId,
+            write = await fileStorage.WriteAsync(new FileWriteRequest(value.File.Id, context.OrganizationId,
                 command.CaseId, value.Link.Kind.ToString(), contentType), command.Content, cancellationToken);
-            value.File.OriginalName = Required(command.OriginalName, 1, 512, "Укажите имя файла."); value.File.ContentType = contentType;
-            value.File.StorageKey = write.StorageKey; value.File.Sha256 = write.Sha256; value.File.SizeBytes = write.SizeBytes; value.File.Status = StoredFileStatus.Available;
-            if (value.Link.DocumentRequirementId is Guid requirementId)
-            {
-                CaseDocumentRequirement requirement = await db.CaseDocumentRequirements.SingleAsync(item => item.Id == requirementId, cancellationToken);
-                requirement.Status = CaseDocumentStatus.Received;
-                requirement.UpdatedByEmployeeId = context.EmployeeId;
-                requirement.UpdatedAt = time.GetUtcNow();
-                db.Entry(propertyCase).Property(item => item.Version).IsModified = true;
-            }
-            OrganizationWorkspace.AddAudit(db, context, subject, "CaseAttachmentUploadRetried", "PropertyCase", command.CaseId,
-                new { command.AttachmentId, value.Link.OwnerType }, correlationId);
-            await db.SaveChangesAsync(cancellationToken);
         }
         catch
         {
-            value.File.Status = StoredFileStatus.UploadFailed; await db.SaveChangesAsync(CancellationToken.None); throw;
+            value.File.Status = StoredFileStatus.UploadFailed;
+            await db.SaveChangesAsync(CancellationToken.None);
+            throw;
         }
+
+        // Commit recovery as one DB state transition. A DB failure after provider success leaves
+        // the previous PendingUpload/UploadFailed state recoverable with the same StoredFile.Id.
+        value.File.OriginalName = Required(command.OriginalName, 1, 512, "Укажите имя файла.");
+        value.File.ContentType = contentType;
+        value.File.StorageKey = write.StorageKey;
+        value.File.Sha256 = write.Sha256;
+        value.File.SizeBytes = write.SizeBytes;
+        value.File.Status = StoredFileStatus.Available;
+        if (value.Link.DocumentRequirementId is Guid requirementId)
+        {
+            CaseDocumentRequirement requirement = await db.CaseDocumentRequirements.SingleAsync(item => item.Id == requirementId, cancellationToken);
+            requirement.Status = CaseDocumentStatus.Received;
+            requirement.UpdatedByEmployeeId = context.EmployeeId;
+            requirement.UpdatedAt = time.GetUtcNow();
+            db.Entry(propertyCase).Property(item => item.Version).IsModified = true;
+        }
+        OrganizationWorkspace.AddAudit(db, context, subject, "CaseAttachmentUploadRetried", "PropertyCase", command.CaseId,
+            new { command.AttachmentId, value.Link.OwnerType }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task ApplySourceFactAsync(Subject subject, ApplySourceFact command, string correlationId, CancellationToken cancellationToken)

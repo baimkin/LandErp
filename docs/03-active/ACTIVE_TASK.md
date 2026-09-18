@@ -9,7 +9,10 @@
 **Gate:** [GATE-RELEASE-B1-04](GATE-RELEASE-B1-04.md).  
 **Evidence:** [RELEASE_PACKAGE_01_REPORT](reports/RELEASE_PACKAGE_01_REPORT.md).
 
-B1-04 может исправлять обычные регрессии B1-01–03, обнаруженные фактическим прогоном. Main, production deploy и общая рабочая БД не входят. LR-23 остаётся открытым product decision.
+**Исполняемо проверенный кодовый SHA:** `59181519a89608e84d0c360ef8dae8c7708eefcc`.  
+GitHub Actions run `35337618940`: **completed / success**. Locked restore — success; Release build — **0 warnings / 0 errors**; PostgreSQL 18 targeted suite — **40 passed / 0 failed / 0 skipped**. TRX artifact: `release-package-01-test-results` (artifact `10544155488`).
+
+B1-04 implementation и backend/integration validation завершены. Browser/manual UI acceptance в этом Gate **не запускалась и остаётся отдельной приёмкой владельца**; независимый review итогового diff также ещё не выполнен. Поэтому пакет не объявляется полностью принятым и тем более production-ready. LR-23 остаётся открытым product decision. Main, production deploy и общая рабочая БД не изменялись.
 
 ## Предыдущий Gate — B1-03 (реализован и опубликован; исполнение проверяется в B1-04)
 

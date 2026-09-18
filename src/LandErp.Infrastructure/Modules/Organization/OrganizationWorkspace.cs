@@ -334,7 +334,9 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
         LandErpDbContext db = scope.ServiceProvider.GetRequiredService<LandErpDbContext>();
         UserManager<LandErpUser> users = scope.ServiceProvider.GetRequiredService<UserManager<LandErpUser>>();
-        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+        // The advisory lock is the serializer. ReadCommitted is intentional here: if this
+        // transaction waited for another owner mutation, subsequent reads must see that commit.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
         await LockOwnerInvariantAsync(db, context.OrganizationId, cancellationToken);
 

@@ -6,25 +6,24 @@ Blazor Server и PostgreSQL. Первый контур закупки включ
 
 ## Запуск на Windows без Docker
 
-1. Нужны PostgreSQL 18 и SDK `10.0.112` из `global.json`. На текущей машине SDK
-   находится в ignored `artifacts/stage1/dotnet/dotnet.exe`; передавайте его через
-   `-DotnetPath` вместо системного старого SDK.
+1. Нужны PostgreSQL 18 и SDK `10.0.401` из `global.json`. Проверьте выбранную
+   версию командой `dotnet --version`; скриптам передавайте `-DotnetPath dotnet`.
 2. Выполните locked restore и Release build:
 
    ```powershell
-   & ./artifacts/stage1/dotnet/dotnet.exe restore LandErp.slnx --locked-mode
-   & ./artifacts/stage1/dotnet/dotnet.exe build LandErp.slnx -c Release --no-restore
+   dotnet restore LandErp.slnx --locked-mode
+   dotnet build LandErp.slnx -c Release --no-restore
    ```
 
 3. Настройте `LANDERP_TEST_ADMIN_CONNECTION` локально вне Git и выполните
-   `./scripts/Initialize-Local.ps1 -DotnetPath ./artifacts/stage1/dotnet/dotnet.exe`.
+   `./scripts/Initialize-Local.ps1 -DotnetPath dotnet`.
    Отдельный инструмент создаёт только новую `landerp_local`, migration/runtime
    роли и применяет migrations. Неизвестную существующую БД он не перезаписывает.
    Повторный запуск использует собственные ignored settings и применяет новые
    migrations. Server/Worker startup никогда не меняет schema.
 4. Первоначальные данные Owner находятся только в
    `local-data/stage1/owner-access.txt`. Откройте файл приватно. Запустите
-   `./scripts/Start-Local.ps1 -DotnetPath ./artifacts/stage1/dotnet/dotnet.exe`,
+   `./scripts/Start-Local.ps1 -DotnetPath dotnet`,
    откройте `https://localhost:7240`, войдите и настройте authenticator MFA.
    При необходимости доверьте локальный сертификат штатной командой
    `dotnet dev-certs https --trust` через выбранный SDK.
@@ -32,7 +31,7 @@ Blazor Server и PostgreSQL. Первый контур закупки включ
    свой Worker при завершении Server. На странице «Поиски и парсинг» проверьте
    состояние «Расписания: работает». Для запуска только сайта предусмотрен
    параметр `-ServerOnly`. Worker также можно запустить независимо:
-   `./scripts/Start-Local.ps1 -Service Worker -DotnetPath ./artifacts/stage1/dotnet/dotnet.exe`.
+   `./scripts/Start-Local.ps1 -Service Worker -DotnetPath dotnet`.
    Он проверяет сроки каждые 30 секунд и ставит задания в общую очередь.
 
 Credentials не передавайте аргументами команд и не сохраняйте в истории терминала.
@@ -83,7 +82,7 @@ Local mode Collector доступен независимо от Server. При �
 Яндекс Диск как пилотное хранилище вложений: [настройка и отключение](docs/03-active/YANDEX_DISK_SETUP.md).
 Доступ ограничен папкой приложения; production заказчика подключается отдельно.
 
-`./scripts/Test-Foundation.ps1 -DotnetPath ./artifacts/stage1/dotnet/dotnet.exe`
+`./scripts/Test-Foundation.ps1 -DotnetPath dotnet`
 использует настоящую PostgreSQL и удаляет только свои disposable test databases.
 Офлайн Collector tests запускаются с фильтром `TestCategory!=Live`; CI не зависит
 от marketplace. Backup/test artifacts и все local-data игнорируются Git.
@@ -92,7 +91,7 @@ Read-only inspection локальной схемы:
 
 ```powershell
 $env:LANDERP_REPOSITORY_ROOT = (Get-Location).Path
-& ./artifacts/stage1/dotnet/dotnet.exe run --project src/LandErp.LocalSetup -c Release --no-build -- --inspect
+dotnet run --project src/LandErp.LocalSetup -c Release --no-build -- --inspect
 ```
 
 Он проверяет comments и запрет DDL откатываемой пробой; migrations не применяет.

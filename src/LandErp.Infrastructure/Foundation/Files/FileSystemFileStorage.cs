@@ -11,19 +11,51 @@ public sealed class FileSystemFileStorage(string root) : IFileStorage
     public async Task<FileWriteResult> WriteAsync(Guid stableFileId, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(root);
-        string key = stableFileId.ToString("N") + ".bin";
+        string hash = Convert.ToHexString(SHA256.HashData(content.Span)).ToLowerInvariant();
+        string key = $"{stableFileId:N}_{hash}.bin";
         string path = Resolve(key);
-        await using (FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous))
+        if (File.Exists(path))
         {
-            await stream.WriteAsync(content, cancellationToken);
+            await EnsureExistingContentAsync(path, hash, content.Length, cancellationToken);
+            return new(key, hash, content.Length);
         }
 
-        string hash = Convert.ToHexString(SHA256.HashData(content.Span)).ToLowerInvariant();
-        return new(key, hash, content.Length);
+        string temporaryPath = Resolve($".{key}.{Guid.CreateVersion7():N}.tmp");
+        try
+        {
+            await using (FileStream stream = new(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous))
+            {
+                await stream.WriteAsync(content, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+
+            try { File.Move(temporaryPath, path, false); }
+            catch (IOException) when (File.Exists(path))
+            {
+                await EnsureExistingContentAsync(path, hash, content.Length, cancellationToken);
+            }
+
+            return new(key, hash, content.Length);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
     }
 
     public Task<byte[]> ReadAsync(string storageKey, CancellationToken cancellationToken) =>
         File.ReadAllBytesAsync(Resolve(storageKey), cancellationToken);
+
+    private static async Task EnsureExistingContentAsync(string path, string expectedHash, int expectedSize, CancellationToken cancellationToken)
+    {
+        FileInfo info = new(path);
+        if (info.Length != expectedSize)
+            throw new FileStorageException("STORAGE_CONTENT_CONFLICT", false, "Сохранённый файл не соответствует ожидаемому содержимому.");
+        byte[] existing = await File.ReadAllBytesAsync(path, cancellationToken);
+        string actualHash = Convert.ToHexString(SHA256.HashData(existing)).ToLowerInvariant();
+        if (!string.Equals(actualHash, expectedHash, StringComparison.Ordinal))
+            throw new FileStorageException("STORAGE_CONTENT_CONFLICT", false, "Сохранённый файл не соответствует ожидаемому содержимому.");
+    }
 
     private string Resolve(string key)
     {

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
@@ -62,10 +63,11 @@ public sealed class ReleasePackageB201Tests
             .OrderBy(item => item.RecordedAt).ToArrayAsync();
         Assert.AreEqual(5, audits.Length);
         Assert.AreEqual(fixture.Manager.UserId, audits[^1].ActorId);
-        StringAssert.Contains(audits[^1].Changes, "\"Field\":\"CadastralNumber\"");
-        StringAssert.Contains(audits[^1].Changes, "\"Before\":\"50:10:0000000:1\"");
-        StringAssert.Contains(audits[^1].Changes, "\"After\":\"50:10:0000000:2\"");
-        StringAssert.Contains(audits[^1].Changes, "\"Reason\":\"Исправлен кадастровый номер\"");
+        using JsonDocument changes = JsonDocument.Parse(audits[^1].Changes);
+        Assert.AreEqual("CadastralNumber", changes.RootElement.GetProperty("Field").GetString());
+        Assert.AreEqual("50:10:0000000:1", changes.RootElement.GetProperty("Before").GetString());
+        Assert.AreEqual("50:10:0000000:2", changes.RootElement.GetProperty("After").GetString());
+        Assert.AreEqual("Исправлен кадастровый номер", changes.RootElement.GetProperty("Reason").GetString());
     }
 
     [TestMethod]

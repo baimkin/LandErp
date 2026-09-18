@@ -23,7 +23,7 @@ public sealed class ReleasePackageB301Tests
         Guid sourceId = await fixture.CreateUnlinkedManualAsync();
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(sourceId), "b301-take", CancellationToken.None);
         CaseCard initial = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
-        DocumentRequirementView requirement = initial.DocumentRequirements.First();
+        DocumentRequirementView requirement = initial.DocumentRequirements[0];
 
         Guid storedId = DataConventions.NewId();
         Guid attachmentId = DataConventions.NewId();

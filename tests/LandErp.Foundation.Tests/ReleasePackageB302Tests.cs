@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LandErp.Application.Foundation.Files;
+using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Infrastructure.Foundation.Files;
@@ -60,6 +61,31 @@ public sealed class ReleasePackageB302Tests
         Assert.AreEqual(FileUploadLimits.MaxRawFileBytes, YandexDiskStorageTests.Options().MaxFileBytes);
         FileUploadLimits.EnsureRawFileSize(FileUploadLimits.MaxRawFileBytes);
         Assert.ThrowsExactly<FileUploadLimitException>(() => FileUploadLimits.EnsureRawFileSize((long)FileUploadLimits.MaxRawFileBytes + 1));
+    }
+
+    [TestMethod]
+    public async Task LocalStorageRetryReusesContentAddressedFileAndRoutedReadAcceptsItsKey()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "LandErp-B302-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            FileSystemFileStorage local = new(directory);
+            byte[] content = "provider write succeeded before database acknowledgement"u8.ToArray();
+            Guid fileId = Guid.NewGuid();
+
+            FileWriteResult first = await local.WriteAsync(fileId, content, CancellationToken.None);
+            FileWriteResult retry = await local.WriteAsync(fileId, content, CancellationToken.None);
+
+            Assert.AreEqual(first, retry);
+            Assert.AreEqual(1, Directory.GetFiles(directory, "*.bin").Length);
+            RoutedFileStorage routed = new(local, null, local);
+            CollectionAssert.AreEqual(content, await routed.ReadAsync(first.StorageKey, CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
     }
 
     private sealed class CountingFileStorage : IFileStorage

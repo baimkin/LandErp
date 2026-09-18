@@ -17,11 +17,22 @@ public sealed class RoutedFileStorage(IFileStorage writer, IFileStorage? cloud, 
         if (storageKey.StartsWith("yd1:", StringComparison.Ordinal))
             return (cloud ?? throw new FileStorageException("STORAGE_DISCONNECTED", false, "Яндекс Диск отключён. Подключите хранилище для чтения этого файла."))
                 .ReadAsync(storageKey, cancellationToken);
-        // Legacy local files have exactly the original GUID.bin layout.
-        if (storageKey.Length != 36 || !storageKey.EndsWith(".bin", StringComparison.Ordinal)
-            || !Guid.TryParseExact(storageKey[..32], "N", out _))
+        // Read both legacy GUID.bin keys and content-addressed GUID_hash.bin keys.
+        if (!IsLocalKey(storageKey))
             throw new FileStorageException("STORAGE_KEY_INVALID", false, "Некорректный ключ файлового хранилища.");
         return (local ?? throw new FileStorageException("STORAGE_LOCAL_UNAVAILABLE", false, "Локальное хранилище этого файла не подключено."))
             .ReadAsync(storageKey, cancellationToken);
+    }
+
+    private static bool IsLocalKey(string key)
+    {
+        if (key.Length < 36 || !key.EndsWith(".bin", StringComparison.Ordinal)
+            || !Guid.TryParseExact(key.AsSpan(0, 32), "N", out _))
+            return false;
+        if (key.Length == 36) return true;
+        if (key.Length != 101 || key[32] != '_') return false;
+        foreach (char value in key.AsSpan(33, 64))
+            if (!Uri.IsHexDigit(value)) return false;
+        return true;
     }
 }

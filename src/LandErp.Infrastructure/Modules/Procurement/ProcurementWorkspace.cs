@@ -611,6 +611,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     public async Task AddNoteAsync(Subject subject, AddCaseNote command, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await RequireDossierPermissionAsync(subject, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // The expected version protects the first write, not a replay of its committed result.
@@ -621,13 +622,10 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         Row row = await VisibleCases(db, context).SingleOrDefaultAsync(value => value.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
         if (replay.ExistingResultId != null)
         {
-            await RequireDossierPermissionAsync(subject, cancellationToken);
             if (replay.ExistingCaseId != row.Case.Id) throw new AccessDeniedException();
             await transaction.CommitAsync(cancellationToken);
             return;
         }
-        if (row.Assignment.EmployeeId != context.EmployeeId) throw new AccessDeniedException();
-        await access.RequireAsync(subject, row.Case.StageId == "pending_head" ? Permissions.HeadDecide : Permissions.ManagerDecide, cancellationToken);
         if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
         if (command.EffectiveAt?.Offset != null && command.EffectiveAt.Value.Offset != TimeSpan.Zero || command.EffectiveAt > time.GetUtcNow().AddMinutes(5)) throw new ArgumentException("Укажите фактическое время контакта UTC.");
         string text = Required(command.Text, 3, 4000, "Укажите заметку.");

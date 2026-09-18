@@ -19,7 +19,7 @@ else if(card!=null)
                 @if(FullPage){<h1>@card.Item.Title</h1>}else{<h2>@card.Item.Title</h2>}
                 <p>@(card.Item.Location??"Местоположение уточняется")</p>
             </div>
-            <div class="case-title-actions">@foreach(var source in card.Item.Sources) { <SourceBadge Source="source" /> }<StatusBadge Label="@ProcurementLabels.Stage(card.Item.Stage)" Tone="@(card.Item.Stage=="acquired" ? "success" : card.Item.Stage=="returned" ? "warning" : "info")" />@if(card.CanManagerDecide||card.CanHeadDecide){<button class="btn secondary" @onclick="()=>{ClearFeedback();noteOpen=true;}">＋ Заметка</button>}<button class="btn secondary" @onclick="()=>{ClearFeedback();decisionsOpen=true;}">Решение по объекту</button></div>
+            <div class="case-title-actions">@foreach(var source in card.Item.Sources) { <SourceBadge Source="source" /> }<StatusBadge Label="@ProcurementLabels.Stage(card.Item.Stage)" Tone="@(card.Item.Stage=="acquired" ? "success" : card.Item.Stage=="returned" ? "warning" : "info")" />@if(card.CanManageDossier){<button class="btn secondary" @onclick="()=>{ClearFeedback();noteOpen=true;}">＋ Заметка</button>}<button class="btn secondary" @onclick="()=>{ClearFeedback();decisionsOpen=true;}">Решение по объекту</button></div>
         </section>
 
         @if(card.Item.Stage=="acquired")
@@ -102,7 +102,7 @@ else if(card!=null)
         @if(tab=="overview")
         {
             <section class="case-dashboard">
-                <article class="surface"><div class="section-heading"><h2>Ход работы</h2><div class="form-actions">@if(card.CanManagerDecide||card.CanHeadDecide){<button class="btn quiet" @onclick="()=>{ClearFeedback();noteOpen=true;}">Заметка</button>}@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<button class="btn secondary" @onclick="OpenNegotiation">＋ Контакт</button>}</div></div>
+                <article class="surface"><div class="section-heading"><h2>Ход работы</h2><div class="form-actions">@if(card.CanManageDossier){<button class="btn quiet" @onclick="()=>{ClearFeedback();noteOpen=true;}">Заметка</button>}@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<button class="btn secondary" @onclick="OpenNegotiation">＋ Контакт</button>}</div></div>
                     @if(card.Timeline.Count==0){<div class="case-empty"><strong>История работы начинается здесь</strong><p>Запишите контакт или добавьте заметку об объекте.</p></div>}
                     <BusinessTimeline Items="card.Timeline.Take(6).ToArray()" />
                     <button class="btn quiet" @onclick='()=>tab="history"'>Вся история →</button>

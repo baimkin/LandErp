@@ -112,7 +112,9 @@ public sealed class CollectorIntegrationTests
             CollectionWork second=(await adapter.ClaimAsync(CancellationToken.None))!;
             CollectionResult result=new(Guid.CreateVersion7(),second.JobId,second.LeaseId,CollectionOutcome.Success,[new("duplicate-control",data)],false);
             CollectionReceipt receipt=await adapter.SendResultAsync(result,CancellationToken.None);
-            Assert.AreEqual(1,receipt.Duplicates); Assert.AreEqual(receipt,await adapter.SendResultAsync(result,CancellationToken.None));
+            Assert.AreEqual(0,receipt.Accepted); Assert.AreEqual(1,receipt.Duplicates);
+            Assert.AreEqual(0,receipt.NewListings); Assert.AreEqual(0,receipt.ChangedListings);
+            Assert.AreEqual(receipt,await adapter.SendResultAsync(result,CancellationToken.None));
             await Assert.ThrowsExactlyAsync<ServerDeliveryException>(()=>adapter.SendResultAsync(result with { Final=true },CancellationToken.None));
             ListingData missing=data with { ObservedAt=data.ObservedAt.AddSeconds(1), Price=new(FieldPresence.Absent,null,null),
                 AreaSquareMeters=new(FieldPresence.ParseFailed,"неизвестно",null), Location=new(FieldPresence.Present,"Новый адрес") };

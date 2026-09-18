@@ -135,7 +135,7 @@ public sealed record CollectionJob(string Id, string BatchId, string LinkId, int
         JobState.Failed => "Ошибка",
         JobState.StoppedInterrupted => "Прервано",
         JobState.Completed => "Вся выдача",
-        JobState.LimitReached => "Предел страниц",
+        JobState.LimitReached => "Завершён по лимиту страниц",
         JobState.SkippedFresh => "Свежие данные",
         _ => State.ToString()
     };

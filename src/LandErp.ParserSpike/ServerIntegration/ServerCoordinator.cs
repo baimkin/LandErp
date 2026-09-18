@@ -13,6 +13,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
     private volatile bool acceptNewWork = true;
     public bool AcceptNewWork { get => acceptNewWork; set => acceptNewWork = value; }
     public string Status { get; private set; } = "Server mode подключён. Local mode доступен независимо.";
+    public DeliverySummary? LastDelivery { get; private set; }
     public LocalServerWork? CurrentWork => outbox.ReadWork();
     public Task<CollectorSearchView> UpdateSearchAsync(UpdateCollectorSearch command, CancellationToken token) => adapter.UpdateSearchAsync(command, token);
     public Task<CollectorGroupView> UpdateGroupAsync(UpdateCollectorGroup command, CancellationToken token) => adapter.UpdateGroupAsync(command, token);
@@ -39,8 +40,9 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             if (old?.LocalJobId != null)
             {
                 LocalServerWork renewed = new(work, old.LocalJobId); outbox.SaveWork(renewed); PrepareResult(renewed);
-                await outbox.FlushAsync(adapter, token).ConfigureAwait(false); outbox.SaveWork(null);
-                Status = "Сохранённый результат доставлен после обновления lease."; return;
+                await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
+                LastDelivery = outbox.Summary(work.JobId); outbox.SaveWork(null);
+                Status = LastDelivery?.Display ?? "Сохранённый результат доставлен после обновления lease."; return;
             }
             StartClaimedWork(work, token);
         }
@@ -98,16 +100,18 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
                         outbox.SupersedeLease(reclaimed.JobId, reclaimed.LeaseId);
                         LocalServerWork renewed = new(reclaimed, work.LocalJobId); outbox.SaveWork(renewed);
                         PrepareResult(renewed); await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
+                        LastDelivery = outbox.Summary(reclaimed.JobId);
                         outbox.SaveWork(null); nextPoll = DateTimeOffset.UtcNow;
-                        Status = "Сохранённый результат доставлен после обновления lease."; return;
+                        Status = LastDelivery?.Display ?? "Сохранённый результат доставлен после обновления lease."; return;
                     }
                     PrepareResult(work); outbox.RetainLocally(work.Work.JobId, work.ResultReasonCode); outbox.SaveWork(null);
                     if (reclaimed != null) { StartClaimedWork(reclaimed, token); return; }
                     nextPoll = DateTimeOffset.UtcNow.AddSeconds(2); Status = "Старое выполнение завершено; ожидаем повтор от Server."; return;
                 }
                 PrepareResult(work); await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
+                LastDelivery = outbox.Summary(work.Work.JobId);
                 outbox.SaveWork(null); nextPoll = DateTimeOffset.UtcNow;
-                Status = "Работа и локальные наблюдения доставлены в Server.";
+                Status = LastDelivery?.Display ?? "Работа и локальные наблюдения доставлены в Server.";
             }
             else
             {
@@ -194,8 +198,12 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             LocalServerWork? work = outbox.ReadWork();
             if (work?.LocalJobId != null && !runner.IsRunning) PrepareResult(work);
             await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
-            if (!runner.IsRunning) outbox.SaveWork(null);
-            Status = "Очередь доставки обработана. Локальные данные сохранены.";
+            if (!runner.IsRunning)
+            {
+                if (work != null) LastDelivery = outbox.Summary(work.Work.JobId);
+                outbox.SaveWork(null);
+            }
+            Status = LastDelivery?.Display ?? "Очередь доставки обработана. Локальные данные сохранены.";
         }
         finally { commands.Release(); }
     }

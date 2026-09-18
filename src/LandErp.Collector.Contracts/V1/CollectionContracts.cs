@@ -27,7 +27,8 @@ public sealed record CollectionCoverage(int UniqueObserved, int? SourceCountHint
 public sealed record CollectionResult(Guid ResultId, Guid JobId, Guid LeaseId, CollectionOutcome Outcome,
     ObservationEnvelope[] Observations, bool Final, string ReasonCode = "", string[]? Warnings = null,
     CollectionCoverage? Coverage = null);
-public sealed record CollectionReceipt(Guid ResultId, string Status, int Accepted, int Duplicates);
+public sealed record CollectionReceipt(Guid ResultId, string Status, int Accepted, int Duplicates,
+    int NewListings = 0, int ChangedListings = 0);
 
 public static class CollectionResultReasonCodes
 {

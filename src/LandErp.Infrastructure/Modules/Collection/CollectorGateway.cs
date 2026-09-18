@@ -418,7 +418,8 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             agent.AttentionCode = manualAction ? string.IsNullOrEmpty(result.ReasonCode) ? result.Outcome.ToString() : result.ReasonCode : "";
             ApplyProgress(agent, null);
         }
-        CollectionReceipt receipt = new(result.ResultId, result.Final ? job.State.ToString() : "Accepted", accepted, duplicates);
+        CollectionReceipt receipt = new(result.ResultId, result.Final ? job.State.ToString() : "Accepted",
+            accepted, duplicates, newListings, changedListings);
         db.CollectionDeliveries.Add(new()
         {
             Id = result.ResultId,

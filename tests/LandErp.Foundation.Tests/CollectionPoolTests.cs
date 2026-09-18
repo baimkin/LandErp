@@ -222,9 +222,13 @@ public sealed class CollectionPoolTests
             Provenance = "Phase 2A test",
             Title = new(FieldPresence.Present, "Общий пул")
         };
-        await winnerGateway.AcceptAsync(winnerCredential,
+        CollectionReceipt receipt = await winnerGateway.AcceptAsync(winnerCredential,
             new(Guid.CreateVersion7(), winner.JobId, winner.LeaseId, CollectionOutcome.Success,
                 [new("shared-pool-observation", observation)], true), CancellationToken.None);
+        Assert.AreEqual(1, receipt.Accepted);
+        Assert.AreEqual(0, receipt.Duplicates);
+        Assert.AreEqual(1, receipt.NewListings);
+        Assert.AreEqual(0, receipt.ChangedListings);
 
         await using (LandErpDbContext db = await factory.CreateDbContextAsync())
         {

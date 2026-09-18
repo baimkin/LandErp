@@ -6,6 +6,11 @@ namespace LandErp.ParserSpike.ServerIntegration;
 
 public sealed record PendingDelivery(long Sequence, CollectionResult Result, int Attempts);
 public sealed record LocalServerWork(CollectionWork Work, string? LocalJobId, string ResultReasonCode = "");
+public sealed record DeliverySummary(Guid JobId, int Collected, int Accepted, int Duplicates,
+    int NewListings, int ChangedListings, string Outcome)
+{
+    public string Display => $"Собрано {Collected}; сервер принял {Accepted}; без изменений {Duplicates}; новых {NewListings}; обновлено {ChangedListings}.";
+}
 
 /// <summary>Delivery is committed before network use; acknowledgement is committed only after a matching receipt.</summary>
 public sealed class ServerOutbox
@@ -24,6 +29,10 @@ public sealed class ServerOutbox
             """;
         command.ExecuteNonQuery();
         EnsureColumn(db, "server_outbox", "terminal_state", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(db, "server_outbox", "accepted_count", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(db, "server_outbox", "duplicate_count", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(db, "server_outbox", "new_count", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(db, "server_outbox", "changed_count", "INTEGER NOT NULL DEFAULT 0");
     }
     public void Bind(ServerConnection connection, bool allowUnboundData)
     {
@@ -95,13 +104,39 @@ public sealed class ServerOutbox
         while (reader.Read()) { CollectionResult value = JsonSerializer.Deserialize<CollectionResult>(reader.GetString(0), CollectionJson.Options)!; if (value.JobId == job && value.LeaseId == lease) return true; }
         return false;
     }
-    public void RecordAttempt(PendingDelivery delivery, string code, bool acknowledged, string terminalState = "")
+    public void RecordAttempt(PendingDelivery delivery, string code, bool acknowledged, string terminalState = "",
+        CollectionReceipt? receipt = null)
     {
         using SqliteConnection db = Open(); using SqliteCommand command = db.CreateCommand();
-        command.CommandText = "UPDATE server_outbox SET attempts=attempts+1,last_code=$code,acked=$acked,terminal_state=$terminal WHERE sequence=$sequence AND result_id=$id";
+        command.CommandText = "UPDATE server_outbox SET attempts=attempts+1,last_code=$code,acked=$acked,terminal_state=$terminal,"
+            + "accepted_count=$accepted,duplicate_count=$duplicates,new_count=$new,changed_count=$changed WHERE sequence=$sequence AND result_id=$id";
         command.Parameters.AddWithValue("$code", code); command.Parameters.AddWithValue("$acked", acknowledged ? 1 : 0);
         command.Parameters.AddWithValue("$terminal", terminalState);
+        command.Parameters.AddWithValue("$accepted", receipt?.Accepted ?? 0);
+        command.Parameters.AddWithValue("$duplicates", receipt?.Duplicates ?? 0);
+        command.Parameters.AddWithValue("$new", receipt?.NewListings ?? 0);
+        command.Parameters.AddWithValue("$changed", receipt?.ChangedListings ?? 0);
         command.Parameters.AddWithValue("$sequence", delivery.Sequence); command.Parameters.AddWithValue("$id", delivery.Result.ResultId.ToString()); command.ExecuteNonQuery();
+    }
+    public DeliverySummary? Summary(Guid jobId)
+    {
+        using SqliteConnection db = Open(); using SqliteCommand command = db.CreateCommand();
+        command.CommandText = """
+            SELECT COALESCE(SUM(json_array_length(json_extract(json,'$.observations'))),0),
+              COALESCE(SUM(accepted_count),0),COALESCE(SUM(duplicate_count),0),COALESCE(SUM(new_count),0),
+              COALESCE(SUM(changed_count),0),COALESCE(MAX(CASE WHEN json_extract(json,'$.final')=1 THEN last_code END),'')
+            FROM server_outbox WHERE json_extract(json,'$.jobId')=$job AND acked=1
+            """;
+        command.Parameters.AddWithValue("$job", jobId.ToString());
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        int collected = Convert.ToInt32(reader.GetInt64(0), System.Globalization.CultureInfo.InvariantCulture);
+        if (collected == 0 && reader.GetString(5).Length == 0) return null;
+        return new(jobId, collected,
+            Convert.ToInt32(reader.GetInt64(1), System.Globalization.CultureInfo.InvariantCulture),
+            Convert.ToInt32(reader.GetInt64(2), System.Globalization.CultureInfo.InvariantCulture),
+            Convert.ToInt32(reader.GetInt64(3), System.Globalization.CultureInfo.InvariantCulture),
+            Convert.ToInt32(reader.GetInt64(4), System.Globalization.CultureInfo.InvariantCulture), reader.GetString(5));
     }
     public void SupersedeLease(Guid job, Guid lease)
     {
@@ -126,7 +161,7 @@ public sealed class ServerOutbox
             {
                 CollectionReceipt receipt = await adapter.SendResultAsync(delivery.Result, token).ConfigureAwait(false);
                 if (receipt.ResultId != delivery.Result.ResultId) throw new ServerDeliveryException("INVALID_RECEIPT", false);
-                RecordAttempt(delivery, receipt.Status, true, "Acknowledged");
+                RecordAttempt(delivery, receipt.Status, true, "Acknowledged", receipt);
             }
             catch (ServerDeliveryException exception)
             {

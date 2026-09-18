@@ -161,6 +161,31 @@ public sealed class ServerTransportTests
     }
 
     [TestMethod]
+    public void DeliverySummaryKeepsAcceptedDuplicateNewAndChangedCounts()
+    {
+        ServerOutbox outbox = NewOutbox(); Guid job = Guid.CreateVersion7();
+        CollectionResult result = Result(job); outbox.Enqueue(result);
+        PendingDelivery pending = outbox.Pending().Single();
+        outbox.RecordAttempt(pending, "Completed", true, "Acknowledged",
+            new(result.ResultId, "Completed", 42, 30, 21, 21));
+        DeliverySummary summary = outbox.Summary(job)!;
+        Assert.AreEqual(42, summary.Accepted); Assert.AreEqual(30, summary.Duplicates);
+        Assert.AreEqual(21, summary.NewListings); Assert.AreEqual(21, summary.ChangedListings);
+        StringAssert.Contains(summary.Display, "новых 21"); StringAssert.Contains(summary.Display, "обновлено 21");
+    }
+
+    [TestMethod]
+    public void ReceiptFromOlderServerKeepsNewCountersAtZero()
+    {
+        Guid id = Guid.CreateVersion7();
+        CollectionReceipt receipt = JsonSerializer.Deserialize<CollectionReceipt>(
+            $$"""{"resultId":"{{id}}","status":"Accepted","accepted":4,"duplicates":3}""",
+            CollectionJson.Options)!;
+        Assert.AreEqual(4, receipt.Accepted); Assert.AreEqual(3, receipt.Duplicates);
+        Assert.AreEqual(0, receipt.NewListings); Assert.AreEqual(0, receipt.ChangedListings);
+    }
+
+    [TestMethod]
     public void EmptyOutboxMayMoveButPendingDataStaysBoundToItsServerAndAgent()
     {
         ServerOutbox outbox = NewOutbox();

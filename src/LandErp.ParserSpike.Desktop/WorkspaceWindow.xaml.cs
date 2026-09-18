@@ -174,8 +174,18 @@ public partial class WorkspaceWindow : Window
         JobsGrid.ItemsSource = controller.Store.Jobs().Where(x => x.LinkId.StartsWith("server-", StringComparison.Ordinal) == IsServer).Select(x => new
         {
             Label = searches.FirstOrDefault(s => s.Id == x.LinkId || s.Url == x.Url)?.Label ?? new Uri(x.Url).Host,
-            Source = x.Source.ToString(), State = x.DisplayState, Progress = $"{x.Page} / {x.Limit} стр.", Started = x.StartedAtUtc.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.CurrentCulture)
+            Source = x.Source.ToString(), State = x.DisplayState, Progress = JobProgress(x), Started = x.StartedAtUtc.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.CurrentCulture)
         }).ToArray();
+    }
+    private string JobProgress(CollectionJob job)
+    {
+        MapScope? map = controller!.Store.ReadMapScope(job.Id);
+        if (map != null)
+        {
+            int collected = controller.Store.Journal(job.Id).Select(item => item.Count).DefaultIfEmpty().Max();
+            return map.ExpectedCount is int expected ? $"{collected} / {expected} объявл." : $"{collected} объявл.";
+        }
+        return $"{job.Page} / {job.Limit} стр.";
     }
     private async void ModeChanged(object sender, SelectionChangedEventArgs e)
     {

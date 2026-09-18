@@ -95,7 +95,10 @@ Control-команды содержат `CommandId`. Точный повтор �
 - `Progress`: page, maxPages, processedCount, totalCount, phase,
   lastUsefulActionAt (UTC).
 
-`null` означает «значение не передано». `SourceState=Ready` явно очищает прежнее
+`null` означает «значение не передано». Для `lastUsefulActionAt` это также
+означает, что Server сохраняет последнее уже известное время полезного действия:
+ранний heartbeat до первого полезного события может передать `null`, а последующий
+`null` не стирает ранее полученную отметку. `SourceState=Ready` явно очищает прежнее
 attention state после повторной проверки страницы. Heartbeat продлевает только
 действующий lease и не завершает Job.
 

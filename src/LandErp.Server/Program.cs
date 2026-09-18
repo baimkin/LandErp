@@ -1,4 +1,5 @@
 using LandErp.Application.Foundation;
+using LandErp.Application.Foundation.Files;
 using LandErp.Infrastructure.Persistence;
 using LandErp.Server.Foundation;
 using LandErp.Infrastructure.Modules.IdentityAccess;
@@ -28,7 +29,7 @@ builder.Services.AddLandErpIdentity();
 builder.Services.AddLandErpCollection();
 builder.Services.AddLandErpProcurement(builder.Configuration, builder.Environment);
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
-builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 8 * 1024 * 1024);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = FileUploadLimits.MaxJsonRequestBodyBytes);
 builder.Services.AddScoped<AccountActivation>();
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();

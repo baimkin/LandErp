@@ -1,5 +1,6 @@
 @page "/procurement/{CaseId:guid}/inspection"
 @attribute [Authorize(Policy = "manager_queue.read")]
+@using LandErp.Application.Foundation.Files
 @using LandErp.Application.Modules.Procurement.Contracts
 @using LandErp.Application.Modules.Procurement.Domain
 @using LandErp.Server.Components.Procurement
@@ -42,7 +43,7 @@ else if(card!=null)
             <section class="panel inspection-summary"><h3>Общие материалы и вывод</h3>@foreach(var file in card.Attachments.Where(x=>x.OwnerType==CaseAttachmentOwner.Inspection)){<a class="material-link" href="/api/procurement/attachments/@file.Id" target="_blank" rel="noopener">@file.Label</a>}<p>@conclusion</p><p>@decision</p></section>
         }
     </main>
-    @if(mediaOpen){<CaseModal Title="Добавить материал осмотра" Error="@Error" Busy="Busy" OnClose="()=>mediaOpen=false"><label class="upload"><strong>@(selectedFile?.Name??"＋ Выберите или перетащите файл")</strong><small>Фото, видео, аудио или документ · до 8 МБ</small><InputFile OnChange="SelectMedia" accept="image/*,video/*,audio/*,.pdf"/></label><div class="form-grid"><label class="field dossier-wide"><span>Название</span><input @bind="media.Label"/></label><label class="field"><span>Тип</span><select @bind="media.Kind"><option value="Photo">Фото</option><option value="Video">Видео</option><option value="Audio">Аудио</option><option value="Document">Документ</option></select></label><label class="field"><span>Относится к</span><select @bind="media.Owner"><option value="inspection">Осмотр в целом</option>@foreach(var item in answers.Where(x=>x.AllowAttachments)){<option value="@item.Id">@item.Title</option>}</select></label><label class="field dossier-wide"><span>Комментарий</span><textarea @bind="media.Description"/></label><div class="form-actions"><ActionButton Label="Загрузить материал" OnClick="UploadMediaAsync" Busy="Busy"/></div></div></CaseModal>}
+    @if(mediaOpen){<CaseModal Title="Добавить материал осмотра" Error="@Error" Busy="Busy" OnClose="()=>mediaOpen=false"><label class="upload"><strong>@(selectedFile?.Name??"＋ Выберите или перетащите файл")</strong><small>Фото, видео, аудио или документ · до @FileUploadLimits.MaxRawFileMegabytes МБ</small><InputFile OnChange="SelectMedia" accept="image/*,video/*,audio/*,.pdf"/>@if(UploadFileTooLarge(selectedFile)){<small class="case-problem">@FileUploadLimits.TooLargeMessage</small>}</label><div class="form-grid"><label class="field dossier-wide"><span>Название</span><input @bind="media.Label"/></label><label class="field"><span>Тип</span><select @bind="media.Kind"><option value="Photo">Фото</option><option value="Video">Видео</option><option value="Audio">Аудио</option><option value="Document">Документ</option></select></label><label class="field"><span>Относится к</span><select @bind="media.Owner"><option value="inspection">Осмотр в целом</option>@foreach(var item in answers.Where(x=>x.AllowAttachments)){<option value="@item.Id">@item.Title</option>}</select></label><label class="field dossier-wide"><span>Комментарий</span><textarea @bind="media.Description"/></label><div class="form-actions"><ActionButton Label="Загрузить материал" OnClick="UploadMediaAsync" Busy="Busy" Disabled="@(selectedFile==null||UploadFileTooLarge(selectedFile))"/></div></div></CaseModal>}
     @if(finishOpen){<CaseModal Title="Завершить осмотр" Subtitle="Проверьте ответы и зафиксируйте общий вывод" Error="@Error" Busy="Busy" OnClose="()=>finishOpen=false"><p class="subtle">Обработано @DoneCount из @answers.Count пунктов. Для обязательных пунктов нужен ответ либо явная отметка «Не удалось проверить».</p><label class="field"><span>Общий вывод</span><textarea data-inspection-conclusion="true" @bind="conclusion" @bind:event="oninput" @bind:after="SaveLocalSoon"/></label><label class="field"><span>Предварительное решение</span><select data-inspection-decision="true" @bind="decision" @bind:after="SaveLocalSoon"><option value="">Не выбрано</option><option>Осмотр пройден, критичных проблем нет</option><option>Нужны дополнительные проверки</option><option>Есть существенные технические риски</option><option>Рекомендую отказаться</option></select></label><div class="form-actions"><ActionButton Label="Завершить осмотр" OnClick="()=>SaveAsync(true)" Busy="Busy"/></div></CaseModal>}
 }
 @code {
@@ -72,16 +73,17 @@ else if(card!=null)
     private async ValueTask SaveLocalAsync(){dirty=true;try{await draftModule!.InvokeVoidAsync("save",StorageKey,new InspectionDraft(card!.Inspection!.Id,card.Inspection.Version,conclusion,decision,answers));localSaved=true;}catch(JSException){localSaved=false;}}
     private async Task SaveAsync(bool complete){InspectionView inspection=card!.Inspection!;await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,inspection.Id,inspection.Version,conclusion,decision,answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),OperationId,CancellationToken.None));if(Success!=null&&!NeedsRefresh){try{await draftModule!.InvokeVoidAsync("remove",StorageKey);}catch(JSException){}dirty=false;localSaved=false;finishOpen=false;}}
     private void SelectMedia(InputFileChangeEventArgs args){selectedFile=args.File;media.Kind=selectedFile.ContentType.StartsWith("image/")?CaseAttachmentKind.Photo:selectedFile.ContentType.StartsWith("video/")?CaseAttachmentKind.Video:selectedFile.ContentType.StartsWith("audio/")?CaseAttachmentKind.Audio:CaseAttachmentKind.Document;media.Label=selectedFile.Name;}
+    private static bool UploadFileTooLarge(IBrowserFile? file)=>file?.Size>FileUploadLimits.MaxRawFileBytes;
+    private static async Task<byte[]> ReadUploadAsync(IBrowserFile file){FileUploadLimits.EnsureRawFileSize(file.Size);await using Stream input=file.OpenReadStream(FileUploadLimits.MaxRawFileBytes);using MemoryStream buffer=new();await input.CopyToAsync(buffer);return buffer.ToArray();}
     private async Task UploadMediaAsync()
     {
         preserveAnswers=true;
         try { await ExecuteAsync(async()=>{
             if(selectedFile==null)throw new ArgumentException("Выберите файл.");
             if(string.IsNullOrWhiteSpace(media.Label))throw new ArgumentException("Укажите название материала.");
-            if(selectedFile.Size>8*1024*1024)throw new ArgumentException("Файл больше 8 МБ.");
-            await using Stream input=selectedFile.OpenReadStream(8*1024*1024);using MemoryStream buffer=new();await input.CopyToAsync(buffer);
+            byte[] content=await ReadUploadAsync(selectedFile);
             Guid owner=media.Owner=="inspection"?card!.Inspection!.Id:Guid.Parse(media.Owner);CaseAttachmentOwner type=media.Owner=="inspection"?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;
-            await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,media.Kind,media.Label,media.Description,selectedFile.Name,selectedFile.ContentType,buffer.ToArray(),null),OperationId,CancellationToken.None);
+            await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,media.Kind,media.Label,media.Description,selectedFile.Name,selectedFile.ContentType,content,null),OperationId,CancellationToken.None);
         },"Материал осмотра добавлен");if(Success!=null){selectedFile=null;media=new();mediaOpen=false;}}
         finally{preserveAnswers=false;}
     }

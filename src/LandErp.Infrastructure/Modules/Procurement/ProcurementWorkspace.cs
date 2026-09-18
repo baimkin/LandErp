@@ -1113,8 +1113,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             throw new ArgumentException("Внешняя ссылка должна использовать HTTPS.");
         if (external != (command.Kind == CaseAttachmentKind.Link) || external == (command.Content != null))
             throw new ArgumentException("Передайте либо HTTPS-ссылку, либо содержимое файла подходящего типа.");
-        if (!external && (command.Content is not { Length: > 0 } || command.Content.Length > 8 * 1024 * 1024))
-            throw new ArgumentException("Файл должен быть непустым и не больше 8 МБ.");
+        if (!external) FileUploadLimits.EnsureRawFileSize(command.Content!.LongLength);
         string contentType = external ? "text/uri-list" : Required(command.ContentType, 3, 256, "Укажите MIME-тип файла.");
         if (!external && !AllowedContentType(command.Kind, contentType)) throw new ArgumentException("Тип файла не разрешён для выбранного вложения.");
         Guid storedId = DataConventions.NewId(); Guid attachmentId = DataConventions.NewId(); DateTimeOffset now = time.GetUtcNow();
@@ -1240,7 +1239,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await RequireDossierPermissionAsync(subject, cancellationToken);
-        if (command.Content.Length == 0 || command.Content.Length > 8 * 1024 * 1024) throw new ArgumentException("Файл должен быть непустым и не больше 8 МБ.");
+        FileUploadLimits.EnsureRawFileSize(command.Content.LongLength);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         var value = await (from link in db.CaseAttachments join file in db.StoredFiles on link.StoredFileId equals file.Id
                            where link.Id == command.AttachmentId && link.PropertyCaseId == command.CaseId && link.OrganizationId == context.OrganizationId

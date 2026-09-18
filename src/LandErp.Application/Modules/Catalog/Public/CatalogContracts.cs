@@ -30,6 +30,8 @@ public sealed record SetCatalogMonitoring(Guid CatalogItemId, long ExpectedVersi
     decimal? TargetPricePerSotka, string Reason);
 public sealed record ResumeCatalogItemCase(Guid CatalogItemId, long ExpectedCatalogVersion);
 public sealed record TakeCatalogItemToWork(Guid CatalogItemId, Guid? ExistingCaseId = null);
+public sealed record CorrectCatalogItemCaseLink(Guid CatalogItemId, long ExpectedCatalogVersion,
+    Guid ExpectedCaseId, Guid? TargetCaseId, string Reason);
 public sealed record TakeToWorkResult(Guid CaseId, string BusinessNumber, bool Created);
 public sealed record CaseLinkTarget(Guid CaseId, string BusinessNumber, string Title);
 
@@ -42,5 +44,6 @@ public interface ICatalogWorkspace
     Task SetMonitoringAsync(Subject subject, SetCatalogMonitoring command, string correlationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CaseLinkTarget>> ReadLinkTargetsAsync(Subject subject, CancellationToken cancellationToken);
     Task<TakeToWorkResult> TakeToWorkAsync(Subject subject, TakeCatalogItemToWork command, string correlationId, CancellationToken cancellationToken);
+    Task CorrectCaseLinkAsync(Subject subject, CorrectCatalogItemCaseLink command, string correlationId, CancellationToken cancellationToken);
     Task<TakeToWorkResult> ResumeCaseAsync(Subject subject, ResumeCatalogItemCase command, string correlationId, CancellationToken cancellationToken);
 }

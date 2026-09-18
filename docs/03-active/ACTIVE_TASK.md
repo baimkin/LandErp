@@ -1,6 +1,27 @@
 # Активная задача LandErp
 
-## Текущий Gate — B4-02, minimal operational health
+## Текущий Gate — B4-03, deployment + HTTPS + backup/restore preparation
+
+**Прямой запрос владельца от 18 сентября 2026 года:** выполнить repository-side часть B4-03.  
+**Ветка:** `codex/release-package-04`.  
+**Исходный commit B4-03:** `4f0407cd48cc101d8c4de793b58ae7a64d3c9d90`.  
+**Scope:** G-02/G-03/G-04 preparation — managed Server/Worker, update/rollback, HTTPS/proxy/keys, backup/restore scripts и runbook.  
+**Gate:** [GATE-RELEASE-B4-03](GATE-RELEASE-B4-03.md).  
+**Runbook:** [PRODUCTION_RUNBOOK](PRODUCTION_RUNBOOK.md).  
+**Evidence:** [RELEASE_PACKAGE_04_B4_03_REPORT](reports/RELEASE_PACKAGE_04_B4_03_REPORT.md).
+
+Не начинать B4-04 UAT автоматически. Реальный reboot/crash/HTTPS/certificate/backup/restore выполняются владельцем на целевой машине. Build/tests здесь **Not run**.
+
+### Required reading B4-03
+
+После README → START_HERE → этого файла читать только:
+1. Server/Worker startup;
+2. persistence + existing migrations script;
+3. production deployment scripts/config example;
+4. production runbook;
+5. existing health endpoints and B4-02 health screen.
+
+## Предыдущий Gate — B4-02, minimal operational health
 
 **Прямой запрос владельца от 18 сентября 2026 года:** завершить B4-02.  
 **Ветка:** `codex/release-package-04`.  

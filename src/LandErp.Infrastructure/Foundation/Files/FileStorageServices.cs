@@ -22,13 +22,15 @@ public static class FileStorageServices
             configuration.GetSection("Storage:YandexDisk").Bind(options);
             options.Validate();
             services.AddSingleton(_ => new YandexDiskFileStorage(options));
-            services.AddSingleton<IFileStorage>(sp =>
+            services.AddSingleton<RoutedFileStorage>(sp =>
             {
                 YandexDiskFileStorage cloud = sp.GetRequiredService<YandexDiskFileStorage>();
                 return new RoutedFileStorage(cloud, cloud, local);
             });
         }
-        else services.AddSingleton<IFileStorage>(new RoutedFileStorage(local!, null, local));
+        else services.AddSingleton(new RoutedFileStorage(local!, null, local));
+        services.AddSingleton<IFileStorage>(sp => sp.GetRequiredService<RoutedFileStorage>());
+        services.AddSingleton<IFileStorageHealth>(sp => sp.GetRequiredService<RoutedFileStorage>());
         return services;
     }
 }

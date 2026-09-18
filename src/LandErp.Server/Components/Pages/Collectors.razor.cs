@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
+using LandErp.Application.Foundation;
+using LandErp.Application.Foundation.Files;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Collection.Contracts;
 using LandErp.Application.Modules.Collection.Domain;
@@ -25,6 +27,9 @@ public partial class Collectors : IAsyncDisposable
     private string historyQuery = "", historyFilter = "all", groupVisibility = "active";
     private string? refreshMessage;
     private string previewText = "";
+    private bool databaseReady;
+    private FileStorageHealth storageHealth = new(false, "NOT_CHECKED");
+    private DateTimeOffset? storageCheckedAt;
     private int previewVersion;
     private DateTimeOffset? refreshedAt;
     private int historyPage = 1;
@@ -40,9 +45,17 @@ public partial class Collectors : IAsyncDisposable
 
     protected override async Task ReadAsync()
     {
-        view = await Administration.ReadAsync(CurrentSubject, lifetime.Token);
-        refreshedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        databaseReady = await DatabaseStatus.IsReadyAsync(lifetime.Token);
+        if (storageCheckedAt == null || now - storageCheckedAt >= TimeSpan.FromMinutes(1))
+        {
+            storageHealth = await StorageStatus.CheckAsync(lifetime.Token);
+            storageCheckedAt = now;
+        }
+        refreshedAt = now;
         refreshMessage = null;
+        if (!databaseReady) { view = null; return; }
+        view = await Administration.ReadAsync(CurrentSubject, lifetime.Token);
     }
 
     private async Task RefreshLoopAsync()
@@ -76,7 +89,16 @@ public partial class Collectors : IAsyncDisposable
     }
 
     private bool SchedulerHealthy => view?.Scheduler.State == "Работает";
-    private int AttentionCount => (view?.AttentionJobs ?? 0) + (view?.Agents.Count(AgentNeedsAttention) ?? 0) + (SchedulerHealthy ? 0 : 1);
+    private bool WorkerHealthy => view?.Scheduler.LastStartedAt is { } started && refreshedAt is { } refreshed
+        && started >= refreshed.AddMinutes(-2);
+    private string WorkerState => !databaseReady ? "Нет данных" : view?.Scheduler.LastStartedAt == null ? "Не запускался" : WorkerHealthy ? "Работает" : "Нет связи";
+    private int ExpiredLeaseCount => view?.ExpiredLeases ?? 0;
+    private int BacklogCount => (view?.PendingJobs ?? 0) + ExpiredLeaseCount;
+    private int StaleAgents => view?.Agents.Count(IsAgentStale) ?? 0;
+    private int OfflineAgents => view?.Agents.Count(agent => agent.Enabled && !agent.Online && !IsAgentStale(agent)) ?? 0;
+    private bool StorageHealthy => storageHealth.Available;
+    private int AttentionCount => (view?.AttentionJobs ?? 0) + (view?.Agents.Count(AgentNeedsAttention) ?? 0)
+        + (SchedulerHealthy ? 0 : 1) + ExpiredLeaseCount;
     private string AttentionSummary => !SchedulerHealthy
         ? "Автоматические запуски не подтверждены: проверьте службу расписаний. Ручной запуск доступен."
         : "Некоторые поиски или парсеры требуют действия. Откройте причины.";
@@ -231,6 +253,8 @@ public partial class Collectors : IAsyncDisposable
         return "LDP1." + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payload)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
     private static bool NeedsAttention(SearchView search) => search.LastRun?.AttentionRequired == true;
+    private bool IsAgentStale(AgentView agent) => agent.Enabled && !agent.Online && agent.LastHeartbeatAt is { } heartbeat
+        && refreshedAt is { } refreshed && heartbeat >= refreshed.AddMinutes(-10);
     private static bool AgentNeedsAttention(AgentView agent) => agent.Enabled && (agent.RuntimeState == AgentRuntimeState.AwaitingManualAction || !string.IsNullOrWhiteSpace(agent.AttentionCode));
     private string Time(DateTimeOffset? instant) => instant.HasValue
         ? TimeZoneInfo.ConvertTime(instant.Value, TimeZoneInfo.FindSystemTimeZoneById(ZoneLabel)).ToString("dd.MM HH:mm", CultureInfo.InvariantCulture) : "—";
@@ -265,6 +289,15 @@ public partial class Collectors : IAsyncDisposable
         ? $"Собрано {coverage.UniqueObserved}; источник сообщил {coverage.SourceCountHint}; конец {(coverage.EndReached ? "подтверждён" : "не подтверждён")}."
         : $"Собрано {coverage.UniqueObserved}; конец {(coverage.EndReached ? "подтверждён" : "не подтверждён")}.";
     private static string AgentBadgeTone(AgentView agent) => AgentNeedsAttention(agent) ? "warning" : agent.Online ? "success" : "neutral";
+    private static string HealthTone(bool healthy) => healthy ? "ok" : "bad";
+    private static string StorageLabel(FileStorageHealth health) => health.Available ? "Работает" : health.Code switch
+    {
+        "STORAGE_AUTH" => "Ошибка доступа",
+        "STORAGE_TIMEOUT" => "Таймаут",
+        "STORAGE_UNAVAILABLE" or "STORAGE_DISCONNECTED" or "STORAGE_LOCAL_UNAVAILABLE" => "Недоступно",
+        "STORAGE_PATH_CONFLICT" => "Ошибка пути",
+        _ => "Требует проверки"
+    };
     private static string AgentTone(AgentView agent) => AgentNeedsAttention(agent) ? "attention" : agent.Online ? "online" : "offline";
     private static string Capabilities(string value) => string.IsNullOrWhiteSpace(value) ? "источники не зарегистрированы" : value.Replace(",", ", ");
     private static int Progress(AgentView a) => a.ProgressTotal is > 0 ? Math.Clamp((int)Math.Round(a.ProgressProcessed * 100d / a.ProgressTotal.Value), 0, 100)

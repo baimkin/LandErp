@@ -1,6 +1,26 @@
 # Активная задача LandErp
 
-## Текущий Gate — B4-01, Parser heartbeat / lease reliability
+## Текущий Gate — B4-02, minimal operational health
+
+**Прямой запрос владельца от 18 сентября 2026 года:** завершить B4-02.  
+**Ветка:** `codex/release-package-04`.  
+**Исходный commit B4-02:** `6543e91569b053e611899aa7d8b49935ed3f6fe5`.  
+**Scope:** минимально полезная часть LR-18 — Server / DB / Worker / Scheduler / Parser / backlog / expired lease / storage.  
+**Gate:** [GATE-RELEASE-B4-02](GATE-RELEASE-B4-02.md).  
+**Evidence:** [RELEASE_PACKAGE_04_B4_02_REPORT](reports/RELEASE_PACKAGE_04_B4_02_REPORT.md).
+
+Не создавать отдельную observability-платформу: B4-02 расширяет существующую страницу `/collectors`, которая уже автообновляется. Не начинать B4-03 deployment/backup или B4-04 UAT. Фактические build/tests/browser владелец выполняет самостоятельно; здесь они **Not run**.
+
+### Required reading B4-02
+
+После README → START_HERE → этого файла читать только:
+1. existing `/health/live` и `/health/ready`;
+2. CollectionAdmin read model + scheduler status;
+3. `/collectors` UI/refresh loop;
+4. file storage registration/providers;
+5. targeted operational health tests.
+
+## Предыдущий Gate — B4-01, Parser heartbeat / lease reliability
 
 **Прямой запрос владельца от 18 сентября 2026 года:** начать B4-01.  
 **Ветка:** `codex/release-package-04`.  

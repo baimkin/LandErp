@@ -45,6 +45,13 @@ public sealed record FileWriteResult(string StorageKey, string Sha256, long Size
 /// <summary>Only system IDs and a bounded category reach provider paths; never addresses or original names.</summary>
 public sealed record FileWriteRequest(Guid FileId, Guid OrganizationId, Guid CaseId, string Purpose, string ContentType);
 
+public sealed record FileStorageHealth(bool Available, string Code);
+
+public interface IFileStorageHealth
+{
+    Task<FileStorageHealth> CheckAsync(CancellationToken cancellationToken);
+}
+
 public sealed class FileStorageException(string code, bool retryable, string message) : IOException(message)
 {
     public string Code { get; } = code;

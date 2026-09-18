@@ -56,12 +56,14 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
             .Take(100).ToArrayAsync(cancellationToken);
         CollectionJobView[] jobs = rawJobs.Select(item => Job(item.Job, item.Label, item.Agent)).ToArray();
         int pending = await db.CollectionJobs.CountAsync(item => item.OrganizationId == context.OrganizationId && item.State == CollectionJobState.Pending, cancellationToken);
+        int expiredLeases = await db.CollectionJobs.CountAsync(item => item.OrganizationId == context.OrganizationId
+            && item.State == CollectionJobState.Leased && item.LeaseExpiresAt <= now, cancellationToken);
         int attention = lastBySearch.Values.Count(item => item.Job.RequiresOperatorAttention);
         CollectionSchedulerStatus? scheduler = await db.CollectionSchedulerStatuses.AsNoTracking().SingleOrDefaultAsync(item => item.Id == 1, cancellationToken);
         CollectionSchedulerHealthView schedulerView = Scheduler(scheduler, now);
         string businessTimeZone = await db.Organizations.Where(item => item.Id == context.OrganizationId)
             .Select(item => item.BusinessTimeZone).SingleAsync(cancellationToken);
-        return new(agents, groups, searches, jobs, searches.Count(item => item.Enabled), pending, attention,
+        return new(agents, groups, searches, jobs, searches.Count(item => item.Enabled), pending, expiredLeases, attention,
             agents.Count(item => item.Online), activeJobs.Length, schedulerView, businessTimeZone);
     }
     public async Task<AgentCredential> CreateAgentAsync(Subject subject, string name, bool canManageSearches, string correlationId, CancellationToken cancellationToken)

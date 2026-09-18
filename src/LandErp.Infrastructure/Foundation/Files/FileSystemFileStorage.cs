@@ -4,7 +4,7 @@ using LandErp.Application.Foundation.Files;
 namespace LandErp.Infrastructure.Foundation.Files;
 
 /// <summary>Local/Test adapter for the provider-neutral storage contract. Production must configure another approved backend.</summary>
-public sealed class FileSystemFileStorage(string root) : IFileStorage
+public sealed class FileSystemFileStorage(string root) : IFileStorage, IFileStorageHealth
 {
     private readonly string root = Path.GetFullPath(root);
 
@@ -24,6 +24,14 @@ public sealed class FileSystemFileStorage(string root) : IFileStorage
 
     public Task<byte[]> ReadAsync(string storageKey, CancellationToken cancellationToken) =>
         File.ReadAllBytesAsync(Resolve(storageKey), cancellationToken);
+
+    public Task<FileStorageHealth> CheckAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        string? volume = Path.GetPathRoot(root);
+        return Task.FromResult(new FileStorageHealth(volume != null && Directory.Exists(volume),
+            volume != null && Directory.Exists(volume) ? "STORAGE_READY" : "STORAGE_LOCAL_UNAVAILABLE"));
+    }
 
     private string Resolve(string key)
     {

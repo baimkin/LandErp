@@ -157,7 +157,8 @@ public sealed partial class ProcurementQueueV2ReadService(
         bool managerPermission = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken);
         bool headPermission = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
         bool canManagerDecide = managerPermission && row.Assignment.EmployeeId == context.EmployeeId
-            && row.Case.StageId != "pending_head" && (row.Case.StageId != "rejected" || sourceChanged);
+            && row.Case.StageId is not ("pending_head" or "acquired")
+            && (row.Case.StageId != "rejected" || sourceChanged);
         bool canHeadDecide = headPermission && row.Case.StageId == "pending_head"
             && row.Assignment.EmployeeId == context.EmployeeId && row.Case.ManagerEmployeeId != context.EmployeeId;
 

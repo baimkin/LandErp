@@ -418,7 +418,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         DecisionTarget[] heads = await TargetsAsync(db, row.Case, Permissions.HeadDecide, cancellationToken);
         DecisionTarget[] managers = await TargetsAsync(db, row.Case, Permissions.ManagerDecide, cancellationToken);
         bool manager = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken) && row.Assignment.EmployeeId == context.EmployeeId
-            && row.Case.StageId != "pending_head" && (row.Case.StageId != "rejected" || SourcesChanged(sources));
+            && row.Case.StageId is not ("pending_head" or "acquired")
+            && (row.Case.StageId != "rejected" || SourcesChanged(sources));
         bool head = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken) && row.Case.StageId == "pending_head"
             && row.Assignment.EmployeeId == context.EmployeeId && row.Case.ManagerEmployeeId != context.EmployeeId;
         bool canManageDossier = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken)
@@ -503,6 +504,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         List<(PropertyCaseSourceLink Link, Listing Item)> sources = (await LoadSourcesAsync(db, [propertyCase.Id], cancellationToken)).GetValueOrDefault(propertyCase.Id, []);
         long sourceRevision = SourceRevision(sources);
         if (propertyCase.Version != command.ExpectedCaseVersion || sourceRevision != command.ExpectedSourceRevision) throw new DbUpdateConcurrencyException();
+        if (propertyCase.StageId == "acquired")
+            throw new ArgumentException("Закупка уже завершена. Для купленного объекта доступны только предусмотренные корректировки данных покупки.");
         headAction |= propertyCase.StageId == "pending_head";
         AccessContext context = await access.RequireAsync(subject, headAction ? Permissions.HeadDecide : Permissions.ManagerDecide, cancellationToken);
         if (row.Assignment.EmployeeId != context.EmployeeId || headAction && (propertyCase.StageId != "pending_head" || propertyCase.ManagerEmployeeId == context.EmployeeId)) throw new AccessDeniedException();
@@ -706,8 +709,6 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             throw new ArgumentException("Глубокая проверка доступна после решения руководителя продолжить работу.");
         if (command.ResponsibleEmployeeId != null && !await db.Employees.AnyAsync(item => item.Id == command.ResponsibleEmployeeId
             && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken)) throw new AccessDeniedException();
-        if (command.DueAt?.Offset != null && command.DueAt.Value.Offset != TimeSpan.Zero || command.DueAt < time.GetUtcNow())
-            throw new ArgumentException("Укажите будущий срок UTC.");
         if (command.Cost < 0) throw new ArgumentException("Стоимость проверки не может быть отрицательной.");
 
         CaseCheck? check = command.CheckId == null ? null : await db.CaseChecks.SingleOrDefaultAsync(item => item.Id == command.CheckId
@@ -715,6 +716,11 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         bool blockerChanged = command.Blocker != (check?.Blocker ?? false);
         if (blockerChanged) await access.RequireAsync(subject, Permissions.HeadDecide, cancellationToken);
         if (check != null && check.Version != command.ExpectedCheckVersion) throw new DbUpdateConcurrencyException();
+        DateTimeOffset now = time.GetUtcNow();
+        if (command.DueAt?.Offset != null && command.DueAt.Value.Offset != TimeSpan.Zero)
+            throw new ArgumentException("Срок проверки должен быть указан в UTC.");
+        if (command.DueAt is DateTimeOffset due && due < now && (check == null || check.DueAt != due))
+            throw new ArgumentException("Новый или изменённый срок проверки должен быть в будущем.");
         CaseCheckTemplateItem? template = command.TemplateItemId == null ? null : await db.CaseCheckTemplateItems.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == command.TemplateItemId && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken)
             ?? throw new AccessDeniedException();
@@ -1178,6 +1184,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             ?? throw new AccessDeniedException();
         if (row.Case.Version != command.ExpectedCaseVersion || row.Task.Version != command.ExpectedTaskVersion)
             throw new DbUpdateConcurrencyException();
+        if (row.Case.StageId == "acquired")
+            throw new ArgumentException("Закупка уже завершена. Следующее действие для купленного объекта изменить нельзя.");
 
         DecisionTarget[] managers = await TargetsAsync(db, row.Case, Permissions.ManagerDecide, cancellationToken);
         DecisionTarget[] heads = await TargetsAsync(db, row.Case, Permissions.HeadDecide, cancellationToken);

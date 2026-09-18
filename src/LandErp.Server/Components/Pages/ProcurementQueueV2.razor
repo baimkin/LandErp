@@ -229,12 +229,12 @@
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Следующее действие</b><div><span class="badge @DueBadge(detail.DueState)">@DueCompact(detail.DueAt, detail.DueState)</span>@if (detail.CanManageDossier) { <button class="btn" type="button" @onclick="OpenNextAction">Изменить</button> }</div></div>
+                    <div class="ct"><b>Следующее действие</b><div><span class="badge @DueBadge(detail.DueState)">@DueCompact(detail.DueAt, detail.DueState)</span>@if (detail.CanManageDossier && detail.Stage != "acquired") { <button class="btn" type="button" @onclick="OpenNextAction">Изменить</button> }</div></div>
                     <div class="next"><span class="badge info">@NextActionTypeLabel(detail.NextActionType)</span><b>@ValueOrDash(detail.NextActionTitle)</b><p>@ValueOrDash(detail.NextActionDescription)</p><div class="sub">Ответственный: @detail.AssigneeName</div></div>
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Переговоры</b><div><span class="badge info">Последние @detail.Negotiations.Count</span><button class="btn" type="button" @onclick="OpenNegotiationsAsync">Все переговоры</button> @if (detail.CanManageDossier) { <button class="btn primary" type="button" @onclick="OpenNegotiation">+ Добавить</button> }</div></div>
+                    <div class="ct"><b>Переговоры</b><div><span class="badge info">Последние @detail.Negotiations.Count</span><button class="btn" type="button" @onclick="OpenNegotiationsAsync">Все переговоры</button> @if (detail.CanManageDossier && detail.Stage != "acquired") { <button class="btn primary" type="button" @onclick="OpenNegotiation">+ Добавить</button> }</div></div>
                     <div class="neg-summary">
                         <div class="neg-summary-main">
                             @if (detail.Negotiations.Count == 0)
@@ -286,7 +286,7 @@
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Осмотр участка</b>@if (detail.Inspection.Exists) { <button class="btn" type="button" @onclick="OpenInspectionReportAsync">Посмотреть результат</button> } else if (detail.CanManageDossier) { <button class="btn" type="button" @onclick="OpenInspectionEditor">Начать осмотр</button> }</div>
+                    <div class="ct"><b>Осмотр участка</b>@if (detail.Inspection.Exists) { <button class="btn" type="button" @onclick="OpenInspectionReportAsync">Посмотреть результат</button> } else if (detail.CanManageDossier && detail.Stage != "acquired") { <button class="btn" type="button" @onclick="OpenInspectionEditor">Начать осмотр</button> }</div>
                     @if (!detail.Inspection.Exists)
                     {
                         <div class="inspection empty-inspection">

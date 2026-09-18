@@ -11,7 +11,7 @@
 | Задача | Реализация | Проверка исполнением | Приёмка |
 |---|---|---|---|
 | B1-01 — LR-09 / LR-19 | Код и тесты входят в коммит добавления этого отчёта | Не выполнялась | Ожидает B1-04 |
-| B1-02 — жизненный цикл и просроченные проверки | Не начата | Не выполнялась | Нет |
+| B1-02 — жизненный цикл и просроченные проверки | Код и targeted tests подготовлены и публикуются одним коммитом | Не выполнялась | Ожидает B1-04 |
 | B1-03 — назначения, Owner, политика шаблонов | Не начата | Не выполнялась | Нет |
 | B1-04 — передача работы и проверка пакета | Не начата | Не выполнялась | Нет |
 
@@ -139,3 +139,40 @@ PostgreSQL-тесты используют существующий `Phase1Fixtu
 - Проверить исходные и обновлённые формы в обычном успешном сценарии; не ограничиваться fault injection.
 
 В B1-04 исправления ошибок этого пакета входят в scope. Записать точный проверенный commit, команды, количество passed/failed/skipped и ограничения. Только затем менять статус с «исполнение не проверено» на «проверено»; публикация в ветку не является production-релизом.
+
+
+## B1-02 — terminal acquired и просроченные проверки
+
+**Исходно зафиксированная база:** `14fa6064567fed4bb1a511ffc2c5576c82559dc2`.  
+**Фактический parent публикации:** `9e1ffd5e23d176be253126b184bef3943851e99a` (`fix: satisfy replay analyzer`), появившийся во время подготовки B1-02 и не пересекающийся с её файлами.  
+**Scope:** LR-01, LR-05.  
+**Статус:** реализовано в коде и тестах; выполнение отложено до B1-04.
+
+### Изменённое поведение
+
+- `DecideAsync` после проверки актуальной версии явно отклоняет обычные Procurement decisions для `acquired`. Отказ происходит до изменения stage, assignment, task, transitions, timeline, notifications или audit.
+- `SaveNextActionAsync` также отклоняет изменение/повторное открытие следующей задачи у купленного объекта.
+- Обычная карточка и Procurement V2 больше не выставляют `CanManagerDecide` для `acquired`; V2 не предлагает изменение следующего действия, новый контакт или старт осмотра из drawer купленного объекта. Полная карточка уже имела stage guards для dossier actions.
+- `CorrectAcquisitionAsync` не менялся и остаётся текущим способом исправить подтверждённые данные покупки без снятия terminal stage.
+- `SaveCheckAsync` сначала получает существующую проверку и её версию. Неизменённый `DueAt`, который к моменту сохранения уже оказался в прошлом, разрешён. Новый или изменённый прошлый срок запрещён. UTC-инвариант сохранён.
+
+### Файлы B1-02
+
+- `src/LandErp.Infrastructure/Modules/Procurement/ProcurementWorkspace.cs`
+- `src/LandErp.Infrastructure/Modules/Procurement/ProcurementQueueV2ReadService.cs`
+- `src/LandErp.Server/Components/Pages/ProcurementQueueV2.razor`
+- `tests/LandErp.Foundation.Tests/ReleasePackageB102Tests.cs` — 2 новых PostgreSQL TestMethod
+- `docs/03-active/GATE-RELEASE-B1-02.md`
+- `docs/03-active/ACTIVE_TASK.md`
+- этот отчёт
+
+Миграций, EF model changes, новых packages и Parser/Collector изменений нет.
+
+### Подготовленные проверки, НЕ запущенные в B1-02
+
+1. Купленный case: `CanManagerDecide=false` в двух read models; обычное решение и SaveNextAction отклоняются; task остаётся completed, stage/acquisition/transition/timeline/audit не меняются.
+2. После этих отказов `CorrectAcquisitionAsync` успешно меняет только данные покупки и сохраняет stage=`acquired`.
+3. Проверка создаётся с будущим сроком через fixed TimeProvider, затем после наступления срока закрывается с тем же DueAt.
+4. Другое прошлое значение срока и новая проверка с прошлым дедлайном отклоняются; после отказов история и аудит содержат только две подтверждённые операции.
+
+**Не выполнялись:** restore, build, tests, browser, PostgreSQL execution, Server/Worker, migrations и production operations. Фактический запуск и регрессия acquisition/check/UI входят в B1-04.

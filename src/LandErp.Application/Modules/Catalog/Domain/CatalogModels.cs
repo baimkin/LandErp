@@ -4,6 +4,7 @@ public enum CatalogSource { Avito, Cian, Telegram, Referral, Agent, DirectOwner,
 public enum CatalogDisposition { Incoming, Monitoring, InWork, Dismissed, Duplicate, Fake, RemovedAtSource, Sold }
 public enum CatalogIngestionKind { Collector, Employee, Migration, Integration }
 public enum CatalogEventKind { ReviewStarted, SourceChanged, MonitoringStarted, MonitoringTriggered, Classified, CaseResumed }
+public enum DuplicateCandidateStatus { Pending, Confirmed, Rejected }
 
 public sealed class Listing
 {
@@ -57,6 +58,22 @@ public sealed class CatalogEvent
     public decimal? ObservedPricePerSotka { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
 }
+public sealed class CatalogDuplicateCandidate
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public Guid ListingId { get; set; }
+    public Guid CandidateListingId { get; set; }
+    public int Score { get; set; }
+    public string ReasonsJson { get; set; } = "[]";
+    public DuplicateCandidateStatus Status { get; set; } = DuplicateCandidateStatus.Pending;
+    public Guid? ReviewedByEmployeeId { get; set; }
+    public DateTimeOffset RecordedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? ReviewedAt { get; set; }
+    public long Version { get; set; } = 1;
+}
+
 public sealed class CatalogObservation
 {
     public Guid Id { get; set; }

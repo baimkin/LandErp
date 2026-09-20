@@ -48,8 +48,7 @@
             <div class="v2-stats">
                 <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.New ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.New)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.New)"><label>Новые</label><strong>@catalogPage.Summary.New</strong><span>ещё не просматривали</span></button>
                 <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PriceChanged)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PriceChanged)"><label>Цена изменилась</label><strong>@catalogPage.Summary.PriceChanged</strong><span>реальные изменения цены</span></button>
-                @* TODO-BACKEND-INCOMING: possible-duplicate candidate model is not available. *@
-                <div class="v2-stat warn" data-todo-backend="TODO-BACKEND-INCOMING"><label>Возможный дубль</label><strong>—</strong><span>нужен matching</span></div>
+                <button type="button" class="v2-stat v2-stat-action warn @(preset == IncomingCatalogPreset.PossibleDuplicate ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PossibleDuplicate)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PossibleDuplicate)"><label>Возможный дубль</label><strong>@catalogPage.Summary.PossibleDuplicate</strong><span>есть совпадающие признаки</span></button>
                 <button type="button" class="v2-stat v2-stat-action risk @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.Incomplete)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.Incomplete)"><label>Не хватает данных</label><strong>@catalogPage.Summary.Incomplete</strong><span>цена / площадь / локация</span></button>
                 <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.ProcessedToday ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.ProcessedToday)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.ProcessedToday)"><label>Обработано сегодня</label><strong>@catalogPage.Summary.ProcessedToday</strong><span>решений за рабочий день</span></button>
             </div>
@@ -168,8 +167,7 @@
                     <button type="button" class="v2-preset @(preset == null ? "active" : "")" @onclick="() => SelectPresetAsync(null)">Все @catalogPage.Summary.Incoming</button>
                     <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.New ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.New)">Новые @catalogPage.Summary.New</button>
                     <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.PriceChanged)">Изменилась цена @catalogPage.Summary.PriceChanged</button>
-                    @* TODO-BACKEND-INCOMING: possible duplicate signal/matching is not persisted yet. *@
-                    <button type="button" class="v2-preset" disabled data-todo-backend="TODO-BACKEND-INCOMING">Возможный дубль —</button>
+                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.PossibleDuplicate ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.PossibleDuplicate)">Возможный дубль @catalogPage.Summary.PossibleDuplicate</button>
                     <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.Incomplete)">Неполные данные @catalogPage.Summary.Incomplete</button>
                     <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.ReturnedFromMonitoring ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.ReturnedFromMonitoring)">Вернулись из мониторинга @catalogPage.Summary.ReturnedFromMonitoring</button>
                 </div>
@@ -212,6 +210,7 @@
                                                 <div class="v2-object">
                                                     <strong>@HighlightText(item.Title)</strong>
                                                     <span class="v2-review-state @(row?.Reviewed == true ? "reviewed" : "new")">@(row?.Reviewed == true ? "Просмотрено" : "Новое")</span>
+                                                    @if (row?.PossibleDuplicate == true) { <span class="v2-badge violet v2-duplicate-badge">Возможный дубль</span> }
                                                     <div class="v2-sub">@HighlightText(item.Location ?? "Местоположение неизвестно") <span>·</span> @HighlightText(item.ExternalId ?? "без внешнего ID")</div>
                                                     @if (!string.IsNullOrWhiteSpace(item.CadastralNumber) || !string.IsNullOrWhiteSpace(row?.SearchConfigurationLabel) || item.BusinessNumber != null)
                                                     {
@@ -324,6 +323,39 @@
                         <div class="v2-ingress-comment"><strong>Комментарий при добавлении</strong><span>@detail.IngressComment</span></div>
                     }
                     <p class="v2-provenance">@detail.Item.Provenance</p>
+                </section>
+            }
+
+            @if (detailRead?.DuplicateCandidates is { Count: > 0 } duplicateCandidates)
+            {
+                <section class="v2-card v2-duplicate-card">
+                    <h3>Возможный дубль</h3>
+                    <p class="v2-provenance">Система нашла объявления с совпадающими признаками. Решение остаётся за менеджером.</p>
+                    @foreach (IncomingDuplicateCandidateView candidate in duplicateCandidates)
+                    {
+                        <article class="v2-duplicate-candidate">
+                            <div class="v2-duplicate-candidate-head">
+                                <div>
+                                    <strong>@candidate.Title</strong>
+                                    <span>@SourceBadge.Label(candidate.Source) · @(candidate.Location ?? "Локация не указана")</span>
+                                </div>
+                                @if (candidate.Url != null) { <a href="@candidate.Url" target="_blank" rel="noopener noreferrer">Источник ↗</a> }
+                            </div>
+                            <div class="v2-duplicate-facts">
+                                <span>@ProcurementLabels.Money(candidate.Price)</span>
+                                <span>@AreaSotki(candidate.AreaSquareMeters)</span>
+                                @if (candidate.CadastralNumber != null) { <span>@candidate.CadastralNumber</span> }
+                            </div>
+                            @if (candidate.Reasons.Count > 0)
+                            {
+                                <ul class="v2-duplicate-reasons">@foreach (string reason in candidate.Reasons) { <li>@reason</li> }</ul>
+                            }
+                            <div class="v2-duplicate-actions">
+                                <button type="button" class="v2-btn sm" disabled="@Busy" @onclick="() => ReviewDuplicateAsync(candidate, false)">Не дубль</button>
+                                <button type="button" class="v2-btn sm duplicate" disabled="@Busy" @onclick="() => ReviewDuplicateAsync(candidate, true)">Подтвердить дубль</button>
+                            </div>
+                        </article>
+                    }
                 </section>
             }
 
@@ -905,6 +937,7 @@
     {
         IncomingCatalogPreset.New => "новые",
         IncomingCatalogPreset.PriceChanged => "цена изменилась",
+        IncomingCatalogPreset.PossibleDuplicate => "возможный дубль",
         IncomingCatalogPreset.Incomplete => "неполные данные",
         IncomingCatalogPreset.ProcessedToday => "обработано сегодня",
         _ => "из мониторинга"
@@ -1000,6 +1033,23 @@
         await ExecuteAsync(async () => result = await Workspace.TakeToWorkAsync(CurrentSubject,
             new(takeItem!.Id, existingCaseId), Guid.CreateVersion7().ToString(), CancellationToken.None));
         if (result != null) Navigation.NavigateTo($"/procurement/{result.CaseId}");
+    }
+
+    private async Task ReviewDuplicateAsync(IncomingDuplicateCandidateView candidate, bool confirmed)
+    {
+        if (detail == null) return;
+        Guid id = detail.Item.Id;
+        int currentIndex = CurrentItemIndex(id);
+        Guid? preferredNextId = NextItemId(id);
+        await ExecuteAsync(() => Workspace.ReviewDuplicateCandidateAsync(CurrentSubject,
+            new(candidate.Id, candidate.Version, confirmed), Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (Success == null) return;
+
+        bool stillPresent = catalogPage?.Items.Any(item => item.Id == id) == true;
+        if (confirmed || !stillPresent)
+            await OpenNextAfterDecisionAsync(id, currentIndex, preferredNextId);
+        else
+            await RefreshDetailAsync(id);
     }
 
     private async Task SaveMonitoringAsync()
@@ -1146,13 +1196,17 @@
         }
     };
 
-    private static string RowTone(IncomingCatalogRowRead? row) => row?.RowState switch
+    private static string RowTone(IncomingCatalogRowRead? row)
+    {
+        if (row?.PossibleDuplicate == true) return "duplicate";
+        return row?.RowState switch
     {
         IncomingCatalogRowState.Incomplete => "incomplete",
         IncomingCatalogRowState.PriceChanged => "changed",
         IncomingCatalogRowState.ReturnedFromMonitoring => "changed",
         _ => ""
-    };
+        };
+    }
 
     private string PageRangeText()
     {

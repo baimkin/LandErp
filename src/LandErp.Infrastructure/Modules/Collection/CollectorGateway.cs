@@ -348,6 +348,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             if (isNew || data.ObservedAt > listing.LastObservedAt)
             {
                 ApplyKnown(listing, data, changes);
+                IncomingDuplicateDetector.ApplyExtractedCadastral(listing);
                 listing.LastObservedAt = data.ObservedAt;
                 if (changes.Count > 0 && !isNew)
                 {
@@ -365,6 +366,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             }
             if (data.ObservedAt < listing.FirstObservedAt) listing.FirstObservedAt = data.ObservedAt;
             if (isNew) db.Listings.Add(listing);
+            await IncomingDuplicateDetector.RefreshAsync(db, listing, time.GetUtcNow(), cancellationToken);
             if (isNew) newListings++;
             else if (changes.Count > 0) changedListings++;
             db.ListingObservations.Add(new()

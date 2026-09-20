@@ -121,6 +121,88 @@ namespace LandErp.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogDuplicateCandidate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CandidateListingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("candidate_listing_id");
+
+                    b.Property<Guid>("ListingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("listing_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<string>("ReasonsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("reasons_json");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at")
+                        .HasComment("UTC момент записи факта в LandErp; не заменяет неизвестную дату действия факта в реальном мире.");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reviewed_at");
+
+                    b.Property<Guid?>("ReviewedByEmployeeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reviewed_by_employee_id");
+
+                    b.Property<int>("Score")
+                        .HasColumnType("integer")
+                        .HasColumnName("score");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_duplicate_candidates");
+
+                    b.HasIndex("CandidateListingId")
+                        .HasDatabaseName("ix_duplicate_candidates_candidate_listing_id");
+
+                    b.HasIndex("ListingId")
+                        .HasDatabaseName("ix_duplicate_candidates_listing_id");
+
+                    b.HasIndex("ReviewedByEmployeeId")
+                        .HasDatabaseName("ix_duplicate_candidates_reviewed_by_employee_id");
+
+                    b.HasIndex("OrganizationId", "ListingId", "CandidateListingId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_duplicate_candidates_organization_id_listing_id_candidate_listing_id");
+
+                    b.HasIndex("OrganizationId", "Status", "RecordedAt")
+                        .HasDatabaseName("ix_duplicate_candidates_organization_id_status_recorded_at");
+
+                    b.ToTable("duplicate_candidates", "catalog", t =>
+                        {
+                            t.HasComment("Сохранённые кандидаты на совпадение двух входящих предложений. Решение менеджера не удаляется и не пересоздаётся повторным matching.");
+                        });
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3437,6 +3519,36 @@ namespace LandErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_stored_files_created_by_employee_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogDuplicateCandidate", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Catalog.Domain.Listing", null)
+                        .WithMany()
+                        .HasForeignKey("CandidateListingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_duplicate_candidates_candidate_listing_id");
+
+                    b.HasOne("LandErp.Application.Modules.Catalog.Domain.Listing", null)
+                        .WithMany()
+                        .HasForeignKey("ListingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_duplicate_candidates_listing_id");
+
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_duplicate_candidates_organization_id");
+
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewedByEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_duplicate_candidates_reviewed_by_employee_id");
                 });
 
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogEvent", b =>

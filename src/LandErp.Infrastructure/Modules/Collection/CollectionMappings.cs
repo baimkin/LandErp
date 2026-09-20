@@ -96,6 +96,18 @@ internal static class CollectionMappings
         builder.Entity<CatalogObservation>().HasOne<Listing>().WithMany().HasForeignKey(item => item.ListingId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CatalogObservation>().HasOne<ServerCollectionJob>().WithMany().HasForeignKey(item => item.JobId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CatalogObservation>().HasOne<CollectorAgent>().WithMany().HasForeignKey(item => item.AgentId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CatalogDuplicateCandidate>().ToTable("duplicate_candidates", "catalog");
+        builder.Entity<CatalogDuplicateCandidate>().Property(item => item.Status).HasConversion<string>();
+        builder.Entity<CatalogDuplicateCandidate>().Property(item => item.ReasonsJson).HasColumnType("jsonb");
+        builder.Entity<CatalogDuplicateCandidate>().HasIndex(item => item.ListingId);
+        builder.Entity<CatalogDuplicateCandidate>().HasIndex(item => item.CandidateListingId);
+        builder.Entity<CatalogDuplicateCandidate>().HasIndex(item => item.ReviewedByEmployeeId);
+        builder.Entity<CatalogDuplicateCandidate>().HasIndex(item => new { item.OrganizationId, item.ListingId, item.CandidateListingId }).IsUnique();
+        builder.Entity<CatalogDuplicateCandidate>().HasIndex(item => new { item.OrganizationId, item.Status, item.RecordedAt });
+        builder.Entity<CatalogDuplicateCandidate>().HasOne<Listing>().WithMany().HasForeignKey(item => item.ListingId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CatalogDuplicateCandidate>().HasOne<Listing>().WithMany().HasForeignKey(item => item.CandidateListingId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CatalogDuplicateCandidate>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ReviewedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CatalogDuplicateCandidate>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CatalogEvent>().ToTable("events", "catalog");
         builder.Entity<CatalogEvent>().Property(item => item.Kind).HasConversion<string>();
         builder.Entity<CatalogEvent>().Property(item => item.Message).HasMaxLength(4000);

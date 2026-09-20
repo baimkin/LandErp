@@ -49,6 +49,9 @@ public sealed class IncomingCatalogReadService(
                 .Where(item => item.OrganizationId == context.OrganizationId && item.Confirmed)
                 .Select(item => item.CatalogItemId))
             .Distinct();
+        IQueryable<Guid> pendingDuplicateListingIds = db.CatalogDuplicateCandidates.AsNoTracking()
+            .Where(item => item.OrganizationId == context.OrganizationId && item.Status == DuplicateCandidateStatus.Pending)
+            .Select(item => item.ListingId).Distinct();
         IQueryable<Guid> processedTodayIds = db.CatalogEvents.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId
                 && item.RecordedAt >= businessDayStart && item.RecordedAt < businessDayEnd
@@ -71,7 +74,8 @@ public sealed class IncomingCatalogReadService(
             await incomingItems.CountAsync(item => priceChangedIds.Contains(item.Id), cancellationToken),
             await incomingItems.CountAsync(item => returnedFromMonitoringIds.Contains(item.Id), cancellationToken),
             New: await incomingItems.CountAsync(item => !reviewedIds.Contains(item.Id), cancellationToken),
-            ProcessedToday: await processedTodayIds.CountAsync(cancellationToken));
+            ProcessedToday: await processedTodayIds.CountAsync(cancellationToken),
+            PossibleDuplicate: await incomingItems.CountAsync(item => pendingDuplicateListingIds.Contains(item.Id), cancellationToken));
 
         IQueryable<Listing> query = organizationItems;
         string[] searchTerms = SearchTerms(baseFilter.Text);
@@ -140,6 +144,7 @@ public sealed class IncomingCatalogReadService(
         {
             IncomingCatalogPreset.New => query.Where(item => !reviewedIds.Contains(item.Id)),
             IncomingCatalogPreset.PriceChanged => query.Where(item => priceChangedIds.Contains(item.Id)),
+            IncomingCatalogPreset.PossibleDuplicate => query.Where(item => pendingDuplicateListingIds.Contains(item.Id)),
             IncomingCatalogPreset.Incomplete => query.Where(item => item.Price == null || item.AreaSquareMeters == null || item.Location == null),
             IncomingCatalogPreset.ReturnedFromMonitoring => query.Where(item => returnedFromMonitoringIds.Contains(item.Id)),
             IncomingCatalogPreset.ProcessedToday => query.Where(item => processedTodayIds.Contains(item.Id)),
@@ -181,6 +186,8 @@ public sealed class IncomingCatalogReadService(
             .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.ObservedAt).First());
 
         HashSet<Guid> reviewedOnPage = (await reviewedIds.Where(id => ids.Contains(id)).ToArrayAsync(cancellationToken)).ToHashSet();
+        HashSet<Guid> possibleDuplicatesOnPage = (await pendingDuplicateListingIds.Where(id => ids.Contains(id))
+            .ToArrayAsync(cancellationToken)).ToHashSet();
 
         var eventRows = await db.CatalogEvents.AsNoTracking()
             .Where(item => ids.Contains(item.CatalogItemId)
@@ -205,7 +212,8 @@ public sealed class IncomingCatalogReadService(
             (IncomingCatalogMatchField? matchedField, string? matchedValue) = SearchMatch(item, searchTerms);
             rows[item.Id] = new(item.Id, search?.SearchId, search?.Label, Completeness(item),
                 RowState(item, priceChanged, returned), priceChanged, returned, photos.FirstOrDefault(), photos.Length,
-                landTypes, matchedField, matchedValue, Reviewed: reviewedOnPage.Contains(item.Id));
+                landTypes, matchedField, matchedValue, Reviewed: reviewedOnPage.Contains(item.Id),
+                PossibleDuplicate: possibleDuplicatesOnPage.Contains(item.Id));
             return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId);
         }).ToArray();
 
@@ -242,9 +250,26 @@ public sealed class IncomingCatalogReadService(
         bool returned = await db.CatalogEvents.AsNoTracking().AnyAsync(value => value.CatalogItemId == catalogItemId
             && value.Kind == CatalogEventKind.MonitoringTriggered, cancellationToken);
 
+        var duplicateRows = await (from duplicate in db.CatalogDuplicateCandidates.AsNoTracking()
+                                   join candidate in db.Listings.AsNoTracking() on duplicate.CandidateListingId equals candidate.Id
+                                   where duplicate.OrganizationId == context.OrganizationId
+                                       && duplicate.ListingId == catalogItemId
+                                       && duplicate.Status == DuplicateCandidateStatus.Pending
+                                   orderby duplicate.Score descending, duplicate.RecordedAt
+                                   select new
+                                   {
+                                       duplicate.Id, duplicate.Version, duplicate.CandidateListingId, candidate.Source,
+                                       candidate.Title, candidate.Location, candidate.Price, candidate.AreaSquareMeters,
+                                       candidate.CadastralNumber, candidate.Url, duplicate.ReasonsJson, duplicate.RecordedAt
+                                   }).ToArrayAsync(cancellationToken);
+        IncomingDuplicateCandidateView[] duplicateCandidates = duplicateRows.Select(value =>
+            new IncomingDuplicateCandidateView(value.Id, value.Version, value.CandidateListingId, value.Source,
+                value.Title ?? "Название неизвестно", value.Location, value.Price, value.AreaSquareMeters,
+                value.CadastralNumber, value.Url, DuplicateReasons(value.ReasonsJson), value.RecordedAt)).ToArray();
+
         return new(detail, PhotoUrls(item.PhotosJson), search?.SearchId, search?.Label, Completeness(item),
             RowState(item, priceChanged, returned), priceChanged, returned,
-            IncomingLandTypeClassifier.Classify(item.Title, item.Description));
+            IncomingLandTypeClassifier.Classify(item.Title, item.Description), duplicateCandidates);
     }
 
     private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber, string? caseStage) => new(
@@ -271,6 +296,12 @@ public sealed class IncomingCatalogReadService(
             : returned ? IncomingCatalogRowState.ReturnedFromMonitoring
             : priceChanged ? IncomingCatalogRowState.PriceChanged
             : IncomingCatalogRowState.Normal;
+
+    private static string[] DuplicateReasons(string json)
+    {
+        try { return JsonSerializer.Deserialize<string[]>(json) ?? []; }
+        catch (JsonException) { return []; }
+    }
 
     private static string[] PhotoUrls(string json)
     {

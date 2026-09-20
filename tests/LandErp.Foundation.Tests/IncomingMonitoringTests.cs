@@ -280,6 +280,104 @@ public sealed class IncomingMonitoringTests
         Assert.IsFalse(processed.Items.Any(item => item.Id == viewedOnlyId));
     }
 
+    [TestMethod]
+    public async Task DuplicateDetectorExtractsCadastralAndPersistsManagerDecision()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        const string realDescription = """
+            Продаём свой участок 6 соток (601 м²) в КП «Солнечный берег», д. Федюково.
+            Адрес: Московская обл., Подольск г.о., д. Федюково, КП «Солнечный берег», земельный участок № 58.
+            Кадастровый номер: 50:27:0020549:439.
+            Категория земель: земли населённых пунктов. ВРИ: для индивидуального жилищного строительства (ИЖС).
+            Стоимость: 6 500 000 ₽. Обременения отсутствуют. 700 м до станции.
+            """;
+
+        Guid firstId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Referral, "6 соток ИЖС в Федюково", "Федюково", 6_500_000m, 601m,
+                null, null, null, realDescription, "Первый источник"), "duplicate-first", CancellationToken.None);
+        CatalogItemDetail first = await fixture.Workspace.ReadItemAsync(fixture.Manager, firstId, CancellationToken.None);
+        Assert.AreEqual("50:27:0020549:439", first.Item.CadastralNumber);
+
+        string copied = realDescription.Replace("Кадастровый номер: 50:27:0020549:439.", "", StringComparison.Ordinal)
+            .Replace("6 500 000", "6 450 000", StringComparison.Ordinal);
+        Guid secondId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "6 COТOK ИЖC, Федюково", "д. Федюково", 6_450_000m, 600m,
+                null, null, null, copied, "Второй источник"), "duplicate-second", CancellationToken.None);
+
+        IncomingCatalogReadPage duplicates = await reads.ReadAsync(fixture.Manager,
+            new(new(), Preset: IncomingCatalogPreset.PossibleDuplicate), CancellationToken.None);
+        Assert.AreEqual(1, duplicates.Total);
+        Assert.AreEqual(secondId, duplicates.Items.Single().Id);
+        Assert.AreEqual(1, duplicates.Summary.PossibleDuplicate);
+
+        IncomingCatalogDetailRead detail = await reads.ReadDetailAsync(fixture.Manager, secondId, CancellationToken.None);
+        IncomingDuplicateCandidateView candidate = detail.DuplicateCandidates!.Single();
+        Assert.AreEqual(firstId, candidate.CandidateListingId);
+        Assert.IsTrue(candidate.Reasons.Any(reason => reason.Contains("описан", StringComparison.OrdinalIgnoreCase)));
+        Assert.IsTrue(candidate.Reasons.Any(reason => reason.Contains("площад", StringComparison.OrdinalIgnoreCase)));
+
+        await fixture.Workspace.ReviewDuplicateCandidateAsync(fixture.Manager,
+            new(candidate.Id, candidate.Version, false), "duplicate-reject", CancellationToken.None);
+        Assert.AreEqual(0, (await reads.ReadAsync(fixture.Manager,
+            new(new(), Preset: IncomingCatalogPreset.PossibleDuplicate), CancellationToken.None)).Total);
+        Assert.AreEqual(DuplicateCandidateStatus.Rejected, await ReadDuplicateStatusAsync(fixture, candidate.Id));
+    }
+
+    [TestMethod]
+    public async Task ConfirmDuplicateMarksIncomingAsDuplicateAndAuditsDecision()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        const string cadastral = "50:27:0020549:439";
+
+        await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Referral, "Участок Федюково", "Федюково", 6_500_000m, 601m,
+                null, null, cadastral, "КП «Солнечный берег», участок № 58", "Первый источник"),
+            "confirm-first", CancellationToken.None);
+        Guid secondId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "Тот же участок", "Федюково", 6_450_000m, 601m,
+                null, null, cadastral, "КП «Солнечный берег», участок № 58", "Второй источник"),
+            "confirm-second", CancellationToken.None);
+
+        IncomingCatalogDetailRead detail = await reads.ReadDetailAsync(fixture.Manager, secondId, CancellationToken.None);
+        IncomingDuplicateCandidateView candidate = detail.DuplicateCandidates!.Single();
+        await fixture.Workspace.ReviewDuplicateCandidateAsync(fixture.Manager,
+            new(candidate.Id, candidate.Version, true), "duplicate-confirm", CancellationToken.None);
+
+        CatalogItemDetail result = await fixture.Workspace.ReadItemAsync(fixture.Manager, secondId, CancellationToken.None);
+        Assert.AreEqual(CatalogDisposition.Duplicate, result.Item.Disposition);
+        Assert.AreEqual(DuplicateCandidateStatus.Confirmed, await ReadDuplicateStatusAsync(fixture, candidate.Id));
+        Assert.AreEqual(1, await fixture.CountAsync(db => db.AuditEvents.CountAsync(item =>
+            item.ObjectId == secondId && item.Action == "CatalogDuplicateConfirmed")));
+    }
+
+    [TestMethod]
+    public async Task DifferentExplicitPlotNumbersSuppressCopiedTemplateFalsePositive()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        string template = "КП «Солнечный берег», земельный участок № {0}. ИЖС, 601 м². "
+            + "Электричество по границе, газификация, 700 м до станции. Собственник. "
+            + "Тихая зелёная локация рядом с Москвой, инфраструктура в шаговой доступности.";
+
+        await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Referral, "Федюково участок 58", "Федюково", 6_500_000m, 601m,
+                null, null, null, template.Replace("{0}", "58", StringComparison.Ordinal), "Первый участок"), "plot-58", CancellationToken.None);
+        await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "Федюково участок 59", "Федюково", 6_500_000m, 601m,
+                null, null, null, template.Replace("{0}", "59", StringComparison.Ordinal), "Второй участок"), "plot-59", CancellationToken.None);
+
+        Assert.AreEqual(0, (await reads.ReadAsync(fixture.Manager,
+            new(new(), Preset: IncomingCatalogPreset.PossibleDuplicate), CancellationToken.None)).Total);
+    }
+
+    private static async Task<DuplicateCandidateStatus> ReadDuplicateStatusAsync(ProcurementTests.Phase1Fixture fixture, Guid id)
+    {
+        await using LandErpDbContext db = await fixture.Factory.CreateDbContextAsync();
+        return await db.CatalogDuplicateCandidates.Where(item => item.Id == id).Select(item => item.Status).SingleAsync();
+    }
+
     private static async Task DecideAsync(ProcurementTests.Phase1Fixture fixture, Guid caseId,
         ProcurementAction action, string reason)
     {

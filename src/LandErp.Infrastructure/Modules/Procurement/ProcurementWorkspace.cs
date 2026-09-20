@@ -168,10 +168,14 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             AttentionAt = now
         };
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        IncomingDuplicateDetector.ApplyExtractedCadastral(item);
         db.Listings.Add(item);
+        await IncomingDuplicateDetector.RefreshAsync(db, item, now, cancellationToken);
         OrganizationWorkspace.AddAudit(db, context, subject, "CatalogItemCreatedManually", "CatalogItem", item.Id,
-            new { item.Source, item.ExternalId, HasUrl = item.Url != null }, correlationId);
+            new { item.Source, item.ExternalId, HasUrl = item.Url != null, item.CadastralNumber }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return item.Id;
     }
 
@@ -229,6 +233,65 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         OrganizationWorkspace.AddAudit(db, context, subject, "CatalogMonitoringStarted", "CatalogItem", item.Id,
             new { TargetTotalPrice = total, TargetPricePerSotka = perSotka, Reason = reason }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ReviewDuplicateCandidateAsync(Subject subject, ReviewCatalogDuplicateCandidate command,
+        string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        CatalogDuplicateCandidate candidate = (await db.CatalogDuplicateCandidates.FromSqlInterpolated(
+            $"SELECT * FROM catalog.duplicate_candidates WHERE id={command.CandidateId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
+        if (candidate.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException();
+        if (candidate.Status != DuplicateCandidateStatus.Pending)
+            throw new ArgumentException("Кандидат на дубль уже обработан.");
+
+        Listing listing = (await db.Listings.FromSqlInterpolated(
+            $"SELECT * FROM catalog.listings WHERE id={candidate.ListingId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
+        Listing other = await db.Listings.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.Id == candidate.CandidateListingId && item.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
+
+        DateTimeOffset now = time.GetUtcNow();
+        candidate.Status = command.Confirmed ? DuplicateCandidateStatus.Confirmed : DuplicateCandidateStatus.Rejected;
+        candidate.ReviewedByEmployeeId = context.EmployeeId;
+        candidate.ReviewedAt = now;
+        candidate.UpdatedAt = now;
+
+        if (command.Confirmed)
+        {
+            if (listing.Disposition != CatalogDisposition.Incoming)
+                throw new ArgumentException("Подтвердить дубль можно только для входящего предложения.");
+            listing.Disposition = CatalogDisposition.Duplicate;
+            listing.QueueReason = $"Подтверждён дубль: {other.Title ?? other.Location ?? other.Id.ToString()}";
+            listing.AttentionRequired = false;
+            db.Entry(listing).Property(value => value.Version).IsModified = true;
+            db.CatalogEvents.Add(CatalogEvent(listing, CatalogEventKind.Classified,
+                $"Дубль: совпадение подтверждено с {other.Title ?? other.Location ?? other.Id.ToString()}", now));
+
+            CatalogDuplicateCandidate[] remaining = await db.CatalogDuplicateCandidates
+                .Where(item => item.OrganizationId == context.OrganizationId && item.ListingId == listing.Id
+                    && item.Id != candidate.Id && item.Status == DuplicateCandidateStatus.Pending)
+                .ToArrayAsync(cancellationToken);
+            foreach (CatalogDuplicateCandidate item in remaining)
+            {
+                item.Status = DuplicateCandidateStatus.Rejected;
+                item.ReviewedByEmployeeId = context.EmployeeId;
+                item.ReviewedAt = now;
+                item.UpdatedAt = now;
+            }
+        }
+
+        OrganizationWorkspace.AddAudit(db, context, subject,
+            command.Confirmed ? "CatalogDuplicateConfirmed" : "CatalogDuplicateRejected",
+            "CatalogItem", listing.Id,
+            new { CandidateId = candidate.Id, OtherCatalogItemId = other.Id, candidate.Score }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<CaseLinkTarget>> ReadLinkTargetsAsync(Subject subject, CancellationToken cancellationToken)

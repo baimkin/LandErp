@@ -28,6 +28,7 @@ public sealed record CreateManualCatalogItem(CatalogSource Source, string Title,
 public sealed record SetCatalogDisposition(Guid CatalogItemId, long ExpectedVersion, CatalogDisposition Disposition, string Reason);
 public sealed record SetCatalogMonitoring(Guid CatalogItemId, long ExpectedVersion, decimal? TargetTotalPrice,
     decimal? TargetPricePerSotka, string Reason);
+public sealed record ReviewCatalogDuplicateCandidate(Guid CandidateId, long ExpectedVersion, bool Confirmed);
 public sealed record ResumeCatalogItemCase(Guid CatalogItemId, long ExpectedCatalogVersion);
 public sealed record TakeCatalogItemToWork(Guid CatalogItemId, Guid? ExistingCaseId = null);
 public sealed record CorrectCatalogItemCaseLink(Guid CatalogItemId, long ExpectedCatalogVersion,
@@ -43,6 +44,7 @@ public interface ICatalogWorkspace
     Task<Guid> CreateManualAsync(Subject subject, CreateManualCatalogItem command, string correlationId, CancellationToken cancellationToken);
     Task SetDispositionAsync(Subject subject, SetCatalogDisposition command, string correlationId, CancellationToken cancellationToken);
     Task SetMonitoringAsync(Subject subject, SetCatalogMonitoring command, string correlationId, CancellationToken cancellationToken);
+    Task ReviewDuplicateCandidateAsync(Subject subject, ReviewCatalogDuplicateCandidate command, string correlationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CaseLinkTarget>> ReadLinkTargetsAsync(Subject subject, CancellationToken cancellationToken);
     Task<TakeToWorkResult> TakeToWorkAsync(Subject subject, TakeCatalogItemToWork command, string correlationId, CancellationToken cancellationToken);
     Task CorrectCaseLinkAsync(Subject subject, CorrectCatalogItemCaseLink command, string correlationId, CancellationToken cancellationToken);

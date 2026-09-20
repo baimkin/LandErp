@@ -868,3 +868,66 @@
     background: var(--surface-subtle);
 }
 
+.v2-duplicate-badge {
+    margin: 5px 0 0 6px;
+    vertical-align: middle;
+}
+
+.v2-duplicate-card {
+    border-color: color-mix(in srgb, var(--purple) 30%, var(--border));
+    background: color-mix(in srgb, var(--purple-soft) 35%, var(--surface));
+}
+
+.v2-duplicate-candidate {
+    margin-top: 10px;
+    padding: 11px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--surface);
+}
+
+.v2-duplicate-candidate-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.v2-duplicate-candidate-head > div {
+    min-width: 0;
+}
+
+.v2-duplicate-candidate-head strong,
+.v2-duplicate-candidate-head span {
+    display: block;
+}
+
+.v2-duplicate-candidate-head span,
+.v2-duplicate-candidate-head a {
+    margin-top: 3px;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+
+.v2-duplicate-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin-top: 8px;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semibold);
+}
+
+.v2-duplicate-reasons {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+}
+
+.v2-duplicate-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 7px;
+    margin-top: 10px;
+}
+

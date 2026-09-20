@@ -5,7 +5,7 @@ namespace LandErp.Application.Modules.Catalog.Contracts;
 using Domain;
 
 /// <summary>Server-backed working views for Incoming. Source-derived land types are convenience classifications, not legal VRI/category facts.</summary>
-public enum IncomingCatalogPreset { New, PriceChanged, Incomplete, ReturnedFromMonitoring, ProcessedToday }
+public enum IncomingCatalogPreset { New, PriceChanged, PossibleDuplicate, Incomplete, ReturnedFromMonitoring, ProcessedToday }
 public enum IncomingCatalogRowState { Normal, PriceChanged, ReturnedFromMonitoring, Incomplete }
 public enum IncomingCatalogSortField { ChangedAt, Price, Area }
 public enum IncomingCatalogSortDirection { Descending, Ascending }
@@ -23,17 +23,21 @@ public sealed record IncomingCatalogRowRead(Guid CatalogItemId, Guid? SearchConf
     string? SearchConfigurationLabel, int CompletenessPercent, IncomingCatalogRowState RowState,
     bool PriceChanged, bool ReturnedFromMonitoring, string? ThumbnailUrl, int PhotoCount,
     IncomingLandType[] LandTypes, IncomingCatalogMatchField? SearchMatchedField = null,
-    string? SearchMatchedValue = null, bool Reviewed = false);
+    string? SearchMatchedValue = null, bool Reviewed = false, bool PossibleDuplicate = false);
 public sealed record IncomingCatalogReadSummary(int Incoming, int Attention, int Monitoring, int InWork, int Incomplete,
-    int PriceChanged, int ReturnedFromMonitoring, int New = 0, int ProcessedToday = 0);
+    int PriceChanged, int ReturnedFromMonitoring, int New = 0, int ProcessedToday = 0, int PossibleDuplicate = 0);
 public sealed record IncomingCatalogReadPage(IReadOnlyList<CatalogItemView> Items, int Total,
     IncomingCatalogReadSummary Summary, IReadOnlyList<IncomingSearchGroupView> SearchGroups,
     IReadOnlyList<IncomingSearchConfigurationView> SearchConfigurations,
     IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows);
+public sealed record IncomingDuplicateCandidateView(Guid Id, long Version, Guid CandidateListingId,
+    CatalogSource Source, string Title, string? Location, decimal? Price, decimal? AreaSquareMeters,
+    string? CadastralNumber, string? Url, IReadOnlyList<string> Reasons, DateTimeOffset RecordedAt);
+
 public sealed record IncomingCatalogDetailRead(CatalogItemDetail Detail, IReadOnlyList<string> PhotoUrls,
     Guid? SearchConfigurationId, string? SearchConfigurationLabel, int CompletenessPercent,
     IncomingCatalogRowState RowState, bool PriceChanged, bool ReturnedFromMonitoring,
-    IncomingLandType[] LandTypes);
+    IncomingLandType[] LandTypes, IReadOnlyList<IncomingDuplicateCandidateView>? DuplicateCandidates = null);
 
 public sealed record IncomingFilterPresetCriteriaV1(int SchemaVersion, CatalogSource? Source,
     Guid? SearchConfigurationId, CatalogDisposition? Disposition, CatalogAgeRange Age,

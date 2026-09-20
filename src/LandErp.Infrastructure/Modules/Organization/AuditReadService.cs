@@ -27,7 +27,8 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
         "EmployeeRestored", "EmployeeWorkTransferred", "EmployeeWorkHandoverPending", "AssignmentChanged", "CollectorAgentCreated", "CollectorAgentRevoked",
         "CollectionSearchCreated", "CollectionSearchUpdated", "CollectionSearchGroupCreated", "CollectionSearchGroupArchived",
         "CatalogItemCreatedManually", "CatalogDispositionChanged", "CatalogMonitoringStarted", "CatalogItemTakenToWork",
-        "CatalogItemLinkedToCase", "PropertyCaseResumedFromCatalog", "SellerContactRecorded", "CaseNoteAdded",
+        "CatalogItemLinkedToCase", "CatalogDuplicateConfirmed", "CatalogDuplicateRejected",
+        "PropertyCaseResumedFromCatalog", "SellerContactRecorded", "CaseNoteAdded",
         "CaseNegotiationAdded", "CaseCheckSaved", "CaseCheckTemplateSaved", "InspectionTemplateSaved",
         "SiteInspectionStarted", "SiteInspectionDraftSaved", "SiteInspectionCompleted", "PropertyCaseAcquired",
         "CaseAttachmentAdded", "CaseAttachmentUploadRetried", "CaseFactAppliedFromSource"
@@ -328,6 +329,8 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
                 "CatalogMonitoringStarted" => Procurement("Предложение поставлено на мониторинг", summary),
                 "CatalogItemTakenToWork" => Procurement("Предложение взято в работу", summary, "success"),
                 "CatalogItemLinkedToCase" => Procurement("Источник связан с объектом закупки", summary),
+                "CatalogDuplicateConfirmed" => Procurement("Подтверждён дубль входящего предложения", summary, "warning"),
+                "CatalogDuplicateRejected" => Procurement("Отклонён кандидат на дубль", summary),
                 "PropertyCaseResumedFromCatalog" => Procurement("Работа по объекту возобновлена", summary, "success"),
                 "SellerContactRecorded" => Procurement("Зафиксирован контакт с продавцом", summary), "CaseNoteAdded" => Procurement("Добавлена заметка", summary),
                 "CaseNegotiationAdded" => Procurement("Добавлены переговоры", summary), "CaseCheckSaved" => Procurement("Сохранена проверка", summary),

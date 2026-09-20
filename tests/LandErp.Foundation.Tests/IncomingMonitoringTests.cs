@@ -372,6 +372,70 @@ public sealed class IncomingMonitoringTests
             new(new(), Preset: IncomingCatalogPreset.PossibleDuplicate), CancellationToken.None)).Total);
     }
 
+    [TestMethod]
+    public async Task PhotoFingerprintsDriveDuplicatesAndSettingsApplyWithoutRestart()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        IIncomingDuplicateMatchingMaintenance matcher =
+            fixture.Scope.ServiceProvider.GetRequiredService<IIncomingDuplicateMatchingMaintenance>();
+        IDuplicateDetectionSettingsService settings =
+            fixture.Scope.ServiceProvider.GetRequiredService<IDuplicateDetectionSettingsService>();
+
+        Guid firstId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Referral, "Северный участок", null, null, null,
+                null, null, null, "Берёзовая роща, тупиковая дорога", "Фото-тест A"),
+            "photo-duplicate-a", CancellationToken.None);
+        Guid secondId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "Южный участок", null, null, null,
+                null, null, null, "Открытое поле возле леса", "Фото-тест B"),
+            "photo-duplicate-b", CancellationToken.None);
+
+        await SeedFingerprintAsync(fixture, firstId, 0, unchecked((long)0x0F0F0F0F0F0F0F0FUL));
+        await SeedFingerprintAsync(fixture, firstId, 1, unchecked((long)0x3333333333333333UL));
+        await SeedFingerprintAsync(fixture, secondId, 0, unchecked((long)0x0F0F0F0F0F0F0F0EUL));
+        await SeedFingerprintAsync(fixture, secondId, 1, unchecked((long)0x3333333333333331UL));
+
+        await matcher.RefreshAsync(secondId, CancellationToken.None);
+        IncomingCatalogReadPage duplicatePage = await reads.ReadAsync(fixture.Manager,
+            new(new(), Preset: IncomingCatalogPreset.PossibleDuplicate), CancellationToken.None);
+        Assert.AreEqual(1, duplicatePage.Total);
+        IncomingCatalogDetailRead detail = await reads.ReadDetailAsync(fixture.Manager, secondId, CancellationToken.None);
+        Assert.IsTrue(detail.DuplicateCandidates!.Single().Reasons.Any(reason =>
+            reason.Contains("2 фотографии", StringComparison.Ordinal)));
+
+        DuplicateDetectionSettingsView current = await settings.ReadAsync(fixture.Owner, CancellationToken.None);
+        await settings.SaveAsync(fixture.Owner,
+            new(current.CandidateThreshold, current.DescriptionSimilarityPercent, current.AreaTolerancePercent,
+                0, current.StrongPhotoMatches, current.CommonPhotoMaxListings, current.Version),
+            "photo-settings-strict", CancellationToken.None);
+
+        await matcher.RefreshAsync(secondId, CancellationToken.None);
+        Assert.AreEqual(0, (await reads.ReadAsync(fixture.Manager,
+            new(new(), Preset: IncomingCatalogPreset.PossibleDuplicate), CancellationToken.None)).Total);
+    }
+
+    private static async Task SeedFingerprintAsync(
+        ProcurementTests.Phase1Fixture fixture, Guid listingId, int index, long hash)
+    {
+        await using LandErpDbContext db = await fixture.Factory.CreateDbContextAsync();
+        Listing listing = await db.Listings.AsNoTracking().SingleAsync(item => item.Id == listingId);
+        db.CatalogPhotoFingerprints.Add(new()
+        {
+            Id = Guid.CreateVersion7(),
+            OrganizationId = listing.OrganizationId,
+            ListingId = listingId,
+            PhotoIndex = index,
+            UrlHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes($"{listingId}:{index}"))),
+            PerceptualHash = hash,
+            Status = PhotoFingerprintStatus.Ready,
+            SourceDataRevision = listing.DataRevision,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+    }
+
     private static async Task<DuplicateCandidateStatus> ReadDuplicateStatusAsync(ProcurementTests.Phase1Fixture fixture, Guid id)
     {
         await using LandErpDbContext db = await fixture.Factory.CreateDbContextAsync();

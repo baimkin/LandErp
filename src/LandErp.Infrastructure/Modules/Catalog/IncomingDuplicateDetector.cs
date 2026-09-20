@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -10,7 +11,6 @@ namespace LandErp.Infrastructure.Modules.Catalog;
 
 internal static partial class IncomingDuplicateDetector
 {
-    private const int CandidateThreshold = 55;
     [GeneratedRegex(@"(?<!\d)(?<a>\d{2})\s*:\s*(?<b>\d{2})\s*:\s*(?<c>\d{6,7})\s*:\s*(?<d>\d{1,7})(?!\d)",
         RegexOptions.CultureInvariant)]
     private static partial Regex CadastralPattern();
@@ -22,6 +22,7 @@ internal static partial class IncomingDuplicateDetector
     [GeneratedRegex(@"\b(?:кп|снт|днп)\s*[«""“](?<n>[^»""”\r\n]{2,80})[»""”]",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex QuotedComplexPattern();
+
     private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
     {
         "для","как","это","или","при","без","все","весь","есть","его","еще","уже","под","над","между","рядом",
@@ -50,15 +51,19 @@ internal static partial class IncomingDuplicateDetector
         return values.Length == 1 ? values[0] : null;
     }
 
-    internal static async Task RefreshAsync(LandErpDbContext db, Listing subject, DateTimeOffset now, CancellationToken cancellationToken)
+    internal static async Task RefreshAsync(
+        LandErpDbContext db, Listing subject, DateTimeOffset now, CancellationToken cancellationToken)
     {
         if (subject.Disposition != CatalogDisposition.Incoming) return;
         ApplyExtractedCadastral(subject);
+        DuplicateDetectionSettingsValues settings =
+            await DuplicateDetectionSettingsService.ReadValuesAsync(db, subject.OrganizationId, cancellationToken);
 
         decimal? area = subject.AreaSquareMeters;
         string? cadastral = IdentityCadastral(subject);
         string seller = NormalizeSimple(subject.SellerName);
         string location = NormalizeSimple(subject.Location);
+        decimal tolerance = settings.AreaTolerancePercent / 100m;
 
         IQueryable<Listing> query = db.Listings.AsNoTracking()
             .Where(item => item.OrganizationId == subject.OrganizationId && item.Id != subject.Id
@@ -66,8 +71,8 @@ internal static partial class IncomingDuplicateDetector
 
         if (area is > 0)
         {
-            decimal min = area.Value * 0.85m;
-            decimal max = area.Value * 1.15m;
+            decimal min = area.Value * (1m - tolerance);
+            decimal max = area.Value * (1m + tolerance);
             if (cadastral != null)
                 query = query.Where(item => item.CadastralNumber == cadastral
                     || item.AreaSquareMeters >= min && item.AreaSquareMeters <= max);
@@ -85,22 +90,33 @@ internal static partial class IncomingDuplicateDetector
         else if (location.Length > 0)
         {
             string token = Tokens(location).FirstOrDefault() ?? "";
-            if (token.Length > 0) query = query.Where(item => item.Location != null && EF.Functions.ILike(item.Location, $"%{token}%"));
+            if (token.Length > 0)
+                query = query.Where(item => item.Location != null && EF.Functions.ILike(item.Location, $"%{token}%"));
         }
 
         Listing[] persisted = await query.OrderByDescending(item => item.ChangedAt).Take(500).ToArrayAsync(cancellationToken);
         Listing[] local = db.Listings.Local.Where(item => item.Id != subject.Id && item.OrganizationId == subject.OrganizationId
             && item.Disposition is not (CatalogDisposition.Fake or CatalogDisposition.Duplicate)).ToArray();
+        Listing[] others = local.Concat(persisted).GroupBy(item => item.Id).Select(group => group.First()).ToArray();
 
-        foreach (Listing other in local.Concat(persisted).GroupBy(item => item.Id).Select(group => group.First()))
+        Dictionary<Guid, long[]> hashesByListing = await CurrentHashesAsync(db, subject, others, cancellationToken);
+        hashesByListing.TryGetValue(subject.Id, out long[]? subjectHashes);
+        subjectHashes ??= [];
+        Dictionary<long, int> commonCounts = await CommonExactHashCountsAsync(
+            db, subject.OrganizationId, subjectHashes, cancellationToken);
+
+        HashSet<Guid> matchedOwnedCandidates = [];
+        foreach (Listing other in others)
         {
-            MatchResult? match = Match(subject, other);
-            if (match == null || match.Score < CandidateThreshold) continue;
+            hashesByListing.TryGetValue(other.Id, out long[]? otherHashes);
+            MatchResult? match = Match(subject, other, subjectHashes, otherHashes ?? [], commonCounts, settings);
+            if (match == null || match.Score < settings.CandidateThreshold) continue;
 
             Guid low = subject.Id.CompareTo(other.Id) < 0 ? subject.Id : other.Id;
             Guid high = subject.Id.CompareTo(other.Id) < 0 ? other.Id : subject.Id;
             string lockKey = $"duplicate:{subject.OrganizationId}:{low}:{high}";
-            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey},0))", cancellationToken);
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey},0))", cancellationToken);
 
             CatalogDuplicateCandidate? existing = db.CatalogDuplicateCandidates.Local.FirstOrDefault(item =>
                 item.OrganizationId == subject.OrganizationId
@@ -111,24 +127,34 @@ internal static partial class IncomingDuplicateDetector
                     && ((item.ListingId == subject.Id && item.CandidateListingId == other.Id)
                         || (item.ListingId == other.Id && item.CandidateListingId == subject.Id)), cancellationToken);
 
+            string reasonsJson = JsonSerializer.Serialize(match.Reasons);
             if (existing == null)
             {
-                db.CatalogDuplicateCandidates.Add(new()
+                existing = new()
                 {
                     Id = DataConventions.NewId(),
                     OrganizationId = subject.OrganizationId,
                     ListingId = subject.Id,
                     CandidateListingId = other.Id,
                     Score = match.Score,
-                    ReasonsJson = JsonSerializer.Serialize(match.Reasons),
+                    ReasonsJson = reasonsJson,
                     Status = DuplicateCandidateStatus.Pending,
                     RecordedAt = now,
                     UpdatedAt = now
-                });
+                };
+                db.CatalogDuplicateCandidates.Add(existing);
+            }
+            else if (existing.Status == DuplicateCandidateStatus.Obsolete && existing.ListingId == subject.Id)
+            {
+                existing.Status = DuplicateCandidateStatus.Pending;
+                existing.Score = match.Score;
+                existing.ReasonsJson = reasonsJson;
+                existing.UpdatedAt = now;
+                existing.ReviewedAt = null;
+                existing.ReviewedByEmployeeId = null;
             }
             else if (existing.Status == DuplicateCandidateStatus.Pending)
             {
-                string reasonsJson = JsonSerializer.Serialize(match.Reasons);
                 if (existing.Score != match.Score || !string.Equals(existing.ReasonsJson, reasonsJson, StringComparison.Ordinal))
                 {
                     existing.Score = match.Score;
@@ -136,10 +162,31 @@ internal static partial class IncomingDuplicateDetector
                     existing.UpdatedAt = now;
                 }
             }
+
+            if (existing.ListingId == subject.Id && existing.Status == DuplicateCandidateStatus.Pending)
+                matchedOwnedCandidates.Add(existing.CandidateListingId);
+        }
+
+        CatalogDuplicateCandidate[] stale = await db.CatalogDuplicateCandidates
+            .Where(item => item.OrganizationId == subject.OrganizationId
+                && item.ListingId == subject.Id
+                && item.Status == DuplicateCandidateStatus.Pending
+                && !matchedOwnedCandidates.Contains(item.CandidateListingId))
+            .ToArrayAsync(cancellationToken);
+        foreach (CatalogDuplicateCandidate item in stale)
+        {
+            item.Status = DuplicateCandidateStatus.Obsolete;
+            item.UpdatedAt = now;
         }
     }
 
-    private static MatchResult? Match(Listing left, Listing right)
+    private static MatchResult? Match(
+        Listing left,
+        Listing right,
+        long[] leftHashes,
+        long[] rightHashes,
+        IReadOnlyDictionary<long, int> commonCounts,
+        DuplicateDetectionSettingsValues settings)
     {
         string? leftCadastral = IdentityCadastral(left);
         string? rightCadastral = IdentityCadastral(right);
@@ -169,10 +216,14 @@ internal static partial class IncomingDuplicateDetector
         }
 
         double description = TextSimilarity(left.Description, right.Description);
-        if (description >= .90) { score += 45; reasons.Add("Очень похожее описание"); }
-        else if (description >= .78) { score += 35; reasons.Add("Похожее описание"); }
-        else if (description >= .65) { score += 25; reasons.Add("Описание заметно совпадает"); }
-        else if (description >= .55) { score += 15; reasons.Add("Есть совпадения в описании"); }
+        double minimumDescription = settings.DescriptionSimilarityPercent / 100d;
+        if (description >= minimumDescription)
+        {
+            if (description >= .90) { score += 45; reasons.Add("Очень похожее описание"); }
+            else if (description >= .78) { score += 35; reasons.Add("Похожее описание"); }
+            else if (description >= .65) { score += 25; reasons.Add("Описание заметно совпадает"); }
+            else { score += 15; reasons.Add("Есть совпадения в описании"); }
+        }
 
         if (left.AreaSquareMeters is > 0 && right.AreaSquareMeters is > 0)
         {
@@ -180,7 +231,7 @@ internal static partial class IncomingDuplicateDetector
             decimal delta = Math.Abs(left.AreaSquareMeters.Value - right.AreaSquareMeters.Value) / max;
             if (delta <= .01m) { score += 20; reasons.Add("Практически одинаковая площадь"); }
             else if (delta <= .05m) { score += 12; reasons.Add("Близкая площадь"); }
-            else if (delta > .15m) return null;
+            else if (delta > settings.AreaTolerancePercent / 100m) return null;
         }
 
         double location = TextSimilarity(left.Location, right.Location, minimumTokens: 1);
@@ -198,12 +249,91 @@ internal static partial class IncomingDuplicateDetector
             { score += 5; reasons.Add("Близкая цена"); }
         }
 
-        if (ExactPhotoUrlOverlap(left.PhotosJson, right.PhotosJson))
-        { score += 20; reasons.Add("Совпадает URL фотографии"); }
+        int matchingPhotos = MatchingPhotoCount(leftHashes, rightHashes, commonCounts, settings);
+        if (matchingPhotos > 0)
+        {
+            score += matchingPhotos >= settings.StrongPhotoMatches
+                ? 60
+                : Math.Min(50, 20 + 15 * matchingPhotos);
+            reasons.Add(matchingPhotos == 1 ? "Совпала фотография" : $"Совпали {matchingPhotos} фотографии");
+        }
 
-        bool corroborated = description >= .55 || leftPlot != null && leftPlot == rightPlot
+        bool corroborated = matchingPhotos > 0 || description >= minimumDescription
+            || leftPlot != null && leftPlot == rightPlot
             || location >= .50 || leftSeller.Length >= 3 && leftSeller == rightSeller;
-        return score >= CandidateThreshold && corroborated ? new(Math.Min(score, 100), reasons) : null;
+        return score >= settings.CandidateThreshold && corroborated ? new(Math.Min(score, 100), reasons) : null;
+    }
+
+    private static int MatchingPhotoCount(
+        long[] left,
+        long[] right,
+        IReadOnlyDictionary<long, int> commonCounts,
+        DuplicateDetectionSettingsValues settings)
+    {
+        if (left.Length == 0 || right.Length == 0) return 0;
+        List<(int Distance, int Left, int Right)> pairs = [];
+        for (int leftIndex = 0; leftIndex < left.Length; leftIndex++)
+        {
+            long hash = left[leftIndex];
+            if (commonCounts.GetValueOrDefault(hash) > settings.CommonPhotoMaxListings) continue;
+            for (int rightIndex = 0; rightIndex < right.Length; rightIndex++)
+            {
+                int distance = HammingDistance(hash, right[rightIndex]);
+                if (distance <= settings.PhotoHammingDistance)
+                    pairs.Add((distance, leftIndex, rightIndex));
+            }
+        }
+
+        bool[] usedLeft = new bool[left.Length];
+        bool[] usedRight = new bool[right.Length];
+        int count = 0;
+        foreach (var pair in pairs.OrderBy(item => item.Distance))
+        {
+            if (usedLeft[pair.Left] || usedRight[pair.Right]) continue;
+            usedLeft[pair.Left] = true;
+            usedRight[pair.Right] = true;
+            count++;
+        }
+        return count;
+    }
+
+    internal static int HammingDistance(long left, long right) =>
+        BitOperations.PopCount(unchecked((ulong)(left ^ right)));
+
+    private static async Task<Dictionary<Guid, long[]>> CurrentHashesAsync(
+        LandErpDbContext db, Listing subject, IReadOnlyList<Listing> others, CancellationToken cancellationToken)
+    {
+        Dictionary<Guid, long> revisions = others.ToDictionary(item => item.Id, item => item.DataRevision);
+        revisions[subject.Id] = subject.DataRevision;
+        Guid[] ids = revisions.Keys.ToArray();
+        var rows = await db.CatalogPhotoFingerprints.AsNoTracking()
+            .Where(item => item.OrganizationId == subject.OrganizationId
+                && ids.Contains(item.ListingId)
+                && item.Status == PhotoFingerprintStatus.Ready
+                && item.PerceptualHash != null)
+            .Select(item => new { item.ListingId, item.PerceptualHash, item.SourceDataRevision })
+            .ToArrayAsync(cancellationToken);
+
+        return rows.Where(item => revisions.GetValueOrDefault(item.ListingId) == item.SourceDataRevision)
+            .GroupBy(item => item.ListingId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.PerceptualHash!.Value).Distinct().ToArray());
+    }
+
+    private static async Task<Dictionary<long, int>> CommonExactHashCountsAsync(
+        LandErpDbContext db, Guid organizationId, long[] hashes, CancellationToken cancellationToken)
+    {
+        if (hashes.Length == 0) return [];
+        long[] distinct = hashes.Distinct().ToArray();
+        var rows = await (from fingerprint in db.CatalogPhotoFingerprints.AsNoTracking()
+                          join listing in db.Listings.AsNoTracking() on fingerprint.ListingId equals listing.Id
+                          where fingerprint.OrganizationId == organizationId
+                              && fingerprint.Status == PhotoFingerprintStatus.Ready
+                              && fingerprint.PerceptualHash != null
+                              && distinct.Contains(fingerprint.PerceptualHash.Value)
+                              && fingerprint.SourceDataRevision == listing.DataRevision
+                          select new { Hash = fingerprint.PerceptualHash.Value, fingerprint.ListingId })
+            .Distinct().ToArrayAsync(cancellationToken);
+        return rows.GroupBy(item => item.Hash).ToDictionary(group => group.Key, group => group.Count());
     }
 
     private static string? IdentityCadastral(Listing item) =>
@@ -288,17 +418,6 @@ internal static partial class IncomingDuplicateDetector
             });
         }
         return result.ToString();
-    }
-
-    private static bool ExactPhotoUrlOverlap(string leftJson, string rightJson)
-    {
-        try
-        {
-            HashSet<string> left = (JsonSerializer.Deserialize<string[]>(leftJson) ?? [])
-                .Where(value => !string.IsNullOrWhiteSpace(value)).ToHashSet(StringComparer.Ordinal);
-            return (JsonSerializer.Deserialize<string[]>(rightJson) ?? []).Any(left.Contains);
-        }
-        catch (JsonException) { return false; }
     }
 
     private sealed record MatchResult(int Score, string[] Reasons)

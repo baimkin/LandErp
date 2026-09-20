@@ -39,6 +39,8 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CatalogObservation> ListingObservations => Set<CatalogObservation>();
     public DbSet<CatalogEvent> CatalogEvents => Set<CatalogEvent>();
     public DbSet<CatalogDuplicateCandidate> CatalogDuplicateCandidates => Set<CatalogDuplicateCandidate>();
+    public DbSet<CatalogPhotoFingerprint> CatalogPhotoFingerprints => Set<CatalogPhotoFingerprint>();
+    public DbSet<CatalogDuplicateSettings> CatalogDuplicateSettings => Set<CatalogDuplicateSettings>();
     public DbSet<PropertyCase> PropertyCases => Set<PropertyCase>();
     public DbSet<PropertyCaseSourceLink> PropertyCaseSourceLinks => Set<PropertyCaseSourceLink>();
     public DbSet<CaseNegotiation> CaseNegotiations => Set<CaseNegotiation>();

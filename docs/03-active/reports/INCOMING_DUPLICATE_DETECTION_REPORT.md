@@ -18,11 +18,11 @@ The deterministic matcher uses explainable signals:
 - location similarity;
 - seller equality;
 - price proximity;
-- exact photo URL overlap as a weak additional signal.
+- perceptual image hashes as a strong cross-source signal; photo URLs are not compared.
 
 Russian/Latin visual confusables used by marketplace text are normalized before comparison. Explicitly different cadastral numbers or different explicit plot numbers suppress a candidate even when advertising text is copied.
 
-The first version intentionally does not download images or add an image-decoding dependency. Perceptual image hashing can be added later as another matching signal without changing the candidate workflow.
+Image fingerprinting is performed asynchronously by `LandErp.Worker` using pHash. The web server and Collector ingress do not download images. Only URL hashes and perceptual hashes are persisted; source image bytes are not stored. Downloads are HTTPS-only, size-limited and block private/link-local targets.
 
 ## Persistence
 
@@ -49,3 +49,12 @@ One EF migration is included: `20260920165000_IncomingDuplicateCandidates`.
 - different explicit plot numbers suppress copied-template false positives.
 
 Actual test execution remains with the repository verification workflow.
+
+
+## Runtime tuning
+
+Organization-wide thresholds are editable at `/settings/duplicates`: candidate score, minimum description similarity, area tolerance, pHash Hamming distance, number of photo matches considered strong, and the threshold for ignoring common/template images. Matching reads these values from PostgreSQL; no process restart is required.
+
+## Image processing
+
+The Worker scans recent Incoming items plus a rolling backfill. Existing fingerprints are reused by hashed source URL, transient download failures use bounded backoff, and stale fingerprints are ignored via the Listing `DataRevision`. The detector compares current pHashes using Hamming distance and one-to-one photo pairing.

@@ -108,6 +108,20 @@ internal static class CollectionMappings
         builder.Entity<CatalogDuplicateCandidate>().HasOne<Listing>().WithMany().HasForeignKey(item => item.CandidateListingId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CatalogDuplicateCandidate>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ReviewedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CatalogDuplicateCandidate>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CatalogPhotoFingerprint>().ToTable("photo_fingerprints", "catalog");
+        builder.Entity<CatalogPhotoFingerprint>().Property(item => item.Status).HasConversion<string>();
+        builder.Entity<CatalogPhotoFingerprint>().Property(item => item.UrlHash).HasMaxLength(64);
+        builder.Entity<CatalogPhotoFingerprint>().HasIndex(item => new { item.ListingId, item.UrlHash }).IsUnique();
+        builder.Entity<CatalogPhotoFingerprint>().HasIndex(item => new { item.OrganizationId, item.Status, item.RetryAt });
+        builder.Entity<CatalogPhotoFingerprint>().HasIndex(item => new { item.OrganizationId, item.PerceptualHash })
+            .HasFilter("perceptual_hash IS NOT NULL");
+        builder.Entity<CatalogPhotoFingerprint>().HasOne<Listing>().WithMany().HasForeignKey(item => item.ListingId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CatalogPhotoFingerprint>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<CatalogDuplicateSettings>().ToTable("duplicate_settings", "catalog");
+        builder.Entity<CatalogDuplicateSettings>().HasKey(item => item.OrganizationId);
+        builder.Entity<CatalogDuplicateSettings>().HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+
         builder.Entity<CatalogEvent>().ToTable("events", "catalog");
         builder.Entity<CatalogEvent>().Property(item => item.Kind).HasConversion<string>();
         builder.Entity<CatalogEvent>().Property(item => item.Message).HasMaxLength(4000);

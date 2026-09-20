@@ -203,6 +203,127 @@ namespace LandErp.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogDuplicateSettings", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<int>("AreaTolerancePercent")
+                        .HasColumnType("integer")
+                        .HasColumnName("area_tolerance_percent");
+
+                    b.Property<int>("CandidateThreshold")
+                        .HasColumnType("integer")
+                        .HasColumnName("candidate_threshold");
+
+                    b.Property<int>("CommonPhotoMaxListings")
+                        .HasColumnType("integer")
+                        .HasColumnName("common_photo_max_listings");
+
+                    b.Property<int>("DescriptionSimilarityPercent")
+                        .HasColumnType("integer")
+                        .HasColumnName("description_similarity_percent");
+
+                    b.Property<int>("PhotoHammingDistance")
+                        .HasColumnType("integer")
+                        .HasColumnName("photo_hamming_distance");
+
+                    b.Property<int>("StrongPhotoMatches")
+                        .HasColumnType("integer")
+                        .HasColumnName("strong_photo_matches");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
+
+                    b.HasKey("OrganizationId")
+                        .HasName("pk_duplicate_settings");
+
+                    b.ToTable("duplicate_settings", "catalog", t =>
+                        {
+                            t.HasComment("Настраиваемые пороги определения дублей для организации; изменения применяются без перезапуска приложения.");
+                        });
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogPhotoFingerprint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("FailureCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("failure_count");
+
+                    b.Property<Guid>("ListingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("listing_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<long?>("PerceptualHash")
+                        .HasColumnType("bigint")
+                        .HasColumnName("perceptual_hash");
+
+                    b.Property<int>("PhotoIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("photo_index");
+
+                    b.Property<DateTimeOffset?>("RetryAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("retry_at");
+
+                    b.Property<long>("SourceDataRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("source_data_revision");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UrlHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("url_hash");
+
+                    b.HasKey("Id")
+                        .HasName("pk_photo_fingerprints");
+
+                    b.HasIndex("ListingId", "UrlHash")
+                        .IsUnique()
+                        .HasDatabaseName("ix_photo_fingerprints_listing_id_url_hash");
+
+                    b.HasIndex("OrganizationId", "PerceptualHash")
+                        .HasDatabaseName("ix_photo_fingerprints_organization_id_perceptual_hash")
+                        .HasFilter("perceptual_hash IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "Status", "RetryAt")
+                        .HasDatabaseName("ix_photo_fingerprints_organization_id_status_retry_at");
+
+                    b.ToTable("photo_fingerprints", "catalog", t =>
+                        {
+                            t.HasComment("Компактные perceptual hashes фотографий входящих объявлений. Исходные изображения в PostgreSQL не сохраняются.");
+                        });
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3549,6 +3670,33 @@ namespace LandErp.Infrastructure.Migrations
                         .HasForeignKey("ReviewedByEmployeeId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_duplicate_candidates_reviewed_by_employee_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogDuplicateSettings", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_duplicate_settings_organization_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogPhotoFingerprint", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Catalog.Domain.Listing", null)
+                        .WithMany()
+                        .HasForeignKey("ListingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_photo_fingerprints_listing_id");
+
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_photo_fingerprints_organization_id");
                 });
 
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogEvent", b =>

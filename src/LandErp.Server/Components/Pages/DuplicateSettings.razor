@@ -1,0 +1,98 @@
+@page "/settings/duplicates"
+@attribute [Authorize(Policy = "organization.manage")]
+@using System.ComponentModel.DataAnnotations
+@using LandErp.Application.Modules.Catalog.Contracts
+@inherits WorkspaceComponent
+@inject IDuplicateDetectionSettingsService Settings
+
+<PageTitle>Настройки дублей · LandErp</PageTitle>
+
+@if (Loading)
+{
+    <PageState Kind="loading" Title="Загружаем настройки дублей…" />
+}
+else if (Forbidden)
+{
+    <PageState Kind="forbidden" Title="Нет доступа к настройкам дублей" />
+}
+else if (view != null)
+{
+    @if (Error != null) { <PageState Kind="error" Title="@Error"><ActionButton Label="Повторить" OnClick="ReloadAsync" /></PageState> }
+    @if (Success != null) { <PageState Kind="success" Title="@Success" /> }
+
+    <div class="duplicate-settings">
+        <header>
+            <span>Администрирование / Catalog</span>
+            <h1>Настройки определения дублей</h1>
+            <p>Пороговые значения применяются к следующим автоматическим проверкам без перезапуска. Жёсткие защитные правила — например разные кадастровые номера — здесь не отключаются.</p>
+        </header>
+
+        <EditForm Model="input" FormName="duplicate-settings" OnValidSubmit="SaveAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <section class="settings-card">
+                <h2>Общая чувствительность</h2>
+                <div class="settings-grid">
+                    <label><span>Общий порог кандидата</span><InputNumber @bind-Value="input.CandidateThreshold" /><small>Чем выше, тем меньше спорных совпадений.</small></label>
+                    <label><span>Похожесть описания, %</span><InputNumber @bind-Value="input.DescriptionSimilarityPercent" /><small>Минимальная текстовая похожесть, которая начинает влиять на результат.</small></label>
+                    <label><span>Допуск площади, %</span><InputNumber @bind-Value="input.AreaTolerancePercent" /><small>При большей разнице объекты считаются разными.</small></label>
+                </div>
+            </section>
+
+            <section class="settings-card">
+                <h2>Фотографии</h2>
+                <div class="settings-grid">
+                    <label><span>Допустимое отличие pHash</span><InputNumber @bind-Value="input.PhotoHammingDistance" /><small>0 — только почти идентичный отпечаток; больше — терпимее к сжатию и ресайзу.</small></label>
+                    <label><span>Сильное совпадение, фото</span><InputNumber @bind-Value="input.StrongPhotoMatches" /><small>Сколько совпавших фотографий считать сильным самостоятельным сигналом.</small></label>
+                    <label><span>Типовая картинка, объявлений</span><InputNumber @bind-Value="input.CommonPhotoMaxListings" /><small>Фото, встречающееся чаще этого порога, не усиливает дубль.</small></label>
+                </div>
+            </section>
+
+            <div class="settings-actions">
+                <button type="submit" class="btn primary" disabled="@Busy">Сохранить настройки</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@code {
+    private DuplicateDetectionSettingsView? view;
+    private SettingsInput input = new();
+
+    protected override async Task ReadAsync()
+    {
+        view = await Settings.ReadAsync(CurrentSubject, CancellationToken.None);
+        input = SettingsInput.From(view);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (view == null) return;
+        DuplicateDetectionSettingsView? saved = null;
+        await ExecuteAsync(async () => saved = await Settings.SaveAsync(CurrentSubject,
+            new(input.CandidateThreshold, input.DescriptionSimilarityPercent, input.AreaTolerancePercent,
+                input.PhotoHammingDistance, input.StrongPhotoMatches, input.CommonPhotoMaxListings, view.Version),
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (saved != null) view = saved;
+    }
+
+    private sealed class SettingsInput
+    {
+        [Range(40, 100)] public int CandidateThreshold { get; set; }
+        [Range(40, 90)] public int DescriptionSimilarityPercent { get; set; }
+        [Range(1, 30)] public int AreaTolerancePercent { get; set; }
+        [Range(0, 20)] public int PhotoHammingDistance { get; set; }
+        [Range(1, 5)] public int StrongPhotoMatches { get; set; }
+        [Range(3, 100)] public int CommonPhotoMaxListings { get; set; }
+
+        public static SettingsInput From(DuplicateDetectionSettingsView value) => new()
+        {
+            CandidateThreshold = value.CandidateThreshold,
+            DescriptionSimilarityPercent = value.DescriptionSimilarityPercent,
+            AreaTolerancePercent = value.AreaTolerancePercent,
+            PhotoHammingDistance = value.PhotoHammingDistance,
+            StrongPhotoMatches = value.StrongPhotoMatches,
+            CommonPhotoMaxListings = value.CommonPhotoMaxListings
+        };
+    }
+}

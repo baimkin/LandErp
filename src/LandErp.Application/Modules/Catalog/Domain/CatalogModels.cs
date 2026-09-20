@@ -4,7 +4,8 @@ public enum CatalogSource { Avito, Cian, Telegram, Referral, Agent, DirectOwner,
 public enum CatalogDisposition { Incoming, Monitoring, InWork, Dismissed, Duplicate, Fake, RemovedAtSource, Sold }
 public enum CatalogIngestionKind { Collector, Employee, Migration, Integration }
 public enum CatalogEventKind { ReviewStarted, SourceChanged, MonitoringStarted, MonitoringTriggered, Classified, CaseResumed }
-public enum DuplicateCandidateStatus { Pending, Confirmed, Rejected }
+public enum DuplicateCandidateStatus { Pending, Confirmed, Rejected, Obsolete }
+public enum PhotoFingerprintStatus { Ready, Retry, Unsupported }
 
 public sealed class Listing
 {
@@ -71,6 +72,34 @@ public sealed class CatalogDuplicateCandidate
     public DateTimeOffset RecordedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? ReviewedAt { get; set; }
+    public long Version { get; set; } = 1;
+}
+
+public sealed class CatalogPhotoFingerprint
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public Guid ListingId { get; set; }
+    public int PhotoIndex { get; set; }
+    public string UrlHash { get; set; } = "";
+    public long? PerceptualHash { get; set; }
+    public PhotoFingerprintStatus Status { get; set; } = PhotoFingerprintStatus.Retry;
+    public int FailureCount { get; set; }
+    public DateTimeOffset? RetryAt { get; set; }
+    public long SourceDataRevision { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class CatalogDuplicateSettings
+{
+    public Guid OrganizationId { get; set; }
+    public int CandidateThreshold { get; set; } = 55;
+    public int DescriptionSimilarityPercent { get; set; } = 55;
+    public int AreaTolerancePercent { get; set; } = 15;
+    public int PhotoHammingDistance { get; set; } = 8;
+    public int StrongPhotoMatches { get; set; } = 2;
+    public int CommonPhotoMaxListings { get; set; } = 20;
+    public DateTimeOffset UpdatedAt { get; set; }
     public long Version { get; set; } = 1;
 }
 

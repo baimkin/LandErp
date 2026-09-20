@@ -34,6 +34,13 @@ public sealed record IncomingDuplicateCandidateView(Guid Id, long Version, Guid 
     CatalogSource Source, string Title, string? Location, decimal? Price, decimal? AreaSquareMeters,
     string? CadastralNumber, string? Url, IReadOnlyList<string> Reasons, DateTimeOffset RecordedAt);
 
+public sealed record DuplicateDetectionSettingsView(int CandidateThreshold, int DescriptionSimilarityPercent,
+    int AreaTolerancePercent, int PhotoHammingDistance, int StrongPhotoMatches, int CommonPhotoMaxListings,
+    long Version);
+public sealed record UpdateDuplicateDetectionSettings(int CandidateThreshold, int DescriptionSimilarityPercent,
+    int AreaTolerancePercent, int PhotoHammingDistance, int StrongPhotoMatches, int CommonPhotoMaxListings,
+    long ExpectedVersion);
+
 public sealed record IncomingCatalogDetailRead(CatalogItemDetail Detail, IReadOnlyList<string> PhotoUrls,
     Guid? SearchConfigurationId, string? SearchConfigurationLabel, int CompletenessPercent,
     IncomingCatalogRowState RowState, bool PriceChanged, bool ReturnedFromMonitoring,
@@ -63,4 +70,16 @@ public interface IIncomingFilterPresetService
     Task<IncomingFilterPresetView> CreateAsync(Subject subject, CreateIncomingFilterPreset command, CancellationToken cancellationToken);
     Task<IncomingFilterPresetView> RenameAsync(Subject subject, RenameIncomingFilterPreset command, CancellationToken cancellationToken);
     Task DeleteAsync(Subject subject, DeleteIncomingFilterPreset command, CancellationToken cancellationToken);
+}
+
+public interface IDuplicateDetectionSettingsService
+{
+    Task<DuplicateDetectionSettingsView> ReadAsync(Subject subject, CancellationToken cancellationToken);
+    Task<DuplicateDetectionSettingsView> SaveAsync(Subject subject, UpdateDuplicateDetectionSettings command,
+        string correlationId, CancellationToken cancellationToken);
+}
+
+public interface IIncomingDuplicateMatchingMaintenance
+{
+    Task RefreshAsync(Guid catalogItemId, CancellationToken cancellationToken);
 }

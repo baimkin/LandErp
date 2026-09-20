@@ -27,7 +27,7 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
         "EmployeeRestored", "EmployeeWorkTransferred", "EmployeeWorkHandoverPending", "AssignmentChanged", "CollectorAgentCreated", "CollectorAgentRevoked",
         "CollectionSearchCreated", "CollectionSearchUpdated", "CollectionSearchGroupCreated", "CollectionSearchGroupArchived",
         "CatalogItemCreatedManually", "CatalogDispositionChanged", "CatalogMonitoringStarted", "CatalogItemTakenToWork",
-        "CatalogItemLinkedToCase", "CatalogDuplicateConfirmed", "CatalogDuplicateRejected",
+        "CatalogItemLinkedToCase", "CatalogDuplicateConfirmed", "CatalogDuplicateRejected", "CatalogDuplicateSettingsChanged",
         "PropertyCaseResumedFromCatalog", "SellerContactRecorded", "CaseNoteAdded",
         "CaseNegotiationAdded", "CaseCheckSaved", "CaseCheckTemplateSaved", "InspectionTemplateSaved",
         "SiteInspectionStarted", "SiteInspectionDraftSaved", "SiteInspectionCompleted", "PropertyCaseAcquired",
@@ -272,6 +272,9 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
         "ScheduleKind" => "Расписание", "State" => "Состояние", "Title" or "WorkingTitle" => "Название объекта",
         "Price" or "WorkingPrice" or "AcquisitionPrice" => "Цена", "Location" or "WorkingLocation" => "Расположение",
         "Reason" => "Причина", "Comment" => "Комментарий", "Result" => "Результат", "MustChangePassword" => "Смена пароля при входе",
+        "CandidateThreshold" => "Общий порог дубля", "DescriptionSimilarityPercent" => "Похожесть описания, %",
+        "AreaTolerancePercent" => "Допуск площади, %", "PhotoHammingDistance" => "Чувствительность фото",
+        "StrongPhotoMatches" => "Сильное совпадение, фото", "CommonPhotoMaxListings" => "Порог типовой картинки",
         _ => SplitWords(value)
     };
 
@@ -331,6 +334,7 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
                 "CatalogItemLinkedToCase" => Procurement("Источник связан с объектом закупки", summary),
                 "CatalogDuplicateConfirmed" => Procurement("Подтверждён дубль входящего предложения", summary, "warning"),
                 "CatalogDuplicateRejected" => Procurement("Отклонён кандидат на дубль", summary),
+                "CatalogDuplicateSettingsChanged" => Procurement("Изменены настройки определения дублей", summary),
                 "PropertyCaseResumedFromCatalog" => Procurement("Работа по объекту возобновлена", summary, "success"),
                 "SellerContactRecorded" => Procurement("Зафиксирован контакт с продавцом", summary), "CaseNoteAdded" => Procurement("Добавлена заметка", summary),
                 "CaseNegotiationAdded" => Procurement("Добавлены переговоры", summary), "CaseCheckSaved" => Procurement("Сохранена проверка", summary),
@@ -378,6 +382,7 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
             foreach (var item in actorRows) references[item.UserId] = item.DisplayName;
 
             Guid[] ids = rows.Select(item => item.ObjectId).Distinct().ToArray();
+            foreach (var item in await db.Organizations.AsNoTracking().Where(item => item.Id == organizationId && ids.Contains(item.Id)).ToArrayAsync(cancellationToken)) Add("Organization", item.Id, "Организация", item.Name, false);
             foreach (var item in await db.Employees.AsNoTracking().Where(item => item.OrganizationId == organizationId && ids.Contains(item.Id)).ToArrayAsync(cancellationToken)) Add("Employee", item.Id, "Сотрудник", item.DisplayName, !item.Active);
             foreach (var item in await db.OrgUnits.AsNoTracking().Where(item => item.OrganizationId == organizationId && ids.Contains(item.Id)).ToArrayAsync(cancellationToken)) Add("OrgUnit", item.Id, "Отдел", item.Name, !item.Active);
             foreach (var item in await db.Teams.AsNoTracking().Where(item => item.OrganizationId == organizationId && ids.Contains(item.Id)).ToArrayAsync(cancellationToken)) Add("Team", item.Id, "Команда", item.Name, !item.Active);
@@ -420,7 +425,7 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
             return "";
         }
 
-        private static string TypeLabel(string value) => value switch { "Employee" => "Сотрудник", "OrgUnit" => "Отдел", "Team" => "Команда", "Position" => "Должность", "CollectorAgent" => "Парсер", "SearchConfiguration" => "Поиск", "SearchGroup" => "Группа поисков", "CollectionJob" => "Задание сбора", "CatalogItem" => "Предложение", "PropertyCase" => "Объект закупки", _ => "Системный объект" };
+        private static string TypeLabel(string value) => value switch { "Organization" => "Организация", "Employee" => "Сотрудник", "OrgUnit" => "Отдел", "Team" => "Команда", "Position" => "Должность", "CollectorAgent" => "Парсер", "SearchConfiguration" => "Поиск", "SearchGroup" => "Группа поисков", "CollectionJob" => "Задание сбора", "CatalogItem" => "Предложение", "PropertyCase" => "Объект закупки", _ => "Системный объект" };
         private static string Key(string type, Guid id) => type + ":" + id.ToString("N");
     }
 }

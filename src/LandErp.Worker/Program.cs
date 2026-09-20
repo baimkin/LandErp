@@ -15,13 +15,14 @@ builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogL
 builder.Services.AddLandErpPersistence(builder.Configuration);
 builder.Services.AddLandErpCollection();
 builder.Services.AddHostedService<CollectionSchedulerWorker>();
+builder.Services.AddHostedService<PhotoFingerprintWorker>();
 using IHost host = builder.Build();
 IDatabaseStatus database = host.Services.GetRequiredService<IDatabaseStatus>();
 ILogger logger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("LandErp.Worker");
 bool ready = await database.IsReadyAsync(CancellationToken.None);
 Action<ILogger, string, bool, Exception?> logStarted = LoggerMessage.Define<string, bool>(
     LogLevel.Information, new EventId(1, "WORKER_STARTED"),
-    "Worker started with collection scheduler; environment {Environment}; database ready {Ready}");
+    "Worker started with collection scheduler and photo fingerprinting; environment {Environment}; database ready {Ready}");
 logStarted(logger, builder.Environment.EnvironmentName, ready, null);
 await host.RunAsync();
 

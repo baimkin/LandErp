@@ -1,8 +1,10 @@
 using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Procurement.Contracts;
+using LandErp.Application.Modules.Organization.Contracts;
 using LandErp.Collector.Contracts.V1;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace LandErp.Foundation.Tests;
@@ -201,6 +203,81 @@ public sealed class IncomingMonitoringTests
             fixture.Workspace.SetDispositionAsync(fixture.ForeignOwner,
                 new(all.Items[0].Id, all.Items[0].Version, CatalogDisposition.Dismissed, "Чужая организация"),
                 "phase3-foreign", CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task ReviewStateIsGlobalAndEveryDetailOpenIsAudited()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(true, false);
+        var ingested = await fixture.IngestMarketplacePairAsync();
+        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+
+        IncomingCatalogReadPage before = await reads.ReadAsync(fixture.Manager, new(new()), CancellationToken.None);
+        Assert.AreEqual(2, before.Summary.New);
+
+        await fixture.Workspace.RegisterViewAsync(fixture.Manager, ingested.AvitoId, "view-manager", CancellationToken.None);
+        IncomingCatalogReadPage afterFirst = await reads.ReadAsync(fixture.Manager, new(new()), CancellationToken.None);
+        Assert.AreEqual(1, afterFirst.Summary.New);
+        Assert.IsTrue(afterFirst.Rows[ingested.AvitoId].Reviewed);
+
+        IncomingCatalogReadPage sharedNew = await reads.ReadAsync(fixture.SecondManager,
+            new(new(), Preset: IncomingCatalogPreset.New), CancellationToken.None);
+        Assert.AreEqual(1, sharedNew.Total);
+        Assert.AreEqual(ingested.CianId, sharedNew.Items.Single().Id,
+            "New state is shared by the organization, not per manager.");
+
+        await fixture.Workspace.RegisterViewAsync(fixture.SecondManager, ingested.AvitoId, "view-second-manager", CancellationToken.None);
+        Assert.AreEqual(1, await fixture.CountAsync(db => db.CatalogEvents.CountAsync(item =>
+            item.CatalogItemId == ingested.AvitoId && item.Kind == CatalogEventKind.ReviewStarted)));
+        Assert.AreEqual(2, await fixture.CountAsync(db => db.AuditEvents.CountAsync(item =>
+            item.ObjectId == ingested.AvitoId && item.Action == "CatalogItemViewed")));
+
+        IAuditReadService audit = fixture.Scope.ServiceProvider.GetRequiredService<IAuditReadService>();
+        AuditPage auditPage = await audit.ReadAsync(fixture.Manager, new(PageSize: 100), CancellationToken.None);
+        Assert.AreEqual(2, auditPage.Items.Count(item => item.Title == "Просмотрено входящее предложение"));
+    }
+
+    [TestMethod]
+    public async Task ProcessedTodayCountsDecisionsButNotSimpleViews()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+
+        Guid classifiedId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "Классифицировать", "Химки", 2_000_000m, 1_000m,
+                null, null, null, null, "processed-today"), "processed-classified-create", CancellationToken.None);
+        CatalogItemDetail classified = await fixture.Workspace.ReadItemAsync(fixture.Manager, classifiedId, CancellationToken.None);
+        await fixture.Workspace.SetDispositionAsync(fixture.Manager,
+            new(classifiedId, classified.Item.Version, CatalogDisposition.Fake, "Подтверждённый фейк"),
+            "processed-classified", CancellationToken.None);
+
+        Guid monitoredId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "Мониторинг", "Химки", 2_000_000m, 1_000m,
+                null, null, null, null, "processed-today"), "processed-monitor-create", CancellationToken.None);
+        CatalogItemDetail monitored = await fixture.Workspace.ReadItemAsync(fixture.Manager, monitoredId, CancellationToken.None);
+        await fixture.Workspace.SetMonitoringAsync(fixture.Manager,
+            new(monitoredId, monitored.Item.Version, 1_500_000m, null, "Ждём снижения"),
+            "processed-monitor", CancellationToken.None);
+
+        Guid takenId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "В Procurement", "Химки", 2_000_000m, 1_000m,
+                null, null, null, null, "processed-today"), "processed-take-create", CancellationToken.None);
+        await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(takenId), "processed-take", CancellationToken.None);
+
+        Guid viewedOnlyId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "Только просмотр", "Химки", 2_000_000m, 1_000m,
+                null, null, null, null, "processed-today"), "processed-view-create", CancellationToken.None);
+        await fixture.Workspace.RegisterViewAsync(fixture.Manager, viewedOnlyId, "processed-view", CancellationToken.None);
+
+        IncomingCatalogReadPage page = await reads.ReadAsync(fixture.Manager, new(new(Disposition: null)), CancellationToken.None);
+        Assert.AreEqual(3, page.Summary.ProcessedToday);
+
+        IncomingCatalogReadPage processed = await reads.ReadAsync(fixture.Manager,
+            new(new(Disposition: null), Preset: IncomingCatalogPreset.ProcessedToday), CancellationToken.None);
+        Assert.AreEqual(3, processed.Total);
+        CollectionAssert.AreEquivalent(new[] { classifiedId, monitoredId, takenId },
+            processed.Items.Select(item => item.Id).ToArray());
+        Assert.IsFalse(processed.Items.Any(item => item.Id == viewedOnlyId));
     }
 
     private static async Task DecideAsync(ProcurementTests.Phase1Fixture fixture, Guid caseId,

@@ -46,14 +46,12 @@
         @if (catalogPage != null)
         {
             <div class="v2-stats">
-                @* TODO-BACKEND-INCOMING: "new/unviewed" needs an explicit viewed-state contract. *@
-                <div class="v2-stat" data-todo-backend="TODO-BACKEND-INCOMING"><label>Новые</label><strong>—</strong><span>нужно состояние просмотра</span></div>
-                <div class="v2-stat"><label>Цена изменилась</label><strong>@catalogPage.Summary.PriceChanged</strong><span>реальные изменения цены</span></div>
+                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.New ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.New)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.New)"><label>Новые</label><strong>@catalogPage.Summary.New</strong><span>ещё не просматривали</span></button>
+                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PriceChanged)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PriceChanged)"><label>Цена изменилась</label><strong>@catalogPage.Summary.PriceChanged</strong><span>реальные изменения цены</span></button>
                 @* TODO-BACKEND-INCOMING: possible-duplicate candidate model is not available. *@
                 <div class="v2-stat warn" data-todo-backend="TODO-BACKEND-INCOMING"><label>Возможный дубль</label><strong>—</strong><span>нужен matching</span></div>
-                <div class="v2-stat risk"><label>Не хватает данных</label><strong>@catalogPage.Summary.Incomplete</strong><span>цена / площадь / локация</span></div>
-                @* TODO-BACKEND-INCOMING: processed-today aggregation is not available as one canonical read model. *@
-                <div class="v2-stat" data-todo-backend="TODO-BACKEND-INCOMING"><label>Обработано сегодня</label><strong>—</strong><span>нужна агрегация решений</span></div>
+                <button type="button" class="v2-stat v2-stat-action risk @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.Incomplete)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.Incomplete)"><label>Не хватает данных</label><strong>@catalogPage.Summary.Incomplete</strong><span>цена / площадь / локация</span></button>
+                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.ProcessedToday ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.ProcessedToday)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.ProcessedToday)"><label>Обработано сегодня</label><strong>@catalogPage.Summary.ProcessedToday</strong><span>решений за рабочий день</span></button>
             </div>
 
             <section class="v2-surface">
@@ -168,8 +166,7 @@
 
                 <div class="v2-presets">
                     <button type="button" class="v2-preset @(preset == null ? "active" : "")" @onclick="() => SelectPresetAsync(null)">Все @catalogPage.Summary.Incoming</button>
-                    @* TODO-BACKEND-INCOMING: "new" is not equivalent to Incoming until viewed-state is defined. *@
-                    <button type="button" class="v2-preset" disabled data-todo-backend="TODO-BACKEND-INCOMING">Новые —</button>
+                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.New ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.New)">Новые @catalogPage.Summary.New</button>
                     <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.PriceChanged)">Изменилась цена @catalogPage.Summary.PriceChanged</button>
                     @* TODO-BACKEND-INCOMING: possible duplicate signal/matching is not persisted yet. *@
                     <button type="button" class="v2-preset" disabled data-todo-backend="TODO-BACKEND-INCOMING">Возможный дубль —</button>
@@ -214,6 +211,7 @@
                                                 }
                                                 <div class="v2-object">
                                                     <strong>@HighlightText(item.Title)</strong>
+                                                    <span class="v2-review-state @(row?.Reviewed == true ? "reviewed" : "new")">@(row?.Reviewed == true ? "Просмотрено" : "Новое")</span>
                                                     <div class="v2-sub">@HighlightText(item.Location ?? "Местоположение неизвестно") <span>·</span> @HighlightText(item.ExternalId ?? "без внешнего ID")</div>
                                                     @if (!string.IsNullOrWhiteSpace(item.CadastralNumber) || !string.IsNullOrWhiteSpace(row?.SearchConfigurationLabel) || item.BusinessNumber != null)
                                                     {
@@ -647,12 +645,26 @@
     private Task PreviousAsync() { page--; return ReloadAsync(); }
     private Task NextAsync() { page++; return ReloadAsync(); }
 
+    private Task SelectMetricAsync(IncomingCatalogPreset value)
+    {
+        CancelSearchDebounce();
+        filter.Reset();
+        searchConfigurationKey = "";
+        preset = value;
+        selectedSavedPresetId = null;
+        sortField = IncomingCatalogSortField.ChangedAt;
+        sortDirection = IncomingCatalogSortDirection.Descending;
+        filter.Disposition = value == IncomingCatalogPreset.ProcessedToday ? null : CatalogDisposition.Incoming;
+        page = 0;
+        return ReloadAsync();
+    }
+
     private Task SelectPresetAsync(IncomingCatalogPreset? value)
     {
         CancelSearchDebounce();
         preset = value;
         selectedSavedPresetId = null;
-        filter.Disposition = CatalogDisposition.Incoming;
+        filter.Disposition = value == IncomingCatalogPreset.ProcessedToday ? null : CatalogDisposition.Incoming;
         page = 0;
         return ReloadAsync();
     }
@@ -891,12 +903,28 @@
 
     private static string PresetNamePart(IncomingCatalogPreset value) => value switch
     {
+        IncomingCatalogPreset.New => "новые",
         IncomingCatalogPreset.PriceChanged => "цена изменилась",
         IncomingCatalogPreset.Incomplete => "неполные данные",
+        IncomingCatalogPreset.ProcessedToday => "обработано сегодня",
         _ => "из мониторинга"
     };
 
     private async Task OpenDetailAsync(Guid id)
+    {
+        if (!await RegisterViewedForUiAsync(id)) return;
+        await LoadDetailAsync(id);
+    }
+
+    private async Task<bool> RegisterViewedForUiAsync(Guid id)
+    {
+        bool recorded = await ExecuteConfirmedAsync(() => Workspace.RegisterViewAsync(CurrentSubject, id,
+            Guid.CreateVersion7().ToString(), CancellationToken.None), nameof(OpenDetailAsync));
+        Success = null;
+        return recorded;
+    }
+
+    private async Task LoadDetailAsync(Guid id)
     {
         detailRead = await IncomingReads.ReadDetailAsync(CurrentSubject, id, CancellationToken.None);
         detail = detailRead.Detail;
@@ -911,13 +939,20 @@
         foreach (ChecklistItem item in checklist) checklistState[item.Key] = "unknown";
     }
 
+    private Task RefreshDetailAsync(Guid id) => LoadDetailAsync(id);
+
     private void CloseDetail() { CloseGallery(); detail = null; detailRead = null; monitoringOpen = false; }
     private void DrawerKeyDown(KeyboardEventArgs args) { if (args.Key == "Escape") CloseDetail(); }
 
     private async Task OpenGalleryForItemAsync(Guid id)
     {
-        IncomingCatalogDetailRead read = detailRead != null && detail?.Item.Id == id
-            ? detailRead : await IncomingReads.ReadDetailAsync(CurrentSubject, id, CancellationToken.None);
+        if (detailRead != null && detail?.Item.Id == id)
+        {
+            OpenGallery(detailRead.PhotoUrls);
+            return;
+        }
+        if (!await RegisterViewedForUiAsync(id)) return;
+        IncomingCatalogDetailRead read = await IncomingReads.ReadDetailAsync(CurrentSubject, id, CancellationToken.None);
         OpenGallery(read.PhotoUrls);
     }
 
@@ -977,7 +1012,7 @@
         if (Success != null)
         {
             if (openNextAfterDecision) await OpenNextAfterDecisionAsync(id, currentIndex, preferredNextId);
-            else await OpenDetailAsync(id);
+            else await RefreshDetailAsync(id);
         }
     }
 
@@ -1006,7 +1041,7 @@
         {
             classificationOpen = false;
             if (openNextAfterDecision) await OpenNextAfterDecisionAsync(id, currentIndex, preferredNextId);
-            else await OpenDetailAsync(id);
+            else await RefreshDetailAsync(id);
         }
     }
 
@@ -1155,7 +1190,7 @@
 
     private static string EventLabel(CatalogEventKind kind) => kind switch
     {
-        CatalogEventKind.SourceChanged => "Данные объявления изменились",
+        CatalogEventKind.ReviewStarted => "Просмотрено", CatalogEventKind.SourceChanged => "Данные объявления изменились",
         CatalogEventKind.MonitoringStarted => "Поставлено на мониторинг",
         CatalogEventKind.MonitoringTriggered => "Порог мониторинга достигнут",
         CatalogEventKind.Classified => "Принято решение",

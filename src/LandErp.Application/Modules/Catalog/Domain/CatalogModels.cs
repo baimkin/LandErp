@@ -3,7 +3,7 @@ namespace LandErp.Application.Modules.Catalog.Domain;
 public enum CatalogSource { Avito, Cian, Telegram, Referral, Agent, DirectOwner, Manual, Other }
 public enum CatalogDisposition { Incoming, Monitoring, InWork, Dismissed, Duplicate, Fake, RemovedAtSource, Sold }
 public enum CatalogIngestionKind { Collector, Employee, Migration, Integration }
-public enum CatalogEventKind { SourceChanged, MonitoringStarted, MonitoringTriggered, Classified, CaseResumed }
+public enum CatalogEventKind { ReviewStarted, SourceChanged, MonitoringStarted, MonitoringTriggered, Classified, CaseResumed }
 
 public sealed class Listing
 {

@@ -108,6 +108,27 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                 item.LastEvaluatedPricePerSotka, item.LastEvaluatedAt), events);
     }
 
+    public async Task RegisterViewAsync(Subject subject, Guid catalogItemId, string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        Listing item = (await db.Listings.FromSqlInterpolated(
+            $"SELECT * FROM catalog.listings WHERE id={catalogItemId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
+
+        DateTimeOffset now = time.GetUtcNow();
+        bool firstView = !await db.CatalogEvents.AnyAsync(value => value.OrganizationId == context.OrganizationId
+            && value.CatalogItemId == item.Id && value.Kind == CatalogEventKind.ReviewStarted, cancellationToken);
+        if (firstView)
+            db.CatalogEvents.Add(CatalogEvent(item, CatalogEventKind.ReviewStarted, "Предложение впервые просмотрено", now));
+
+        OrganizationWorkspace.AddAudit(db, context, subject, "CatalogItemViewed", "CatalogItem", item.Id,
+            new { FirstView = firstView }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task<Guid> CreateManualAsync(Subject subject, CreateManualCatalogItem command, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);

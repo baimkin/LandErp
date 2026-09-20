@@ -193,6 +193,7 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
     private static List<AuditChangeView> SemanticChanges(string action, string json, ProjectionContext context)
     {
         if (action is "LoginSucceeded" or "TemporaryPasswordLogin") return [new("Результат", "—", "Успешный вход")];
+        if (action == "CatalogItemViewed") return [];
         if (action == "TemporaryPasswordChanged") return [new("Результат", "—", "Временный пароль заменён")];
         if (action == "MfaEnabled") return [new("Результат", "—", "Двухфакторная защита включена")];
         if (action == "EmployeePasswordReset") return [new("Результат", "—", "Выдан новый временный пароль")];
@@ -322,6 +323,7 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
                 "CollectionSearchGroupCreated" => Collection("Создана группа поисков", summary), "CollectionSearchGroupArchived" => Collection("Группа поисков архивирована", summary, "warning"),
                 "CollectionJobQueued" => Collection("Поставлено задание на сбор данных", summary),
                 "CatalogItemCreatedManually" => Procurement("Добавлено входящее предложение", summary),
+                "CatalogItemViewed" => Procurement("Просмотрено входящее предложение", summary),
                 "CatalogDispositionChanged" => Procurement("Изменено состояние предложения", summary),
                 "CatalogMonitoringStarted" => Procurement("Предложение поставлено на мониторинг", summary),
                 "CatalogItemTakenToWork" => Procurement("Предложение взято в работу", summary, "success"),

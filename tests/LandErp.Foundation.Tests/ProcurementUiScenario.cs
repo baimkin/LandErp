@@ -95,6 +95,10 @@ internal static class ProcurementUiScenario
             await manual.WaitForAsync(new() { State = WaitForSelectorState.Detached });
             ILocator row = page.Locator("tr", new() { HasText = "UI Phase 3 без внешней идентичности" });
             await row.GetByText("без внешнего ID", new() { Exact = false }).WaitForAsync();
+            await row.GetByText("Новое", new() { Exact = true }).WaitForAsync();
+            ILocator newMetric = page.Locator(".v2-stats .v2-stat-action", new() { HasText = "Новые" });
+            await newMetric.ClickAsync();
+            await row.WaitForAsync();
             await row.ClickAsync();
             ILocator drawer = await StableDrawerAsync(page);
             await drawer.GetByLabel("Общая цена ≤, ₽", new() { Exact = true }).FillAsync("2900000");

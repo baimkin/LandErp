@@ -1,3 +1,4 @@
+using LandErp.Application.Foundation;
 using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
@@ -27,6 +28,8 @@ public sealed class IncomingCatalogReadService(
         IQueryable<Listing> organizationItems = db.Listings.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId);
         IQueryable<Listing> incomingItems = organizationItems.Where(item => item.Disposition == CatalogDisposition.Incoming);
+        DateTimeOffset now = time.GetUtcNow();
+        (DateTimeOffset businessDayStart, DateTimeOffset businessDayEnd) = BusinessDayUtc(now);
 
         IQueryable<Guid> priceChangedIds = db.CatalogEvents.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId
@@ -35,6 +38,29 @@ public sealed class IncomingCatalogReadService(
         IQueryable<Guid> returnedFromMonitoringIds = db.CatalogEvents.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId && item.Kind == CatalogEventKind.MonitoringTriggered)
             .Select(item => item.CatalogItemId).Distinct();
+        IQueryable<Guid> reviewedIds = db.CatalogEvents.AsNoTracking()
+            .Where(item => item.OrganizationId == context.OrganizationId
+                && (item.Kind == CatalogEventKind.ReviewStarted
+                    || item.Kind == CatalogEventKind.Classified
+                    || item.Kind == CatalogEventKind.MonitoringStarted
+                    || item.Kind == CatalogEventKind.CaseResumed))
+            .Select(item => item.CatalogItemId)
+            .Union(db.PropertyCaseSourceLinks.AsNoTracking()
+                .Where(item => item.OrganizationId == context.OrganizationId && item.Confirmed)
+                .Select(item => item.CatalogItemId))
+            .Distinct();
+        IQueryable<Guid> processedTodayIds = db.CatalogEvents.AsNoTracking()
+            .Where(item => item.OrganizationId == context.OrganizationId
+                && item.RecordedAt >= businessDayStart && item.RecordedAt < businessDayEnd
+                && (item.Kind == CatalogEventKind.Classified
+                    || item.Kind == CatalogEventKind.MonitoringStarted
+                    || item.Kind == CatalogEventKind.CaseResumed))
+            .Select(item => item.CatalogItemId)
+            .Union(db.PropertyCaseSourceLinks.AsNoTracking()
+                .Where(item => item.OrganizationId == context.OrganizationId && item.Confirmed
+                    && item.RecordedAt >= businessDayStart && item.RecordedAt < businessDayEnd)
+                .Select(item => item.CatalogItemId))
+            .Distinct();
 
         IncomingCatalogReadSummary summary = new(
             await incomingItems.CountAsync(cancellationToken),
@@ -43,7 +69,9 @@ public sealed class IncomingCatalogReadService(
             await organizationItems.CountAsync(item => item.Disposition == CatalogDisposition.InWork, cancellationToken),
             await incomingItems.CountAsync(item => item.Price == null || item.AreaSquareMeters == null || item.Location == null, cancellationToken),
             await incomingItems.CountAsync(item => priceChangedIds.Contains(item.Id), cancellationToken),
-            await incomingItems.CountAsync(item => returnedFromMonitoringIds.Contains(item.Id), cancellationToken));
+            await incomingItems.CountAsync(item => returnedFromMonitoringIds.Contains(item.Id), cancellationToken),
+            New: await incomingItems.CountAsync(item => !reviewedIds.Contains(item.Id), cancellationToken),
+            ProcessedToday: await processedTodayIds.CountAsync(cancellationToken));
 
         IQueryable<Listing> query = organizationItems;
         string[] searchTerms = SearchTerms(baseFilter.Text);
@@ -72,7 +100,6 @@ public sealed class IncomingCatalogReadService(
                 && item.Price.Value * 100m / item.AreaSquareMeters.Value <= filter.MaxPricePerSotka.Value);
         query = IncomingLandTypeClassifier.ApplyFilter(query, filter.LandTypes);
 
-        DateTimeOffset now = time.GetUtcNow();
         query = baseFilter.Age switch
         {
             CatalogAgeRange.Today => query.Where(item => item.ReceivedAt >= now.AddDays(-1)),
@@ -111,9 +138,11 @@ public sealed class IncomingCatalogReadService(
 
         query = filter.Preset switch
         {
+            IncomingCatalogPreset.New => query.Where(item => !reviewedIds.Contains(item.Id)),
             IncomingCatalogPreset.PriceChanged => query.Where(item => priceChangedIds.Contains(item.Id)),
             IncomingCatalogPreset.Incomplete => query.Where(item => item.Price == null || item.AreaSquareMeters == null || item.Location == null),
             IncomingCatalogPreset.ReturnedFromMonitoring => query.Where(item => returnedFromMonitoringIds.Contains(item.Id)),
+            IncomingCatalogPreset.ProcessedToday => query.Where(item => processedTodayIds.Contains(item.Id)),
             _ => query
         };
 
@@ -151,6 +180,8 @@ public sealed class IncomingCatalogReadService(
         var searchByItem = searchRows.GroupBy(item => item.ListingId)
             .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.ObservedAt).First());
 
+        HashSet<Guid> reviewedOnPage = (await reviewedIds.Where(id => ids.Contains(id)).ToArrayAsync(cancellationToken)).ToHashSet();
+
         var eventRows = await db.CatalogEvents.AsNoTracking()
             .Where(item => ids.Contains(item.CatalogItemId)
                 && (item.Kind == CatalogEventKind.SourceChanged || item.Kind == CatalogEventKind.MonitoringTriggered))
@@ -174,7 +205,7 @@ public sealed class IncomingCatalogReadService(
             (IncomingCatalogMatchField? matchedField, string? matchedValue) = SearchMatch(item, searchTerms);
             rows[item.Id] = new(item.Id, search?.SearchId, search?.Label, Completeness(item),
                 RowState(item, priceChanged, returned), priceChanged, returned, photos.FirstOrDefault(), photos.Length,
-                landTypes, matchedField, matchedValue);
+                landTypes, matchedField, matchedValue, Reviewed: reviewedOnPage.Contains(item.Id));
             return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId);
         }).ToArray();
 
@@ -275,6 +306,15 @@ public sealed class IncomingCatalogReadService(
 
     private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
         ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
+
+    private static (DateTimeOffset Start, DateTimeOffset End) BusinessDayUtc(DateTimeOffset instant)
+    {
+        TimeZoneInfo zone = TimeZoneInfo.FindSystemTimeZoneById(DataConventions.BusinessTimeZoneId);
+        DateTime localDate = TimeZoneInfo.ConvertTime(instant, zone).Date;
+        DateTime startUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(localDate, DateTimeKind.Unspecified), zone);
+        DateTime endUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(localDate.AddDays(1), DateTimeKind.Unspecified), zone);
+        return (new DateTimeOffset(startUtc), new DateTimeOffset(endUtc));
+    }
 
     private static void Validate(IncomingCatalogReadFilter filter)
     {

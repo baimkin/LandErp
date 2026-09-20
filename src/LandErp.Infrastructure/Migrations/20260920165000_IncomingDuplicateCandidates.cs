@@ -2,6 +2,7 @@ using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
+#pragma warning disable CA1861 // EF migration metadata uses one-shot constant column arrays.
 #nullable disable
 
 namespace LandErp.Infrastructure.Migrations;
@@ -47,13 +48,13 @@ public partial class IncomingDuplicateCandidates : Migration
             },
             comment: "Сохранённые кандидаты на совпадение двух входящих предложений. Решение менеджера не удаляется и не пересоздаётся повторным matching.");
 
-        migrationBuilder.CreateIndex("ix_duplicate_candidates_candidate_listing_id", "catalog", "duplicate_candidates", "candidate_listing_id");
-        migrationBuilder.CreateIndex("ix_duplicate_candidates_listing_id", "catalog", "duplicate_candidates", "listing_id");
-        migrationBuilder.CreateIndex("ix_duplicate_candidates_reviewed_by_employee_id", "catalog", "duplicate_candidates", "reviewed_by_employee_id");
+        migrationBuilder.CreateIndex(name: "ix_duplicate_candidates_candidate_listing_id", schema: "catalog", table: "duplicate_candidates", column: "candidate_listing_id");
+        migrationBuilder.CreateIndex(name: "ix_duplicate_candidates_listing_id", schema: "catalog", table: "duplicate_candidates", column: "listing_id");
+        migrationBuilder.CreateIndex(name: "ix_duplicate_candidates_reviewed_by_employee_id", schema: "catalog", table: "duplicate_candidates", column: "reviewed_by_employee_id");
         migrationBuilder.CreateIndex("ix_duplicate_candidates_organization_id_listing_id_candidate_listing_id",
-            "catalog", "duplicate_candidates", new[] { "organization_id", "listing_id", "candidate_listing_id" }, unique: true);
+            schema: "catalog", table: "duplicate_candidates", columns: new[] { "organization_id", "listing_id", "candidate_listing_id" }, unique: true);
         migrationBuilder.CreateIndex("ix_duplicate_candidates_organization_id_status_recorded_at",
-            "catalog", "duplicate_candidates", new[] { "organization_id", "status", "recorded_at" });
+            schema: "catalog", table: "duplicate_candidates", columns: new[] { "organization_id", "status", "recorded_at" });
     }
 
     protected override void Down(MigrationBuilder migrationBuilder) =>

@@ -331,7 +331,7 @@ internal static partial class IncomingDuplicateDetector
                               && fingerprint.PerceptualHash != null
                               && distinct.Contains(fingerprint.PerceptualHash.Value)
                               && fingerprint.SourceDataRevision == listing.DataRevision
-                          select new { Hash = fingerprint.PerceptualHash.Value, fingerprint.ListingId })
+                          select new { Hash = fingerprint.PerceptualHash!.Value, fingerprint.ListingId })
             .Distinct().ToArrayAsync(cancellationToken);
         return rows.GroupBy(item => item.Hash).ToDictionary(group => group.Key, group => group.Count());
     }

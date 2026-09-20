@@ -78,6 +78,8 @@ internal sealed class PostgresSandbox : IAsyncDisposable
             + $"GRANT DELETE ON identity.user_roles TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON SCHEMA collection,catalog TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_groups,collection.search_group_market_settings,collection.search_configurations,collection.jobs,collection.scheduler_status,catalog.listings TO \"{RuntimeRole}\"; "
+            + $"GRANT SELECT,INSERT,UPDATE ON catalog.duplicate_candidates,catalog.duplicate_settings TO \"{RuntimeRole}\"; "
+            + $"GRANT SELECT,INSERT,UPDATE,DELETE ON catalog.photo_fingerprints TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations,catalog.events TO \"{RuntimeRole}\"; "
             + $"GRANT USAGE ON SCHEMA workflow,procurement TO \"{RuntimeRole}\"; "
             + $"GRANT SELECT ON workflow.stages TO \"{RuntimeRole}\"; "

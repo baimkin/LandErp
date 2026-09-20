@@ -7,5 +7,6 @@
     <ProjectReference Include="../LandErp.Application/LandErp.Application.csproj" />
     <ProjectReference Include="../LandErp.Infrastructure/LandErp.Infrastructure.csproj" />
     <PackageReference Include="SkiaSharp" />
+    <InternalsVisibleTo Include="LandErp.Foundation.Tests" />
   </ItemGroup>
 </Project>

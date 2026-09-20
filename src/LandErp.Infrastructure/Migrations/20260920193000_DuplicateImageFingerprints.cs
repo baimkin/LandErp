@@ -2,6 +2,7 @@ using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
+#pragma warning disable CA1861 // EF migration metadata uses one-shot constant column arrays.
 #nullable disable
 
 namespace LandErp.Infrastructure.Migrations;
@@ -68,12 +69,12 @@ public partial class DuplicateImageFingerprints : Migration
             },
             comment: "Компактные perceptual hashes фотографий входящих объявлений. Исходные изображения в PostgreSQL не сохраняются.");
 
-        migrationBuilder.CreateIndex("ix_photo_fingerprints_listing_id_url_hash",
-            "catalog", "photo_fingerprints", new[] { "listing_id", "url_hash" }, unique: true);
-        migrationBuilder.CreateIndex("ix_photo_fingerprints_organization_id_status_retry_at",
-            "catalog", "photo_fingerprints", new[] { "organization_id", "status", "retry_at" });
-        migrationBuilder.CreateIndex("ix_photo_fingerprints_organization_id_perceptual_hash",
-            "catalog", "photo_fingerprints", new[] { "organization_id", "perceptual_hash" },
+        migrationBuilder.CreateIndex(name: "ix_photo_fingerprints_listing_id_url_hash",
+            schema: "catalog", table: "photo_fingerprints", columns: new[] { "listing_id", "url_hash" }, unique: true);
+        migrationBuilder.CreateIndex(name: "ix_photo_fingerprints_organization_id_status_retry_at",
+            schema: "catalog", table: "photo_fingerprints", columns: new[] { "organization_id", "status", "retry_at" });
+        migrationBuilder.CreateIndex(name: "ix_photo_fingerprints_organization_id_perceptual_hash",
+            schema: "catalog", table: "photo_fingerprints", columns: new[] { "organization_id", "perceptual_hash" },
             filter: "perceptual_hash IS NOT NULL");
     }
 

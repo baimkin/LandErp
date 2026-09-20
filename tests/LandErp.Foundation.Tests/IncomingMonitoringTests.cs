@@ -3,9 +3,13 @@ using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Organization.Contracts;
 using LandErp.Collector.Contracts.V1;
+using LandErp.Infrastructure.Modules.Catalog;
+using LandErp.Infrastructure.Persistence;
+using LandErp.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SkiaSharp;
 
 namespace LandErp.Foundation.Tests;
 
@@ -210,7 +214,7 @@ public sealed class IncomingMonitoringTests
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(true, false);
         var ingested = await fixture.IngestMarketplacePairAsync();
-        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
 
         IncomingCatalogReadPage before = await reads.ReadAsync(fixture.Manager, new(new()), CancellationToken.None);
         Assert.AreEqual(2, before.Summary.New);
@@ -233,7 +237,7 @@ public sealed class IncomingMonitoringTests
             item.ObjectId == ingested.AvitoId && item.Action == "CatalogItemViewed")));
 
         IAuditReadService audit = fixture.Scope.ServiceProvider.GetRequiredService<IAuditReadService>();
-        AuditPage auditPage = await audit.ReadAsync(fixture.Manager, new(PageSize: 100), CancellationToken.None);
+        AuditPage auditPage = await audit.ReadAsync(fixture.Owner, new(PageSize: 100), CancellationToken.None);
         Assert.AreEqual(2, auditPage.Items.Count(item => item.Title == "Просмотрено входящее предложение"));
     }
 
@@ -241,7 +245,7 @@ public sealed class IncomingMonitoringTests
     public async Task ProcessedTodayCountsDecisionsButNotSimpleViews()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
 
         Guid classifiedId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
             new(CatalogSource.Telegram, "Классифицировать", "Химки", 2_000_000m, 1_000m,
@@ -284,7 +288,7 @@ public sealed class IncomingMonitoringTests
     public async Task DuplicateDetectorExtractsCadastralAndPersistsManagerDecision()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
         const string realDescription = """
             Продаём свой участок 6 соток (601 м²) в КП «Солнечный берег», д. Федюково.
             Адрес: Московская обл., Подольск г.о., д. Федюково, КП «Солнечный берег», земельный участок № 58.
@@ -328,7 +332,7 @@ public sealed class IncomingMonitoringTests
     public async Task ConfirmDuplicateMarksIncomingAsDuplicateAndAuditsDecision()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
         const string cadastral = "50:27:0020549:439";
 
         await fixture.Workspace.CreateManualAsync(fixture.Manager,
@@ -356,7 +360,7 @@ public sealed class IncomingMonitoringTests
     public async Task DifferentExplicitPlotNumbersSuppressCopiedTemplateFalsePositive()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
         string template = "КП «Солнечный берег», земельный участок № {0}. ИЖС, 601 м². "
             + "Электричество по границе, газификация, 700 м до станции. Собственник. "
             + "Тихая зелёная локация рядом с Москвой, инфраструктура в шаговой доступности.";
@@ -376,11 +380,9 @@ public sealed class IncomingMonitoringTests
     public async Task PhotoFingerprintsDriveDuplicatesAndSettingsApplyWithoutRestart()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
-        IIncomingDuplicateMatchingMaintenance matcher =
-            fixture.Scope.ServiceProvider.GetRequiredService<IIncomingDuplicateMatchingMaintenance>();
-        IDuplicateDetectionSettingsService settings =
-            fixture.Scope.ServiceProvider.GetRequiredService<IDuplicateDetectionSettingsService>();
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingDuplicateMatchingMaintenance matcher = new(fixture.Factory, TimeProvider.System);
+        DuplicateDetectionSettingsService settings = new(fixture.Factory, fixture.Access, TimeProvider.System);
 
         Guid firstId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
             new(CatalogSource.Referral, "Северный участок", null, null, null,
@@ -413,6 +415,36 @@ public sealed class IncomingMonitoringTests
         await matcher.RefreshAsync(secondId, CancellationToken.None);
         Assert.AreEqual(0, (await reads.ReadAsync(fixture.Manager,
             new(new(), Preset: IncomingCatalogPreset.PossibleDuplicate), CancellationToken.None)).Total);
+    }
+
+    [TestMethod]
+    public void PerceptualHashIsStableAcrossImageEncoding()
+    {
+        using SKBitmap bitmap = new(128, 96, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using (SKCanvas canvas = new(bitmap))
+        {
+            canvas.Clear(new SKColor(231, 226, 205));
+            using SKPaint dark = new() { Color = new SKColor(35, 74, 48), IsAntialias = true };
+            using SKPaint light = new() { Color = new SKColor(198, 148, 65), IsAntialias = true };
+            canvas.DrawRect(new SKRect(8, 10, 78, 82), dark);
+            canvas.DrawCircle(92, 42, 27, light);
+            canvas.DrawLine(12, 88, 118, 68, dark);
+        }
+
+        byte[] png = Encode(bitmap, SKEncodedImageFormat.Png, 100);
+        byte[] jpeg = Encode(bitmap, SKEncodedImageFormat.Jpeg, 82);
+        long pngHash = PhotoFingerprintWorker.PerceptualHash(png);
+        long jpegHash = PhotoFingerprintWorker.PerceptualHash(jpeg);
+        int distance = System.Numerics.BitOperations.PopCount(unchecked((ulong)(pngHash ^ jpegHash)));
+
+        Assert.IsTrue(distance <= 8, $"pHash distance after ordinary re-encoding was {distance}.");
+    }
+
+    private static byte[] Encode(SKBitmap bitmap, SKEncodedImageFormat format, int quality)
+    {
+        using SKImage image = SKImage.FromBitmap(bitmap);
+        using SKData data = image.Encode(format, quality);
+        return data.ToArray();
     }
 
     private static async Task SeedFingerprintAsync(

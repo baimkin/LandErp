@@ -341,7 +341,7 @@ public sealed class PhotoFingerprintWorker(
             && (bytes[0] & 0xFE) != 0xFC;
     }
 
-    private static long PerceptualHash(byte[] bytes)
+    internal static long PerceptualHash(byte[] bytes)
     {
         using SKData data = SKData.CreateCopy(bytes);
         using SKCodec? codec = SKCodec.Create(data);

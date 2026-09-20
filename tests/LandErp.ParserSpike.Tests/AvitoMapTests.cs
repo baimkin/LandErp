@@ -166,6 +166,43 @@ public sealed class AvitoMapTests
         public Task ActivateAsync(CancellationToken cancellationToken)=>Task.CompletedTask;
         public ValueTask DisposeAsync()=>ValueTask.CompletedTask;
     }
+    private sealed class LoadingMapSessions(PageObservation loading, PageObservation ready) : ISourceSessions
+    {
+        public int Wheels;
+        public int LoadingReads;
+        public bool LastReadWasLoading;
+        public Task<ISourcePage> CreatePageAsync(SourceSite source, CollectionSettings settings, CancellationToken cancellationToken)
+            => Task.FromResult<ISourcePage>(new LoadingMapPage(this, loading, ready));
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+    private sealed class LoadingMapPage(LoadingMapSessions owner, PageObservation loading, PageObservation ready) : ISourcePage
+    {
+        private int initialLoadingReads = 2;
+        private int postWheelLoadingReads;
+        private int urlRevision;
+        public SourceSite Source => SourceSite.Avito;
+        public string CurrentUrl { get; private set; } = Url;
+        public Task OpenAsync(string url, CancellationToken cancellationToken) { CurrentUrl = url; return Task.CompletedTask; }
+        public Task<PageObservation> ReadAsync(CancellationToken cancellationToken)
+        {
+            CurrentUrl = $"https://www.avito.ru/korolev/zemelnye_uchastki?drawId=runtime-{++urlRevision}&map=runtime-{urlRevision}&localPriority=0";
+            bool isLoading = initialLoadingReads-- > 0 || postWheelLoadingReads-- > 0;
+            owner.LastReadWasLoading = isLoading;
+            if (isLoading) owner.LoadingReads++;
+            return Task.FromResult(isLoading ? loading : ready);
+        }
+        public Task<bool> WheelAsync(CollectionSettings settings, CancellationToken cancellationToken)
+        {
+            Assert.IsFalse(owner.LastReadWasLoading, "Parser scrolled while the preceding page load was still active.");
+            owner.Wheels++;
+            if (owner.Wheels == 1) postWheelLoadingReads = 2;
+            return Task.FromResult(true);
+        }
+        public Task<Pagination> NextAsync(CancellationToken cancellationToken) => Task.FromResult(new Pagination(NextKind.End));
+        public Task FollowAsync(Pagination pagination, CancellationToken cancellationToken) => throw new InvalidOperationException();
+        public Task ActivateAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
     [TestMethod]
     public async Task IncompleteMapIsSavedButNeverBecomesFreshCompletedCoverage()
     {
@@ -187,6 +224,22 @@ public sealed class AvitoMapTests
         Assert.AreEqual(JobState.Completed,store.Jobs().Single().State);Assert.IsTrue(sessions.Wheels>0);
         Assert.AreEqual(CollectionCompletionKind.Success,store.Completion(store.Jobs().Single().Id)!.Kind);
         Assert.AreEqual(JobState.SkippedFresh,store.Jobs(store.StartBatch(new())).Single().State);
+    }
+    [TestMethod]
+    public async Task MapWaitsForLoadingAndIgnoresRuntimeUrlRewrites()
+    {
+        LocalStore store=Store();store.SaveLink("Map",Url);
+        PageObservation ready=Data(2).Read(Url,false);
+        LoadingMapSessions sessions=new(ready with { Loading=true },ready);
+        await using QueueRunner runner=new(store,sessions);
+
+        await runner.StartAsync(new(){MaxPages=1,MaxScrollSteps=30,StabilitySeconds=1,LoadWaitSeconds=1,ScrollPauseMilliseconds=0});
+
+        CollectionJob job=store.Jobs().Single();
+        Assert.AreEqual(JobState.Completed,job.State);
+        Assert.IsTrue(sessions.LoadingReads>=4);
+        Assert.IsTrue(sessions.Wheels>=3);
+        Assert.AreEqual(CollectionCompletionKind.Success,store.Completion(job.Id)!.Kind);
     }
     [TestMethod]
     public async Task MissingZonePausesWithNoticeAndCancellationEndsWaiting()

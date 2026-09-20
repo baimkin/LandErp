@@ -51,7 +51,11 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
     public async Task TickAsync(CancellationToken token)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        if (now < nextPoll || !await commands.WaitAsync(0, token).ConfigureAwait(false)) return;
+        // A completed local run must be delivered immediately. The 45-second value is a heartbeat
+        // cadence for active work, not a post-completion delay before the next server assignment.
+        LocalServerWork? localSnapshot = outbox.ReadWork();
+        bool completionWaiting = localSnapshot?.LocalJobId != null && !runner.IsRunning;
+        if ((!completionWaiting && now < nextPoll) || !await commands.WaitAsync(0, token).ConfigureAwait(false)) return;
         try
         {
             LocalServerWork? work = outbox.ReadWork();

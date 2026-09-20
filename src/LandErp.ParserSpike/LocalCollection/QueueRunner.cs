@@ -134,7 +134,10 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
             HashSet<string> pageWarnings = new(StringComparer.Ordinal);
             MapScope? map = null;
             string? lastMapDiagnostic = null;
-            bool settled = false, lastLoading = true; int stableRounds = 0; Stopwatch stable = Stopwatch.StartNew(), wait = Stopwatch.StartNew();
+            bool settled = false, lastLoading = true; int stableRounds = 0;
+            Stopwatch stable = Stopwatch.StartNew(), initialReady = Stopwatch.StartNew();
+            DateTimeOffset? loadingSince = null;
+            int loadingTimeoutSeconds = Math.Max(15, settings.LoadWaitSeconds);
             for (int step = 0; step < settings.MaxScrollSteps; step++)
             {
                 await ReadyAsync(job.Source, token).ConfigureAwait(false);
@@ -155,11 +158,11 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                 {
                     Block(job, job.Owner!, snapshot.Kind.ToString());
                     await ReadyAsync(job.Source, token).ConfigureAwait(false);
-                    stable.Restart(); wait.Restart(); continue;
+                    stable.Restart(); initialReady.Restart(); continue;
                 }
                 if (snapshot.Map is { ZoneConfirmed: false } unconfirmed)
                 {
-                    if (snapshot.Loading || wait.Elapsed.TotalSeconds < settings.LoadWaitSeconds)
+                    if (initialReady.Elapsed.TotalSeconds < settings.LoadWaitSeconds)
                     { await Task.Delay(250, token).ConfigureAwait(false); continue; }
                     if (serverManaged)
                     {
@@ -169,13 +172,13 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                     }
                     Block(job, job.Owner!, "Карта: " + (unconfirmed.ZoneError ?? "контур зоны не получен; восстановите выделение"));
                     await ReadyAsync(job.Source, token).ConfigureAwait(false);
-                    stable.Restart(); wait.Restart(); continue;
+                    stable.Restart(); initialReady.Restart(); continue;
                 }
                 map = snapshot.Map;
                 if (SearchUrls.IsDetail(page.CurrentUrl, job.Source))
                 { Finish(job, JobState.Failed, CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSearchUrl,
                     "Ссылка сохранена, но парсер отдельного объявления пока не реализован", [], false, false, stableRounds); return; }
-                if (snapshot.Kind == PageKind.Unknown && gathered.Count == 0 && wait.Elapsed.TotalSeconds < settings.LoadWaitSeconds)
+                if (snapshot.Kind == PageKind.Unknown && gathered.Count == 0 && initialReady.Elapsed.TotalSeconds < settings.LoadWaitSeconds)
                 { await Task.Delay(250, token).ConfigureAwait(false); continue; }
                 if (snapshot.Kind != PageKind.SearchResults)
                 {
@@ -186,28 +189,52 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                     { Block(job, job.Owner!, snapshot.Kind.ToString()); await ReadyAsync(job.Source, token).ConfigureAwait(false); }
                     return;
                 }
-                if (SearchUrls.PageNumber(page.CurrentUrl) != number || !SearchUrls.SameSearch(effectiveSearch, page.CurrentUrl, job.Source))
+                // A map is a live application: Avito rewrites drawId, map and presentation parameters
+                // while preserving the same captured polygon. Its geometry and page classification are
+                // the authority during scrolling. Full URL equality remains useful for classic pagination.
+                if (map is null && (SearchUrls.PageNumber(page.CurrentUrl) != number || !SearchUrls.SameSearch(effectiveSearch, page.CurrentUrl, job.Source)))
                 {
                     diagnostics?.Write(job, number, "Проверка адреса", "Несовпадение", expectedUrl: effectiveSearch, actualUrl: page.CurrentUrl,
                         detail: "Номер страницы или фильтры отличаются; источник изменения неизвестен");
                     Finish(job, JobState.Failed, CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSearchUrl,
                         "Номер страницы или фильтры изменились; сравнение адресов записано в журнал", [], false, false, stableRounds); return;
                 }
-                effectiveSearch = page.CurrentUrl;
+                if (map is null) effectiveSearch = page.CurrentUrl;
                 await ReadyAsync(job.Source, token).ConfigureAwait(false);
                 int before = gathered.Count;
                 foreach (ListingObservation item in snapshot.Listings) gathered[item.ExternalId] = item;
                 foreach (string warning in snapshot.Warnings) { pageWarnings.Add(warning); jobWarnings.Add(warning); }
-                if (gathered.Count > before || snapshot.Loading) { stableRounds = 0; stable.Restart(); wait.Restart(); }
+                if (gathered.Count > before) { stableRounds = 0; stable.Restart(); }
                 else stableRounds++;
                 if (!await SaveAsync(job, number, page.CurrentUrl, gathered.Values.ToArray(), false, null,
                     pageWarnings.Count == 0 ? map is null ? "Частичный снимок" : $"Карта: {gathered.Count} / {map.ExpectedCount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"}; порций {map.ResponseBatches}" : string.Join("; ", pageWarnings), map, snapshot.Changes)) return;
                 Changed?.Invoke(this, EventArgs.Empty);
+                if (snapshot.Loading)
+                {
+                    loadingSince ??= DateTimeOffset.UtcNow;
+                    stableRounds = 0; stable.Restart();
+                    if ((DateTimeOffset.UtcNow - loadingSince.Value).TotalSeconds >= loadingTimeoutSeconds)
+                    {
+                        CollectionCompletionKind kind = gathered.Count > 0 ? CollectionCompletionKind.Partial : CollectionCompletionKind.SourceError;
+                        Finish(job, JobState.Failed, kind, CollectionResultReasonCodes.LoadingInterrupted,
+                            "Загрузка не завершилась; полезные данные сохранены", jobWarnings, false, false, stableRounds); return;
+                    }
+                    await Task.Delay(250, token).ConfigureAwait(false);
+                    continue;
+                }
+                loadingSince = null;
+                if (map is { ResponseBatches: 0 } && gathered.Count == 0 && initialReady.Elapsed.TotalSeconds < loadingTimeoutSeconds)
+                {
+                    stableRounds = 0; stable.Restart();
+                    await Task.Delay(250, token).ConfigureAwait(false);
+                    continue;
+                }
                 await ReadyAsync(job.Source, token).ConfigureAwait(false);
                 bool bottom = await ActionAsync(job, page, number, "Прокрутка", () => page.WheelAsync(settings, token), token).ConfigureAwait(false);
-                if (!bottom) { stable.Restart(); wait.Restart(); }
+                if (!bottom) stable.Restart();
                 if (bottom && !snapshot.Loading && stableRounds >= 3 && stable.Elapsed.TotalSeconds >= settings.StabilitySeconds) { settled = true; break; }
-                await Task.Delay(settings.ScrollPauseMilliseconds, token).ConfigureAwait(false);
+                int pause = map is null ? settings.ScrollPauseMilliseconds : Math.Max(750, settings.ScrollPauseMilliseconds);
+                await Task.Delay(pause, token).ConfigureAwait(false);
             }
             if (!settled)
             {

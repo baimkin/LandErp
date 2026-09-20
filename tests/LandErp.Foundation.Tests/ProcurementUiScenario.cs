@@ -44,6 +44,24 @@ internal static class ProcurementUiScenario
             await page.GetByText("Рабочие факты PropertyCase", new() { Exact = true }).WaitForAsync();
             string canonical = page.Url;
 
+            await page.GotoAsync(origin + "/procurement"); await ReadyAsync(page);
+            ILocator procurementRow = page.Locator("tr", new() { HasText = "UI Telegram Phase 1" });
+            await procurementRow.WaitForAsync();
+            ILocator fullCardLink = procurementRow.GetByRole(AriaRole.Link, new() { Name = "UI Telegram Phase 1", Exact = true });
+            Assert.AreEqual(new Uri(canonical).AbsolutePath, await fullCardLink.GetAttributeAsync("href"));
+
+            await procurementRow.Locator(".obj .sub").ClickAsync();
+            ILocator quickDrawer = page.Locator("aside.drawer.on");
+            await quickDrawer.WaitForAsync();
+            Assert.AreEqual(origin + "/procurement", page.Url);
+            await quickDrawer.GetByRole(AriaRole.Button, new() { Name = "×", Exact = true }).ClickAsync();
+            await quickDrawer.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+            await fullCardLink.ClickAsync();
+            await page.WaitForURLAsync(canonical);
+            await ReadyAsync(page);
+            await page.GetByRole(AriaRole.Heading, new() { Name = "UI Telegram Phase 1", Exact = true }).WaitForAsync();
+
             string images = Path.Combine(FoundationTests.RepositoryRoot(), "artifacts", "stage1", "phase1-ui");
             Directory.CreateDirectory(images);
             await page.ScreenshotAsync(new() { Path = Path.Combine(images, "case-desktop.png"), FullPage = true });

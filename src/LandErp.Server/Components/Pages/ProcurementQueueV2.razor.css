@@ -45,6 +45,9 @@ tbody tr:hover td{background:#fbfcfe}
 .row-check td:first-child{box-shadow:inset 3px 0 var(--violet)}
 .row-source td:first-child{box-shadow:inset 3px 0 var(--a)}
 .obj b{display:block;color:#214664;font-size: var(--text-ui)}
+.object-title-link{display:block;color:#214664;font-size:var(--text-ui);font-weight:var(--weight-semibold);text-decoration:none;overflow-wrap:anywhere}
+.object-title-link:hover{text-decoration:underline;color:#174f80}
+.object-title-link:focus-visible{outline:2px solid #86b7e6;outline-offset:2px;border-radius:3px}
 .objline{display:flex;align-items:center;gap:8px}
 .objline>div{min-width:0}
 .thumb{width:42px;height:34px;border-radius:7px;object-fit:cover;flex:0 0 auto;background:#e5ece8}

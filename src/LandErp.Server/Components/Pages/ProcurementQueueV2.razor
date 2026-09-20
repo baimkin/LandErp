@@ -134,7 +134,10 @@
                                                     <span class="thumb fallback" aria-hidden="true">⌂</span>
                                                 }
                                                 <div>
-                                                    <b>@item.Title</b>
+                                                    <a class="object-title-link"
+                                                       href="@($"/procurement/{item.CaseId}")"
+                                                       title="Открыть полную карточку"
+                                                       @onclick:stopPropagation="true">@item.Title</a>
                                                     <div class="sub">@item.BusinessNumber@if (!string.IsNullOrWhiteSpace(item.CadastralNumber)) { <text> · @item.CadastralNumber</text> }</div>
                                                 </div>
                                             </div>

@@ -21,7 +21,7 @@ They run under LocalService, start at boot and restart after failure. The task a
 ## 2. Required software
 
 - Windows PowerShell 5.1+;
-- .NET 10 / ASP.NET Core Runtime compatible with the published release;
+- .NET 10 SDK on the operator host for migrations/setup and ASP.NET Core Runtime compatible with the published release on the target host;
 - PostgreSQL 18 server and PostgreSQL 18 client tools;
 - an HTTPS reverse proxy on the same host or an explicitly trusted proxy IP.
 
@@ -39,12 +39,44 @@ The initializer rejects placeholders, copies the config to ProgramData, creates 
 ## 4. Database migrations
 
 Server and Worker never change schema on startup.
-Before a release containing migrations, configure `LANDERP_MIGRATOR_CONNECTION` only in the elevated migration session and run:
+For the first installation, prepare three connection strings outside Git:
+
+- provisioner: PostgreSQL administrator connected to the maintenance database, for example `postgres`;
+- migrator: application database owner, targeting the new LandErp database;
+- runtime: limited application role; this exact connection is also stored in `production.json`.
+
+All three must target PostgreSQL 18 on loopback. Migrator and runtime role names
+must differ. From elevated PowerShell run:
+
+    ./scripts/Initialize-ProductionDatabase.ps1
+
+The script requests missing provisioner/migrator connections through hidden
+prompts, creates only absent roles/database, refuses unsafe existing role
+attributes or foreign database ownership, applies migrations, replaces runtime
+grants with the explicit least-privilege set and proves runtime DDL is denied.
+It is resumable but never drops or overwrites an existing database.
+
+Before a later release containing migrations, configure `LANDERP_MIGRATOR_CONNECTION` only in the elevated migration session and first review the generated SQL:
 
     ./scripts/Invoke-Migrations.ps1 -Action Script
-    ./scripts/Invoke-Migrations.ps1 -Action Apply
 
 Do not put migrator credentials into `production.json`; runtime uses the limited application role.
+
+Then run `Initialize-ProductionDatabase.ps1`; the idempotent command applies
+pending migrations and refreshes the explicit runtime grant set before the new
+binaries are deployed.
+
+## 4.1 Initial Owner
+
+Create the first Owner only after database initialization and before public login:
+
+    ./scripts/Initialize-ProductionOwner.ps1 -Login owner@example.com -OrganizationName "Company"
+
+The script requests the migrator connection and initial password through hidden
+prompts. It succeeds only on an empty identity/organization database. Repeating
+the same login and organization is a no-op; different or partial existing identity
+data causes a safe refusal for manual review. The first login requires password
+change and MFA enrollment.
 
 ## 5. Publish a release
 

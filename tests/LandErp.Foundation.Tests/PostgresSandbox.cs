@@ -21,12 +21,19 @@ internal sealed class PostgresSandbox : IAsyncDisposable
     }
 
     public string DatabaseName => "landerp_test_" + suffix;
+    internal string AdminConnection => adminConnection;
     public string MigratorRole => "le_m_" + suffix;
     public string RuntimeRole => "le_r_" + suffix;
     public string MigratorConnection => Connection(DatabaseName, MigratorRole);
     public string RuntimeConnection => Connection(DatabaseName, RuntimeRole);
 
     public static async Task<PostgresSandbox> CreateAsync()
+        => await CreateAsync(initialize: true);
+
+    internal static async Task<PostgresSandbox> CreateProductionTargetAsync()
+        => await CreateAsync(initialize: false);
+
+    private static async Task<PostgresSandbox> CreateAsync(bool initialize)
     {
         string admin = Environment.GetEnvironmentVariable("LANDERP_TEST_ADMIN_CONNECTION") ?? "";
         if (string.IsNullOrWhiteSpace(admin))
@@ -45,9 +52,19 @@ internal sealed class PostgresSandbox : IAsyncDisposable
         try
         {
             await sandbox.ExecuteAdminAsync("SELECT 1");
-            await sandbox.CreateRoleAsync(sandbox.MigratorRole);
-            await sandbox.CreateRoleAsync(sandbox.RuntimeRole);
-            await sandbox.CreateDatabaseAsync(sandbox.DatabaseName);
+            if (initialize)
+            {
+                await sandbox.CreateRoleAsync(sandbox.MigratorRole);
+                await sandbox.CreateRoleAsync(sandbox.RuntimeRole);
+                await sandbox.CreateDatabaseAsync(sandbox.DatabaseName);
+            }
+            else
+            {
+                // Register exact disposable names before the production initializer creates any subset of them.
+                sandbox.createdRoles.Add(sandbox.MigratorRole);
+                sandbox.createdRoles.Add(sandbox.RuntimeRole);
+                sandbox.createdDatabases.Add(sandbox.DatabaseName);
+            }
             return sandbox;
         }
         catch
@@ -67,26 +84,7 @@ internal sealed class PostgresSandbox : IAsyncDisposable
 
     public async Task GrantRuntimeAsync()
     {
-        await ExecuteAdminAsync($"REVOKE CREATE ON SCHEMA public FROM PUBLIC; "
-            + $"REVOKE ALL ON SCHEMA foundation FROM PUBLIC; "
-            + $"GRANT CONNECT ON DATABASE \"{DatabaseName}\" TO \"{RuntimeRole}\"; "
-            + $"GRANT USAGE ON SCHEMA foundation TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT ON ALL TABLES IN SCHEMA foundation TO \"{RuntimeRole}\"; "
-            + $"GRANT INSERT ON foundation.audit_events TO \"{RuntimeRole}\"; "
-            + $"GRANT USAGE ON SCHEMA identity,organization TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA identity,organization TO \"{RuntimeRole}\"; "
-            + $"GRANT DELETE ON identity.user_roles TO \"{RuntimeRole}\"; "
-            + $"GRANT USAGE ON SCHEMA collection,catalog TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_groups,collection.search_group_market_settings,collection.search_configurations,collection.jobs,collection.scheduler_status,catalog.listings TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT,UPDATE ON catalog.duplicate_candidates,catalog.duplicate_settings TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT,UPDATE,DELETE ON catalog.photo_fingerprints TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations,catalog.events TO \"{RuntimeRole}\"; "
-            + $"GRANT USAGE ON SCHEMA workflow,procurement TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT ON workflow.stages TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,procurement.case_checks,procurement.case_check_template_items,procurement.case_document_requirements,procurement.inspection_template_items,procurement.site_inspections,procurement.site_inspection_items,foundation.notifications,foundation.stored_files TO \"{RuntimeRole}\"; "
-            + $"GRANT SELECT,INSERT ON workflow.transitions,workflow.approvals,foundation.business_timeline,procurement.negotiations,procurement.case_attachments,procurement.case_fact_revisions TO \"{RuntimeRole}\"; "
-            + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA procurement TO \"{RuntimeRole}\"; "
-            + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA identity,organization TO \"{RuntimeRole}\";", DatabaseName);
+        await ProductionDatabaseInitializer.ApplyRuntimeAccessAsync(MigratorConnection, RuntimeRole);
     }
 
     public async Task BackupRestoreAsync()
@@ -201,7 +199,7 @@ internal sealed class PostgresSandbox : IAsyncDisposable
                 throw new InvalidOperationException("Refusing cleanup of an unowned database.");
             }
 
-            await ExecuteAdminAsync($"DROP DATABASE \"{database}\" WITH (FORCE)");
+            await ExecuteAdminAsync($"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)");
         }
 
         foreach (string role in createdRoles.AsEnumerable().Reverse())
@@ -211,7 +209,7 @@ internal sealed class PostgresSandbox : IAsyncDisposable
                 throw new InvalidOperationException("Refusing cleanup of an unowned role.");
             }
 
-            await ExecuteAdminAsync($"DROP ROLE \"{role}\"");
+            await ExecuteAdminAsync($"DROP ROLE IF EXISTS \"{role}\"");
         }
     }
 }

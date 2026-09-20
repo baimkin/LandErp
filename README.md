@@ -75,6 +75,10 @@ Local mode Collector доступен независимо от Server. При �
 
 Первый production-контур Windows — versioned publish, managed Server/Worker, HTTPS reverse proxy, persistent Data Protection keys, backup/restore и rollback — описан в [Production Runbook](docs/03-active/PRODUCTION_RUNBOOK.md).
 
+Первый запуск использует отдельные явные команды
+`Initialize-ProductionDatabase.ps1` и `Initialize-ProductionOwner.ps1`;
+Server/Worker сами не создают БД, роли, миграции или владельца.
+
 Локальный `Start-Local.ps1` остаётся только development launcher и не является production supervisor.
 
 ## Проверки

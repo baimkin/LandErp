@@ -86,28 +86,7 @@ try
     string runtimeRole = runtimeSettings.Username ?? throw new InvalidOperationException("Runtime role missing.");
     if (!runtimeRole.StartsWith("le_local_r_", StringComparison.Ordinal) || !runtimeRole.All(character => char.IsAsciiLetterOrDigit(character) || character == '_'))
         throw new InvalidOperationException("Unexpected local runtime role.");
-    await using NpgsqlConnection migratorConnection = new(settings.MigratorConnection);
-    await migratorConnection.OpenAsync();
-    await using NpgsqlCommand grants = new($"REVOKE CREATE ON SCHEMA public FROM PUBLIC; "
-        + $"GRANT CONNECT ON DATABASE landerp_local TO \"{runtimeRole}\"; "
-        + $"GRANT USAGE ON SCHEMA identity,organization,foundation TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA identity,organization TO \"{runtimeRole}\"; "
-        + $"GRANT DELETE ON identity.user_roles TO \"{runtimeRole}\"; "
-        + $"GRANT USAGE ON SCHEMA collection,catalog TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_groups,collection.search_group_market_settings,collection.search_configurations,collection.jobs,collection.scheduler_status,catalog.listings TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT,INSERT,UPDATE ON catalog.incoming_filter_presets TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT,INSERT,UPDATE ON catalog.duplicate_candidates,catalog.duplicate_settings TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT,INSERT,UPDATE,DELETE ON catalog.photo_fingerprints TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT,INSERT ON collection.deliveries,catalog.observations,catalog.events TO \"{runtimeRole}\"; "
-        + $"GRANT USAGE ON SCHEMA workflow,procurement TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT ON workflow.stages TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,procurement.case_checks,procurement.case_check_template_items,procurement.case_document_requirements,procurement.inspection_template_items,procurement.site_inspections,procurement.site_inspection_items,foundation.notifications,foundation.stored_files TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT,INSERT ON workflow.transitions,workflow.approvals,foundation.business_timeline,procurement.negotiations,procurement.case_attachments,procurement.case_fact_revisions TO \"{runtimeRole}\"; "
-        + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA procurement TO \"{runtimeRole}\"; "
-        + $"GRANT USAGE ON ALL SEQUENCES IN SCHEMA identity,organization TO \"{runtimeRole}\"; "
-        + $"GRANT SELECT ON ALL TABLES IN SCHEMA foundation TO \"{runtimeRole}\"; "
-        + $"GRANT INSERT ON foundation.audit_events TO \"{runtimeRole}\";", migratorConnection);
-    await grants.ExecuteNonQueryAsync();
+    await ProductionDatabaseInitializer.ApplyRuntimeAccessAsync(settings.MigratorConnection, runtimeRole);
     Console.WriteLine("Local schema applied and Owner initialized. Credentials are in ignored local-data/stage1; values are not printed.");
 }
 catch

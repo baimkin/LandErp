@@ -6,5 +6,6 @@
     <None Remove="artifacts\**" />
     <ProjectReference Include="../LandErp.Application/LandErp.Application.csproj" />
     <ProjectReference Include="../LandErp.Infrastructure/LandErp.Infrastructure.csproj" />
+    <PackageReference Include="QRCoder" />
   </ItemGroup>
 </Project>

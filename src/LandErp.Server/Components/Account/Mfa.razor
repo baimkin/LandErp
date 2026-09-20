@@ -5,6 +5,7 @@
 @using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Identity
 @using System.Security.Claims
+@using QRCoder
 @using LandErp.Infrastructure.Modules.IdentityAccess
 @using LandErp.Infrastructure.Persistence
 @inject UserManager<LandErpUser> Users
@@ -22,7 +23,15 @@ else if (recoveryCodes != null)
 }
 else
 {
-    <p>Добавьте ключ в приложение-аутентификатор. Затем введите текущий шестизначный код.</p>
+    <p>Отсканируйте QR-код приложением-аутентификатором. Затем введите текущий шестизначный код.</p>
+    @if (qrCodeDataUri != null)
+    {
+        <div class="mfa-qr">
+            <img src="@qrCodeDataUri" alt="QR-код для настройки MFA LandErp" width="240" height="240" />
+            <small>QR-код содержит секрет настройки. Не фотографируйте и не пересылайте его.</small>
+        </div>
+    }
+    <p class="subtle">Если QR-код не сканируется, добавьте учётную запись вручную:</p>
     <label class="field"><span>Ключ настройки</span><input value="@key" readonly aria-label="Ключ настройки MFA" /></label>
     @if (error != null) { <PageState Kind="error" Title="@error" /> }
     <EditForm Model="Input" method="post" FormName="mfa" OnValidSubmit="EnableAsync">
@@ -35,6 +44,7 @@ else
     [SupplyParameterFromForm] private MfaInput Input { get; set; } = default!;
     private LandErpUser? user;
     private string? key;
+    private string? qrCodeDataUri;
     private string? error;
     private IEnumerable<string>? recoveryCodes;
 
@@ -47,6 +57,7 @@ else
         if (user == null || user.TwoFactorEnabled) { user = null; return; }
         key = await Users.GetAuthenticatorKeyAsync(user);
         if (key == null) { await Users.ResetAuthenticatorKeyAsync(user); key = await Users.GetAuthenticatorKeyAsync(user); }
+        if (key != null) qrCodeDataUri = CreateQrCodeDataUri(user.UserName ?? "LandErp user", key);
     }
 
     private async Task EnableAsync()
@@ -65,6 +76,15 @@ else
         await HttpContext.SignOutAsync(IdentityConstants.TwoFactorUserIdScheme);
         await SignIn.SignInWithClaimsAsync(user, false, [new Claim("amr", "mfa")]);
         await AccountAudit.RecordAsync(Db, user.Id, "MfaEnabled");
+    }
+    private static string CreateQrCodeDataUri(string login, string secret)
+    {
+        const string issuer = "LandErp";
+        string label = $"{Uri.EscapeDataString(issuer)}:{Uri.EscapeDataString(login)}";
+        string uri = $"otpauth://totp/{label}?secret={Uri.EscapeDataString(secret)}&issuer={Uri.EscapeDataString(issuer)}&digits=6";
+        using QRCodeData data = QRCodeGenerator.GenerateQrCode(uri, QRCodeGenerator.ECCLevel.Q);
+        using var qrCode = new PngByteQRCode(data);
+        return "data:image/png;base64," + Convert.ToBase64String(qrCode.GetGraphic(8));
     }
     private sealed class MfaInput { [Required, RegularExpression("^[0-9]{6}$", ErrorMessage = "Введите 6 цифр")] public string Code { get; set; } = ""; }
 }

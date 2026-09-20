@@ -14,6 +14,14 @@ if ($version -notmatch '^[A-Za-z0-9._-]+$') { throw 'Release version is invalid.
 foreach ($relative in @('Server\LandErp.Server.exe','Worker\LandErp.Worker.exe')) { if (-not (Test-Path -LiteralPath (Join-Path $source $relative))) { throw "Release is missing $relative" } }
 $config = Join-Path $StateRoot 'config\production.json'
 if (-not (Test-Path -LiteralPath $config)) { throw 'Run Initialize-ProductionConfig.ps1 first.' }
+$productionConfig = Get-Content -Raw -LiteralPath $config | ConvertFrom-Json
+$allowedHosts = @(([string]$productionConfig.AllowedHosts).Split(';') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+$healthHeaders = @{}
+if ($allowedHosts -notcontains '*') {
+    $healthHost = $allowedHosts | Where-Object { $_ -notmatch '\*' } | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace([string]$healthHost)) { throw 'AllowedHosts must include a concrete hostname for the local deployment health check.' }
+    $healthHeaders['Host'] = [string]$healthHost
+}
 $releaseDirectory = Join-Path $InstallRoot "releases\$version"
 if (Test-Path -LiteralPath $releaseDirectory) {
     $installedMetadataFile = Join-Path $releaseDirectory 'release.json'
@@ -54,9 +62,9 @@ try {
     Start-ScheduledTask -TaskName 'LandErp Worker'
     Start-ScheduledTask -TaskName 'LandErp Server'
     $live = $false
-    for ($attempt=0; $attempt -lt 30; $attempt++) { try { $response = Invoke-WebRequest -UseBasicParsing -Uri ($ServerUrl.TrimEnd('/') + '/health/live') -TimeoutSec 2; if ($response.StatusCode -eq 200) { $live = $true; break } } catch { }; Start-Sleep -Seconds 1 }
+    for ($attempt=0; $attempt -lt 30; $attempt++) { try { $response = Invoke-WebRequest -UseBasicParsing -Uri ($ServerUrl.TrimEnd('/') + '/health/live') -Headers $healthHeaders -TimeoutSec 2; if ($response.StatusCode -eq 200) { $live = $true; break } } catch { }; Start-Sleep -Seconds 1 }
     if (-not $live) { throw 'Server did not become live after deployment.' }
-    $ready = Invoke-WebRequest -UseBasicParsing -Uri ($ServerUrl.TrimEnd('/') + '/health/ready') -TimeoutSec 5
+    $ready = Invoke-WebRequest -UseBasicParsing -Uri ($ServerUrl.TrimEnd('/') + '/health/ready') -Headers $healthHeaders -TimeoutSec 5
     if ($ready.StatusCode -ne 200) { throw 'Server is live but Database readiness failed.' }
 }
 catch {

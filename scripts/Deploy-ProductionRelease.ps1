@@ -41,9 +41,10 @@ function Register-LandErpTask([string]$Name,[string]$Service) {
     $arguments = "-NoProfile -ExecutionPolicy Bypass -File $q$runner$q -Service $Service -StateRoot $q$StateRoot$q -ServerUrl $q$ServerUrl$q"
     $action = New-ScheduledTaskAction -Execute $powerShell -Argument $arguments
     $trigger = New-ScheduledTaskTrigger -AtStartup
-    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 10 -RestartInterval (New-TimeSpan -Seconds 30) -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
+    # Task Scheduler XML requires a restart interval of at least one minute on supported Windows Server versions.
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'S-1-5-19' -LogonType ServiceAccount -RunLevel Limited
-    Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger -Settings $settings -Principal $taskPrincipal -Description "Managed LandErp $Service process. Installed by repository deployment script." -Force | Out-Null
+    Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger -Settings $settings -Principal $taskPrincipal -Description "Managed LandErp $Service process. Installed by repository deployment script." -Force -ErrorAction Stop | Out-Null
 }
 foreach ($task in @('LandErp Server','LandErp Worker')) { Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue }
 Move-Item -LiteralPath $tempCurrent -Destination $currentFile -Force

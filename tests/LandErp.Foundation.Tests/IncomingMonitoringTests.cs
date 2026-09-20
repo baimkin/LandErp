@@ -88,7 +88,23 @@ public sealed class IncomingMonitoringTests
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
         var ingested = await fixture.IngestMarketplacePairAsync();
-        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+        IncomingCatalogReadService reads = new(
+            fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+
+        await using (LandErpDbContext db = await fixture.Factory.CreateDbContextAsync())
+        {
+            db.CatalogEvents.Add(new()
+            {
+                Id = Guid.NewGuid(),
+                OrganizationId = fixture.OrganizationId,
+                CatalogItemId = ingested.CianId,
+                Kind = CatalogEventKind.SourceChanged,
+                Message = "Изменилось описание",
+                ObservedPrice = 2_400_000m,
+                RecordedAt = DateTimeOffset.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
 
         await fixture.IngestChangedAvitoAsync(ingested.Agent, ingested.Administration, 1_800_000m);
 
@@ -106,6 +122,8 @@ public sealed class IncomingMonitoringTests
         IncomingCatalogReadPage changedPage = await reads.ReadAsync(fixture.Manager,
             new(new(), Preset: IncomingCatalogPreset.PriceChanged), CancellationToken.None);
         Assert.IsTrue(changedPage.Items.Any(item => item.Id == ingested.AvitoId));
+        Assert.IsFalse(changedPage.Items.Any(item => item.Id == ingested.CianId),
+            "A historical non-price source event must not become a price change just because its previous price is null.");
     }
 
     [TestMethod]

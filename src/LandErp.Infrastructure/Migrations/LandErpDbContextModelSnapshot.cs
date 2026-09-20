@@ -355,6 +355,18 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("observed_price")
                         .HasComment("Общая цена источника в момент события, если была известна.");
 
+                    b.Property<decimal?>("PreviousObservedPrice")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("previous_observed_price")
+                        .HasComment("Предыдущее известное значение публичной цены непосредственно перед событием изменения источника.");
+
+                    b.Property<decimal?>("PreviousObservedPricePerSotka")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("previous_observed_price_per_sotka")
+                        .HasComment("Предыдущая вычисленная цена за сотку непосредственно перед событием изменения источника.");
+
                     b.Property<decimal?>("ObservedPricePerSotka")
                         .HasPrecision(19, 4)
                         .HasColumnType("numeric(19,4)")

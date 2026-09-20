@@ -9,6 +9,7 @@ using LandErp.Infrastructure.Modules.Catalog;
 using LandErp.Infrastructure.Modules.Organization;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -347,20 +348,22 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             List<string> changes = [];
             if (isNew || data.ObservedAt > listing.LastObservedAt)
             {
+                decimal? previousPrice = listing.Price;
+                decimal? previousPricePerSotka = PricePerSotka(listing.Price, listing.AreaSquareMeters);
                 ApplyKnown(listing, data, changes);
                 IncomingDuplicateDetector.ApplyExtractedCadastral(listing);
                 listing.LastObservedAt = data.ObservedAt;
                 if (changes.Count > 0 && !isNew)
                 {
                     listing.DataRevision++; listing.ChangedAt = time.GetUtcNow();
-                    listing.QueueReason = "Изменились: " + string.Join(", ", changes);
+                    listing.QueueReason = SourceChangeQueueReason(changes, previousPrice, listing.Price);
                     if (listing.Disposition != CatalogDisposition.Monitoring)
                     {
                         listing.AttentionRequired = true;
                         listing.AttentionAt = time.GetUtcNow();
                     }
                     db.CatalogEvents.Add(NewCatalogEvent(listing, CatalogEventKind.SourceChanged,
-                        listing.QueueReason, time.GetUtcNow()));
+                        SourceChangeEventMessage(changes), time.GetUtcNow(), previousPrice, previousPricePerSotka));
                 }
                 CatalogMonitoringEvaluator.Evaluate(db, listing, time.GetUtcNow());
             }
@@ -545,13 +548,53 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         listing.Url = data.Url;
     }
 
+    private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
+
+    private static string SourceChangeQueueReason(IReadOnlyList<string> changes, decimal? previousPrice, decimal? currentPrice)
+    {
+        if (!changes.Contains("цена", StringComparer.Ordinal))
+            return "Изменились: " + string.Join(", ", changes);
+
+        string price = PriceChangeSummary(previousPrice, currentPrice);
+        string[] others = changes.Where(value => !string.Equals(value, "цена", StringComparison.Ordinal)).ToArray();
+        return others.Length == 0 ? price : $"{price} · Также изменились: {string.Join(", ", others)}";
+    }
+
+    private static string SourceChangeEventMessage(IReadOnlyList<string> changes)
+    {
+        string[] others = changes.Where(value => !string.Equals(value, "цена", StringComparison.Ordinal)).ToArray();
+        return others.Length == 0 ? "Изменилась цена источника" : $"Также изменились: {string.Join(", ", others)}";
+    }
+
+    private static string PriceChangeSummary(decimal? previous, decimal? current)
+    {
+        if (previous == null && current == null) return "Цена изменилась";
+        if (previous == null) return $"Цена установлена: {Money(current!.Value)}";
+        if (current == null) return $"Цена удалена: было {Money(previous.Value)}";
+
+        decimal delta = current.Value - previous.Value;
+        string percent = previous.Value == 0
+            ? ""
+            : $" · {SignedPercent(delta / previous.Value * 100m)}";
+        return $"Цена: {Money(previous.Value)} → {Money(current.Value)} · {SignedMoney(delta)}{percent}";
+    }
+
+    private static string Money(decimal value) => $"{decimal.Round(value, 0).ToString("N0", RuCulture)} ₽";
+    private static string SignedMoney(decimal value) =>
+        value > 0 ? $"+{Money(value)}" : value < 0 ? $"−{Money(Math.Abs(value))}" : Money(0m);
+    private static string SignedPercent(decimal value) =>
+        value > 0 ? $"+{value.ToString("0.#", RuCulture)}%" : value < 0 ? $"−{Math.Abs(value).ToString("0.#", RuCulture)}%" : "0%";
+
     private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) =>
         CatalogMonitoringEvaluator.PricePerSotka(price, areaSquareMeters);
 
-    private static CatalogEvent NewCatalogEvent(Listing listing, CatalogEventKind kind, string message, DateTimeOffset now) => new()
+    private static CatalogEvent NewCatalogEvent(Listing listing, CatalogEventKind kind, string message, DateTimeOffset now,
+        decimal? previousObservedPrice = null, decimal? previousObservedPricePerSotka = null) => new()
     {
         Id = DataConventions.NewId(), OrganizationId = listing.OrganizationId, CatalogItemId = listing.Id,
-        Kind = kind, Message = message, ObservedPrice = listing.Price,
+        Kind = kind, Message = message,
+        PreviousObservedPrice = previousObservedPrice, ObservedPrice = listing.Price,
+        PreviousObservedPricePerSotka = previousObservedPricePerSotka,
         ObservedPricePerSotka = PricePerSotka(listing.Price, listing.AreaSquareMeters), RecordedAt = now
     };
 }

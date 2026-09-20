@@ -19,8 +19,9 @@ public sealed record IncomingCatalogSummary(int Incoming, int Attention, int Mon
 public sealed record IncomingCatalogPage(IReadOnlyList<CatalogItemView> Items, int Total, IncomingCatalogSummary Summary);
 public sealed record CatalogMonitoringView(decimal? TargetTotalPrice, decimal? TargetPricePerSotka,
     DateTimeOffset? StartedAt, decimal? LastEvaluatedPrice, decimal? LastEvaluatedPricePerSotka, DateTimeOffset? LastEvaluatedAt);
-public sealed record CatalogEventView(Guid Id, CatalogEventKind Kind, string Message, decimal? ObservedPrice,
-    decimal? ObservedPricePerSotka, DateTimeOffset RecordedAt);
+public sealed record CatalogEventView(Guid Id, CatalogEventKind Kind, string Message,
+    decimal? PreviousObservedPrice, decimal? ObservedPrice,
+    decimal? PreviousObservedPricePerSotka, decimal? ObservedPricePerSotka, DateTimeOffset RecordedAt);
 public sealed record CatalogItemDetail(CatalogItemView Item, string? SellerName, string? IngressComment,
     CatalogMonitoringView Monitoring, IReadOnlyList<CatalogEventView> Events);
 public sealed record CreateManualCatalogItem(CatalogSource Source, string Title, string? Location, decimal? Price,

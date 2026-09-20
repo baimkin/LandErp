@@ -84,6 +84,31 @@ public sealed class IncomingMonitoringTests
     }
 
     [TestMethod]
+    public async Task SourcePriceChangeStoresBeforeAfterAndShowsDelta()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        var ingested = await fixture.IngestMarketplacePairAsync();
+        IIncomingCatalogReadService reads = fixture.Scope.ServiceProvider.GetRequiredService<IIncomingCatalogReadService>();
+
+        await fixture.IngestChangedAvitoAsync(ingested.Agent, ingested.Administration, 1_800_000m);
+
+        CatalogItemDetail detail = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
+        CatalogEventView priceEvent = detail.Events.Single(item => item.Kind == CatalogEventKind.SourceChanged);
+        Assert.AreEqual(2_000_000m, priceEvent.PreviousObservedPrice);
+        Assert.AreEqual(1_800_000m, priceEvent.ObservedPrice);
+        Assert.AreEqual(decimal.Round(2_000_000m * 100m / 1_500m, 4), priceEvent.PreviousObservedPricePerSotka);
+        Assert.AreEqual(decimal.Round(1_800_000m * 100m / 1_500m, 4), priceEvent.ObservedPricePerSotka);
+        StringAssert.Contains(detail.Item.QueueReason, "2");
+        StringAssert.Contains(detail.Item.QueueReason, "1");
+        StringAssert.Contains(detail.Item.QueueReason, "−200");
+        StringAssert.Contains(detail.Item.QueueReason, "−10%");
+
+        IncomingCatalogReadPage changedPage = await reads.ReadAsync(fixture.Manager,
+            new(new(), Preset: IncomingCatalogPreset.PriceChanged), CancellationToken.None);
+        Assert.IsTrue(changedPage.Items.Any(item => item.Id == ingested.AvitoId));
+    }
+
+    [TestMethod]
     public async Task MonitoringImmediatelyReactivatesWhenCurrentPricePerSotkaMeetsThreshold()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);

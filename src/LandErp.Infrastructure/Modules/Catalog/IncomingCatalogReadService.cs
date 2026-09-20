@@ -33,7 +33,8 @@ public sealed class IncomingCatalogReadService(
 
         IQueryable<Guid> priceChangedIds = db.CatalogEvents.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId
-                && item.Kind == CatalogEventKind.SourceChanged && item.Message.Contains("цена"))
+                && item.Kind == CatalogEventKind.SourceChanged
+                && (item.PreviousObservedPrice != item.ObservedPrice || item.Message.Contains("цена")))
             .Select(item => item.CatalogItemId).Distinct();
         IQueryable<Guid> returnedFromMonitoringIds = db.CatalogEvents.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId && item.Kind == CatalogEventKind.MonitoringTriggered)
@@ -192,10 +193,12 @@ public sealed class IncomingCatalogReadService(
         var eventRows = await db.CatalogEvents.AsNoTracking()
             .Where(item => ids.Contains(item.CatalogItemId)
                 && (item.Kind == CatalogEventKind.SourceChanged || item.Kind == CatalogEventKind.MonitoringTriggered))
-            .Select(item => new { item.CatalogItemId, item.Kind, item.Message }).ToArrayAsync(cancellationToken);
+            .Select(item => new { item.CatalogItemId, item.Kind, item.Message,
+                item.PreviousObservedPrice, item.ObservedPrice }).ToArrayAsync(cancellationToken);
         var flagsByItem = eventRows.GroupBy(item => item.CatalogItemId).ToDictionary(group => group.Key, group => new
         {
-            PriceChanged = group.Any(item => item.Kind == CatalogEventKind.SourceChanged && item.Message.Contains("цена")),
+            PriceChanged = group.Any(item => item.Kind == CatalogEventKind.SourceChanged
+                && (item.PreviousObservedPrice != item.ObservedPrice || item.Message.Contains("цена"))),
             Returned = group.Any(item => item.Kind == CatalogEventKind.MonitoringTriggered)
         });
 

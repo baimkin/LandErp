@@ -55,7 +55,9 @@ public sealed class CatalogEvent
     public Guid CatalogItemId { get; set; }
     public CatalogEventKind Kind { get; set; }
     public string Message { get; set; } = "";
+    public decimal? PreviousObservedPrice { get; set; }
     public decimal? ObservedPrice { get; set; }
+    public decimal? PreviousObservedPricePerSotka { get; set; }
     public decimal? ObservedPricePerSotka { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
 }

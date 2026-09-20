@@ -125,7 +125,9 @@ internal static class CollectionMappings
         builder.Entity<CatalogEvent>().ToTable("events", "catalog");
         builder.Entity<CatalogEvent>().Property(item => item.Kind).HasConversion<string>();
         builder.Entity<CatalogEvent>().Property(item => item.Message).HasMaxLength(4000);
+        builder.Entity<CatalogEvent>().Property(item => item.PreviousObservedPrice).HasPrecision(19, 4);
         builder.Entity<CatalogEvent>().Property(item => item.ObservedPrice).HasPrecision(19, 4);
+        builder.Entity<CatalogEvent>().Property(item => item.PreviousObservedPricePerSotka).HasPrecision(19, 4);
         builder.Entity<CatalogEvent>().Property(item => item.ObservedPricePerSotka).HasPrecision(19, 4);
         builder.Entity<CatalogEvent>().HasIndex(item => new { item.CatalogItemId, item.RecordedAt });
         builder.Entity<CatalogEvent>().HasOne<Listing>().WithMany().HasForeignKey(item => item.CatalogItemId).OnDelete(DeleteBehavior.Restrict);

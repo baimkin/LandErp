@@ -383,7 +383,31 @@
                 }
                 else
                 {
-                    <ol>@foreach (CatalogEventView item in detail.Events) { <li><strong>@EventLabel(item.Kind)</strong><span>@ProcurementLabels.Time(item.RecordedAt)</span><p>@item.Message</p></li> }</ol>
+                    <ol>
+                        @foreach (CatalogEventView item in detail.Events)
+                        {
+                            <li>
+                                <strong>@EventLabel(item.Kind)</strong><span>@ProcurementLabels.Time(item.RecordedAt)</span>
+                                @if (HasTypedPriceChange(item))
+                                {
+                                    <p>@PriceChangeSummary(item.PreviousObservedPrice!.Value, item.ObservedPrice!.Value)</p>
+                                    @if (HasTypedPricePerSotkaChange(item))
+                                    {
+                                        <p>@PricePerSotkaChangeSummary(item.PreviousObservedPricePerSotka!.Value, item.ObservedPricePerSotka!.Value)</p>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.Message)
+                                        && !string.Equals(item.Message, "Изменилась цена источника", StringComparison.Ordinal))
+                                    {
+                                        <p>@item.Message</p>
+                                    }
+                                }
+                                else
+                                {
+                                    <p>@item.Message</p>
+                                }
+                            </li>
+                        }
+                    </ol>
                 }
             </section>
 
@@ -1241,6 +1265,34 @@
     };
 
     private static string LandTypeResultLabel(IncomingLandType value) => LandTypeFilterLabel(value);
+
+    private static bool HasTypedPriceChange(CatalogEventView item) =>
+        item.Kind == CatalogEventKind.SourceChanged
+        && item.PreviousObservedPrice != null && item.ObservedPrice != null
+        && item.PreviousObservedPrice != item.ObservedPrice;
+
+    private static bool HasTypedPricePerSotkaChange(CatalogEventView item) =>
+        item.PreviousObservedPricePerSotka != null && item.ObservedPricePerSotka != null
+        && item.PreviousObservedPricePerSotka != item.ObservedPricePerSotka;
+
+    private static string PriceChangeSummary(decimal previous, decimal current) =>
+        $"Цена: {ProcurementLabels.Money(previous)} → {ProcurementLabels.Money(current)} · {SignedMoney(current - previous)}{PercentPart(previous, current)}";
+
+    private static string PricePerSotkaChangeSummary(decimal previous, decimal current) =>
+        $"Цена за сотку: {ProcurementLabels.Money(previous)} → {ProcurementLabels.Money(current)} · {SignedMoney(current - previous)}{PercentPart(previous, current)}";
+
+    private static string SignedMoney(decimal value) =>
+        value > 0 ? $"+{ProcurementLabels.Money(value)}"
+        : value < 0 ? $"−{ProcurementLabels.Money(Math.Abs(value))}"
+        : ProcurementLabels.Money(0m);
+
+    private static string PercentPart(decimal previous, decimal current)
+    {
+        if (previous == 0) return "";
+        decimal value = (current - previous) / previous * 100m;
+        string sign = value > 0 ? "+" : value < 0 ? "−" : "";
+        return $" · {sign}{Math.Abs(value).ToString("0.#", RuCulture)}%";
+    }
 
     private static string EventLabel(CatalogEventKind kind) => kind switch
     {

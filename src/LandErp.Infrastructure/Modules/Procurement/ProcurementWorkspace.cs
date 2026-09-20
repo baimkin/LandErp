@@ -101,8 +101,10 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                           select new { propertyCase.Id, propertyCase.BusinessNumber, propertyCase.StageId }).SingleOrDefaultAsync(cancellationToken);
         CatalogEventView[] events = await db.CatalogEvents.AsNoTracking().Where(value => value.CatalogItemId == item.Id)
             .OrderByDescending(value => value.RecordedAt).ThenByDescending(value => value.Id).Take(100)
-            .Select(value => new CatalogEventView(value.Id, value.Kind, value.Message, value.ObservedPrice,
-                value.ObservedPricePerSotka, value.RecordedAt)).ToArrayAsync(cancellationToken);
+            .Select(value => new CatalogEventView(value.Id, value.Kind, value.Message,
+                value.PreviousObservedPrice, value.ObservedPrice,
+                value.PreviousObservedPricePerSotka, value.ObservedPricePerSotka,
+                value.RecordedAt)).ToArrayAsync(cancellationToken);
         return new(CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId), item.SellerName, item.IngressComment,
             new(item.TargetTotalPrice, item.TargetPricePerSotka, item.MonitoringStartedAt, item.LastEvaluatedPrice,
                 item.LastEvaluatedPricePerSotka, item.LastEvaluatedAt), events);

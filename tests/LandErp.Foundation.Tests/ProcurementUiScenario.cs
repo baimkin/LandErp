@@ -22,8 +22,9 @@ internal static class ProcurementUiScenario
             Assert.AreEqual(403, await page.EvaluateAsync<int>("async () => (await fetch('/api/audit')).status"));
             Assert.AreEqual(400, await page.EvaluateAsync<int>("async () => (await fetch('/api/procurement/incoming/take-to-work', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status"));
 
-            await page.GotoAsync(origin + "/incoming"); await ReadyAsync(page);
-            await page.GetByRole(AriaRole.Button, new() { Name = "+ Добавить объявление / предложение", Exact = true }).ClickAsync();
+            await page.GotoAsync(origin + "/procurement"); await ReadyAsync(page);
+            await page.GetByRole(AriaRole.Heading, new() { Name = "Очередь закупки", Exact = true }).WaitForAsync();
+            await page.GotoAsync(origin + "/incoming?manual=true"); await ReadyAsync(page);
             ILocator manual = await StableDialogAsync(page);
             await manual.GetByLabel("Название", new() { Exact = true }).FillAsync("UI Telegram Phase 1");
             await manual.GetByLabel("Локация", new() { Exact = true }).FillAsync("UI Химки");
@@ -32,7 +33,7 @@ internal static class ProcurementUiScenario
             await manual.GetByRole(AriaRole.Button, new() { Name = "Сохранить во входящие", Exact = true }).ClickAsync();
             await manual.WaitForAsync(new() { State = WaitForSelectorState.Detached });
             ILocator row = page.Locator("tr", new() { HasText = "UI Telegram Phase 1" });
-            await row.GetByRole(AriaRole.Button, new() { Name = "Подробнее", Exact = true }).ClickAsync();
+            await row.ClickAsync();
             ILocator drawer = await StableDrawerAsync(page);
             await drawer.GetByRole(AriaRole.Button, new() { Name = "Взять в работу", Exact = true }).ClickAsync();
             ILocator take = await StableDialogAsync(page);
@@ -83,7 +84,7 @@ internal static class ProcurementUiScenario
             await page.GotoAsync(origin + "/incoming"); await ReadyAsync(page);
             await page.GetByRole(AriaRole.Link, new() { Name = "Входящие", Exact = false }).WaitForAsync();
             await page.GetByRole(AriaRole.Link, new() { Name = "Закупка", Exact = false }).WaitForAsync();
-            await page.GetByRole(AriaRole.Button, new() { Name = "+ Добавить объявление / предложение", Exact = true }).ClickAsync();
+            await page.GetByRole(AriaRole.Button, new() { Name = "+ Добавить ссылку вручную", Exact = true }).ClickAsync();
             ILocator manual = await StableDialogAsync(page);
             await manual.GetByLabel("Название", new() { Exact = true }).FillAsync("UI Phase 3 без внешней идентичности");
             await manual.GetByLabel("Локация", new() { Exact = true }).FillAsync("Химки");
@@ -94,7 +95,7 @@ internal static class ProcurementUiScenario
             await manual.WaitForAsync(new() { State = WaitForSelectorState.Detached });
             ILocator row = page.Locator("tr", new() { HasText = "UI Phase 3 без внешней идентичности" });
             await row.GetByText("без внешнего ID", new() { Exact = false }).WaitForAsync();
-            await row.GetByRole(AriaRole.Button, new() { Name = "Подробнее", Exact = true }).ClickAsync();
+            await row.ClickAsync();
             ILocator drawer = await StableDrawerAsync(page);
             await drawer.GetByLabel("Общая цена ≤, ₽", new() { Exact = true }).FillAsync("2900000");
             await drawer.GetByLabel("Комментарий", new() { Exact = true }).FillAsync("Ждём целевую цену");

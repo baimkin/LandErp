@@ -1,3 +1,4 @@
+@page "/incoming"
 @page "/incoming-v2"
 @attribute [Authorize(Policy = "manager_queue.read")]
 @using System.Globalization
@@ -11,7 +12,7 @@
 @inject IIncomingFilterPresetService FilterPresets
 @inject NavigationManager Navigation
 
-<PageTitle>Входящие предложения v2 · LandErp</PageTitle>
+<PageTitle>Входящие предложения · LandErp</PageTitle>
 
 <div class="incoming-v2">
     <div class="v2-head">
@@ -551,6 +552,7 @@
 }
 
 @code {
+    [Parameter, SupplyParameterFromQuery(Name = "manual")] public bool OpenManual { get; set; }
     private const int PageSize = 25;
     private const int SearchDebounceMilliseconds = 400;
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
@@ -560,6 +562,7 @@
     private readonly FilterInput filter = new();
     private int page;
     private bool manualOpen;
+    private bool queryInitialized;
     private bool historyDemoOpen;
     private bool advancedOpen;
     private bool monitoringOpen;
@@ -600,6 +603,13 @@
         new("vri", "Категория / ВРИ", "Допустимы для сценария"),
         new("access", "Подъезд / техническое состояние", "Нет очевидного стоп-фактора")
     ];
+
+    protected override void OnParametersSet()
+    {
+        if (queryInitialized) return;
+        manualOpen = OpenManual;
+        queryInitialized = true;
+    }
 
     protected override async Task ReadAsync()
     {

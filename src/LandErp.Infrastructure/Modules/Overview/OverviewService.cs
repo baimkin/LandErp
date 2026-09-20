@@ -179,18 +179,18 @@ public sealed class OverviewService(
         if (queue != null)
         {
             quick.Add(new("incoming", "Открыть входящие", "/incoming", false));
-            quick.Add(new("queue", "Очередь закупки", "/procurement-v2", false));
-            quick.Add(new("mine", "Мои объекты", "/procurement-v2?mine=true", false));
+            quick.Add(new("queue", "Очередь закупки", "/procurement", false));
+            quick.Add(new("mine", "Мои объекты", "/procurement?mine=true", false));
         }
 
         int maxStage = Math.Max(1, Math.Max(newIncoming, Math.Max(activeCount, Math.Max(deepCount, Math.Max(waitingCount, acquiredCount)))));
         OverviewStageItem[] stages = queue == null ? [] :
         [
             Stage("incoming", "Входящие", newIncoming, "новых предложений", maxStage, "/incoming"),
-            Stage("work", "В работе", activeCount, overdueCount == 0 ? "объектов в работе" : $"{overdueCount} просрочено", maxStage, "/procurement-v2"),
-            Stage("deep", "Глубокая проверка", deepCount, "юридическая проверка", maxStage, "/procurement-v2"),
-            Stage("decision", "Решение", waitingCount, "ждут руководителя", maxStage, "/procurement-v2?stage=pending_head"),
-            Stage("acquired", "Куплено", acquiredCount, "за последние 30 дней", maxStage, "/procurement-v2?stage=acquired")
+            Stage("work", "В работе", activeCount, overdueCount == 0 ? "объектов в работе" : $"{overdueCount} просрочено", maxStage, "/procurement"),
+            Stage("deep", "Глубокая проверка", deepCount, "юридическая проверка", maxStage, "/procurement"),
+            Stage("decision", "Решение", waitingCount, "ждут руководителя", maxStage, "/procurement?stage=pending_head"),
+            Stage("acquired", "Куплено", acquiredCount, "за последние 30 дней", maxStage, "/procurement?stage=acquired")
         ];
 
         return new(queue != null,

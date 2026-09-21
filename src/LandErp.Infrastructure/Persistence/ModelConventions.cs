@@ -51,6 +51,7 @@ internal static class ModelConventions
         ["permissions"] = "Каталог стабильных системных разрешений на действия. Проверяется сервером вместе с scope.",
         ["role_permissions"] = "Состав разрешений каждой роли. Не даёт доступ к другим организациям.",
         ["employee_invitations"] = "Одноразовые приглашения для активации сотрудников; открытый token не сохраняется, повторное использование запрещено.",
+        ["employee_access_settings"] = "Явные настройки возможностей сотрудника Access V1. Отсутствие строки означает временную совместимость со старой permission-моделью до переключения AP-02.",
         ["organizations"] = "Организации, являющиеся границами доступа LandErp. Не являются юридическими лицами сделки.",
         ["org_units"] = "Подразделения организации, определяющие рабочую ответственность и Department visibility.",
         ["positions"] = "Настраиваемые должности сотрудников; название должности само по себе не предоставляет permissions.",
@@ -180,6 +181,16 @@ internal static class ModelConventions
         ["RoleId"] = "Набор permissions для текущего назначения; итоговый доступ ограничен scope.",
         ["PermissionId"] = "Стабильный код серверной проверки операции, а не название кнопки интерфейса.",
         ["Scope"] = "Own — собственные записи; AssignedObjects — назначенные объекты; Team — команда; Department — подразделение; Organization — одна организация.",
+        ["IncomingAccess"] = "Уровень доступа к входящим предложениям: None, Read или Process.",
+        ["ProcurementAccess"] = "Уровень возможности в закупке: None, Read, Manager или Head. Области просмотра и работы задаются отдельно.",
+        ["ProcurementReadScope"] = "Максимальная область просмотра закупки; не даёт права изменять объект сама по себе.",
+        ["ProcurementWorkScope"] = "Максимальная область рабочих действий закупки; не может быть шире ProcurementReadScope.",
+        ["CollectionAccess"] = "Уровень доступа к поискам и Parser: None, Read или Manage.",
+        ["CanAssignInspections"] = "Разрешено назначать полевые осмотры; само по себе не расширяет область просмотра закупки.",
+        ["CanPerformInspections"] = "Разрешено выполнять назначенные полевые осмотры без общего доступа к закупке.",
+        ["CanConfirmPurchase"] = "Разрешено фиксировать факт покупки как отдельная возможность, независимо от должности.",
+        ["CanManageTemplates"] = "Разрешено изменять шаблоны проверок и осмотров как отдельная возможность.",
+        ["CanReadAudit"] = "Разрешено читать аудит организации как отдельная возможность.",
         ["Version"] = "Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.",
         ["Active"] = "Разрешена ли работа сотрудника. При выключении существующая cookie не обходит серверную проверку.",
         ["TokenHash"] = "SHA-256 одноразового высокоэнтропийного token; открытое значение не хранится.",
@@ -245,7 +256,11 @@ internal static class ModelConventions
                     property.SetComment("Опциональная HTTPS-ссылка на источник; ручное предложение может существовать без URL.");
                 }
 
-                if (property.Name == "Version")
+                if (table == "employee_access_settings" && property.Name == "EmployeeId")
+                {
+                    property.SetComment("Сотрудник, для которого явно сохранены настройки Access V1; одновременно PK и FK на organization.employees.");
+                }
+                else if (property.Name == "Version")
                 {
                     property.IsConcurrencyToken = true;
                 }

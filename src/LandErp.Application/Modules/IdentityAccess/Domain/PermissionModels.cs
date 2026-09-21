@@ -1,3 +1,5 @@
+using LandErp.Application.Modules.IdentityAccess.Contracts;
+
 namespace LandErp.Application.Modules.IdentityAccess.Domain;
 
 public sealed class PermissionDefinition
@@ -10,6 +12,22 @@ public sealed class RolePermissionGrant
 {
     public Guid RoleId { get; set; }
     public string PermissionId { get; set; } = "";
+}
+
+public sealed class EmployeeAccessSettings
+{
+    public Guid EmployeeId { get; set; }
+    public IncomingAccessLevel IncomingAccess { get; set; }
+    public ProcurementAccessLevel ProcurementAccess { get; set; }
+    public AccessScope ProcurementReadScope { get; set; }
+    public AccessScope ProcurementWorkScope { get; set; }
+    public CollectionAccessLevel CollectionAccess { get; set; }
+    public bool CanAssignInspections { get; set; }
+    public bool CanPerformInspections { get; set; }
+    public bool CanConfirmPurchase { get; set; }
+    public bool CanManageTemplates { get; set; }
+    public bool CanReadAudit { get; set; }
+    public long Version { get; set; } = 1;
 }
 
 public sealed class EmployeeInvitation

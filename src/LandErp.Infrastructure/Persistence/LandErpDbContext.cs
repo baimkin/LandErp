@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using LandErp.Application.Modules.IdentityAccess.Domain;
+using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Organization.Domain;
 using LandErp.Infrastructure.Modules.IdentityAccess;
 using Microsoft.AspNetCore.Identity;
@@ -24,6 +25,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<Team> Teams => Set<Team>();
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<EmployeeAssignment> EmployeeAssignments => Set<EmployeeAssignment>();
+    public DbSet<EmployeeAccessSettings> EmployeeAccessSettings => Set<EmployeeAccessSettings>();
     public DbSet<PermissionDefinition> Permissions => Set<PermissionDefinition>();
     public DbSet<RolePermissionGrant> RolePermissions => Set<RolePermissionGrant>();
     public DbSet<EmployeeInvitation> EmployeeInvitations => Set<EmployeeInvitation>();
@@ -86,6 +88,14 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
             .HasKey(item => new { item.RoleId, item.PermissionId });
         builder.Entity<RolePermissionGrant>().HasOne<IdentityRole<Guid>>().WithMany().HasForeignKey(item => item.RoleId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<RolePermissionGrant>().HasOne<PermissionDefinition>().WithMany().HasForeignKey(item => item.PermissionId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<EmployeeAccessSettings>().ToTable("employee_access_settings", "identity").HasKey(item => item.EmployeeId);
+        builder.Entity<EmployeeAccessSettings>().Property(item => item.EmployeeId).ValueGeneratedNever();
+        builder.Entity<EmployeeAccessSettings>().Property(item => item.IncomingAccess).HasConversion<string>();
+        builder.Entity<EmployeeAccessSettings>().Property(item => item.ProcurementAccess).HasConversion<string>();
+        builder.Entity<EmployeeAccessSettings>().Property(item => item.ProcurementReadScope).HasConversion<string>();
+        builder.Entity<EmployeeAccessSettings>().Property(item => item.ProcurementWorkScope).HasConversion<string>();
+        builder.Entity<EmployeeAccessSettings>().Property(item => item.CollectionAccess).HasConversion<string>();
+        builder.Entity<EmployeeAccessSettings>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<EmployeeInvitation>().ToTable("employee_invitations", "identity");
         builder.Entity<EmployeeInvitation>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<AuditEvent>().ToTable("audit_events", "foundation");
@@ -134,6 +144,16 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     {
         foreach (var entry in ChangeTracker.Entries())
         {
+            if (entry.Entity is EmployeeAccessSettings accessSettings && entry.State is EntityState.Added or EntityState.Modified)
+            {
+                EmployeeAccessRules.Validate(new EmployeeAccessConfiguration(
+                    accessSettings.IncomingAccess, accessSettings.ProcurementAccess,
+                    accessSettings.ProcurementReadScope, accessSettings.ProcurementWorkScope,
+                    accessSettings.CollectionAccess, accessSettings.CanAssignInspections,
+                    accessSettings.CanPerformInspections, accessSettings.CanConfirmPurchase,
+                    accessSettings.CanManageTemplates, accessSettings.CanReadAudit));
+            }
+
             if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation or CatalogEvent or WorkflowTransition or Approval
                 or BusinessTimelineEntry or CaseNegotiation or CaseAttachment or PropertyCaseFactRevision
                 && entry.State is EntityState.Modified or EntityState.Deleted)

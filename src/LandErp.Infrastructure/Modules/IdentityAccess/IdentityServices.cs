@@ -20,6 +20,7 @@ public static class IdentityServices
             options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
         }).AddEntityFrameworkStores<LandErpDbContext>().AddDefaultTokenProviders();
         services.AddScoped<IAccessControl, AccessControl>();
+        services.AddScoped<IEmployeeAccessService, EmployeeAccessService>();
         services.AddScoped<IOrganizationWorkspace, OrganizationWorkspace>();
         services.AddScoped<IAuditReadService, AuditReadService>();
         return services;

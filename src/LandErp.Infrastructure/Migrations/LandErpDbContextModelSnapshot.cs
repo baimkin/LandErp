@@ -1398,6 +1398,83 @@ namespace LandErp.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.IdentityAccess.Domain.EmployeeAccessSettings", b =>
+                {
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("employee_id")
+                        .HasComment("Сотрудник, для которого явно сохранены настройки Access V1; одновременно PK и FK на organization.employees.");
+
+                    b.Property<bool>("CanAssignInspections")
+                        .HasColumnType("boolean")
+                        .HasColumnName("can_assign_inspections")
+                        .HasComment("Разрешено назначать полевые осмотры; само по себе не расширяет область просмотра закупки.");
+
+                    b.Property<bool>("CanConfirmPurchase")
+                        .HasColumnType("boolean")
+                        .HasColumnName("can_confirm_purchase")
+                        .HasComment("Разрешено фиксировать факт покупки как отдельная возможность, независимо от должности.");
+
+                    b.Property<bool>("CanManageTemplates")
+                        .HasColumnType("boolean")
+                        .HasColumnName("can_manage_templates")
+                        .HasComment("Разрешено изменять шаблоны проверок и осмотров как отдельная возможность.");
+
+                    b.Property<bool>("CanPerformInspections")
+                        .HasColumnType("boolean")
+                        .HasColumnName("can_perform_inspections")
+                        .HasComment("Разрешено выполнять назначенные полевые осмотры без общего доступа к закупке.");
+
+                    b.Property<bool>("CanReadAudit")
+                        .HasColumnType("boolean")
+                        .HasColumnName("can_read_audit")
+                        .HasComment("Разрешено читать аудит организации как отдельная возможность.");
+
+                    b.Property<string>("CollectionAccess")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("collection_access")
+                        .HasComment("Уровень доступа к поискам и Parser: None, Read или Manage.");
+
+                    b.Property<string>("IncomingAccess")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("incoming_access")
+                        .HasComment("Уровень доступа к входящим предложениям: None, Read или Process.");
+
+                    b.Property<string>("ProcurementAccess")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("procurement_access")
+                        .HasComment("Уровень возможности в закупке: None, Read, Manager или Head. Области просмотра и работы задаются отдельно.");
+
+                    b.Property<string>("ProcurementReadScope")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("procurement_read_scope")
+                        .HasComment("Максимальная область просмотра закупки; не даёт права изменять объект сама по себе.");
+
+                    b.Property<string>("ProcurementWorkScope")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("procurement_work_scope")
+                        .HasComment("Максимальная область рабочих действий закупки; не может быть шире ProcurementReadScope.");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
+
+                    b.HasKey("EmployeeId")
+                        .HasName("pk_employee_access_settings");
+
+                    b.ToTable("employee_access_settings", "identity", t =>
+                        {
+                            t.HasComment("Явные настройки возможностей сотрудника Access V1. Отсутствие строки означает временную совместимость со старой permission-моделью до переключения AP-02.");
+                        });
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.IdentityAccess.Domain.EmployeeInvitation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3948,6 +4025,16 @@ namespace LandErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_jobs_search_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.IdentityAccess.Domain.EmployeeAccessSettings", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_employee_access_settings_employee_id");
                 });
 
             modelBuilder.Entity("LandErp.Application.Modules.IdentityAccess.Domain.EmployeeInvitation", b =>

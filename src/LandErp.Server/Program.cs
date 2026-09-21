@@ -183,7 +183,7 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapCollectorEndpoints();
 app.MapProcurementEndpoints();
-app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+app.MapRazorComponents<App>().AddInteractiveServerRenderMode(options => options.DisableWebSocketCompression = true);
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.MapGet("/health/ready", async (IDatabaseStatus database, CancellationToken cancellationToken) =>
     await database.IsReadyAsync(cancellationToken) ? Results.Ok(new { status = "ready" })

@@ -234,7 +234,11 @@ public sealed record ProcurementQueueV2Detail(
     decimal? StartPrice = null,
     decimal? PriceDeltaFromStart = null,
     decimal? PriceDeltaFromStartPercent = null,
-    bool PriceChanged = false);
+    bool PriceChanged = false)
+{
+    public bool CanAssignInspections { get; init; }
+    public bool CanPerformInspections { get; init; }
+}
 
 public interface IProcurementQueueV2ReadService
 {

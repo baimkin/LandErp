@@ -26,7 +26,7 @@
         <div class="v2-head-actions">
             @* TODO-BACKEND-INCOMING: page-level decision history read model is not available. *@
             <button type="button" class="v2-btn" data-todo-backend="TODO-BACKEND-INCOMING" @onclick="() => historyDemoOpen = true">История решений</button>
-            <button type="button" class="v2-btn primary" @onclick="() => manualOpen = true">+ Добавить ссылку вручную</button>
+            @if(CanProcessIncoming){<button type="button" class="v2-btn primary" @onclick="() => manualOpen = true">+ Добавить ссылку вручную</button>}
         </div>
     </div>
 
@@ -130,8 +130,11 @@
                                 </optgroup>
                             }
                         </select>
-                        <button class="v2-btn sm quiet" type="button" disabled="@(SelectedSavedPreset() == null)" title="Переименовать выбранный фильтр" aria-label="Переименовать выбранный фильтр" @onclick="OpenRenameSelectedPreset">✎</button>
-                        <button class="v2-btn sm quiet" type="button" disabled="@(SelectedSavedPreset() == null)" title="Удалить выбранный фильтр" aria-label="Удалить выбранный фильтр" @onclick="OpenDeleteSelectedPreset">×</button>
+                        @if(CanProcessIncoming)
+                        {
+                            <button class="v2-btn sm quiet" type="button" disabled="@(SelectedSavedPreset() == null)" title="Переименовать выбранный фильтр" aria-label="Переименовать выбранный фильтр" @onclick="OpenRenameSelectedPreset">✎</button>
+                            <button class="v2-btn sm quiet" type="button" disabled="@(SelectedSavedPreset() == null)" title="Удалить выбранный фильтр" aria-label="Удалить выбранный фильтр" @onclick="OpenDeleteSelectedPreset">×</button>
+                        }
                         <button class="v2-btn sm quiet" type="button" aria-expanded="@advancedOpen" @onclick="() => advancedOpen = !advancedOpen">Фильтры</button>
                         <button class="v2-btn sm quiet v2-reset" type="button" @onclick="ResetFilterAsync">Сбросить</button>
                     </div>
@@ -159,7 +162,7 @@
                             </div>
                             <div class="v2-advanced-actions" style="gap:8px">
                                 <button class="v2-btn sm primary" type="submit">Применить фильтры</button>
-                                <button class="v2-btn sm" type="button" @onclick="OpenSavePreset">Сохранить фильтр</button>
+                                @if(CanProcessIncoming){<button class="v2-btn sm" type="button" @onclick="OpenSavePreset">Сохранить фильтр</button>}
                             </div>
                         </div>
                     }
@@ -355,7 +358,7 @@
                         }
                     </div>
                     <div class="v2-object-group-actions">
-                        <button type="button" class="v2-btn sm danger-text" disabled="@Busy" @onclick="OpenUnlinkObjectGroup">
+                        <button type="button" class="v2-btn sm danger-text" disabled="@(!CanProcessIncoming || Busy)" @onclick="OpenUnlinkObjectGroup">
                             Исключить открытое объявление из группы
                         </button>
                     </div>
@@ -387,8 +390,8 @@
                                 <ul class="v2-duplicate-reasons">@foreach (string reason in candidate.Reasons) { <li>@reason</li> }</ul>
                             }
                             <div class="v2-duplicate-actions">
-                                <button type="button" class="v2-btn sm" disabled="@Busy" @onclick="() => ReviewDuplicateAsync(candidate, false)">Не дубль</button>
-                                <button type="button" class="v2-btn sm duplicate" disabled="@Busy" @onclick="() => OpenDuplicateCompareAsync(candidate)">Сравнить и решить</button>
+                                <button type="button" class="v2-btn sm" disabled="@(!CanProcessIncoming || Busy)" @onclick="() => ReviewDuplicateAsync(candidate, false)">Не дубль</button>
+                                <button type="button" class="v2-btn sm duplicate" disabled="@(!CanProcessIncoming || Busy)" @onclick="() => OpenDuplicateCompareAsync(candidate)">Сравнить и решить</button>
                             </div>
                         </article>
                     }
@@ -403,9 +406,9 @@
                     <div class="v2-checkrow">
                         <div><strong>@item.Title</strong><span>@item.Description</span></div>
                         <div class="v2-segmented">
-                            <button type="button" class="@(CheckClass(item.Key, "ok"))" @onclick="() => SetCheckOk(item.Key)">✓ Подходит</button>
-                            <button type="button" class="@(CheckClass(item.Key, "issue"))" @onclick="() => SetCheckIssue(item.Key)">! Проблема</button>
-                            <button type="button" class="@(CheckClass(item.Key, "unknown"))" @onclick="() => SetCheckUnknown(item.Key)">? Не проверено</button>
+                            <button type="button" class="@(CheckClass(item.Key, "ok"))" disabled="@(!CanProcessIncoming)" @onclick="() => SetCheckOk(item.Key)">✓ Подходит</button>
+                            <button type="button" class="@(CheckClass(item.Key, "issue"))" disabled="@(!CanProcessIncoming)" @onclick="() => SetCheckIssue(item.Key)">! Проблема</button>
+                            <button type="button" class="@(CheckClass(item.Key, "unknown"))" disabled="@(!CanProcessIncoming)" @onclick="() => SetCheckUnknown(item.Key)">? Не проверено</button>
                         </div>
                     </div>
                 }
@@ -447,58 +450,77 @@
                 }
             </section>
 
-            <label class="v2-next-option">
-                <input type="checkbox" @bind="openNextAfterDecision" />
-                <span><strong>После решения открыть следующее объявление</strong><small>Ускоряет последовательный разбор входящих.</small></span>
-            </label>
+            @if(CanProcessIncoming)
+            {
+                <label class="v2-next-option">
+                    <input type="checkbox" @bind="openNextAfterDecision" />
+                    <span><strong>После решения открыть следующее объявление</strong><small>Ускоряет последовательный разбор входящих.</small></span>
+                </label>
+            }
         </div>
 
         <div class="v2-monitor-shell">
-            <button type="button" class="v2-monitor-toggle" aria-expanded="@monitoringOpen" @onclick="() => monitoringOpen = !monitoringOpen">
-                <span><strong>Мониторинг цены</strong><small>@MonitoringSummary()</small></span>
-                <span class="v2-monitor-chevron">@(monitoringOpen ? "⌃" : "⌄")</span>
-            </button>
-            @if (monitoringOpen)
+            @if(CanProcessIncoming)
             {
-                <EditForm Model="monitoring" FormName="incoming-v2-monitor" OnValidSubmit="SaveMonitoringAsync">
-                    <DataAnnotationsValidator />
-                    <div class="v2-monitor">
-                        <div class="v2-monitor-grid">
-                            <div><label>Цена объявления ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.Total" /><span>₽</span></div></div>
-                            <div class="v2-or">или</div>
-                            <div><label>Цена за сотку ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.PerSotka" /><span>₽</span></div></div>
-                            <button type="submit" class="v2-btn" disabled="@Busy">Поставить на мониторинг</button>
+                <button type="button" class="v2-monitor-toggle" aria-expanded="@monitoringOpen" @onclick="() => monitoringOpen = !monitoringOpen">
+                    <span><strong>Мониторинг цены</strong><small>@MonitoringSummary()</small></span>
+                    <span class="v2-monitor-chevron">@(monitoringOpen ? "⌃" : "⌄")</span>
+                </button>
+                @if (monitoringOpen)
+                {
+                    <EditForm Model="monitoring" FormName="incoming-v2-monitor" OnValidSubmit="SaveMonitoringAsync">
+                        <DataAnnotationsValidator />
+                        <div class="v2-monitor">
+                            <div class="v2-monitor-grid">
+                                <div><label>Цена объявления ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.Total" /><span>₽</span></div></div>
+                                <div class="v2-or">или</div>
+                                <div><label>Цена за сотку ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.PerSotka" /><span>₽</span></div></div>
+                                <button type="submit" class="v2-btn" disabled="@Busy">Поставить на мониторинг</button>
+                            </div>
+                            <div class="v2-monitor-reason"><label>Комментарий к мониторингу</label><InputText @bind-Value="monitoring.Reason" /></div>
+                            <ValidationSummary />
+                            @if (detail.Monitoring.LastEvaluatedAt != null) { <div class="v2-monitor-last">Последняя оценка @ProcurementLabels.Time(detail.Monitoring.LastEvaluatedAt): @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPrice) · @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPricePerSotka) / сот.</div> }
                         </div>
-                        <div class="v2-monitor-reason"><label>Комментарий к мониторингу</label><InputText @bind-Value="monitoring.Reason" /></div>
-                        <ValidationSummary />
-                        @if (detail.Monitoring.LastEvaluatedAt != null) { <div class="v2-monitor-last">Последняя оценка @ProcurementLabels.Time(detail.Monitoring.LastEvaluatedAt): @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPrice) · @ProcurementLabels.Money(detail.Monitoring.LastEvaluatedPricePerSotka) / сот.</div> }
-                    </div>
-                </EditForm>
+                    </EditForm>
+                }
+            }
+            else
+            {
+                <div class="v2-monitor-toggle"><span><strong>Мониторинг цены</strong><small>@MonitoringSummary() · только просмотр</small></span></div>
             }
         </div>
 
         <div class="v2-drawer-foot">
-            <div class="v2-classify">
-                <button type="button" class="v2-btn sm duplicate" @onclick="OpenDuplicateSearchAsync">Связать с объектом</button>
-                <button type="button" class="v2-btn sm danger-text" @onclick="() => OpenClassification(CatalogDisposition.Fake)">Фейк</button>
-                <button type="button" class="v2-btn sm" @onclick="() => OpenClassification(CatalogDisposition.RemovedAtSource)">Снято</button>
-                <button type="button" class="v2-btn sm sold" @onclick="() => OpenClassification(CatalogDisposition.Sold)">Продано</button>
-            </div>
-            <div class="v2-decide">
-                <button type="button" class="v2-btn danger" @onclick="() => OpenClassification(CatalogDisposition.Dismissed)">Не подходит</button>
-                @if (detail.Item.PropertyCaseId == null)
-                {
-                    <button type="button" class="v2-btn primary" @onclick="() => OpenTakeAsync(detail.Item)">Взять в работу</button>
-                }
-                else if (detail.Item.CanResumeCase)
-                {
-                    <button type="button" class="v2-btn primary" @onclick="ResumeAsync">Возобновить</button>
-                }
-                else
-                {
-                    <button type="button" class="v2-btn primary" @onclick="() => OpenCase(detail.Item.PropertyCaseId)">Открыть PropertyCase</button>
-                }
-            </div>
+            @if(CanProcessIncoming)
+            {
+                <div class="v2-classify">
+                    <button type="button" class="v2-btn sm duplicate" @onclick="OpenDuplicateSearchAsync">Связать с объектом</button>
+                    <button type="button" class="v2-btn sm danger-text" @onclick="() => OpenClassification(CatalogDisposition.Fake)">Фейк</button>
+                    <button type="button" class="v2-btn sm" @onclick="() => OpenClassification(CatalogDisposition.RemovedAtSource)">Снято</button>
+                    <button type="button" class="v2-btn sm sold" @onclick="() => OpenClassification(CatalogDisposition.Sold)">Продано</button>
+                </div>
+                <div class="v2-decide">
+                    <button type="button" class="v2-btn danger" @onclick="() => OpenClassification(CatalogDisposition.Dismissed)">Не подходит</button>
+                    @if (detail.Item.PropertyCaseId == null)
+                    {
+                        <button type="button" class="v2-btn" @onclick="() => OpenTransferAsync(detail.Item)">Передать в закупку</button>
+                        @if(CanManageProcurement){<button type="button" class="v2-btn primary" @onclick="() => OpenTakeAsync(detail.Item)">Взять в работу</button>}
+                    }
+                    else if (detail.Item.CanResumeCase && CanManageProcurement)
+                    {
+                        <button type="button" class="v2-btn primary" @onclick="ResumeAsync">Возобновить</button>
+                    }
+                    else if (CanReadProcurement)
+                    {
+                        <button type="button" class="v2-btn primary" @onclick="() => OpenCase(detail.Item.PropertyCaseId)">Открыть PropertyCase</button>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="subtle">Режим просмотра: действия обработки входящих недоступны.</div>
+                @if(detail.Item.PropertyCaseId!=null && CanReadProcurement){<button type="button" class="v2-btn" @onclick="() => OpenCase(detail.Item.PropertyCaseId)">Открыть PropertyCase</button>}
+            }
         </div>
     </aside>
 }
@@ -646,7 +668,23 @@
     </Modal>
 }
 
-@if (manualOpen)
+@if (CanProcessIncoming && transferOpen && transferItem != null)
+{
+    <Modal Title="Передать в закупку" OnClose="CloseTransfer">
+        <p>Выберите сотрудника, который будет вести новый PropertyCase. Вы останетесь только автором передачи и не получите доступ к закупке автоматически.</p>
+        @if(procurementTargets.Count==0)
+        {
+            <p class="organization-notice">Нет сотрудников, которые могут принять новый объект с текущими effective Access V1 настройками.</p>
+        }
+        else
+        {
+            <label class="field"><span>Закупщик</span><select @bind="transferTargetKey">@foreach(var target in procurementTargets){<option value="@target.EmployeeId">@target.Name</option>}</select></label>
+        }
+        <div class="form-actions"><button type="button" class="v2-btn" @onclick="CloseTransfer">Отмена</button><button type="button" class="v2-btn primary" disabled="@(Busy||!Guid.TryParse(transferTargetKey,out _))" @onclick="TransferToProcurementAsync">Передать в закупку</button></div>
+    </Modal>
+}
+
+@if (manualOpen && CanProcessIncoming)
 {
     <Modal Title="Добавить объявление / предложение" OnClose="() => manualOpen = false">
         <EditForm Model="manual" FormName="manual-catalog-v2" OnValidSubmit="CreateManualAsync"><DataAnnotationsValidator /><ValidationSummary />
@@ -667,7 +705,7 @@
     </Modal>
 }
 
-@if (savePresetOpen)
+@if (CanProcessIncoming && savePresetOpen)
 {
     <Modal Title="Сохранить текущие фильтры" OnClose="() => savePresetOpen = false">
         <p class="subtle">Название сформировано автоматически — его можно изменить. Группа нужна только для удобной организации. Свободный текстовый поиск не сохраняется.</p>
@@ -689,7 +727,7 @@
     </Modal>
 }
 
-@if (renamePreset != null)
+@if (CanProcessIncoming && renamePreset != null)
 {
     <Modal Title="Переименовать фильтр" OnClose="() => renamePreset = null">
         <label class="field"><span>Название</span><InputText @bind-Value="presetName" /></label>
@@ -697,7 +735,7 @@
     </Modal>
 }
 
-@if (deletePreset != null)
+@if (CanProcessIncoming && deletePreset != null)
 {
     <Modal Title="Удалить сохранённый фильтр" OnClose="() => deletePreset = null">
         <p>Удалить фильтр <strong>@deletePreset.Name</strong>?</p>
@@ -814,6 +852,14 @@
     private string? duplicateSearchError;
     private bool unlinkObjectGroupOpen;
     private string unlinkObjectGroupReason = "";
+    private EffectiveEmployeeAccess? effectiveAccess;
+    private CatalogItemView? transferItem;
+    private bool transferOpen;
+    private string transferTargetKey = "";
+    private IReadOnlyList<IncomingProcurementTarget> procurementTargets = [];
+    private bool CanProcessIncoming => effectiveAccess?.CanProcessIncoming == true;
+    private bool CanManageProcurement => effectiveAccess?.CanManageProcurement == true;
+    private bool CanReadProcurement => effectiveAccess?.CanReadProcurement == true;
 
     private static readonly CatalogSource[] manualSources = [CatalogSource.Telegram, CatalogSource.Referral, CatalogSource.Agent, CatalogSource.DirectOwner, CatalogSource.Manual, CatalogSource.Other];
     private static readonly ChecklistItem[] checklist =
@@ -835,6 +881,7 @@
 
     protected override async Task ReadAsync()
     {
+        effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, CancellationToken.None);
         Guid? searchId = Guid.TryParse(searchConfigurationKey, out Guid parsed) ? parsed : null;
         IncomingCatalogFilter baseFilter = new(filter.Text.Trim(), filter.Source, filter.Disposition, filter.Age,
             filter.MinPrice, filter.MaxPrice, ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki),
@@ -1342,6 +1389,7 @@
 
     private async Task UnlinkObjectGroupAsync()
     {
+        if(!CanProcessIncoming)throw new AccessDeniedException();
         if (detail == null) return;
         Guid id = detail.Item.Id;
         bool saved = await ExecuteConfirmedAsync(() => Workspace.UnlinkCatalogItemFromObjectGroupAsync(CurrentSubject,
@@ -1354,14 +1402,42 @@
 
     private async Task CreateManualAsync()
     {
+        if(!CanProcessIncoming)throw new AccessDeniedException();
         await ExecuteAsync(() => Workspace.CreateManualAsync(CurrentSubject,
             new(manual.Source, manual.Title, manual.Location, manual.Price, manual.Area, manual.Url, manual.ExternalId, manual.CadastralNumber, manual.Description, manual.Comment),
             Guid.CreateVersion7().ToString(), CancellationToken.None));
         if (Success != null) { manualOpen = false; manual = new(); }
     }
 
+    private async Task OpenTransferAsync(CatalogItemView item)
+    {
+        if(!CanProcessIncoming)throw new AccessDeniedException();
+        transferItem=item;
+        procurementTargets=(await Workspace.ReadProcurementTargetsAsync(CurrentSubject,CancellationToken.None))
+            .Where(target=>effectiveAccess==null||target.EmployeeId!=effectiveAccess.EmployeeId)
+            .ToArray();
+        transferTargetKey=procurementTargets.FirstOrDefault()?.EmployeeId.ToString()??"";
+        transferOpen=true;
+    }
+
+    private void CloseTransfer(){if(Busy)return;transferOpen=false;transferItem=null;transferTargetKey="";procurementTargets=[];}
+
+    private async Task TransferToProcurementAsync()
+    {
+        if(transferItem==null||!Guid.TryParse(transferTargetKey,out Guid targetId))return;
+        Guid itemId=transferItem.Id;
+        TakeToWorkResult? result=null;
+        bool committed=await ExecuteConfirmedAsync(async()=>result=await Workspace.TransferToProcurementAsync(
+            CurrentSubject,new(itemId,targetId),OperationId,CancellationToken.None));
+        if(!committed)return;
+        CloseTransfer();
+        if(detail?.Item.Id==itemId)await RefreshDetailAsync(itemId);
+        Success=result==null?"Передано в закупку":$"Передано в закупку · {result.BusinessNumber}";
+    }
+
     private async Task OpenTakeAsync(CatalogItemView item)
     {
+        if(!CanProcessIncoming||!CanManageProcurement)throw new AccessDeniedException();
         takeItem = item;
         existingCaseId = null;
         targets = await Workspace.ReadLinkTargetsAsync(CurrentSubject, CancellationToken.None);
@@ -1377,6 +1453,7 @@
 
     private async Task ReviewDuplicateAsync(IncomingDuplicateCandidateView candidate, bool confirmed)
     {
+        if(!CanProcessIncoming)throw new AccessDeniedException();
         if (detail == null) return;
         Guid id = detail.Item.Id;
         int currentIndex = CurrentItemIndex(id);
@@ -1402,6 +1479,7 @@
 
     private async Task SaveMonitoringAsync()
     {
+        if(!CanProcessIncoming)throw new AccessDeniedException();
         Guid id = detail!.Item.Id;
         int currentIndex = CurrentItemIndex(id);
         Guid? preferredNextId = NextItemId(id);
@@ -1429,6 +1507,7 @@
 
     private async Task ClassifyAsync()
     {
+        if(!CanProcessIncoming)throw new AccessDeniedException();
         Guid id = detail!.Item.Id;
         int currentIndex = CurrentItemIndex(id);
         Guid? preferredNextId = NextItemId(id);

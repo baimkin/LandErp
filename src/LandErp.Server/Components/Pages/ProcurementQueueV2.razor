@@ -290,7 +290,7 @@
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Осмотр участка</b>@if (detail.Inspection.Exists) { <button class="btn" type="button" @onclick="OpenInspectionReportAsync">Посмотреть результат</button> } else if (detail.CanManageDossier && detail.Stage != "acquired") { <button class="btn" type="button" @onclick="OpenInspectionEditor">Начать осмотр</button> }</div>
+                    <div class="ct"><b>Осмотр участка</b>@if (detail.Inspection.Exists) { <button class="btn" type="button" @onclick="OpenInspectionReportAsync">Посмотреть результат</button> } else if (detail.CanAssignInspections && detail.Stage != "acquired") { <button class="btn" type="button" @onclick="OpenInspectionEditor">Назначить осмотр</button> }</div>
                     @if (!detail.Inspection.Exists)
                     {
                         <div class="inspection empty-inspection">
@@ -539,7 +539,7 @@
                     </div>
                 }
             </div>
-            <div class="mf"><button class="btn" type="button" @onclick="CloseInspectionReport">Закрыть</button>@if (detail.CanManageDossier) { <button class="btn primary" type="button" @onclick="OpenInspectionEditor">Открыть форму осмотра</button> }</div>
+            <div class="mf"><button class="btn" type="button" @onclick="CloseInspectionReport">Закрыть</button>@if (detail.CanAssignInspections || detail.CanPerformInspections) { <button class="btn primary" type="button" @onclick="OpenInspectionEditor">@(detail.CanPerformInspections?"Открыть форму осмотра":"Открыть назначение")</button> }</div>
         </div>
     </div>
 }

@@ -101,7 +101,7 @@ else if(data!=null)
     @if(assignOpen)
     {
         <CaseModal Title="Назначить осмотр" Subtitle="Осмотрщик получит доступ только к этому заданию и чек-листу" Error="@Error" Busy="Busy" OnClose="()=>assignOpen=false">
-            @if(data.Inspectors.Count==0){<p class="feedback">Нет активных сотрудников с ролью Inspector. Добавьте сотрудника или назначьте ему эту роль в разделе организации.</p>}
+            @if(data.Inspectors.Count==0){<p class="feedback">Нет активных сотрудников с правом выполнять осмотры. Настройте сотруднику Access V1 «Выполнять осмотры» в разделе организации.</p>}
             else
             {
                 <div class="form-grid">

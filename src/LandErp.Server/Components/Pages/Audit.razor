@@ -1,5 +1,5 @@
 @page "/audit"
-@attribute [Authorize(Policy = "audit.read")]
+@attribute [Authorize]
 @inherits WorkspaceComponent
 @inject IAuditReadService Reader
 @inject NavigationManager Navigation
@@ -11,7 +11,7 @@
 }
 else if(Forbidden)
 {
-    <PageState Kind="forbidden" Title="Нет доступа к аудиту" Description="Для просмотра требуется разрешение audit.read и область всей организации." />
+    <PageState Kind="forbidden" Title="Нет доступа к аудиту" Description="Для просмотра требуется право Access V1 «Читать полный аудит»." />
 }
 else if(auditPage!=null)
 {

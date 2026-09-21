@@ -75,6 +75,8 @@ public sealed record EffectiveEmployeeAccess(
     public bool CanHeadProcurement => Settings.ProcurementAccess >= ProcurementAccessLevel.Head;
     public bool CanReadCollection => Settings.CollectionAccess >= CollectionAccessLevel.Read;
     public bool CanManageCollection => Settings.CollectionAccess >= CollectionAccessLevel.Manage;
+    public bool CanReadAudit => Settings.CanReadAudit
+        && (Source != EmployeeAccessSource.LegacyPermissions || Settings.ProcurementReadScope == AccessScope.Organization);
     public AccessContext OrganizationContext =>
         new(EmployeeId, OrganizationId, DepartmentId, TeamId, AccessScope.Organization);
     public AccessContext ProcurementReadContext =>
@@ -88,6 +90,8 @@ public interface IEmployeeAccessService
     Task<EffectiveEmployeeAccess> ResolveAsync(Subject subject, CancellationToken cancellationToken);
     Task<IReadOnlyList<EffectiveEmployeeAccess>> ResolveActiveEmployeesAsync(
         Guid organizationId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<EffectiveEmployeeAccess>> ResolveEmployeesAsync(
+        Guid organizationId, IReadOnlyCollection<Guid> employeeIds, CancellationToken cancellationToken);
     void Validate(EmployeeAccessConfiguration settings);
 }
 

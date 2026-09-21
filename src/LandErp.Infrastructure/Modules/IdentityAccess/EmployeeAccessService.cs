@@ -11,72 +11,60 @@ namespace LandErp.Infrastructure.Modules.IdentityAccess;
 /// </summary>
 public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> factory) : IEmployeeAccessService
 {
+    private sealed record EmployeeRow(Guid Id, Guid OrganizationId, Guid? DepartmentId, Guid? TeamId,
+        Guid RoleId, AccessScope Scope, string RoleName);
+
     public void Validate(EmployeeAccessConfiguration settings) => EmployeeAccessRules.Validate(settings);
 
     public async Task<EffectiveEmployeeAccess> ResolveAsync(Subject subject, CancellationToken cancellationToken)
     {
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        var employee = await (from value in db.Employees.AsNoTracking()
-                              join assignment in db.EmployeeAssignments.AsNoTracking() on value.Id equals assignment.EmployeeId
-                              join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
-                              where value.UserId == subject.UserId && value.Active
-                              select new
-                              {
-                                  value.Id,
-                                  value.OrganizationId,
-                                  assignment.OrgUnitId,
-                                  assignment.TeamId,
-                                  assignment.RoleId,
-                                  assignment.Scope,
-                                  RoleName = role.Name
-                              }).SingleOrDefaultAsync(cancellationToken);
-
-        if (employee == null) throw new AccessDeniedException();
-
-        if (string.Equals(employee.RoleName, "Owner", StringComparison.Ordinal))
-            return Effective(employee.Id, employee.OrganizationId, employee.OrgUnitId, employee.TeamId,
-                OwnerConfiguration(), EmployeeAccessSource.SystemOwner);
-
-        EmployeeAccessSettings? configured = await db.EmployeeAccessSettings.AsNoTracking()
-            .SingleOrDefaultAsync(item => item.EmployeeId == employee.Id, cancellationToken);
-        if (configured != null)
-        {
-            EmployeeAccessConfiguration settings = ToConfiguration(configured);
-            Validate(settings);
-            return Effective(employee.Id, employee.OrganizationId, employee.OrgUnitId, employee.TeamId,
-                settings, EmployeeAccessSource.Configured);
-        }
-
-        string[] permissions = await db.RolePermissions.AsNoTracking()
-            .Where(item => item.RoleId == employee.RoleId)
-            .Select(item => item.PermissionId)
-            .ToArrayAsync(cancellationToken);
-        EmployeeAccessConfiguration legacy = LegacyConfiguration(permissions, employee.Scope);
-        Validate(legacy);
-        return Effective(employee.Id, employee.OrganizationId, employee.OrgUnitId, employee.TeamId,
-            legacy, EmployeeAccessSource.LegacyPermissions);
+        EmployeeRow? row = await (from employee in db.Employees.AsNoTracking()
+                                  join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
+                                  join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
+                                  where employee.UserId == subject.UserId && employee.Active
+                                  select new EmployeeRow(employee.Id, employee.OrganizationId, assignment.OrgUnitId,
+                                      assignment.TeamId, assignment.RoleId, assignment.Scope, role.Name!))
+            .SingleOrDefaultAsync(cancellationToken);
+        if (row == null) throw new AccessDeniedException();
+        return (await ResolveRowsAsync(db, [row], cancellationToken)).Single();
     }
 
     public async Task<IReadOnlyList<EffectiveEmployeeAccess>> ResolveActiveEmployeesAsync(
         Guid organizationId, CancellationToken cancellationToken)
     {
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        var rows = await (from employee in db.Employees.AsNoTracking()
-                          join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
-                          join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
-                          where employee.OrganizationId == organizationId && employee.Active
-                          select new
-                          {
-                              employee.Id,
-                              employee.OrganizationId,
-                              assignment.OrgUnitId,
-                              assignment.TeamId,
-                              assignment.RoleId,
-                              assignment.Scope,
-                              RoleName = role.Name
-                          }).ToArrayAsync(cancellationToken);
-        if (rows.Length == 0) return [];
+        EmployeeRow[] rows = await (from employee in db.Employees.AsNoTracking()
+                                    join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
+                                    join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
+                                    where employee.OrganizationId == organizationId && employee.Active
+                                    select new EmployeeRow(employee.Id, employee.OrganizationId, assignment.OrgUnitId,
+                                        assignment.TeamId, assignment.RoleId, assignment.Scope, role.Name!))
+            .ToArrayAsync(cancellationToken);
+        return await ResolveRowsAsync(db, rows, cancellationToken);
+    }
 
+    public async Task<IReadOnlyList<EffectiveEmployeeAccess>> ResolveEmployeesAsync(
+        Guid organizationId, IReadOnlyCollection<Guid> employeeIds, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(employeeIds);
+        if (employeeIds.Count == 0) return [];
+        Guid[] ids = employeeIds.Distinct().ToArray();
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        EmployeeRow[] rows = await (from employee in db.Employees.AsNoTracking()
+                                    join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
+                                    join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
+                                    where employee.OrganizationId == organizationId && ids.Contains(employee.Id)
+                                    select new EmployeeRow(employee.Id, employee.OrganizationId, assignment.OrgUnitId,
+                                        assignment.TeamId, assignment.RoleId, assignment.Scope, role.Name!))
+            .ToArrayAsync(cancellationToken);
+        return await ResolveRowsAsync(db, rows, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<EffectiveEmployeeAccess>> ResolveRowsAsync(
+        LandErpDbContext db, IReadOnlyCollection<EmployeeRow> rows, CancellationToken cancellationToken)
+    {
+        if (rows.Count == 0) return [];
         Guid[] employeeIds = rows.Select(item => item.Id).ToArray();
         Dictionary<Guid, EmployeeAccessSettings> configured = await db.EmployeeAccessSettings.AsNoTracking()
             .Where(item => employeeIds.Contains(item.EmployeeId))
@@ -89,8 +77,8 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
         Dictionary<Guid, string[]> permissions = grantRows.GroupBy(item => item.RoleId)
             .ToDictionary(group => group.Key, group => group.Select(item => item.PermissionId).ToArray());
 
-        List<EffectiveEmployeeAccess> result = new(rows.Length);
-        foreach (var row in rows)
+        List<EffectiveEmployeeAccess> result = new(rows.Count);
+        foreach (EmployeeRow row in rows)
         {
             EmployeeAccessConfiguration settings;
             EmployeeAccessSource source;
@@ -112,7 +100,7 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
                 source = EmployeeAccessSource.LegacyPermissions;
             }
 
-            result.Add(Effective(row.Id, row.OrganizationId, row.OrgUnitId, row.TeamId, settings, source));
+            result.Add(Effective(row.Id, row.OrganizationId, row.DepartmentId, row.TeamId, settings, source));
         }
 
         return result;

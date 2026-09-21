@@ -179,6 +179,15 @@ public sealed partial class ProcurementQueueV2ReadService(
             && (row.Case.StageId != "rejected" || sourceChanged);
         bool canHeadDecide = headPermission && row.Case.StageId == "pending_head"
             && row.Assignment.EmployeeId == context.EmployeeId && row.Case.ManagerEmployeeId != context.EmployeeId;
+        SiteInspection? inspectionEntity = await db.SiteInspections.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.PropertyCaseId == caseId, cancellationToken);
+        bool canAssignInspections = workVisible && effective.Settings.CanAssignInspections
+            && inspectionEntity?.Status != InspectionStatus.Completed;
+        bool canPerformInspections = inspectionEntity != null
+            && inspectionEntity.InspectorEmployeeId == context.EmployeeId
+            && effective.Settings.CanPerformInspections
+            && inspectionEntity.Status != InspectionStatus.Completed
+            && row.Case.StageId is not ("rejected" or "monitor" or "acquired");
 
         return new(row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle, row.Case.WorkingLocation, row.Case.CadastralNumber,
             row.Case.WorkingAreaSquareMeters, row.Case.WorkingPrice, row.Case.Currency, row.Case.StageId, row.Task.EmployeeId,
@@ -186,6 +195,11 @@ public sealed partial class ProcurementQueueV2ReadService(
             askSource == null ? null : SourceLabel(askSource), sellerOffer, buyerOffer, agreedPrice, row.Task.Type, row.Task.Title, row.Task.Description, row.Task.DueAt,
             DueState(row.Task, todayStart, tomorrowStart), negotiations, quick, deep, inspection, timeline, sources, sourceChanged,
             sourceRows.Length == 0 ? 0 : sourceRows.Max(item => item.DataRevision), row.Case.Version, canManagerDecide, canHeadDecide,
-            managerPermission || headPermission, row.Task.Version, availableAssignees, startPrice, priceDelta, priceDeltaPercent, priceChanged);
+            managerPermission || headPermission, row.Task.Version, availableAssignees,
+            startPrice, priceDelta, priceDeltaPercent, priceChanged)
+        {
+            CanAssignInspections = canAssignInspections,
+            CanPerformInspections = canPerformInspections
+        };
     }
 }

@@ -10,8 +10,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LandErp.Infrastructure.Modules.Organization;
 
-public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory, IAccessControl access) : IAuditReadService
+public sealed class AuditReadService : IAuditReadService
 {
+    private readonly IDbContextFactory<LandErpDbContext> factory;
+    private readonly IAccessControl legacyAccess;
+    private readonly IEmployeeAccessService employeeAccess;
+
+    public AuditReadService(
+        IDbContextFactory<LandErpDbContext> factory,
+        IAccessControl legacyAccess,
+        IEmployeeAccessService employeeAccess)
+    {
+        this.factory = factory;
+        this.legacyAccess = legacyAccess;
+        this.employeeAccess = employeeAccess;
+    }
+
+    public AuditReadService(IDbContextFactory<LandErpDbContext> factory, IAccessControl legacyAccess)
+        : this(factory, legacyAccess, new LandErp.Infrastructure.Modules.IdentityAccess.EmployeeAccessService(factory)) { }
     private const int MaximumExportRows = 10_000;
     private static readonly JsonSerializerOptions PrettyJsonOptions = new() { WriteIndented = true };
     private static readonly string[] SecurityActions =
@@ -24,7 +40,7 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
         "DepartmentCreated", "DepartmentUpdated", "DepartmentArchived", "DepartmentRestored",
         "TeamCreated", "TeamUpdated", "TeamArchived", "TeamRestored", "PositionCreated", "PositionUpdated",
         "PositionArchived", "PositionRestored", "EmployeeCreated", "EmployeeInvited", "EmployeeDeactivated",
-        "EmployeeRestored", "EmployeeWorkTransferred", "EmployeeWorkHandoverPending", "AssignmentChanged", "CollectorAgentCreated", "CollectorAgentRevoked",
+        "EmployeeRestored", "EmployeeWorkTransferred", "EmployeeWorkHandoverPending", "AssignmentChanged", "EmployeeAccessChanged", "CollectorAgentCreated", "CollectorAgentRevoked",
         "CollectionSearchCreated", "CollectionSearchUpdated", "CollectionSearchGroupCreated", "CollectionSearchGroupArchived",
         "CatalogItemCreatedManually", "CatalogDispositionChanged", "CatalogMonitoringStarted", "CatalogItemTakenToWork",
         "CatalogItemLinkedToCase", "CatalogDuplicateConfirmed", "CatalogDuplicateRejected", "CatalogDuplicateSettingsChanged",
@@ -129,8 +145,14 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
 
     private async Task<AccessContext> RequireAsync(Subject subject, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.AuditRead, cancellationToken);
-        return context.Scope == AccessScope.Organization ? context : throw new AccessDeniedException();
+        EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        if (!effective.CanReadAudit) throw new AccessDeniedException();
+        if (effective.Source != EmployeeAccessSource.Configured)
+        {
+            AccessContext transition = await legacyAccess.RequireAsync(subject, Permissions.AuditRead, cancellationToken);
+            if (transition.Scope != AccessScope.Organization) throw new AccessDeniedException();
+        }
+        return effective.OrganizationContext;
     }
 
     private static QueryWindow Window(AuditQuery query, string zoneId)
@@ -248,8 +270,17 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
         }
         if (value.ValueKind == JsonValueKind.Number)
         {
-            if (field.Equals("Scope", StringComparison.OrdinalIgnoreCase) && value.TryGetInt32(out int scope))
+            if ((field.Equals("Scope", StringComparison.OrdinalIgnoreCase)
+                    || field.Equals("ProcurementReadScope", StringComparison.OrdinalIgnoreCase)
+                    || field.Equals("ProcurementWorkScope", StringComparison.OrdinalIgnoreCase))
+                && value.TryGetInt32(out int scope))
                 return scope switch { 0 => "Свои", 1 => "Назначенные объекты", 2 => "Команда", 3 => "Отдел", 4 => "Вся организация", _ => "Изменено" };
+            if (field.Equals("IncomingAccess", StringComparison.OrdinalIgnoreCase) && value.TryGetInt32(out int incoming))
+                return incoming switch { 0 => "Нет доступа", 1 => "Просмотр", 2 => "Обработка", _ => "Изменено" };
+            if (field.Equals("ProcurementAccess", StringComparison.OrdinalIgnoreCase) && value.TryGetInt32(out int procurement))
+                return procurement switch { 0 => "Нет доступа", 1 => "Просмотр", 2 => "Менеджер", 3 => "Руководитель", _ => "Изменено" };
+            if (field.Equals("CollectionAccess", StringComparison.OrdinalIgnoreCase) && value.TryGetInt32(out int collection))
+                return collection switch { 0 => "Нет доступа", 1 => "Просмотр", 2 => "Управление", _ => "Изменено" };
             return value.GetRawText();
         }
         if (value.ValueKind == JsonValueKind.Array) return value.GetArrayLength() == 0 ? "Нет" : $"Элементов: {value.GetArrayLength()}";
@@ -268,6 +299,11 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
         "Name" or "Label" => "Название", "DisplayName" => "ФИО", "Login" => "Логин", "Description" => "Описание",
         "DepartmentId" or "OrgUnitId" => "Отдел", "TeamId" => "Команда", "PositionId" => "Должность",
         "ManagerId" or "ManagerEmployeeId" => "Руководитель", "RecipientEmployeeId" => "Получатель", "Role" or "RoleId" => "Роль", "Scope" => "Область доступа",
+        "IncomingAccess" => "Входящие предложения", "ProcurementAccess" => "Закупка",
+        "ProcurementReadScope" => "Какие закупочные объекты видит", "ProcurementWorkScope" => "С какими закупочными объектами работает",
+        "CollectionAccess" => "Поиски и парсеры", "CanAssignInspections" => "Назначать осмотры",
+        "CanPerformInspections" => "Выполнять осмотры", "CanConfirmPurchase" => "Фиксировать покупку",
+        "CanManageTemplates" => "Управлять общими шаблонами", "CanReadAudit" => "Читать полный аудит",
         "Active" or "Enabled" => "Состояние", "Source" => "Источник", "MaxPages" => "Предел страниц",
         "ScheduleKind" => "Расписание", "State" => "Состояние", "Title" or "WorkingTitle" => "Название объекта",
         "Price" or "WorkingPrice" or "AcquisitionPrice" => "Цена", "Location" or "WorkingLocation" => "Расположение",
@@ -320,7 +356,8 @@ public sealed class AuditReadService(IDbContextFactory<LandErpDbContext> factory
                 "EmployeeDeactivated" => Data("Сотрудник отключён", summary, "warning"), "EmployeeRestored" => Data("Сотрудник восстановлен", summary, "success"),
                 "EmployeeWorkTransferred" => Data("Передана активная работа сотрудника", summary),
                 "EmployeeWorkHandoverPending" => Data("Требуется переназначение после отзыва доступа", summary, "warning"),
-                "AssignmentChanged" => Data("Изменены назначение и доступ сотрудника", summary),
+                "EmployeeAccessChanged" => Data("Изменены настройки Access V1 сотрудника", summary),
+                "AssignmentChanged" => Data("Изменены назначение и legacy-доступ сотрудника", summary),
                 "CollectorAgentCreated" => Collection("Подключён парсер", summary), "CollectorAgentRevoked" => Collection("Парсер отключён", summary, "warning"),
                 "CollectorCredentialRotated" => new("Безопасность", "Входы и доступ", "warning", "↻", "Обновлён доступ парсера", summary),
                 "CollectionSearchCreated" => Collection("Создан поисковый запрос", summary), "CollectionSearchUpdated" => Collection("Изменён поисковый запрос", summary),

@@ -14,6 +14,8 @@ public partial class Collectors : IAsyncDisposable
 {
     private const int PageSize = 10;
     private CollectionAdminView? view;
+    private EffectiveEmployeeAccess? effectiveAccess;
+    private bool CanManageCollection => effectiveAccess?.CanManageCollection == true;
     private AgentConnectionCode? connectionCode;
     private AgentCredential? credential;
     private AgentView? selectedAgent;
@@ -50,6 +52,7 @@ public partial class Collectors : IAsyncDisposable
         refreshedAt = now;
         refreshMessage = null;
         if (!databaseReady) { view = null; return; }
+        effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, lifetime.Token);
         view = await Administration.ReadAsync(CurrentSubject, lifetime.Token);
     }
 

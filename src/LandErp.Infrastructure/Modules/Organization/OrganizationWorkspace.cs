@@ -65,6 +65,16 @@ public sealed class OrganizationWorkspace(
         Team[] teams = await db.Teams.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId).OrderBy(item => item.Name).ToArrayAsync(cancellationToken);
         Position[] positions = await db.Positions.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId).OrderBy(item => item.Name).ToArrayAsync(cancellationToken);
         Dictionary<Guid, string> departmentNames = departments.ToDictionary(item => item.Id, item => item.Name);
+        Guid[] visibleEmployeeIds = visibleEmployees.Select(item => item.employee.Id).ToArray();
+        EffectiveEmployeeAccess[] effectiveAccess = (await employeeAccess.ResolveEmployeesAsync(
+            context.OrganizationId, visibleEmployeeIds, cancellationToken)).ToArray();
+        Dictionary<Guid, EffectiveEmployeeAccess> accessByEmployee =
+            effectiveAccess.ToDictionary(item => item.EmployeeId);
+        Dictionary<Guid, long> accessVersions = visibleEmployeeIds.Length == 0
+            ? []
+            : await db.EmployeeAccessSettings.AsNoTracking()
+                .Where(item => visibleEmployeeIds.Contains(item.EmployeeId))
+                .ToDictionaryAsync(item => item.EmployeeId, item => item.Version, cancellationToken);
         return new(
             await db.Organizations.Where(item => item.Id == context.OrganizationId).Select(item => item.Name).SingleAsync(cancellationToken),
             departments.Select(item => new DepartmentView(item.Id, item.Name, item.Description, item.ManagerEmployeeId,
@@ -77,10 +87,18 @@ public sealed class OrganizationWorkspace(
                 item.ManagerEmployeeId == null ? null : names.GetValueOrDefault(item.ManagerEmployeeId.Value, "Сотрудник"), item.Active,
                 allAssignments.Count(value => value.TeamId == item.Id), item.Version)).ToArray(),
             await db.Roles.OrderBy(item => item.Name).Select(item => new NamedItem(item.Id, item.Name!)).ToArrayAsync(cancellationToken),
-            visibleEmployees.Select(item => new EmployeeView(item.employee.Id, item.employee.DisplayName, item.user.UserName!,
-                item.employee.Active ? EmployeeState.Active : item.user.PasswordHash == null ? EmployeeState.PendingActivation : EmployeeState.Disabled,
-                item.user.MustChangePassword, item.assignment.OrgUnitId, item.assignment.PositionId, item.assignment.TeamId,
-                item.assignment.ManagerEmployeeId, item.assignment.RoleId, item.role.Name!, item.assignment.Scope, item.assignment.Version, item.employee.Version)).ToArray());
+            visibleEmployees.Select(item =>
+            {
+                EffectiveEmployeeAccess effective = accessByEmployee[item.employee.Id];
+                return new EmployeeView(item.employee.Id, item.employee.DisplayName, item.user.UserName!,
+                    item.employee.Active ? EmployeeState.Active : item.user.PasswordHash == null ? EmployeeState.PendingActivation : EmployeeState.Disabled,
+                    item.user.MustChangePassword, item.assignment.OrgUnitId, item.assignment.PositionId, item.assignment.TeamId,
+                    item.assignment.ManagerEmployeeId, item.assignment.RoleId, item.role.Name!, item.assignment.Scope,
+                    item.assignment.Version, item.employee.Version,
+                    new EmployeeAccessView(item.employee.Id, effective.Settings, effective.Source,
+                        accessVersions.TryGetValue(item.employee.Id, out long accessVersion) ? accessVersion : null,
+                        effective.IsSystemOwner));
+            }).ToArray());
     }
 
     public async Task SaveDepartmentAsync(Subject subject, SaveDepartment command, string correlationId, CancellationToken cancellationToken)
@@ -217,6 +235,84 @@ public sealed class OrganizationWorkspace(
         AddAudit(db, context, subject, "EmployeePasswordReset", "Employee", employee.Id, new { Login = user.UserName, MustChangePassword = true }, correlationId);
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return new(employee.Id, user.UserName!, password);
+    }
+
+    public async Task<EmployeeAccessView> ReadEmployeeAccessAsync(Subject subject, Guid employeeId,
+        CancellationToken cancellationToken)
+    {
+        AccessContext context = await RequireOrganizationAdminAsync(subject, Permissions.UsersManage, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        return await BuildEmployeeAccessViewAsync(db, context.OrganizationId, employeeId, cancellationToken);
+    }
+
+    public async Task<EmployeeAccessView> SaveEmployeeAccessAsync(Subject subject, SaveEmployeeAccess command,
+        string correlationId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command.Settings);
+        employeeAccess.Validate(command.Settings);
+        AccessContext context = await RequireAccessAdminAsync(subject, cancellationToken);
+
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+
+        EffectiveEmployeeAccess before = (await employeeAccess.ResolveEmployeesAsync(
+            context.OrganizationId, [command.EmployeeId], cancellationToken)).SingleOrDefault()
+            ?? throw new AccessDeniedException();
+
+        var target = await (from employee in db.Employees
+                            join assignment in db.EmployeeAssignments on employee.Id equals assignment.EmployeeId
+                            join role in db.Roles on assignment.RoleId equals role.Id
+                            where employee.Id == command.EmployeeId && employee.OrganizationId == context.OrganizationId
+                            select new { Employee = employee, Assignment = assignment, RoleName = role.Name! })
+            .SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
+
+        if (string.Equals(target.RoleName, "Owner", StringComparison.Ordinal))
+            throw new ArgumentException("Доступ Owner системный и не может быть ограничен настройками Access V1.");
+        ValidateAccessScopeReferences(target.Assignment, command.Settings);
+
+        EmployeeAccessSettings? row = await db.EmployeeAccessSettings
+            .SingleOrDefaultAsync(item => item.EmployeeId == command.EmployeeId, cancellationToken);
+        long? beforeExplicitVersion = row?.Version;
+        if (row == null)
+        {
+            if (command.ExpectedVersion != null)
+                throw new DbUpdateConcurrencyException("Настройки доступа уже изменились. Обновите карточку сотрудника.");
+            row = new EmployeeAccessSettings { EmployeeId = command.EmployeeId };
+            db.EmployeeAccessSettings.Add(row);
+        }
+        else if (command.ExpectedVersion != row.Version)
+        {
+            throw new DbUpdateConcurrencyException("Настройки доступа уже изменились. Обновите карточку сотрудника.");
+        }
+
+        await ValidateAccessChangeAgainstActiveWorkAsync(db, target.Employee, target.Assignment,
+            command.Settings, cancellationToken);
+
+        row.IncomingAccess = command.Settings.IncomingAccess;
+        row.ProcurementAccess = command.Settings.ProcurementAccess;
+        row.ProcurementReadScope = command.Settings.ProcurementReadScope;
+        row.ProcurementWorkScope = command.Settings.ProcurementWorkScope;
+        row.CollectionAccess = command.Settings.CollectionAccess;
+        row.CanAssignInspections = command.Settings.CanAssignInspections;
+        row.CanPerformInspections = command.Settings.CanPerformInspections;
+        row.CanConfirmPurchase = command.Settings.CanConfirmPurchase;
+        row.CanManageTemplates = command.Settings.CanManageTemplates;
+        row.CanReadAudit = command.Settings.CanReadAudit;
+
+        AddAudit(db, context, subject, "EmployeeAccessChanged", "Employee", command.EmployeeId,
+            new
+            {
+                Before = before.Settings,
+                After = command.Settings,
+                BeforeSource = before.Source.ToString(),
+                BeforeExplicitVersion = beforeExplicitVersion
+            }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        await using LandErpDbContext readDb = await factory.CreateDbContextAsync(cancellationToken);
+        return await BuildEmployeeAccessViewAsync(readDb, context.OrganizationId, command.EmployeeId, cancellationToken);
     }
 
     public async Task<EmployeeWorkImpact> ReadEmployeeWorkImpactAsync(Subject subject, Guid employeeId,
@@ -626,6 +722,81 @@ public sealed class OrganizationWorkspace(
                 state.View.OpenInspections,
                 state.View.PendingApprovals
             }, correlationId);
+    }
+
+    private async Task<EmployeeAccessView> BuildEmployeeAccessViewAsync(LandErpDbContext db, Guid organizationId,
+        Guid employeeId, CancellationToken cancellationToken)
+    {
+        if (!await db.Employees.AsNoTracking().AnyAsync(item => item.Id == employeeId
+            && item.OrganizationId == organizationId, cancellationToken))
+            throw new AccessDeniedException();
+
+        EffectiveEmployeeAccess effective = (await employeeAccess.ResolveEmployeesAsync(
+            organizationId, [employeeId], cancellationToken)).Single();
+        long? version = await db.EmployeeAccessSettings.AsNoTracking()
+            .Where(item => item.EmployeeId == employeeId)
+            .Select(item => (long?)item.Version)
+            .SingleOrDefaultAsync(cancellationToken);
+        return new(employeeId, effective.Settings, effective.Source, version, effective.IsSystemOwner);
+    }
+
+    private static void ValidateAccessScopeReferences(
+        EmployeeAssignment assignment, EmployeeAccessConfiguration settings)
+    {
+        if ((settings.ProcurementReadScope == AccessScope.Team || settings.ProcurementWorkScope == AccessScope.Team)
+            && assignment.TeamId == null)
+            throw new ArgumentException("Для области «Команда» сотрудник должен быть назначен в команду.");
+        if ((settings.ProcurementReadScope == AccessScope.Department || settings.ProcurementWorkScope == AccessScope.Department)
+            && assignment.OrgUnitId == null)
+            throw new ArgumentException("Для области «Отдел» сотрудник должен быть назначен в отдел.");
+    }
+
+    private async Task ValidateAccessChangeAgainstActiveWorkAsync(
+        LandErpDbContext db,
+        Employee employee,
+        EmployeeAssignment assignment,
+        EmployeeAccessConfiguration proposed,
+        CancellationToken cancellationToken)
+    {
+        EmployeeWorkState state = await BuildEmployeeWorkStateAsync(
+            db, employee.OrganizationId, employee.Id, cancellationToken);
+
+        if (state.Inspections.Length > 0 && !proposed.CanPerformInspections)
+            throw new ArgumentException(
+                "У сотрудника есть незавершённые осмотры. Сначала переназначьте активную работу, затем отключайте право выполнять осмотры.");
+
+        if (state.Cases.Length == 0) return;
+        if (proposed.ProcurementAccess < ProcurementAccessLevel.Manager)
+            throw new ArgumentException(
+                "У сотрудника есть активная работа в закупке. Сначала переназначьте её, затем уменьшайте доступ к закупке.");
+
+        AccessContext proposedWork = new(employee.Id, employee.OrganizationId, assignment.OrgUnitId,
+            assignment.TeamId, proposed.ProcurementWorkScope);
+        foreach (CaseWorkImpact impact in state.Cases)
+        {
+            if (!ProcurementVisibility.CanSeeAfterResponsibility(
+                impact.Case, proposedWork, impact.Case.ManagerEmployeeId, impact.CaseAssigneeEmployeeId))
+            {
+                throw new ArgumentException(
+                    "Новая область работы не включает один или несколько активных объектов сотрудника. Сначала переназначьте активную работу.");
+            }
+
+            if (impact.Assignment && impact.Case.StageId == "pending_head"
+                && proposed.ProcurementAccess < ProcurementAccessLevel.Head)
+            {
+                throw new ArgumentException(
+                    "У сотрудника есть объект, ожидающий решения руководителя. Сначала передайте его другому руководителю.");
+            }
+        }
+    }
+
+    private async Task<AccessContext> RequireAccessAdminAsync(Subject subject, CancellationToken cancellationToken)
+    {
+        AccessContext context = await RequireOrganizationAdminAsync(subject, Permissions.UsersManage, cancellationToken);
+        AccessContext roleContext = await access.RequireAsync(subject, Permissions.RolesManage, cancellationToken);
+        if (roleContext.OrganizationId != context.OrganizationId || roleContext.Scope != AccessScope.Organization)
+            throw new AccessDeniedException();
+        return context;
     }
 
     private async Task<AccessContext> RequireOrganizationAdminAsync(Subject subject, string permission, CancellationToken cancellationToken)

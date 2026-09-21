@@ -8,6 +8,7 @@ using LandErp.Application.Modules.Organization.Contracts;
 using LandErp.Server.Security;
 using LandErp.Server.Components;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Authentication;
@@ -193,17 +194,39 @@ app.MapGet("/health/ready", async (IDatabaseStatus database, CancellationToken c
 app.MapGet("/api/organization", async (HttpContext context, IOrganizationWorkspace workspace, CancellationToken cancellationToken) =>
     Results.Ok(await workspace.ReadAsync(PermissionAuthorization.SubjectFrom(context.User), cancellationToken)))
     .RequireAuthorization(Permissions.UsersRead);
+app.MapGet("/api/organization/employees/{employeeId:guid}/access",
+    async (Guid employeeId, HttpContext context, IOrganizationWorkspace workspace, CancellationToken cancellationToken) =>
+        Results.Ok(await workspace.ReadEmployeeAccessAsync(
+            PermissionAuthorization.SubjectFrom(context.User), employeeId, cancellationToken)))
+    .RequireAuthorization();
+app.MapPut("/api/organization/employees/{employeeId:guid}/access",
+    async (Guid employeeId, SaveEmployeeAccess command, HttpContext context, IAntiforgery antiforgery,
+        IOrganizationWorkspace workspace, CancellationToken cancellationToken) =>
+    {
+        if (command.EmployeeId != employeeId)
+            return Results.Problem(statusCode: 400, title: "EmployeeId в маршруте и команде должен совпадать.");
+        try { await antiforgery.ValidateRequestAsync(context); }
+        catch (AntiforgeryValidationException)
+        {
+            return Results.Problem(statusCode: 400, title: "Проверка запроса не пройдена",
+                extensions: new Dictionary<string, object?> { ["code"] = "CSRF_VALIDATION_FAILED" });
+        }
+        EmployeeAccessView saved = await workspace.SaveEmployeeAccessAsync(
+            PermissionAuthorization.SubjectFrom(context.User), command, context.TraceIdentifier, cancellationToken);
+        return Results.Ok(saved);
+    })
+    .RequireAuthorization();
 app.MapGet("/api/audit", async (HttpContext context, IAuditReadService audit, CancellationToken cancellationToken) =>
     Results.Ok(await audit.ReadAsync(PermissionAuthorization.SubjectFrom(context.User), ParseAuditQuery(context.Request.Query), cancellationToken)))
-    .RequireAuthorization(Permissions.AuditRead);
+    .RequireAuthorization();
 app.MapGet("/api/audit/{eventId:guid}/technical", async (Guid eventId, HttpContext context, IAuditReadService audit, CancellationToken cancellationToken) =>
     Results.Ok(await audit.ReadTechnicalAsync(PermissionAuthorization.SubjectFrom(context.User), eventId, cancellationToken)))
-    .RequireAuthorization(Permissions.AuditRead);
+    .RequireAuthorization();
 app.MapGet("/api/audit/export", async (HttpContext context, IAuditReadService audit, CancellationToken cancellationToken) =>
 {
     AuditExport export = await audit.ExportCsvAsync(PermissionAuthorization.SubjectFrom(context.User), ParseAuditQuery(context.Request.Query), cancellationToken);
     return Results.File(export.Content, "text/csv; charset=utf-8", export.FileName);
-}).RequireAuthorization(Permissions.AuditRead);
+}).RequireAuthorization();
 
 static AuditQuery ParseAuditQuery(IQueryCollection values)
 {

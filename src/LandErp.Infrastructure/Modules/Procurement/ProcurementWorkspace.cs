@@ -957,6 +957,13 @@ public sealed class ProcurementWorkspace(
             .Where(item => item.PropertyCaseId == caseId).OrderBy(item => item.Title).ToArrayAsync(cancellationToken);
         CaseCheckTemplateItem[] checkTemplates = await EnsureCheckTemplatesAsync(db, context.OrganizationId, cancellationToken);
         SiteInspection? inspection = await db.SiteInspections.AsNoTracking().SingleOrDefaultAsync(item => item.PropertyCaseId == caseId, cancellationToken);
+        bool canAssignInspections = workVisible && effective.Settings.CanAssignInspections
+            && inspection?.Status != InspectionStatus.Completed;
+        bool canPerformInspections = inspection != null
+            && inspection.InspectorEmployeeId == context.EmployeeId
+            && effective.Settings.CanPerformInspections
+            && inspection.Status != InspectionStatus.Completed
+            && row.Case.StageId is not ("rejected" or "monitor" or "acquired");
         SiteInspectionItem[] inspectionItems = inspection == null ? [] : await db.SiteInspectionItems.AsNoTracking()
             .Where(item => item.InspectionId == inspection.Id).OrderBy(item => item.SortOrderSnapshot).ToArrayAsync(cancellationToken);
         var attachments = await (from link in db.CaseAttachments.AsNoTracking()
@@ -1001,7 +1008,11 @@ public sealed class ProcurementWorkspace(
                     item.UnitSnapshot, item.NormalAnswerSnapshot, item.AllowAttachmentsSnapshot, item.RequiredSnapshot, item.Status,
                     item.Answer, item.Note, item.Version)).ToArray()),
             row.Case.CadastralNumber, row.Case.AcquisitionPrice, row.Case.AcquisitionDate, row.Case.AcquisitionComment,
-            canManageDossier, canManageTemplates, canManageBlockers, canConfirmPurchase, canCorrectSourceLinks);
+            canManageDossier, canManageTemplates, canManageBlockers, canConfirmPurchase, canCorrectSourceLinks)
+        {
+            CanAssignInspections = canAssignInspections,
+            CanPerformInspections = canPerformInspections
+        };
     }
 
     public async Task<Guid?> ResolveLegacyListingAsync(Subject subject, Guid listingId, CancellationToken cancellationToken)

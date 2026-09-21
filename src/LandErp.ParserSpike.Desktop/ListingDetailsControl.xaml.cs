@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using LandErp.ParserSpike.LocalCollection;
 
@@ -12,10 +13,18 @@ public sealed class ListingOpenEventArgs(string url) : EventArgs
     public string Url { get; } = url;
 }
 
+internal sealed record PhotoThumbnailItem(int Index, BitmapImage Image);
+
 public partial class ListingDetailsControl : UserControl
 {
     private string? currentUrl;
+    private string[] photoUrls = [];
+    private int photoIndex;
+    private bool changingPhotoSelection;
+
     public string? CurrentExternalId { get; private set; }
+    public int CurrentPhotoIndex => photoUrls.Length == 0 ? -1 : photoIndex;
+    public int PhotoCount => photoUrls.Length;
     public event EventHandler<ListingOpenEventArgs>? OpenListingRequested;
 
     public ListingDetailsControl()
@@ -26,11 +35,13 @@ public partial class ListingDetailsControl : UserControl
 
     public void Clear()
     {
-        CurrentExternalId = null; currentUrl = null;
+        CurrentExternalId = null; currentUrl = null; photoUrls = []; photoIndex = 0;
         TitleText.Text = "Выберите объявление"; MetaText.Text = FactsText.Text = DeclaredText.Text = InferredText.Text =
             DescriptionText.Text = ContextText.Text = HistoryText.Text = TechnicalText.Text = "";
-        ConflictPanel.Visibility = Visibility.Collapsed; PhotoPanel.Visibility = Visibility.Collapsed;
-        PhotoPreview.Source = null; PhotoCountText.Text = ""; OpenButton.IsEnabled = false;
+        ConflictPanel.Visibility = Visibility.Collapsed;
+        PhotoPanel.Visibility = Visibility.Collapsed; PhotoEmptyPanel.Visibility = Visibility.Collapsed; PhotoThumbnails.Visibility = Visibility.Collapsed;
+        PhotoPreview.Source = null; PhotoThumbnails.ItemsSource = null; PhotoCountText.Text = PhotoPositionText.Text = "";
+        PreviousPhotoButton.IsEnabled = NextPhotoButton.IsEnabled = false; OpenButton.IsEnabled = false;
     }
 
     public void ShowListing(ListingRow row, HistoryRow[] history, string context)
@@ -57,22 +68,74 @@ public partial class ListingDetailsControl : UserControl
         }
         else ConflictPanel.Visibility = Visibility.Collapsed;
         DescriptionText.Text = string.IsNullOrWhiteSpace(data.Description.Raw) ? "—" : data.Description.Raw;
-        PhotoCountText.Text = $"Фотографии: {data.PhotoUrls.Length}";
-        PhotoPreview.Source = null; PhotoPanel.Visibility = Visibility.Collapsed;
-        string? firstPhoto = data.PhotoUrls.FirstOrDefault();
-        if (Uri.TryCreate(firstPhoto, UriKind.Absolute, out Uri? photo) && photo.Scheme == Uri.UriSchemeHttps)
-        {
-            try
-            {
-                BitmapImage image = new(); image.BeginInit(); image.UriSource = photo; image.CacheOption = BitmapCacheOption.OnDemand; image.EndInit();
-                PhotoPreview.Source = image; PhotoPanel.Visibility = Visibility.Visible;
-            }
-            catch (UriFormatException) { }
-            catch (InvalidOperationException) { }
-        }
+        SetPhotos(data.PhotoUrls);
         ContextText.Text = context;
         HistoryText.Text = History(history);
         TechnicalText.Text = Technical(data, history);
+    }
+
+    private void SetPhotos(string[] urls)
+    {
+        photoUrls = urls.Where(IsSafePhotoUrl).Distinct(StringComparer.Ordinal).ToArray();
+        photoIndex = 0;
+        PhotoCountText.Text = photoUrls.Length == 0 ? "Фотографии" : $"Фотографии · {photoUrls.Length}";
+        PhotoPanel.Visibility = photoUrls.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        PhotoEmptyPanel.Visibility = photoUrls.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        PhotoThumbnails.Visibility = photoUrls.Length > 1 ? Visibility.Visible : Visibility.Collapsed;
+
+        if (photoUrls.Length == 0)
+        {
+            PhotoPreview.Source = null; PhotoPositionText.Text = ""; PhotoThumbnails.ItemsSource = null;
+            PreviousPhotoButton.IsEnabled = NextPhotoButton.IsEnabled = false; return;
+        }
+
+        PhotoThumbnailItem[] thumbnails = photoUrls.Select((url, index) => new PhotoThumbnailItem(index, CreateImage(url, 180))).ToArray();
+        PhotoThumbnails.ItemsSource = thumbnails;
+        ShowPhoto(0);
+    }
+
+    private static bool IsSafePhotoUrl(string value) => Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)
+        && uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(uri.UserInfo);
+
+    private static BitmapImage CreateImage(string url, int decodeWidth = 0)
+    {
+        BitmapImage image = new();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnDemand;
+        image.UriSource = new Uri(url, UriKind.Absolute);
+        if (decodeWidth > 0) image.DecodePixelWidth = decodeWidth;
+        image.EndInit();
+        return image;
+    }
+
+    private void ShowPhoto(int index)
+    {
+        if (photoUrls.Length == 0) return;
+        photoIndex = Math.Clamp(index, 0, photoUrls.Length - 1);
+        PhotoPreview.Source = CreateImage(photoUrls[photoIndex]);
+        PhotoPositionText.Text = $"Фото {photoIndex + 1} из {photoUrls.Length}";
+        PreviousPhotoButton.IsEnabled = photoIndex > 0;
+        NextPhotoButton.IsEnabled = photoIndex < photoUrls.Length - 1;
+        changingPhotoSelection = true;
+        PhotoThumbnails.SelectedIndex = photoIndex;
+        if (PhotoThumbnails.SelectedItem is not null) PhotoThumbnails.ScrollIntoView(PhotoThumbnails.SelectedItem);
+        changingPhotoSelection = false;
+    }
+
+    private void PreviousPhotoClick(object sender, RoutedEventArgs e) => ShowPhoto(photoIndex - 1);
+    private void NextPhotoClick(object sender, RoutedEventArgs e) => ShowPhoto(photoIndex + 1);
+
+    private void PhotoThumbnailSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (!changingPhotoSelection && PhotoThumbnails.SelectedItem is PhotoThumbnailItem item) ShowPhoto(item.Index);
+    }
+
+    private void PhotoPreviewClick(object sender, MouseButtonEventArgs e)
+    {
+        if (photoUrls.Length == 0) return;
+        PhotoViewerWindow viewer = new(photoUrls, photoIndex) { Owner = Window.GetWindow(this) };
+        _ = viewer.ShowDialog();
+        ShowPhoto(viewer.SelectedIndex);
     }
 
     private static string History(HistoryRow[] history)

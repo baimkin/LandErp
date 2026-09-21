@@ -20,6 +20,27 @@ public sealed class ListingDetailsUiTests
     }
 
     [TestMethod]
+    public async Task PhotoGalleryUsesUniformPreviewNavigationAndThumbnails()
+    {
+        await OnSta(() =>
+        {
+            ListingDetailsControl control = new();
+            Image preview = (Image)control.FindName("PhotoPreview");
+            Button previous = (Button)control.FindName("PreviousPhotoButton");
+            Button next = (Button)control.FindName("NextPhotoButton");
+            ListBox thumbnails = (ListBox)control.FindName("PhotoThumbnails");
+            TextBlock position = (TextBlock)control.FindName("PhotoPositionText");
+            Assert.AreEqual(System.Windows.Media.Stretch.Uniform, preview.Stretch);
+            Assert.IsNotNull(previous);
+            Assert.IsNotNull(next);
+            Assert.IsNotNull(thumbnails);
+            Assert.IsNotNull(position);
+            Assert.IsNotNull(control.FindName("PhotoEmptyPanel"));
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestMethod]
     public async Task DetailsModePersistsAndOneSeparateWindowFollowsTableSelection()
     {
         string root = Path.Combine(Path.GetTempPath(), "LandErp-DetailsUi", Guid.NewGuid().ToString("N"));

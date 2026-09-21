@@ -18,10 +18,54 @@
                         <TextBlock x:Name="InferredText" TextWrapping="Wrap" Margin="0,2,0,0"/>
                         <TextBlock Text="Описание" FontWeight="SemiBold" Margin="0,12,0,3"/>
                         <TextBlock x:Name="DescriptionText" TextWrapping="Wrap" LineHeight="19"/>
-                        <TextBlock x:Name="PhotoCountText" FontWeight="SemiBold" Margin="0,12,0,5"/>
-                        <Border x:Name="PhotoPanel" Visibility="Collapsed" CornerRadius="7" ClipToBounds="True" Background="#EEF2F7">
-                            <Image x:Name="PhotoPreview" Height="180" Stretch="UniformToFill"/>
+
+                        <DockPanel Margin="0,12,0,5">
+                            <TextBlock x:Name="PhotoCountText" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="PhotoPositionText" DockPanel.Dock="Right" Foreground="#74839A" FontSize="12.5"/>
+                        </DockPanel>
+
+                        <Border x:Name="PhotoPanel" Visibility="Collapsed" CornerRadius="8" ClipToBounds="True"
+                                Background="#EEF2F7" BorderBrush="#E0E6EF" BorderThickness="1">
+                            <Grid MinHeight="270">
+                                <Image x:Name="PhotoPreview" MinHeight="270" MaxHeight="360" Stretch="Uniform"
+                                       Cursor="Hand" MouseLeftButtonUp="PhotoPreviewClick" ToolTip="Открыть фото крупно"/>
+                                <Button x:Name="PreviousPhotoButton" Content="‹" Width="38" Height="46" Padding="0"
+                                        Margin="8,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                        FontSize="26" FontWeight="SemiBold" Click="PreviousPhotoClick" ToolTip="Предыдущее фото"/>
+                                <Button x:Name="NextPhotoButton" Content="›" Width="38" Height="46" Padding="0"
+                                        Margin="0,0,8,0" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        FontSize="26" FontWeight="SemiBold" Click="NextPhotoClick" ToolTip="Следующее фото"/>
+                            </Grid>
                         </Border>
+
+                        <Border x:Name="PhotoEmptyPanel" Background="#F4F6FA" BorderBrush="#E0E6EF" BorderThickness="1"
+                                CornerRadius="8" Padding="20" Visibility="Collapsed">
+                            <TextBlock Text="Фотографии не найдены" Foreground="#74839A"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+
+                        <ListBox x:Name="PhotoThumbnails" Visibility="Collapsed" Margin="0,6,0,0"
+                                 BorderThickness="0" Background="Transparent" SelectionChanged="PhotoThumbnailSelected"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="2"/>
+                                    <Setter Property="Margin" Value="0,0,5,3"/>
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="78" Height="58" Background="#EEF2F7" CornerRadius="5" ClipToBounds="True">
+                                        <Image Source="{Binding Image}" Stretch="UniformToFill"/>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
                         <Button x:Name="OpenButton" Content="Открыть объявление" HorizontalAlignment="Left" Margin="0,8,0,0" Click="OpenClick" IsEnabled="False"/>
                         <TextBlock Text="Контекст сбора" FontWeight="SemiBold" Margin="0,12,0,3"/>
                         <TextBlock x:Name="ContextText" TextWrapping="Wrap" FontSize="12.5" Foreground="#74839A"/>

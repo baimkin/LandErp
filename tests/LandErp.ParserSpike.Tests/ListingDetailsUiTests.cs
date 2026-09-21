@@ -37,6 +37,7 @@ public sealed class ListingDetailsUiTests
         controller.Store.SavePage(job, 1, link.Url, items, true, new(NextKind.End), "fixture");
         controller.Store.SetState(job, JobState.Completed, "fixture");
         controller.SetListingDetailsMode(ListingDetailsDisplayMode.SeparateWindow);
+        controller.SetListingDetailsWidth(520);
 
         await OnSta(async () =>
         {
@@ -70,6 +71,7 @@ public sealed class ListingDetailsUiTests
 
         await using WorkspaceController reopenedController = new(database, root, new NoSessions());
         Assert.AreEqual(ListingDetailsDisplayMode.SeparateWindow, reopenedController.ListingDetailsMode);
+        Assert.AreEqual(520d, reopenedController.ListingDetailsWidth, 0.1);
     }
 
     private static ListingObservation Item(string id, DateTimeOffset time, string title) => new()

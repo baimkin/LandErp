@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using LandErp.ParserSpike.LocalCollection;
@@ -21,6 +22,7 @@ public sealed class WorkspaceController : IAsyncDisposable
     public string ConnectionStatus { get; private set; } = "Сервер не подключён";
     public ParserOperatingMode Mode { get; private set; }
     public ListingDetailsDisplayMode ListingDetailsMode { get; private set; }
+    public double ListingDetailsWidth { get; private set; }
     public ServerCoordinator? Server { get; private set; }
     public LocalStore Store { get; }
     public QueueRunner Runner { get; }
@@ -37,6 +39,7 @@ public sealed class WorkspaceController : IAsyncDisposable
             Runner = new QueueRunner(Store, this.sessions, Diagnostics);
             Mode = LoadMode();
             ListingDetailsMode = LoadListingDetailsMode();
+            ListingDetailsWidth = LoadListingDetailsWidth();
             AutomationEnabled = File.Exists(AutomationPath) && File.ReadAllText(AutomationPath).Trim() == "on";
         }
         catch { guard.Dispose(); throw; }
@@ -86,11 +89,27 @@ public sealed class WorkspaceController : IAsyncDisposable
     }
     private string ModeSettingsPath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "workspace-mode.txt");
     private string ListingDetailsModePath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "listing-details-mode.txt");
+    private string ListingDetailsWidthPath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "listing-details-width.txt");
     private ParserOperatingMode LoadMode() => File.Exists(ModeSettingsPath)
         && Enum.TryParse(File.ReadAllText(ModeSettingsPath).Trim(), out ParserOperatingMode value) ? value : ParserOperatingMode.Local;
     private ListingDetailsDisplayMode LoadListingDetailsMode() => File.Exists(ListingDetailsModePath)
         && Enum.TryParse(File.ReadAllText(ListingDetailsModePath).Trim(), out ListingDetailsDisplayMode value)
         ? value : ListingDetailsDisplayMode.SidePanel;
+    private double LoadListingDetailsWidth()
+    {
+        if (!File.Exists(ListingDetailsWidthPath)) return 430d;
+        return double.TryParse(File.ReadAllText(ListingDetailsWidthPath).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+            && double.IsFinite(value) ? Math.Clamp(value, 320d, 760d) : 430d;
+    }
+    public void SetListingDetailsWidth(double width)
+    {
+        if (!double.IsFinite(width)) return;
+        double value = Math.Clamp(width, 320d, 760d);
+        string temporary = ListingDetailsWidthPath + ".tmp";
+        File.WriteAllText(temporary, value.ToString("0", CultureInfo.InvariantCulture));
+        File.Move(temporary, ListingDetailsWidthPath, true);
+        ListingDetailsWidth = value;
+    }
     public void SetListingDetailsMode(ListingDetailsDisplayMode mode)
     {
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));

@@ -173,6 +173,8 @@ public sealed record ListingRow(ListingObservation Observation, DateTimeOffset F
         .Concat(Observation.InferredLandTypes).Distinct().ToArray());
     public string LandTypeIssue => Observation.LandTypeConflict ? "⚠" : "";
     public string Published => Observation.SourcePublishedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.CurrentCulture) ?? "—";
+    public string LastParsed => LastSeen.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.CurrentCulture);
+    public string LastParsedFull => LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss", CultureInfo.CurrentCulture);
     public int PhotoCount => Observation.PhotoUrls.Length;
     public string CadastralNumber => Observation.CadastralNumber.Raw ?? "—";
     public string Coordinates => Observation.Latitude.Parsed is decimal lat && Observation.Longitude.Parsed is decimal lon

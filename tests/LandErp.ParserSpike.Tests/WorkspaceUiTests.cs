@@ -43,6 +43,13 @@ public sealed class WorkspaceUiTests
                 CollectionAssert.AreEqual((string[])["Поиски", "Работа", "Результаты", "Настройки"], tabs.Items.Cast<TabItem>().Select(x => (string)x.Header).ToArray());
                 Assert.IsNull(window.FindName("SettingsGrid")); Assert.IsNull(window.FindName("DiagnosticText"));
                 Assert.AreEqual(0, sessions.Created); Assert.IsFalse(controller.AutomationEnabled);
+                tabs.SelectedIndex = 2;
+                DataGrid results = (DataGrid)window.FindName("ListingsGrid");
+                Assert.AreEqual(1, results.FrozenColumnCount);
+                Assert.IsFalse(results.Columns.Any(column => column.Width.IsStar));
+                Assert.IsTrue(results.Columns.Any(column => Equals(column.Header, "Парсинг")));
+                Assert.IsNotNull(window.FindName("DetailsSplitter"));
+                Assert.IsNotNull(window.FindName("ResetFiltersButton"));
                 tabs.SelectedIndex = 3;
                 ((TextBox)window.FindName("MaxPagesInput")).Text = "0";
                 ((Button)window.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

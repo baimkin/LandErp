@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using LandErp.ParserSpike.LocalCollection;
 using LandErp.ParserSpike.ServerIntegration;
@@ -388,6 +389,16 @@ public partial class WorkspaceWindow : Window
         return Task.CompletedTask;
     }
     private async void FindClick(object sender, RoutedEventArgs e) => await ActionAsync(() => { offset = 0; return FindAsync(); });
+    private async void ResetFiltersClick(object sender, RoutedEventArgs e) => await ActionAsync(() =>
+    {
+        SearchInput.Clear();
+        SourceFilterInput.SelectedIndex = 0;
+        SearchFilterInput.SelectedIndex = 0;
+        RunFilterInput.SelectedIndex = 0;
+        QualityFilterInput.SelectedIndex = 0;
+        offset = 0;
+        return FindAsync();
+    });
     private async void PreviousClick(object sender, RoutedEventArgs e) => await ActionAsync(() => { offset = Math.Max(0, offset - 100); return FindAsync(); });
     private async void NextClick(object sender, RoutedEventArgs e) => await ActionAsync(() => { if (offset + 100 < total) offset += 100; return FindAsync(); });
     private void ListingSelected(object sender, SelectionChangedEventArgs e) => ShowSelectedListing();
@@ -433,10 +444,18 @@ public partial class WorkspaceWindow : Window
         if (controller == null) return;
         bool side = controller.ListingDetailsMode == ListingDetailsDisplayMode.SidePanel;
         DetailsPanel.Visibility = side ? Visibility.Visible : Visibility.Collapsed;
-        DetailsGapColumn.Width = side ? new GridLength(20) : new GridLength(0);
-        DetailsColumn.Width = side ? new GridLength(2, GridUnitType.Star) : new GridLength(0);
+        DetailsSplitter.Visibility = side ? Visibility.Visible : Visibility.Collapsed;
+        DetailsSplitterColumn.Width = side ? new GridLength(6) : new GridLength(0);
+        DetailsColumn.MinWidth = side ? 320 : 0;
+        DetailsColumn.Width = side ? new GridLength(controller.ListingDetailsWidth) : new GridLength(0);
         if (side && detailsWindow != null) { detailsWindow.Close(); detailsWindow = null; }
         if (!side && ListingsGrid.SelectedItem is ListingRow) ShowSelectedListing();
+    }
+    private void DetailsSplitterDragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (controller?.ListingDetailsMode != ListingDetailsDisplayMode.SidePanel) return;
+        controller.SetListingDetailsWidth(DetailsColumn.ActualWidth);
+        DetailsColumn.Width = new GridLength(controller.ListingDetailsWidth);
     }
     private void InitializeResultFilters()
     {

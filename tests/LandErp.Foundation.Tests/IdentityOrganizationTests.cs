@@ -91,7 +91,7 @@ public sealed class IdentityOrganizationTests
         await workspace.ChangeAssignmentAsync(actor, own, "test", CancellationToken.None);
         Assert.AreEqual(1, (await workspace.ReadAsync(managerActor, CancellationToken.None)).Employees.Count);
         AuditPage audit = await auditReader.ReadAsync(actor, new(PageSize: 100), CancellationToken.None);
-        Assert.IsTrue(audit.Items.Any(item => item.Title == "Изменены назначение и доступ сотрудника"));
+        Assert.IsTrue(audit.Items.Any(item => item.Title == "Изменены назначение и legacy-доступ сотрудника"));
         AuditExport auditExport = await auditReader.ExportCsvAsync(actor, new(), CancellationToken.None);
         string auditCsv = System.Text.Encoding.UTF8.GetString(auditExport.Content);
         Assert.IsFalse(auditCsv.Contains(invitation.OneTimeToken, StringComparison.Ordinal)

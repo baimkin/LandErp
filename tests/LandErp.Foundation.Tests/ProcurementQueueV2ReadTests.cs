@@ -41,11 +41,21 @@ public sealed class ProcurementQueueV2ReadTests
                 "Фото от собственника", "Материал к контакту", "owner.jpg", "image/jpeg", content, null),
             "negotiation-file", CancellationToken.None);
 
+        await fixture.SetExplicitAccessAsync(fixture.ManagerEmployeeId,
+            new(IncomingAccessLevel.Process, ProcurementAccessLevel.Manager,
+                AccessScope.Department, AccessScope.Department, CollectionAccessLevel.None,
+                CanAssignInspections: true, CanPerformInspections: true, CanConfirmPurchase: false,
+                CanManageTemplates: true, CanReadAudit: false));
+        await fixture.Workspace.AssignInspectionAsync(fixture.Manager,
+            new(caseId, fixture.ManagerEmployeeId, null, "Осмотр для отчёта", null),
+            "assign-inspection", CancellationToken.None);
+        CaseCard assignedCard = await fixture.Workspace.ReadCardAsync(fixture.Manager, caseId, CancellationToken.None);
         Guid inspectionId = await fixture.Workspace.SaveInspectionAsync(fixture.Manager,
-            new(caseId, null, null, "", "", [], false), "start-inspection", CancellationToken.None);
+            new(caseId, assignedCard.Inspection!.Id, assignedCard.Inspection.Version, "", "", [], false),
+            "start-inspection", CancellationToken.None);
         CaseCard inspectionCard = await fixture.Workspace.ReadCardAsync(fixture.Manager, caseId, CancellationToken.None);
         InspectionItemView problemItem = inspectionCard.Inspection!.Items.First(item => item.NormalAnswer.Length > 0);
-        string abnormalAnswer = string.Equals(problemItem.NormalAnswer, "Нет", StringComparison.OrdinalIgnoreCase) ? "Да" : "Нет";
+        string abnormalAnswer = problemItem.Options.First(option => option != problemItem.NormalAnswer);
         await fixture.Workspace.SaveInspectionAsync(fixture.Manager,
             new(caseId, inspectionId, inspectionCard.Inspection.Version, "Нужна дополнительная проверка",
                 "Вернуться к вопросу после документов",

@@ -67,12 +67,12 @@ public sealed class AccessV1Ap02WorkflowTests
                 readScope: AccessScope.Department, workScope: AccessScope.Own));
 
         Guid listingId = await fixture.CreateUnlinkedManualAsync();
-        TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(
-            fixture.Manager, new(listingId), "ap02-reader-take", CancellationToken.None);
-
         IncomingCatalogPage incoming = await fixture.Workspace.ReadIncomingAsync(
             reader, new(), CancellationToken.None);
-        Assert.IsTrue(incoming.Items.Any());
+        Assert.IsTrue(incoming.Items.Any(item => item.Id == listingId));
+
+        TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(
+            fixture.Manager, new(listingId), "ap02-reader-take", CancellationToken.None);
         ProcurementQueuePage queue = await fixture.Workspace.ReadQueueAsync(reader, new(), CancellationToken.None);
         Assert.IsTrue(queue.Items.Any(item => item.CaseId == taken.CaseId));
 

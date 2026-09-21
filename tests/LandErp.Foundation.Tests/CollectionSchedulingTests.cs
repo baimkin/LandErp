@@ -2,6 +2,7 @@ using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Collection.Contracts;
 using LandErp.Application.Modules.Collection.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
+using LandErp.Application.Modules.Organization.Contracts;
 using LandErp.Infrastructure.Modules.Collection;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -171,14 +172,15 @@ public sealed class CollectionSchedulingTests
         }
 
         CollectionAdministration readOnly = new(fixture.Factory, fixture.Clock);
-        CollectionAdminView view = await readOnly.ReadAsync(new(Guid.CreateVersion7(), true), CancellationToken.None);
+        Subject reader = await fixture.CreateCollectionEmployeeAsync("collection.reader@test.invalid", CollectionAccessLevel.Read);
+        CollectionAdminView view = await readOnly.ReadAsync(reader, CancellationToken.None);
         Assert.AreEqual(1, view.PendingJobs, "Pending KPI must not depend on the 100-row history window.");
         Assert.IsFalse(view.Jobs.Any(item => item.State == "Pending"));
         Assert.AreEqual(0, view.AttentionJobs, "A later successful run resolves an older failed-run attention signal.");
         Assert.IsNotNull(view.Searches.Single().LastRun);
         Assert.AreEqual(3, view.Searches.Single().LastRun!.NewListingsCount);
         Assert.AreEqual(2, view.Searches.Single().LastRun!.ChangedListingsCount);
-        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => readOnly.EnqueueAsync(new(Guid.CreateVersion7(), true),
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => readOnly.EnqueueAsync(reader,
             search.Id, "read-only", CancellationToken.None));
     }
 
@@ -235,6 +237,21 @@ public sealed class CollectionSchedulingTests
             await sandbox.GrantRuntimeAsync();
             ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
             return new(sandbox, services, ownerId, new Clock(now));
+        }
+
+        public async Task<Subject> CreateCollectionEmployeeAsync(string login, CollectionAccessLevel level)
+        {
+            IOrganizationWorkspace organization = services.GetRequiredService<IOrganizationWorkspace>();
+            OrganizationView view = await organization.ReadAsync(Owner, CancellationToken.None);
+            Guid roleId = view.Roles.Single(item => item.Name == "ProcurementManager").Id;
+            TemporaryCredential created = await organization.CreateEmployeeAsync(Owner,
+                new(login, login, null, null, null, null, roleId, AccessScope.Own, true,
+                    EmployeeAccessRules.NoAccess with { CollectionAccess = level }),
+                "collection-access-test", CancellationToken.None);
+            await using LandErpDbContext db = await Factory.CreateDbContextAsync();
+            Guid userId = await db.Employees.Where(item => item.Id == created.EmployeeId)
+                .Select(item => item.UserId).SingleAsync();
+            return new Subject(userId, false);
         }
 
         public async ValueTask DisposeAsync()
@@ -306,7 +323,7 @@ public sealed class CollectionSchedulingTests
         await using var f = await SchedulingFixture.CreateAsync("department-collection@test.invalid",
             new(2026, 9, 17, 5, 0, 0, TimeSpan.Zero));
         CollectionAdministration administration = new(f.Factory, f.Clock);
-        Subject subject = new(Guid.CreateVersion7(), false);
+        Subject subject = await f.CreateCollectionEmployeeAsync("collection.manager@test.invalid", CollectionAccessLevel.Manage);
 
         Assert.AreEqual(0, (await administration.ReadAsync(subject, default)).Searches.Count);
         Guid groupId = await administration.CreateGroupAsync(subject, "Руководитель закупки", 0, "group", default);

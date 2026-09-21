@@ -1,4 +1,5 @@
 using LandErp.Application.Modules.Procurement.Contracts;
+using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;
 using LandErp.Infrastructure.Modules.Procurement;
@@ -16,6 +17,11 @@ public sealed class ReleasePackageB102Tests
     public async Task AcquiredCaseRejectsOrdinaryDecisionAndNextActionWithoutChangingTerminalState()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        await fixture.SetExplicitAccessAsync(fixture.EmployeeId("head-phase1@test.invalid"),
+            new(IncomingAccessLevel.Process, ProcurementAccessLevel.Head,
+                AccessScope.Organization, AccessScope.Organization, CollectionAccessLevel.None,
+                CanAssignInspections: true, CanPerformInspections: false, CanConfirmPurchase: true,
+                CanManageTemplates: true, CanReadAudit: false));
         ManualPropertyCaseResult created = await fixture.Workspace.CreateManualCaseAsync(fixture.Manager,
             new("B1-02 terminal case", "Химки", null, 4_000_000m, 900m, "Synthetic B1-02 case"),
             "b1-02-create", CancellationToken.None);

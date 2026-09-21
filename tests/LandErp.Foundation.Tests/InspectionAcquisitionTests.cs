@@ -118,6 +118,11 @@ public sealed class InspectionAcquisitionTests
                 AccessScope.Department, AccessScope.Department, CollectionAccessLevel.None,
                 CanAssignInspections: true, CanPerformInspections: true, CanConfirmPurchase: false,
                 CanManageTemplates: true, CanReadAudit: false));
+        await fixture.SetExplicitAccessAsync(fixture.EmployeeId("head-phase1@test.invalid"),
+            new(IncomingAccessLevel.Process, ProcurementAccessLevel.Head,
+                AccessScope.Organization, AccessScope.Organization, CollectionAccessLevel.None,
+                CanAssignInspections: true, CanPerformInspections: false, CanConfirmPurchase: true,
+                CanManageTemplates: true, CanReadAudit: false));
         await fixture.Workspace.AssignInspectionAsync(fixture.Manager,
             new(taken.CaseId, fixture.ManagerEmployeeId, null, "Self-assigned for inspection behavior test", null),
             "assign-self", CancellationToken.None);
@@ -271,7 +276,12 @@ public sealed class InspectionAcquisitionTests
 
         structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         Guid administratorUserId = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
-            structure, "Administrator", "administrator-phase5@test.invalid", "Administrator", fixture.DepartmentA, AccessScope.Organization);
+            structure, "Administrator", "administrator-phase5@test.invalid", "Administrator", fixture.DepartmentA, AccessScope.Organization,
+            EmployeeAccessRules.NoAccess with
+            {
+                ProcurementAccess = ProcurementAccessLevel.Read,
+                ProcurementReadScope = AccessScope.Organization
+            });
         await IdentityOrganizationTests.EnableMfaAsync(fixture.Services, administratorUserId);
         Subject administrator = new(administratorUserId, true);
         ProcurementQueuePage adminQueue = await fixture.Workspace.ReadQueueAsync(administrator, new(), CancellationToken.None);

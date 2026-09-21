@@ -82,10 +82,19 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                             where ids.Contains(link.CatalogItemId) && link.Confirmed
                             select new { link.CatalogItemId, propertyCase.Id, propertyCase.BusinessNumber, propertyCase.StageId }).ToArrayAsync(cancellationToken);
         var byItem = linked.ToDictionary(item => item.CatalogItemId);
+        Guid[] groupIds = items.Where(item => item.ObjectGroupId != null).Select(item => item.ObjectGroupId!.Value)
+            .Distinct().ToArray();
+        Dictionary<Guid, int> groupCounts = groupIds.Length == 0
+            ? []
+            : await db.Listings.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId
+                    && item.ObjectGroupId != null && groupIds.Contains(item.ObjectGroupId.Value))
+                .GroupBy(item => item.ObjectGroupId!.Value)
+                .ToDictionaryAsync(group => group.Key, group => group.Count(), cancellationToken);
         return new(items.Select(item =>
         {
             byItem.TryGetValue(item.Id, out var link);
-            return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId);
+            int groupCount = item.ObjectGroupId is Guid groupId && groupCounts.TryGetValue(groupId, out int count) ? count : 0;
+            return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId, groupCount);
         }).ToArray(), total, summary);
     }
 
@@ -99,13 +108,16 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                           join propertyCase in db.PropertyCases on sourceLink.PropertyCaseId equals propertyCase.Id
                           where sourceLink.CatalogItemId == item.Id && sourceLink.Confirmed
                           select new { propertyCase.Id, propertyCase.BusinessNumber, propertyCase.StageId }).SingleOrDefaultAsync(cancellationToken);
+        int objectGroupMemberCount = item.ObjectGroupId == null ? 0 : await db.Listings.AsNoTracking()
+            .CountAsync(value => value.OrganizationId == context.OrganizationId
+                && value.ObjectGroupId == item.ObjectGroupId, cancellationToken);
         CatalogEventView[] events = await db.CatalogEvents.AsNoTracking().Where(value => value.CatalogItemId == item.Id)
             .OrderByDescending(value => value.RecordedAt).ThenByDescending(value => value.Id).Take(100)
             .Select(value => new CatalogEventView(value.Id, value.Kind, value.Message,
                 value.PreviousObservedPrice, value.ObservedPrice,
                 value.PreviousObservedPricePerSotka, value.ObservedPricePerSotka,
                 value.RecordedAt)).ToArrayAsync(cancellationToken);
-        return new(CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId), item.SellerName, item.IngressComment,
+        return new(CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId, objectGroupMemberCount), item.SellerName, item.IngressComment,
             new(item.TargetTotalPrice, item.TargetPricePerSotka, item.MonitoringStartedAt, item.LastEvaluatedPrice,
                 item.LastEvaluatedPricePerSotka, item.LastEvaluatedAt), events);
     }
@@ -183,7 +195,8 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
     public async Task SetDispositionAsync(Subject subject, SetCatalogDisposition command, string correlationId, CancellationToken cancellationToken)
     {
-        if (command.Disposition is CatalogDisposition.InWork or CatalogDisposition.Monitoring or CatalogDisposition.Incoming)
+        if (command.Disposition is CatalogDisposition.InWork or CatalogDisposition.Monitoring
+            or CatalogDisposition.Incoming or CatalogDisposition.Duplicate)
             throw new ArgumentException("Используйте специальное действие для выбранного состояния.");
         if (!Enum.IsDefined(command.Disposition)) throw new ArgumentException("Классификация не поддерживается.");
         AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
@@ -243,6 +256,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
 
         CatalogDuplicateCandidate candidate = (await db.CatalogDuplicateCandidates.FromSqlInterpolated(
             $"SELECT * FROM catalog.duplicate_candidates WHERE id={command.CandidateId} AND organization_id={context.OrganizationId} FOR UPDATE")
@@ -251,47 +265,193 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         if (candidate.Status != DuplicateCandidateStatus.Pending)
             throw new ArgumentException("Кандидат на дубль уже обработан.");
 
-        Listing listing = (await db.Listings.FromSqlInterpolated(
-            $"SELECT * FROM catalog.listings WHERE id={candidate.ListingId} AND organization_id={context.OrganizationId} FOR UPDATE")
-            .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
-        Listing other = await db.Listings.AsNoTracking().SingleOrDefaultAsync(item =>
+        Listing listing = await db.Listings.SingleOrDefaultAsync(item =>
+            item.Id == candidate.ListingId && item.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
+        Listing other = await db.Listings.SingleOrDefaultAsync(item =>
             item.Id == candidate.CandidateListingId && item.OrganizationId == context.OrganizationId, cancellationToken)
             ?? throw new AccessDeniedException();
 
         DateTimeOffset now = time.GetUtcNow();
+        Guid? objectGroupId = listing.ObjectGroupId;
+        if (command.Confirmed)
+        {
+            if (listing.Disposition is not (CatalogDisposition.Incoming or CatalogDisposition.Duplicate))
+                throw new ArgumentException("Подтвердить совпадение можно только для входящего предложения или уже связанного дубля.");
+            objectGroupId = await LinkSameObjectAsync(db, context.OrganizationId, listing, other, now, cancellationToken);
+            listing.Disposition = CatalogDisposition.Duplicate;
+            listing.QueueReason = $"Тот же объект: {other.Title ?? other.Location ?? other.Id.ToString()}";
+            listing.AttentionRequired = false;
+            listing.AttentionAt = null;
+            listing.ChangedAt = now;
+            db.Entry(listing).Property(value => value.Version).IsModified = true;
+            db.CatalogEvents.Add(CatalogEvent(listing, CatalogEventKind.Classified,
+                $"Связано в группу одного объекта с {other.Title ?? other.Location ?? other.Id.ToString()}", now));
+        }
+
         candidate.Status = command.Confirmed ? DuplicateCandidateStatus.Confirmed : DuplicateCandidateStatus.Rejected;
         candidate.ReviewedByEmployeeId = context.EmployeeId;
         candidate.ReviewedAt = now;
         candidate.UpdatedAt = now;
 
-        if (command.Confirmed)
-        {
-            if (listing.Disposition != CatalogDisposition.Incoming)
-                throw new ArgumentException("Подтвердить дубль можно только для входящего предложения.");
-            listing.Disposition = CatalogDisposition.Duplicate;
-            listing.QueueReason = $"Подтверждён дубль: {other.Title ?? other.Location ?? other.Id.ToString()}";
-            listing.AttentionRequired = false;
-            db.Entry(listing).Property(value => value.Version).IsModified = true;
-            db.CatalogEvents.Add(CatalogEvent(listing, CatalogEventKind.Classified,
-                $"Дубль: совпадение подтверждено с {other.Title ?? other.Location ?? other.Id.ToString()}", now));
-
-            CatalogDuplicateCandidate[] remaining = await db.CatalogDuplicateCandidates
-                .Where(item => item.OrganizationId == context.OrganizationId && item.ListingId == listing.Id
-                    && item.Id != candidate.Id && item.Status == DuplicateCandidateStatus.Pending)
-                .ToArrayAsync(cancellationToken);
-            foreach (CatalogDuplicateCandidate item in remaining)
-            {
-                item.Status = DuplicateCandidateStatus.Rejected;
-                item.ReviewedByEmployeeId = context.EmployeeId;
-                item.ReviewedAt = now;
-                item.UpdatedAt = now;
-            }
-        }
-
         OrganizationWorkspace.AddAudit(db, context, subject,
             command.Confirmed ? "CatalogDuplicateConfirmed" : "CatalogDuplicateRejected",
             "CatalogItem", listing.Id,
-            new { CandidateId = candidate.Id, OtherCatalogItemId = other.Id, candidate.Score }, correlationId);
+            new { CandidateId = candidate.Id, OtherCatalogItemId = other.Id, candidate.Score, ObjectGroupId = objectGroupId }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task LinkCatalogItemsAsSameObjectAsync(Subject subject, LinkCatalogItemsAsSameObject command,
+        string correlationId, CancellationToken cancellationToken)
+    {
+        if (command.CatalogItemId == command.OtherCatalogItemId)
+            throw new ArgumentException("Нельзя связать объявление само с собой.");
+        string reason = Required(command.Reason, 3, 4000, "Укажите причину связи.");
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+
+        Listing listing = await db.Listings.SingleOrDefaultAsync(item =>
+            item.Id == command.CatalogItemId && item.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
+        if (listing.Version != command.ExpectedCatalogVersion) throw new DbUpdateConcurrencyException();
+        Listing other = await db.Listings.SingleOrDefaultAsync(item =>
+            item.Id == command.OtherCatalogItemId && item.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
+        if (listing.Disposition == CatalogDisposition.Fake || other.Disposition == CatalogDisposition.Fake)
+            throw new ArgumentException("Фейковое предложение нельзя включить в группу одного объекта.");
+        if (listing.ObjectGroupId != null && listing.ObjectGroupId == other.ObjectGroupId)
+            throw new ArgumentException("Объявления уже находятся в одной группе объекта.");
+
+        DateTimeOffset now = time.GetUtcNow();
+        Guid objectGroupId = await LinkSameObjectAsync(db, context.OrganizationId, listing, other, now, cancellationToken);
+        CatalogDuplicateCandidate? candidate = await db.CatalogDuplicateCandidates.SingleOrDefaultAsync(item =>
+            item.OrganizationId == context.OrganizationId
+            && ((item.ListingId == listing.Id && item.CandidateListingId == other.Id)
+                || (item.ListingId == other.Id && item.CandidateListingId == listing.Id)), cancellationToken);
+        if (candidate == null)
+        {
+            candidate = new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
+                ListingId = listing.Id, CandidateListingId = other.Id, Score = 0,
+                ReasonsJson = JsonSerializer.Serialize(new[] { "Связано менеджером вручную после сравнения" }),
+                Status = DuplicateCandidateStatus.Confirmed, ReviewedByEmployeeId = context.EmployeeId,
+                RecordedAt = now, UpdatedAt = now, ReviewedAt = now
+            };
+            db.CatalogDuplicateCandidates.Add(candidate);
+        }
+        else
+        {
+            candidate.Status = DuplicateCandidateStatus.Confirmed;
+            candidate.ReviewedByEmployeeId = context.EmployeeId;
+            candidate.ReviewedAt = now;
+            candidate.UpdatedAt = now;
+        }
+
+        if (listing.Disposition == CatalogDisposition.Incoming)
+        {
+            listing.Disposition = CatalogDisposition.Duplicate;
+            listing.AttentionRequired = false;
+            listing.AttentionAt = null;
+        }
+        listing.QueueReason = $"Связано в один объект: {reason}";
+        listing.ChangedAt = now;
+        db.Entry(listing).Property(value => value.Version).IsModified = true;
+        db.CatalogEvents.Add(CatalogEvent(listing, CatalogEventKind.Classified,
+            $"Связано в группу одного объекта: {reason}", now));
+        OrganizationWorkspace.AddAudit(db, context, subject, "CatalogObjectGroupLinked", "CatalogItem", listing.Id,
+            new { OtherCatalogItemId = other.Id, ObjectGroupId = objectGroupId, Reason = reason }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task UnlinkCatalogItemFromObjectGroupAsync(Subject subject, UnlinkCatalogItemFromObjectGroup command,
+        string correlationId, CancellationToken cancellationToken)
+    {
+        string reason = Required(command.Reason, 3, 4000, "Укажите причину разделения.");
+        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+
+        Listing listing = await db.Listings.SingleOrDefaultAsync(item =>
+            item.Id == command.CatalogItemId && item.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
+        if (listing.Version != command.ExpectedCatalogVersion) throw new DbUpdateConcurrencyException();
+        if (listing.ObjectGroupId is not Guid groupId)
+            throw new ArgumentException("Объявление не состоит в группе одного объекта.");
+
+        CatalogObjectGroup group = await db.CatalogObjectGroups.SingleOrDefaultAsync(item =>
+            item.Id == groupId && item.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new DbUpdateConcurrencyException();
+        Listing[] remaining = await db.Listings.Where(item => item.OrganizationId == context.OrganizationId
+                && item.ObjectGroupId == groupId && item.Id != listing.Id)
+            .OrderBy(item => item.ReceivedAt).ThenBy(item => item.Id).ToArrayAsync(cancellationToken);
+        DateTimeOffset now = time.GetUtcNow();
+
+        PropertyCaseSourceLink? sourceLink = await db.PropertyCaseSourceLinks.SingleOrDefaultAsync(item =>
+            item.CatalogItemId == listing.Id && item.Confirmed, cancellationToken);
+        if (sourceLink != null)
+        {
+            bool visible = await VisibleCases(db, context).AnyAsync(row => row.Case.Id == sourceLink.PropertyCaseId, cancellationToken);
+            if (!visible) throw new AccessDeniedException();
+            sourceLink.Confirmed = false;
+            db.BusinessTimeline.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+                ObjectId = sourceLink.PropertyCaseId, ActorEmployeeId = context.EmployeeId, Kind = "SourceUnlinked",
+                Title = "Источник исключён из группы одного объекта",
+                Body = $"{listing.Source}: {listing.Title ?? "источник"}\nПричина: {reason}", RecordedAt = now
+            });
+        }
+
+        listing.ObjectGroupId = null;
+        if (listing.Disposition is CatalogDisposition.Duplicate or CatalogDisposition.InWork)
+            listing.Disposition = CatalogDisposition.Incoming;
+        listing.AttentionRequired = true;
+        listing.AttentionAt = now;
+        listing.QueueReason = $"Исключено из группы объекта: {reason}";
+        listing.ChangedAt = now;
+        db.Entry(listing).Property(value => value.Version).IsModified = true;
+
+        foreach (Listing other in remaining)
+            await RejectSameObjectPairAsync(db, context.EmployeeId, listing, other, now, cancellationToken);
+
+        if (remaining.Length <= 1)
+        {
+            if (remaining.Length == 1)
+            {
+                Listing last = remaining[0];
+                last.ObjectGroupId = null;
+                await PromoteForIndependentReviewAsync(db, last, now, cancellationToken);
+                db.Entry(last).Property(value => value.Version).IsModified = true;
+            }
+            db.CatalogObjectGroups.Remove(group);
+        }
+        else
+        {
+            group.UpdatedAt = now;
+            db.Entry(group).Property(value => value.Version).IsModified = true;
+            Guid[] remainingIds = remaining.Select(item => item.Id).ToArray();
+            bool hasCase = await db.PropertyCaseSourceLinks.AnyAsync(link =>
+                remainingIds.Contains(link.CatalogItemId) && link.Confirmed, cancellationToken);
+            if (!hasCase && remaining.All(item => item.Disposition == CatalogDisposition.Duplicate))
+            {
+                Listing representative = remaining[0];
+                representative.Disposition = CatalogDisposition.Incoming;
+                representative.AttentionRequired = true;
+                representative.AttentionAt = now;
+                representative.QueueReason = "Группа одного объекта требует продолжения обработки после разделения.";
+                representative.ChangedAt = now;
+                db.Entry(representative).Property(value => value.Version).IsModified = true;
+            }
+        }
+
+        OrganizationWorkspace.AddAudit(db, context, subject, "CatalogObjectGroupUnlinked", "CatalogItem", listing.Id,
+            new { ObjectGroupId = groupId, Reason = reason, RemainingMembers = remaining.Length }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
@@ -454,79 +614,97 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         Listing catalogItem = (await db.Listings.FromSqlInterpolated(
             $"SELECT * FROM catalog.listings WHERE id={command.CatalogItemId} AND organization_id={context.OrganizationId} FOR UPDATE")
             .ToListAsync(cancellationToken)).SingleOrDefault() ?? throw new AccessDeniedException();
-        PropertyCaseSourceLink? existingLink = await db.PropertyCaseSourceLinks.SingleOrDefaultAsync(
-            item => item.CatalogItemId == catalogItem.Id && item.Confirmed, cancellationToken);
-        if (existingLink != null)
-        {
-            PropertyCase existing = await VisibleCases(db, context).Where(row => row.Case.Id == existingLink.PropertyCaseId)
-                .Select(row => row.Case).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
-            await transaction.CommitAsync(cancellationToken);
-            return new(existing.Id, existing.BusinessNumber, false);
-        }
+
+        Listing[] sources = catalogItem.ObjectGroupId is Guid groupId
+            ? await db.Listings.Where(item => item.OrganizationId == context.OrganizationId && item.ObjectGroupId == groupId)
+                .OrderBy(item => item.ReceivedAt).ThenBy(item => item.Id).ToArrayAsync(cancellationToken)
+            : [catalogItem];
+        Guid[] sourceIds = sources.Select(item => item.Id).ToArray();
+        PropertyCaseSourceLink[] currentLinks = await db.PropertyCaseSourceLinks
+            .Where(item => sourceIds.Contains(item.CatalogItemId) && item.Confirmed).ToArrayAsync(cancellationToken);
+        Guid[] linkedCaseIds = currentLinks.Select(item => item.PropertyCaseId).Distinct().ToArray();
+        if (linkedCaseIds.Length > 1)
+            throw new ArgumentException("Объявления группы уже связаны с разными PropertyCase. Сначала исправьте связи источников.");
 
         PropertyCase propertyCase;
-        bool created = command.ExistingCaseId == null;
-        if (created)
+        bool created;
+        if (linkedCaseIds.Length == 1)
+        {
+            Guid linkedCaseId = linkedCaseIds[0];
+            if (command.ExistingCaseId is Guid requestedCaseId && requestedCaseId != linkedCaseId)
+                throw new ArgumentException("Группа объекта уже связана с другим PropertyCase.");
+            propertyCase = await VisibleCases(db, context).Where(row => row.Case.Id == linkedCaseId)
+                .Select(row => row.Case).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
+            created = false;
+        }
+        else if (command.ExistingCaseId == null)
         {
             propertyCase = await CreatePropertyCaseAsync(db, context, catalogItem.Title ?? "Объект без названия",
                 catalogItem.Price, catalogItem.AreaSquareMeters, catalogItem.Location, catalogItem.CadastralNumber,
                 "Catalog snapshot at case creation", "TakeWork", cancellationToken, catalogItem.Currency, catalogItem.DataRevision);
+            created = true;
         }
         else
         {
-            Guid existingCaseId = command.ExistingCaseId.GetValueOrDefault();
+            Guid existingCaseId = command.ExistingCaseId.Value;
             propertyCase = await VisibleCases(db, context).Where(row => row.Case.Id == existingCaseId)
                 .Select(row => row.Case).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
+            created = false;
         }
 
         DateTimeOffset linkedAt = time.GetUtcNow();
-        PropertyCaseSourceLink? historicalLink = await db.PropertyCaseSourceLinks.SingleOrDefaultAsync(
-            item => item.CatalogItemId == catalogItem.Id && item.PropertyCaseId == propertyCase.Id, cancellationToken);
-        if (historicalLink == null)
+        foreach (Listing source in sources)
         {
-            db.PropertyCaseSourceLinks.Add(new()
+            PropertyCaseSourceLink? active = currentLinks.SingleOrDefault(item => item.CatalogItemId == source.Id);
+            if (active == null)
             {
-                Id = DataConventions.NewId(),
-                OrganizationId = context.OrganizationId,
-                PropertyCaseId = propertyCase.Id,
-                CatalogItemId = catalogItem.Id,
-                Confirmed = true,
-                RelationType = "Source",
-                ActorEmployeeId = context.EmployeeId,
-                Provenance = "User confirmed",
-                ReviewedDataRevision = catalogItem.DataRevision,
-                RecordedAt = linkedAt
-            });
+                PropertyCaseSourceLink? historical = await db.PropertyCaseSourceLinks.SingleOrDefaultAsync(item =>
+                    item.CatalogItemId == source.Id && item.PropertyCaseId == propertyCase.Id, cancellationToken);
+                if (historical == null)
+                {
+                    db.PropertyCaseSourceLinks.Add(new()
+                    {
+                        Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
+                        PropertyCaseId = propertyCase.Id, CatalogItemId = source.Id, Confirmed = true,
+                        RelationType = "Source", ActorEmployeeId = context.EmployeeId,
+                        Provenance = source.Id == catalogItem.Id ? "User confirmed" : "Object group confirmed",
+                        ReviewedDataRevision = source.DataRevision, RecordedAt = linkedAt
+                    });
+                }
+                else
+                {
+                    historical.Confirmed = true;
+                    historical.ActorEmployeeId = context.EmployeeId;
+                    historical.Provenance = source.Id == catalogItem.Id ? "User confirmed" : "Object group confirmed";
+                    historical.ReviewedDataRevision = source.DataRevision;
+                    historical.RecordedAt = linkedAt;
+                }
+            }
+            source.Disposition = CatalogDisposition.InWork;
+            source.AttentionRequired = false;
+            source.AttentionAt = null;
+            source.QueueReason = source.Id == catalogItem.Id
+                ? $"В работе: {propertyCase.BusinessNumber}."
+                : $"Источник группы одного объекта связан с {propertyCase.BusinessNumber}.";
+            source.ChangedAt = linkedAt;
+            db.Entry(source).Property(value => value.Version).IsModified = true;
         }
-        else
-        {
-            historicalLink.Confirmed = true;
-            historicalLink.ActorEmployeeId = context.EmployeeId;
-            historicalLink.Provenance = "User confirmed";
-            historicalLink.ReviewedDataRevision = catalogItem.DataRevision;
-            historicalLink.RecordedAt = linkedAt;
-            catalogItem.QueueReason = $"Повторно привязан к {propertyCase.BusinessNumber}.";
-            catalogItem.AttentionAt = null;
-            catalogItem.ChangedAt = linkedAt;
-        }
-        catalogItem.Disposition = CatalogDisposition.InWork;
-        catalogItem.AttentionRequired = false;
-        db.Entry(catalogItem).Property(value => value.Version).IsModified = true;
-        string title = created ? "Взят в работу" : "Добавлен источник";
+
+        string title = created ? "Взят в работу" : sources.Length > 1 ? "Группа источников добавлена" : "Добавлен источник";
         db.BusinessTimeline.Add(new()
         {
-            Id = DataConventions.NewId(),
-            OrganizationId = context.OrganizationId,
-            ObjectType = "PropertyCase",
-            ObjectId = propertyCase.Id,
-            ActorEmployeeId = context.EmployeeId,
-            Kind = created ? "Decision" : "SourceLinked",
-            Title = title,
-            Body = $"{catalogItem.Source}: {catalogItem.Title ?? "источник"}",
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+            ObjectId = propertyCase.Id, ActorEmployeeId = context.EmployeeId,
+            Kind = created ? "Decision" : "SourceLinked", Title = title,
+            Body = sources.Length == 1
+                ? $"{catalogItem.Source}: {catalogItem.Title ?? "источник"}"
+                : $"Связано источников одного объекта: {sources.Length}.",
             RecordedAt = linkedAt
         });
         OrganizationWorkspace.AddAudit(db, context, subject, created ? "CatalogItemTakenToWork" : "CatalogItemLinkedToCase",
-            "PropertyCase", propertyCase.Id, new { CatalogItemId = catalogItem.Id, propertyCase.BusinessNumber }, correlationId);
+            "PropertyCase", propertyCase.Id,
+            new { CatalogItemId = catalogItem.Id, CatalogItemIds = sourceIds, catalogItem.ObjectGroupId, propertyCase.BusinessNumber },
+            correlationId);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new(propertyCase.Id, propertyCase.BusinessNumber, created);
@@ -1954,12 +2132,116 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
     private static bool SourcesChanged(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Any(value => value.Item.DataRevision > value.Link.ReviewedDataRevision);
     private static long SourceRevision(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Sum(value => value.Item.DataRevision);
-    private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber, string? caseStage) => new(
+    private static async Task<Guid> LinkSameObjectAsync(LandErpDbContext db, Guid organizationId,
+        Listing left, Listing right, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        Guid[] groupIds = new[] { left.ObjectGroupId, right.ObjectGroupId }.OfType<Guid>().Distinct().ToArray();
+        Listing[] members = groupIds.Length == 0
+            ? [left, right]
+            : await db.Listings.Where(item => item.OrganizationId == organizationId
+                    && (item.Id == left.Id || item.Id == right.Id
+                        || item.ObjectGroupId != null && groupIds.Contains(item.ObjectGroupId.Value)))
+                .OrderBy(item => item.ReceivedAt).ThenBy(item => item.Id).ToArrayAsync(cancellationToken);
+        Guid[] memberIds = members.Select(item => item.Id).Distinct().ToArray();
+        Guid[] caseIds = await db.PropertyCaseSourceLinks.Where(item =>
+                memberIds.Contains(item.CatalogItemId) && item.Confirmed)
+            .Select(item => item.PropertyCaseId).Distinct().ToArrayAsync(cancellationToken);
+        if (caseIds.Length > 1)
+            throw new ArgumentException("Нельзя объединить объявления: они уже относятся к разным PropertyCase.");
+
+        if (left.ObjectGroupId is Guid sameGroup && right.ObjectGroupId == sameGroup)
+            return sameGroup;
+
+        CatalogObjectGroup group;
+        if (groupIds.Length == 0)
+        {
+            group = new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = organizationId,
+                RecordedAt = now, UpdatedAt = now
+            };
+            db.CatalogObjectGroups.Add(group);
+        }
+        else
+        {
+            CatalogObjectGroup[] existingGroups = await db.CatalogObjectGroups.Where(item =>
+                    item.OrganizationId == organizationId && groupIds.Contains(item.Id))
+                .OrderBy(item => item.RecordedAt).ThenBy(item => item.Id).ToArrayAsync(cancellationToken);
+            if (existingGroups.Length != groupIds.Length) throw new DbUpdateConcurrencyException();
+            group = existingGroups[0];
+            group.UpdatedAt = now;
+            db.Entry(group).Property(item => item.Version).IsModified = true;
+            foreach (CatalogObjectGroup obsolete in existingGroups.Skip(1))
+            {
+                foreach (Listing member in members.Where(item => item.ObjectGroupId == obsolete.Id))
+                    member.ObjectGroupId = group.Id;
+                db.CatalogObjectGroups.Remove(obsolete);
+            }
+        }
+
+        left.ObjectGroupId = group.Id;
+        right.ObjectGroupId = group.Id;
+
+        CatalogDuplicateCandidate[] resolvedInsideGroup = await db.CatalogDuplicateCandidates
+            .Where(item => item.OrganizationId == organizationId
+                && item.Status == DuplicateCandidateStatus.Pending
+                && memberIds.Contains(item.ListingId) && memberIds.Contains(item.CandidateListingId))
+            .ToArrayAsync(cancellationToken);
+        foreach (CatalogDuplicateCandidate candidate in resolvedInsideGroup)
+        {
+            candidate.Status = DuplicateCandidateStatus.Obsolete;
+            candidate.UpdatedAt = now;
+        }
+        return group.Id;
+    }
+
+    private static async Task RejectSameObjectPairAsync(LandErpDbContext db, Guid employeeId,
+        Listing left, Listing right, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        CatalogDuplicateCandidate? candidate = await db.CatalogDuplicateCandidates.SingleOrDefaultAsync(item =>
+            item.OrganizationId == left.OrganizationId
+            && ((item.ListingId == left.Id && item.CandidateListingId == right.Id)
+                || (item.ListingId == right.Id && item.CandidateListingId == left.Id)), cancellationToken);
+        if (candidate == null)
+        {
+            db.CatalogDuplicateCandidates.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = left.OrganizationId,
+                ListingId = left.Id, CandidateListingId = right.Id, Score = 0,
+                ReasonsJson = JsonSerializer.Serialize(new[] { "Разделено менеджером: это разные физические объекты" }),
+                Status = DuplicateCandidateStatus.Rejected, ReviewedByEmployeeId = employeeId,
+                RecordedAt = now, UpdatedAt = now, ReviewedAt = now
+            });
+            return;
+        }
+
+        candidate.Status = DuplicateCandidateStatus.Rejected;
+        candidate.ReviewedByEmployeeId = employeeId;
+        candidate.ReviewedAt = now;
+        candidate.UpdatedAt = now;
+    }
+
+    private static async Task PromoteForIndependentReviewAsync(LandErpDbContext db,
+        Listing listing, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        bool hasCase = await db.PropertyCaseSourceLinks.AnyAsync(item =>
+            item.CatalogItemId == listing.Id && item.Confirmed, cancellationToken);
+        if (hasCase || listing.Disposition != CatalogDisposition.Duplicate) return;
+        listing.Disposition = CatalogDisposition.Incoming;
+        listing.AttentionRequired = true;
+        listing.AttentionAt = now;
+        listing.QueueReason = "Объявление снова самостоятельное после разделения группы.";
+        listing.ChangedAt = now;
+    }
+
+    private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber, string? caseStage,
+        int objectGroupMemberCount = 0) => new(
         item.Id, item.Source, item.ExternalId, item.Url, item.Title ?? "Название неизвестно", item.Price,
         PricePerSotka(item.Price, item.AreaSquareMeters), item.Currency, item.AreaSquareMeters, item.Location,
         item.CadastralNumber, item.Description, item.Provenance, item.IngestionKind, item.Disposition,
         item.QueueReason, item.AttentionRequired, item.ReceivedAt, item.ChangedAt, item.LastObservedAt,
-        caseId, businessNumber, caseStage, caseStage is "rejected" or "monitor", item.Version);
+        caseId, businessNumber, caseStage, caseStage is "rejected" or "monitor", item.Version,
+        item.ObjectGroupId, objectGroupMemberCount);
     private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
         ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
     private static CatalogEvent CatalogEvent(Listing item, CatalogEventKind kind, string message, DateTimeOffset recordedAt) => new()

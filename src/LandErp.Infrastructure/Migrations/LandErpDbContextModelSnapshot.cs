@@ -253,6 +253,45 @@ namespace LandErp.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogObjectGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at")
+                        .HasComment("UTC момент записи факта в LandErp; не заменяет неизвестную дату действия факта в реальном мире.");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_object_groups");
+
+                    b.HasIndex("OrganizationId", "UpdatedAt")
+                        .HasDatabaseName("ix_object_groups_organization_id_updated_at");
+
+                    b.ToTable("object_groups", "catalog", t =>
+                        {
+                            t.HasComment("Подтверждённые группы объявлений одного физического объекта. Группа не имеет главного объявления и не заменяет PropertyCase.");
+                        });
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogPhotoFingerprint", b =>
                 {
                     b.Property<Guid>("Id")
@@ -596,6 +635,11 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("monitoring_started_at")
                         .HasComment("UTC момент установки текущих условий мониторинга цены.");
 
+                    b.Property<Guid?>("ObjectGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("object_group_id")
+                        .HasComment("Опциональная связь объявления с подтверждённой группой одного физического объекта; null означает самостоятельное объявление.");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id")
@@ -694,6 +738,10 @@ namespace LandErp.Infrastructure.Migrations
 
                     b.HasIndex("OrganizationId", "ChangedAt")
                         .HasDatabaseName("ix_listings_organization_id_changed_at");
+
+                    b.HasIndex("OrganizationId", "ObjectGroupId")
+                        .HasDatabaseName("ix_listings_organization_id_object_group_id")
+                        .HasFilter("object_group_id IS NOT NULL");
 
                     b.HasIndex("OrganizationId", "Source", "ExternalId")
                         .IsUnique()
@@ -3752,6 +3800,16 @@ namespace LandErp.Infrastructure.Migrations
                         .HasConstraintName("fk_observations_listing_id");
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogObjectGroup", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_object_groups_organization_id");
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.Listing", b =>
                 {
                     b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
@@ -3765,6 +3823,12 @@ namespace LandErp.Infrastructure.Migrations
                         .HasForeignKey("DepartmentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_listings_department_id");
+
+                    b.HasOne("LandErp.Application.Modules.Catalog.Domain.CatalogObjectGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ObjectGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_listings_object_group_id");
 
                     b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
                         .WithMany()

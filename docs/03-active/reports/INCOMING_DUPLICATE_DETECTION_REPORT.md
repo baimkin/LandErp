@@ -58,3 +58,20 @@ Organization-wide thresholds are editable at `/settings/duplicates`: candidate s
 ## Image processing
 
 The Worker scans recent Incoming items plus a rolling backfill. Existing fingerprints are reused by hashed source URL, transient download failures use bounded backoff, and stale fingerprints are ignored via the Listing `DataRevision`. The detector compares current pHashes using Hamming distance and one-to-one photo pairing.
+
+
+## Object-group workflow
+
+Follow-up implementation replaces the one-sided «duplicate of listing X» workflow with a headless Catalog object group.
+
+- a standalone Catalog item has no group;
+- confirming the first pair creates one `catalog.object_groups` row and assigns both Listings to it;
+- additional confirmed sources join the same group; merging two groups keeps no business-level primary Listing;
+- manager can compare the two source records side by side before confirming;
+- manual same-object linking uses the same persisted group model;
+- unlinking restores the source as independent, records Audit and persists rejected pair decisions so matching does not immediately offer the same relation again;
+- a two-member group is dissolved automatically when one member is removed;
+- taking any group member into Procurement links every member as a source of one PropertyCase;
+- generic `CatalogDisposition.Duplicate` classification without a concrete related Listing is rejected by the server.
+
+The existing deterministic detector and pHash scoring remain responsible only for proposing candidates; they do not create an object group without a manager decision.

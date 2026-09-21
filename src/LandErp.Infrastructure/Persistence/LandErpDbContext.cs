@@ -36,6 +36,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CollectionDelivery> CollectionDeliveries => Set<CollectionDelivery>();
     public DbSet<CollectionSchedulerStatus> CollectionSchedulerStatuses => Set<CollectionSchedulerStatus>();
     public DbSet<Listing> Listings => Set<Listing>();
+    public DbSet<CatalogObjectGroup> CatalogObjectGroups => Set<CatalogObjectGroup>();
     public DbSet<CatalogObservation> ListingObservations => Set<CatalogObservation>();
     public DbSet<CatalogEvent> CatalogEvents => Set<CatalogEvent>();
     public DbSet<CatalogDuplicateCandidate> CatalogDuplicateCandidates => Set<CatalogDuplicateCandidate>();

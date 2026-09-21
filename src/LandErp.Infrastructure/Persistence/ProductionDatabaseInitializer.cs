@@ -57,6 +57,7 @@ public static partial class ProductionDatabaseInitializer
             GRANT DELETE ON identity.user_roles TO {role};
             GRANT SELECT,INSERT,UPDATE ON collection.agents,collection.search_groups,collection.search_group_market_settings,collection.search_configurations,collection.jobs,collection.scheduler_status,catalog.listings,catalog.incoming_filter_presets TO {role};
             GRANT SELECT,INSERT,UPDATE ON catalog.duplicate_candidates,catalog.duplicate_settings TO {role};
+            GRANT SELECT,INSERT,UPDATE,DELETE ON catalog.object_groups TO {role};
             GRANT SELECT,INSERT,UPDATE,DELETE ON catalog.photo_fingerprints TO {role};
             GRANT SELECT,INSERT ON collection.deliveries,catalog.observations,catalog.events TO {role};
             GRANT SELECT ON workflow.stages TO {role};

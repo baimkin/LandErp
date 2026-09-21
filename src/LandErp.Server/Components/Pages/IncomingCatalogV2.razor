@@ -211,6 +211,7 @@
                                                     <strong>@HighlightText(item.Title)</strong>
                                                     <span class="v2-review-state @(row?.Reviewed == true ? "reviewed" : "new")">@(row?.Reviewed == true ? "Просмотрено" : "Новое")</span>
                                                     @if (row?.PossibleDuplicate == true) { <span class="v2-badge violet v2-duplicate-badge">Возможный дубль</span> }
+                                                    @if (row?.ObjectGroupMemberCount > 1) { <span class="v2-badge violet v2-duplicate-badge">Один объект · @row!.ObjectGroupMemberCount источника</span> }
                                                     <div class="v2-sub">@HighlightText(item.Location ?? "Местоположение неизвестно") <span>·</span> @HighlightText(item.ExternalId ?? "без внешнего ID")</div>
                                                     @if (!string.IsNullOrWhiteSpace(item.CadastralNumber) || !string.IsNullOrWhiteSpace(row?.SearchConfigurationLabel) || item.BusinessNumber != null)
                                                     {
@@ -326,18 +327,51 @@
                 </section>
             }
 
+            @if (detailRead?.ObjectGroup is { } objectGroup)
+            {
+                <section class="v2-card v2-object-group-card">
+                    <div class="v2-object-group-head">
+                        <div>
+                            <h3>Один физический объект</h3>
+                            <p class="v2-provenance">@objectGroup.MemberCount связанных источника. Главного объявления в группе нет.</p>
+                        </div>
+                        <span class="v2-badge violet">@objectGroup.MemberCount источника</span>
+                    </div>
+                    <div class="v2-object-group-members">
+                        @foreach (IncomingObjectGroupMemberView member in objectGroup.Members)
+                        {
+                            bool current = member.CatalogItemId == detail.Item.Id;
+                            <div class="v2-object-group-member @(current ? "current" : "")">
+                                <button type="button" class="v2-object-group-open" disabled="@current" @onclick="() => OpenGroupMemberAsync(member.CatalogItemId)">
+                                    <strong>@SourceBadge.Label(member.Source) · @member.Title</strong>
+                                    <span>@(member.Location ?? "Локация не указана") · @ProcurementLabels.Money(member.Price) · @AreaSotki(member.AreaSquareMeters)</span>
+                                    @if (member.BusinessNumber != null) { <span>Связан с @member.BusinessNumber</span> }
+                                </button>
+                                @if (current) { <span class="v2-badge">Открыто</span> }
+                                @if (member.Url != null) { <a href="@member.Url" target="_blank" rel="noopener noreferrer">Источник ↗</a> }
+                            </div>
+                        }
+                    </div>
+                    <div class="v2-object-group-actions">
+                        <button type="button" class="v2-btn sm danger-text" disabled="@Busy" @onclick="OpenUnlinkObjectGroup">
+                            Исключить открытое объявление из группы
+                        </button>
+                    </div>
+                </section>
+            }
+
             @if (detailRead?.DuplicateCandidates is { Count: > 0 } duplicateCandidates)
             {
                 <section class="v2-card v2-duplicate-card">
-                    <h3>Возможный дубль</h3>
-                    <p class="v2-provenance">Система нашла объявления с совпадающими признаками. Решение остаётся за менеджером.</p>
+                    <h3>Возможные совпадения</h3>
+                    <p class="v2-provenance">Система нашла похожие объявления. Перед связыванием можно сравнить исходные данные рядом.</p>
                     @foreach (IncomingDuplicateCandidateView candidate in duplicateCandidates)
                     {
                         <article class="v2-duplicate-candidate">
                             <div class="v2-duplicate-candidate-head">
                                 <div>
                                     <strong>@candidate.Title</strong>
-                                    <span>@SourceBadge.Label(candidate.Source) · @(candidate.Location ?? "Локация не указана")</span>
+                                    <span>@SourceBadge.Label(candidate.Source) · @(candidate.Location ?? "Локация не указана") · совпадение @candidate.Score/100</span>
                                 </div>
                                 @if (candidate.Url != null) { <a href="@candidate.Url" target="_blank" rel="noopener noreferrer">Источник ↗</a> }
                             </div>
@@ -352,7 +386,7 @@
                             }
                             <div class="v2-duplicate-actions">
                                 <button type="button" class="v2-btn sm" disabled="@Busy" @onclick="() => ReviewDuplicateAsync(candidate, false)">Не дубль</button>
-                                <button type="button" class="v2-btn sm duplicate" disabled="@Busy" @onclick="() => ReviewDuplicateAsync(candidate, true)">Подтвердить дубль</button>
+                                <button type="button" class="v2-btn sm duplicate" disabled="@Busy" @onclick="() => OpenDuplicateCompareAsync(candidate)">Сравнить и решить</button>
                             </div>
                         </article>
                     }
@@ -443,7 +477,7 @@
 
         <div class="v2-drawer-foot">
             <div class="v2-classify">
-                <button type="button" class="v2-btn sm duplicate" @onclick="() => OpenClassification(CatalogDisposition.Duplicate)">Дубль</button>
+                <button type="button" class="v2-btn sm duplicate" @onclick="OpenDuplicateSearchAsync">Связать с объектом</button>
                 <button type="button" class="v2-btn sm danger-text" @onclick="() => OpenClassification(CatalogDisposition.Fake)">Фейк</button>
                 <button type="button" class="v2-btn sm" @onclick="() => OpenClassification(CatalogDisposition.RemovedAtSource)">Снято</button>
                 <button type="button" class="v2-btn sm sold" @onclick="() => OpenClassification(CatalogDisposition.Sold)">Продано</button>
@@ -491,6 +525,123 @@
             }
         </div>
     </div>
+}
+
+@if ((duplicateCompareRead != null || duplicateCompareError != null) && detailRead != null && detail != null)
+{
+    <Modal Title="Сравнение объявлений" Kind="compare" OnClose="CloseDuplicateCompare">
+        @if (duplicateCompareError != null)
+        {
+            <p class="v2-search-error">@duplicateCompareError</p>
+            <div class="form-actions">
+                <ActionButton Label="Закрыть" Tone="quiet" OnClick="CloseDuplicateCompare" />
+            </div>
+        }
+        else if (duplicateCompareRead != null)
+        {
+            @if (duplicateCompareRead.ObjectGroup is { MemberCount: > 1 } targetGroup)
+            {
+                <div class="v2-compare-group-note">
+                    Кандидат уже входит в группу одного объекта из <strong>@targetGroup.MemberCount</strong> источников.
+                    Подтверждение добавит текущее объявление в эту группу.
+                </div>
+            }
+            <div class="v2-compare-grid">
+                <section class="v2-compare-column">
+                    <div class="v2-compare-label">Текущее объявление</div>
+                    @if (detailRead.PhotoUrls.Count > 0) { <img class="v2-compare-photo" src="@detailRead.PhotoUrls[0]" alt="" /> }
+                    else { <div class="v2-compare-photo empty">Нет фото</div> }
+                    <h3>@detail.Item.Title</h3>
+                    <div class="v2-compare-facts">
+                        <span><small>Источник</small><strong>@SourceBadge.Label(detail.Item.Source)</strong></span>
+                        <span><small>Цена</small><strong>@ProcurementLabels.Money(detail.Item.Price)</strong></span>
+                        <span><small>₽ / сот.</small><strong>@(detail.Item.PricePerSotka == null ? "—" : ProcurementLabels.Money(detail.Item.PricePerSotka) + " / сот.")</strong></span>
+                        <span><small>Площадь</small><strong>@AreaSotki(detail.Item.AreaSquareMeters)</strong></span>
+                        <span><small>Кадастр</small><strong>@(detail.Item.CadastralNumber ?? "—")</strong></span>
+                        <span><small>Продавец</small><strong>@(detail.SellerName ?? "—")</strong></span>
+                        <span class="wide"><small>Локация</small><strong>@(detail.Item.Location ?? "—")</strong></span>
+                    </div>
+                    <div class="v2-compare-description"><small>Описание</small><p>@(detail.Item.Description ?? "Описание отсутствует")</p></div>
+                </section>
+                <section class="v2-compare-column">
+                    <div class="v2-compare-label">Сравниваемое объявление</div>
+                    @if (duplicateCompareRead.PhotoUrls.Count > 0) { <img class="v2-compare-photo" src="@duplicateCompareRead.PhotoUrls[0]" alt="" /> }
+                    else { <div class="v2-compare-photo empty">Нет фото</div> }
+                    <h3>@duplicateCompareRead.Detail.Item.Title</h3>
+                    <div class="v2-compare-facts">
+                        <span><small>Источник</small><strong>@SourceBadge.Label(duplicateCompareRead.Detail.Item.Source)</strong></span>
+                        <span><small>Цена</small><strong>@ProcurementLabels.Money(duplicateCompareRead.Detail.Item.Price)</strong></span>
+                        <span><small>₽ / сот.</small><strong>@(duplicateCompareRead.Detail.Item.PricePerSotka == null ? "—" : ProcurementLabels.Money(duplicateCompareRead.Detail.Item.PricePerSotka) + " / сот.")</strong></span>
+                        <span><small>Площадь</small><strong>@AreaSotki(duplicateCompareRead.Detail.Item.AreaSquareMeters)</strong></span>
+                        <span><small>Кадастр</small><strong>@(duplicateCompareRead.Detail.Item.CadastralNumber ?? "—")</strong></span>
+                        <span><small>Продавец</small><strong>@(duplicateCompareRead.Detail.SellerName ?? "—")</strong></span>
+                        <span class="wide"><small>Локация</small><strong>@(duplicateCompareRead.Detail.Item.Location ?? "—")</strong></span>
+                    </div>
+                    <div class="v2-compare-description"><small>Описание</small><p>@(duplicateCompareRead.Detail.Item.Description ?? "Описание отсутствует")</p></div>
+                </section>
+            </div>
+            @if (duplicateCompareCandidate?.Reasons is { Count: > 0 } compareReasons)
+            {
+                <div class="v2-compare-reasons"><strong>Почему система сопоставила объявления</strong><ul>@foreach (string reason in compareReasons) { <li>@reason</li> }</ul></div>
+            }
+            <div class="form-actions">
+                <ActionButton Label="Закрыть" Tone="quiet" OnClick="CloseDuplicateCompare" />
+                @if (duplicateCompareCandidate != null)
+                {
+                    <ActionButton Label="Не дубль" OnClick="RejectComparedCandidateAsync" />
+                }
+                <button type="button" class="v2-btn duplicate" disabled="@Busy" @onclick="ConfirmComparedSameObjectAsync">Это один объект — связать</button>
+            </div>
+        }
+    </Modal>
+}
+
+@if (duplicateSearchOpen && detail != null)
+{
+    <Modal Title="Связать с существующим объектом" OnClose="CloseDuplicateSearch">
+        <p class="subtle">Найдите другое объявление. Если оно уже входит в группу, текущее объявление будет добавлено ко всей группе.</p>
+        <div class="v2-duplicate-search">
+            <input @bind="duplicateSearchText" @bind:event="oninput" placeholder="Название, локация, ID или кадастровый номер" />
+            <button type="button" class="v2-btn" @onclick="SearchDuplicateTargetsAsync">Найти</button>
+        </div>
+        @if (duplicateSearchError != null)
+        {
+            <p class="v2-search-error">@duplicateSearchError</p>
+        }
+        else if (duplicateSearchResults.Count == 0)
+        {
+            <p class="subtle">Подходящих объявлений не найдено.</p>
+        }
+        else
+        {
+            <div class="v2-duplicate-targets">
+                @foreach (IncomingDuplicateLinkTargetView target in duplicateSearchResults)
+                {
+                    <div class="v2-duplicate-target">
+                        <div>
+                            <strong>@SourceBadge.Label(target.Source) · @target.Title</strong>
+                            <span>@(target.Location ?? "Локация не указана") · @ProcurementLabels.Money(target.Price) · @AreaSotki(target.AreaSquareMeters)</span>
+                            @if (target.ObjectGroupMemberCount > 1) { <span>Уже в группе: @target.ObjectGroupMemberCount источника</span> }
+                            @if (target.BusinessNumber != null) { <span>PropertyCase: @target.BusinessNumber</span> }
+                        </div>
+                        <button type="button" class="v2-btn sm" @onclick="() => OpenManualDuplicateCompareAsync(target)">Сравнить</button>
+                    </div>
+                }
+            </div>
+        }
+    </Modal>
+}
+
+@if (unlinkObjectGroupOpen && detail != null)
+{
+    <Modal Title="Исключить объявление из группы" OnClose="CloseUnlinkObjectGroup">
+        <p>Объявление снова станет самостоятельным. Если оно было добавлено в PropertyCase через эту группу, связь источника будет снята.</p>
+        <label class="field"><span>Почему это другой объект</span><InputTextArea @bind-Value="unlinkObjectGroupReason" /></label>
+        <div class="form-actions">
+            <ActionButton Label="Отмена" Tone="quiet" OnClick="CloseUnlinkObjectGroup" />
+            <button type="button" class="v2-btn danger" disabled="@Busy" @onclick="UnlinkObjectGroupAsync">Исключить из группы</button>
+        </div>
+    </Modal>
 }
 
 @if (manualOpen)
@@ -555,7 +706,17 @@
 @if (takeItem != null)
 {
     <Modal Title="Взять в работу" OnClose="() => takeItem = null">
-        <p><strong>@takeItem.Title</strong></p><p class="subtle">Создайте новый PropertyCase либо подтвердите связь с существующим.</p>
+        <p><strong>@takeItem.Title</strong></p>
+        <p class="subtle">
+            @if (takeItem.ObjectGroupMemberCount > 1)
+            {
+                <span>В работу перейдёт вся группа одного объекта: @takeItem.ObjectGroupMemberCount связанных источника. Все они будут привязаны к одному PropertyCase.</span>
+            }
+            else
+            {
+                <span>Создайте новый PropertyCase либо подтвердите связь с существующим.</span>
+            }
+        </p>
         <label class="field"><span>PropertyCase</span><InputSelect @bind-Value="existingCaseId"><option value="">Создать новый PropertyCase</option>@foreach (CaseLinkTarget target in targets) { <option value="@target.CaseId">@target.BusinessNumber · @target.Title</option> }</InputSelect></label>
         <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => takeItem = null" /><ActionButton Label="Подтвердить" Busy="Busy" OnClick="TakeAsync" /></div>
     </Modal>
@@ -571,11 +732,6 @@
         else if (classification == CatalogDisposition.Fake)
         {
             <label class="field"><span>Причина</span><select @bind="classificationCategory"><option>Нереальная цена</option><option>Фото/описание не соответствует</option><option>Объект не существует</option><option>Другое</option></select></label>
-        }
-        else if (classification == CatalogDisposition.Duplicate)
-        {
-            @* TODO-BACKEND-INCOMING: duplicate target matching/linking contract is absent. This selector is UI-only and disabled. *@
-            <label class="field" data-todo-backend="TODO-BACKEND-INCOMING"><span>Дубль чего</span><select disabled><option>PC-0187 · Сходня · 10 сот.</option><option>Найти другой объект…</option></select></label>
         }
         else if (classification == CatalogDisposition.RemovedAtSource)
         {
@@ -646,6 +802,16 @@
     private IncomingFilterPresetView? deletePreset;
     private string presetName = "";
     private Guid? presetGroupId;
+    private IncomingCatalogDetailRead? duplicateCompareRead;
+    private string? duplicateCompareError;
+    private IncomingDuplicateCandidateView? duplicateCompareCandidate;
+    private IncomingDuplicateLinkTargetView? manualDuplicateTarget;
+    private bool duplicateSearchOpen;
+    private string duplicateSearchText = "";
+    private IReadOnlyList<IncomingDuplicateLinkTargetView> duplicateSearchResults = [];
+    private string? duplicateSearchError;
+    private bool unlinkObjectGroupOpen;
+    private string unlinkObjectGroupReason = "";
 
     private static readonly CatalogSource[] manualSources = [CatalogSource.Telegram, CatalogSource.Referral, CatalogSource.Agent, CatalogSource.DirectOwner, CatalogSource.Manual, CatalogSource.Other];
     private static readonly ChecklistItem[] checklist =
@@ -998,7 +1164,16 @@
 
     private Task RefreshDetailAsync(Guid id) => LoadDetailAsync(id);
 
-    private void CloseDetail() { CloseGallery(); detail = null; detailRead = null; monitoringOpen = false; }
+    private void CloseDetail()
+    {
+        CloseGallery();
+        CloseDuplicateCompare();
+        CloseDuplicateSearch();
+        unlinkObjectGroupOpen = false;
+        detail = null;
+        detailRead = null;
+        monitoringOpen = false;
+    }
     private void DrawerKeyDown(KeyboardEventArgs args) { if (args.Key == "Escape") CloseDetail(); }
 
     private async Task OpenGalleryForItemAsync(Guid id)
@@ -1036,6 +1211,143 @@
         else if (args.Key == "ArrowRight") NextPhoto();
     }
 
+    private async Task OpenGroupMemberAsync(Guid id)
+    {
+        if (detail?.Item.Id == id) return;
+        await OpenDetailAsync(id);
+    }
+
+    private async Task OpenDuplicateCompareAsync(IncomingDuplicateCandidateView candidate)
+    {
+        duplicateCompareCandidate = candidate;
+        manualDuplicateTarget = null;
+        duplicateCompareError = null;
+        try
+        {
+            duplicateCompareRead = await IncomingReads.ReadDetailAsync(
+                CurrentSubject, candidate.CandidateListingId, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            duplicateCompareRead = null;
+            duplicateCompareCandidate = null;
+            duplicateCompareError = ReadFailure(exception, "Не удалось загрузить второе объявление для сравнения.");
+        }
+    }
+
+    private async Task OpenManualDuplicateCompareAsync(IncomingDuplicateLinkTargetView target)
+    {
+        duplicateSearchOpen = false;
+        duplicateCompareCandidate = null;
+        manualDuplicateTarget = target;
+        duplicateCompareError = null;
+        try
+        {
+            duplicateCompareRead = await IncomingReads.ReadDetailAsync(
+                CurrentSubject, target.CatalogItemId, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            duplicateCompareRead = null;
+            manualDuplicateTarget = null;
+            duplicateCompareError = ReadFailure(exception, "Не удалось загрузить второе объявление для сравнения.");
+        }
+    }
+
+    private void CloseDuplicateCompare()
+    {
+        duplicateCompareRead = null;
+        duplicateCompareError = null;
+        duplicateCompareCandidate = null;
+        manualDuplicateTarget = null;
+    }
+
+    private async Task RejectComparedCandidateAsync()
+    {
+        if (duplicateCompareCandidate == null) return;
+        IncomingDuplicateCandidateView candidate = duplicateCompareCandidate;
+        CloseDuplicateCompare();
+        await ReviewDuplicateAsync(candidate, false);
+    }
+
+    private async Task ConfirmComparedSameObjectAsync()
+    {
+        if (detail == null || duplicateCompareRead == null) return;
+        if (duplicateCompareCandidate != null)
+        {
+            IncomingDuplicateCandidateView candidate = duplicateCompareCandidate;
+            CloseDuplicateCompare();
+            await ReviewDuplicateAsync(candidate, true);
+            return;
+        }
+        if (manualDuplicateTarget == null) return;
+
+        Guid id = detail.Item.Id;
+        Guid targetId = manualDuplicateTarget.CatalogItemId;
+        bool saved = await ExecuteConfirmedAsync(() => Workspace.LinkCatalogItemsAsSameObjectAsync(CurrentSubject,
+            new(id, detail.Item.Version, targetId, "Подтверждено менеджером после сравнения"),
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (!saved) return;
+        CloseDuplicateCompare();
+        CloseDuplicateSearch();
+        await LoadDetailAsync(id);
+    }
+
+    private async Task OpenDuplicateSearchAsync()
+    {
+        duplicateSearchOpen = true;
+        duplicateSearchText = "";
+        await SearchDuplicateTargetsAsync();
+    }
+
+    private void CloseDuplicateSearch()
+    {
+        duplicateSearchOpen = false;
+        duplicateSearchText = "";
+        duplicateSearchResults = [];
+        duplicateSearchError = null;
+    }
+
+    private async Task SearchDuplicateTargetsAsync()
+    {
+        if (detail == null) return;
+        duplicateSearchError = null;
+        try
+        {
+            duplicateSearchResults = await IncomingReads.SearchDuplicateTargetsAsync(
+                CurrentSubject, detail.Item.Id, duplicateSearchText, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            duplicateSearchResults = [];
+            duplicateSearchError = ReadFailure(exception, "Не удалось найти объявления для связывания.");
+        }
+    }
+
+    private void OpenUnlinkObjectGroup()
+    {
+        unlinkObjectGroupReason = "";
+        unlinkObjectGroupOpen = true;
+    }
+
+    private void CloseUnlinkObjectGroup()
+    {
+        unlinkObjectGroupOpen = false;
+        unlinkObjectGroupReason = "";
+    }
+
+    private async Task UnlinkObjectGroupAsync()
+    {
+        if (detail == null) return;
+        Guid id = detail.Item.Id;
+        bool saved = await ExecuteConfirmedAsync(() => Workspace.UnlinkCatalogItemFromObjectGroupAsync(CurrentSubject,
+            new(id, detail.Item.Version, unlinkObjectGroupReason),
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (!saved) return;
+        CloseUnlinkObjectGroup();
+        await LoadDetailAsync(id);
+    }
+
     private async Task CreateManualAsync()
     {
         await ExecuteAsync(() => Workspace.CreateManualAsync(CurrentSubject,
@@ -1069,8 +1381,16 @@
             new(candidate.Id, candidate.Version, confirmed), Guid.CreateVersion7().ToString(), CancellationToken.None));
         if (Success == null) return;
 
+        if (confirmed)
+        {
+            await RefreshDetailAsync(id);
+            if (detailRead?.DuplicateCandidates is { Count: > 0 }) return;
+            if (openNextAfterDecision) await OpenNextAfterDecisionAsync(id, currentIndex, preferredNextId);
+            return;
+        }
+
         bool stillPresent = catalogPage?.Items.Any(item => item.Id == id) == true;
-        if (confirmed || !stillPresent)
+        if (!stillPresent)
             await OpenNextAfterDecisionAsync(id, currentIndex, preferredNextId);
         else
             await RefreshDetailAsync(id);

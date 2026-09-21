@@ -118,6 +118,7 @@ button { cursor: pointer; }
 .source-tag { border:1px solid var(--border-strong); background:var(--surface); color:var(--text-strong); }
 .erp-modal { width:min(560px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); padding:0; border:1px solid var(--border); border-radius:var(--radius-md); box-shadow:var(--shadow-md); color:var(--text); background:var(--canvas); }
 .erp-modal::backdrop { background:rgba(8,20,42,.46); }
+.erp-modal.compare { width:min(1120px,calc(100vw - 32px)); }
 .erp-modal.drawer { width:min(820px,100vw); max-height:100dvh; height:100dvh; margin:0 0 0 auto; border-radius:0; }
 .erp-modal.drawer.audit-drawer { width:min(var(--drawer-w),100vw); }
 .modal-header { display:flex; justify-content:space-between; align-items:center; gap:var(--space-4); padding:var(--space-4) var(--space-5); border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:1; }

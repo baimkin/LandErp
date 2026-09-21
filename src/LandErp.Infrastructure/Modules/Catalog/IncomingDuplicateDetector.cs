@@ -68,6 +68,8 @@ internal static partial class IncomingDuplicateDetector
         IQueryable<Listing> query = db.Listings.AsNoTracking()
             .Where(item => item.OrganizationId == subject.OrganizationId && item.Id != subject.Id
                 && item.Disposition != CatalogDisposition.Fake && item.Disposition != CatalogDisposition.Duplicate);
+        if (subject.ObjectGroupId is Guid subjectGroupId)
+            query = query.Where(item => item.ObjectGroupId != subjectGroupId);
 
         if (area is > 0)
         {
@@ -108,6 +110,7 @@ internal static partial class IncomingDuplicateDetector
         HashSet<Guid> matchedOwnedCandidates = [];
         foreach (Listing other in others)
         {
+            if (subject.ObjectGroupId != null && subject.ObjectGroupId == other.ObjectGroupId) continue;
             hashesByListing.TryGetValue(other.Id, out long[]? otherHashes);
             MatchResult? match = Match(subject, other, subjectHashes, otherHashes ?? [], commonCounts, settings);
             if (match == null || match.Score < settings.CandidateThreshold) continue;

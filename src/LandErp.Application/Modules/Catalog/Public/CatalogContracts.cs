@@ -14,7 +14,7 @@ public sealed record CatalogItemView(Guid Id, CatalogSource Source, string? Exte
     string? Description, string Provenance, CatalogIngestionKind IngestionKind, CatalogDisposition Disposition,
     string QueueReason, bool AttentionRequired, DateTimeOffset ReceivedAt, DateTimeOffset ChangedAt,
     DateTimeOffset? LastObservedAt, Guid? PropertyCaseId, string? BusinessNumber, string? LinkedCaseStage,
-    bool CanResumeCase, long Version);
+    bool CanResumeCase, long Version, Guid? ObjectGroupId = null, int ObjectGroupMemberCount = 0);
 public sealed record IncomingCatalogSummary(int Incoming, int Attention, int Monitoring, int InWork, int Incomplete);
 public sealed record IncomingCatalogPage(IReadOnlyList<CatalogItemView> Items, int Total, IncomingCatalogSummary Summary);
 public sealed record CatalogMonitoringView(decimal? TargetTotalPrice, decimal? TargetPricePerSotka,
@@ -30,6 +30,9 @@ public sealed record SetCatalogDisposition(Guid CatalogItemId, long ExpectedVers
 public sealed record SetCatalogMonitoring(Guid CatalogItemId, long ExpectedVersion, decimal? TargetTotalPrice,
     decimal? TargetPricePerSotka, string Reason);
 public sealed record ReviewCatalogDuplicateCandidate(Guid CandidateId, long ExpectedVersion, bool Confirmed);
+public sealed record LinkCatalogItemsAsSameObject(Guid CatalogItemId, long ExpectedCatalogVersion,
+    Guid OtherCatalogItemId, string Reason);
+public sealed record UnlinkCatalogItemFromObjectGroup(Guid CatalogItemId, long ExpectedCatalogVersion, string Reason);
 public sealed record ResumeCatalogItemCase(Guid CatalogItemId, long ExpectedCatalogVersion);
 public sealed record TakeCatalogItemToWork(Guid CatalogItemId, Guid? ExistingCaseId = null);
 public sealed record CorrectCatalogItemCaseLink(Guid CatalogItemId, long ExpectedCatalogVersion,
@@ -46,6 +49,8 @@ public interface ICatalogWorkspace
     Task SetDispositionAsync(Subject subject, SetCatalogDisposition command, string correlationId, CancellationToken cancellationToken);
     Task SetMonitoringAsync(Subject subject, SetCatalogMonitoring command, string correlationId, CancellationToken cancellationToken);
     Task ReviewDuplicateCandidateAsync(Subject subject, ReviewCatalogDuplicateCandidate command, string correlationId, CancellationToken cancellationToken);
+    Task LinkCatalogItemsAsSameObjectAsync(Subject subject, LinkCatalogItemsAsSameObject command, string correlationId, CancellationToken cancellationToken);
+    Task UnlinkCatalogItemFromObjectGroupAsync(Subject subject, UnlinkCatalogItemFromObjectGroup command, string correlationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CaseLinkTarget>> ReadLinkTargetsAsync(Subject subject, CancellationToken cancellationToken);
     Task<TakeToWorkResult> TakeToWorkAsync(Subject subject, TakeCatalogItemToWork command, string correlationId, CancellationToken cancellationToken);
     Task CorrectCaseLinkAsync(Subject subject, CorrectCatalogItemCaseLink command, string correlationId, CancellationToken cancellationToken);

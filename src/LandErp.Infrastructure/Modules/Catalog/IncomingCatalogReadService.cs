@@ -78,7 +78,9 @@ public sealed class IncomingCatalogReadService(
             await incomingItems.CountAsync(item => returnedFromMonitoringIds.Contains(item.Id), cancellationToken),
             New: await incomingItems.CountAsync(item => !reviewedIds.Contains(item.Id), cancellationToken),
             ProcessedToday: await processedTodayIds.CountAsync(cancellationToken),
-            PossibleDuplicate: await incomingItems.CountAsync(item => pendingDuplicateListingIds.Contains(item.Id), cancellationToken));
+            PossibleDuplicate: await organizationItems.CountAsync(item =>
+                (item.Disposition == CatalogDisposition.Incoming || item.Disposition == CatalogDisposition.Duplicate)
+                && pendingDuplicateListingIds.Contains(item.Id), cancellationToken));
 
         IQueryable<Listing> query = organizationItems;
         string[] searchTerms = SearchTerms(baseFilter.Text);
@@ -93,7 +95,8 @@ public sealed class IncomingCatalogReadService(
                 || EF.Functions.ILike(item.SellerName ?? "", pattern));
         }
         if (baseFilter.Source != null) query = query.Where(item => item.Source == baseFilter.Source);
-        if (baseFilter.Disposition != null) query = query.Where(item => item.Disposition == baseFilter.Disposition);
+        if (baseFilter.Disposition != null && filter.Preset != IncomingCatalogPreset.PossibleDuplicate)
+            query = query.Where(item => item.Disposition == baseFilter.Disposition);
         if (baseFilter.AttentionOnly) query = query.Where(item => item.AttentionRequired);
         if (baseFilter.MinPrice != null) query = query.Where(item => item.Price >= baseFilter.MinPrice);
         if (baseFilter.MaxPrice != null) query = query.Where(item => item.Price <= baseFilter.MaxPrice);
@@ -147,7 +150,9 @@ public sealed class IncomingCatalogReadService(
         {
             IncomingCatalogPreset.New => query.Where(item => !reviewedIds.Contains(item.Id)),
             IncomingCatalogPreset.PriceChanged => query.Where(item => priceChangedIds.Contains(item.Id)),
-            IncomingCatalogPreset.PossibleDuplicate => query.Where(item => pendingDuplicateListingIds.Contains(item.Id)),
+            IncomingCatalogPreset.PossibleDuplicate => query.Where(item =>
+                (item.Disposition == CatalogDisposition.Incoming || item.Disposition == CatalogDisposition.Duplicate)
+                && pendingDuplicateListingIds.Contains(item.Id)),
             IncomingCatalogPreset.Incomplete => query.Where(item => item.Price == null || item.AreaSquareMeters == null || item.Location == null),
             IncomingCatalogPreset.ReturnedFromMonitoring => query.Where(item => returnedFromMonitoringIds.Contains(item.Id)),
             IncomingCatalogPreset.ProcessedToday => query.Where(item => processedTodayIds.Contains(item.Id)),
@@ -178,6 +183,15 @@ public sealed class IncomingCatalogReadService(
                             select new { link.CatalogItemId, propertyCase.Id, propertyCase.BusinessNumber, propertyCase.StageId })
             .ToArrayAsync(cancellationToken);
         var linksByItem = linked.ToDictionary(item => item.CatalogItemId);
+
+        Guid[] pageGroupIds = items.Where(item => item.ObjectGroupId != null)
+            .Select(item => item.ObjectGroupId!.Value).Distinct().ToArray();
+        Dictionary<Guid, int> groupCounts = pageGroupIds.Length == 0
+            ? []
+            : await db.Listings.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId
+                    && item.ObjectGroupId != null && pageGroupIds.Contains(item.ObjectGroupId.Value))
+                .GroupBy(item => item.ObjectGroupId!.Value)
+                .ToDictionaryAsync(group => group.Key, group => group.Count(), cancellationToken);
 
         var searchRows = await (from observation in db.ListingObservations.AsNoTracking()
                                 join job in db.CollectionJobs.AsNoTracking() on observation.JobId equals job.Id
@@ -217,11 +231,14 @@ public sealed class IncomingCatalogReadService(
             string[] photos = PhotoUrls(item.PhotosJson);
             IncomingLandType[] landTypes = IncomingLandTypeClassifier.Classify(item.Title, item.Description);
             (IncomingCatalogMatchField? matchedField, string? matchedValue) = SearchMatch(item, searchTerms);
+            int objectGroupMemberCount = item.ObjectGroupId is Guid groupId && groupCounts.TryGetValue(groupId, out int count)
+                ? count : 0;
             rows[item.Id] = new(item.Id, search?.SearchId, search?.Label, Completeness(item),
                 RowState(item, priceChanged, returned), priceChanged, returned, photos.FirstOrDefault(), photos.Length,
                 landTypes, matchedField, matchedValue, Reviewed: reviewedOnPage.Contains(item.Id),
-                PossibleDuplicate: possibleDuplicatesOnPage.Contains(item.Id));
-            return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId);
+                PossibleDuplicate: possibleDuplicatesOnPage.Contains(item.Id),
+                ObjectGroupId: item.ObjectGroupId, ObjectGroupMemberCount: objectGroupMemberCount);
+            return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId, objectGroupMemberCount);
         }).ToArray();
 
         IncomingSearchGroupView[] groups = await db.SearchGroups.AsNoTracking()
@@ -267,24 +284,105 @@ public sealed class IncomingCatalogReadService(
                                    {
                                        duplicate.Id, duplicate.Version, duplicate.CandidateListingId, candidate.Source,
                                        candidate.Title, candidate.Location, candidate.Price, candidate.AreaSquareMeters,
-                                       candidate.CadastralNumber, candidate.Url, duplicate.ReasonsJson, duplicate.RecordedAt
+                                       candidate.CadastralNumber, candidate.Url, duplicate.ReasonsJson, duplicate.RecordedAt,
+                                       duplicate.Score
                                    }).ToArrayAsync(cancellationToken);
         IncomingDuplicateCandidateView[] duplicateCandidates = duplicateRows.Select(value =>
             new IncomingDuplicateCandidateView(value.Id, value.Version, value.CandidateListingId, value.Source,
                 value.Title ?? "Название неизвестно", value.Location, value.Price, value.AreaSquareMeters,
-                value.CadastralNumber, value.Url, DuplicateReasons(value.ReasonsJson), value.RecordedAt)).ToArray();
+                value.CadastralNumber, value.Url, DuplicateReasons(value.ReasonsJson), value.RecordedAt, value.Score)).ToArray();
+
+        IncomingObjectGroupView? objectGroup = null;
+        if (item.ObjectGroupId is Guid objectGroupId)
+        {
+            Listing[] members = await db.Listings.AsNoTracking()
+                .Where(value => value.OrganizationId == context.OrganizationId && value.ObjectGroupId == objectGroupId)
+                .OrderBy(value => value.ReceivedAt).ThenBy(value => value.Id).ToArrayAsync(cancellationToken);
+            Guid[] memberIds = members.Select(value => value.Id).ToArray();
+            var groupLinks = await (from link in db.PropertyCaseSourceLinks.AsNoTracking()
+                                    join propertyCase in db.PropertyCases.AsNoTracking() on link.PropertyCaseId equals propertyCase.Id
+                                    where memberIds.Contains(link.CatalogItemId) && link.Confirmed
+                                    select new { link.CatalogItemId, propertyCase.Id, propertyCase.BusinessNumber })
+                .ToArrayAsync(cancellationToken);
+            var groupLinksByItem = groupLinks.ToDictionary(value => value.CatalogItemId);
+            IncomingObjectGroupMemberView[] memberViews = members.Select(value =>
+            {
+                groupLinksByItem.TryGetValue(value.Id, out var link);
+                return new IncomingObjectGroupMemberView(value.Id, value.Source, value.Title ?? "Название неизвестно",
+                    value.Location, value.Price, PricePerSotka(value.Price, value.AreaSquareMeters), value.AreaSquareMeters,
+                    value.CadastralNumber, value.Url, value.Disposition, link?.Id, link?.BusinessNumber);
+            }).ToArray();
+            objectGroup = new(objectGroupId, memberViews.Length, memberViews);
+        }
 
         return new(detail, PhotoUrls(item.PhotosJson), search?.SearchId, search?.Label, Completeness(item),
             RowState(item, priceChanged, returned), priceChanged, returned,
-            IncomingLandTypeClassifier.Classify(item.Title, item.Description), duplicateCandidates);
+            IncomingLandTypeClassifier.Classify(item.Title, item.Description), duplicateCandidates, objectGroup);
     }
 
-    private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber, string? caseStage) => new(
+    public async Task<IReadOnlyList<IncomingDuplicateLinkTargetView>> SearchDuplicateTargetsAsync(
+        Subject subject, Guid catalogItemId, string text, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        string search = text.Trim();
+        if (search.Length > 200) throw new ArgumentException("Поиск ограничен 200 символами.");
+
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        Listing source = await db.Listings.AsNoTracking().SingleOrDefaultAsync(value =>
+            value.Id == catalogItemId && value.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
+
+        IQueryable<Listing> query = db.Listings.AsNoTracking().Where(value =>
+            value.OrganizationId == context.OrganizationId && value.Id != catalogItemId
+            && value.Disposition != CatalogDisposition.Fake);
+        if (source.ObjectGroupId is Guid sourceGroupId)
+            query = query.Where(value => value.ObjectGroupId != sourceGroupId);
+        if (search.Length > 0)
+        {
+            string pattern = $"%{search}%";
+            query = query.Where(value => EF.Functions.ILike(value.Title ?? "", pattern)
+                || EF.Functions.ILike(value.Location ?? "", pattern)
+                || EF.Functions.ILike(value.ExternalId ?? "", pattern)
+                || EF.Functions.ILike(value.CadastralNumber ?? "", pattern)
+                || EF.Functions.ILike(value.SellerName ?? "", pattern));
+        }
+
+        Listing[] targets = await query.OrderByDescending(value => value.ChangedAt).ThenBy(value => value.Id)
+            .Take(30).ToArrayAsync(cancellationToken);
+        Guid[] ids = targets.Select(value => value.Id).ToArray();
+        Guid[] groupIds = targets.Where(value => value.ObjectGroupId != null)
+            .Select(value => value.ObjectGroupId!.Value).Distinct().ToArray();
+        Dictionary<Guid, int> groupCounts = groupIds.Length == 0
+            ? []
+            : await db.Listings.AsNoTracking().Where(value => value.OrganizationId == context.OrganizationId
+                    && value.ObjectGroupId != null && groupIds.Contains(value.ObjectGroupId.Value))
+                .GroupBy(value => value.ObjectGroupId!.Value)
+                .ToDictionaryAsync(group => group.Key, group => group.Count(), cancellationToken);
+        var links = await (from link in db.PropertyCaseSourceLinks.AsNoTracking()
+                           join propertyCase in db.PropertyCases.AsNoTracking() on link.PropertyCaseId equals propertyCase.Id
+                           where ids.Contains(link.CatalogItemId) && link.Confirmed
+                           select new { link.CatalogItemId, propertyCase.Id, propertyCase.BusinessNumber })
+            .ToArrayAsync(cancellationToken);
+        var linksByItem = links.ToDictionary(value => value.CatalogItemId);
+
+        return targets.Select(value =>
+        {
+            linksByItem.TryGetValue(value.Id, out var link);
+            int groupCount = value.ObjectGroupId is Guid groupId && groupCounts.TryGetValue(groupId, out int count) ? count : 0;
+            return new IncomingDuplicateLinkTargetView(value.Id, value.Source, value.Title ?? "Название неизвестно",
+                value.Location, value.Price, PricePerSotka(value.Price, value.AreaSquareMeters), value.AreaSquareMeters,
+                value.CadastralNumber, value.ObjectGroupId, groupCount, link?.Id, link?.BusinessNumber);
+        }).ToArray();
+    }
+
+    private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber, string? caseStage,
+        int objectGroupMemberCount = 0) => new(
         item.Id, item.Source, item.ExternalId, item.Url, item.Title ?? "Название неизвестно", item.Price,
         PricePerSotka(item.Price, item.AreaSquareMeters), item.Currency, item.AreaSquareMeters, item.Location,
         item.CadastralNumber, item.Description, item.Provenance, item.IngestionKind, item.Disposition,
         item.QueueReason, item.AttentionRequired, item.ReceivedAt, item.ChangedAt, item.LastObservedAt,
-        caseId, businessNumber, caseStage, caseStage is "rejected" or "monitor", item.Version);
+        caseId, businessNumber, caseStage, caseStage is "rejected" or "monitor", item.Version,
+        item.ObjectGroupId, objectGroupMemberCount);
 
     private static int Completeness(Listing item)
     {

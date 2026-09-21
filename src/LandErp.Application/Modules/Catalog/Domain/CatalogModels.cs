@@ -13,6 +13,7 @@ public sealed class Listing
     public Guid OrganizationId { get; set; }
     public Guid? DepartmentId { get; set; }
     public Guid? TeamId { get; set; }
+    public Guid? ObjectGroupId { get; set; }
     public CatalogSource Source { get; set; }
     public string? ExternalId { get; set; }
     public string? Url { get; set; }
@@ -61,6 +62,15 @@ public sealed class CatalogEvent
     public decimal? ObservedPricePerSotka { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
 }
+public sealed class CatalogObjectGroup
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public DateTimeOffset RecordedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public long Version { get; set; } = 1;
+}
+
 public sealed class CatalogDuplicateCandidate
 {
     public Guid Id { get; set; }

@@ -23,7 +23,8 @@ public sealed record IncomingCatalogRowRead(Guid CatalogItemId, Guid? SearchConf
     string? SearchConfigurationLabel, int CompletenessPercent, IncomingCatalogRowState RowState,
     bool PriceChanged, bool ReturnedFromMonitoring, string? ThumbnailUrl, int PhotoCount,
     IncomingLandType[] LandTypes, IncomingCatalogMatchField? SearchMatchedField = null,
-    string? SearchMatchedValue = null, bool Reviewed = false, bool PossibleDuplicate = false);
+    string? SearchMatchedValue = null, bool Reviewed = false, bool PossibleDuplicate = false,
+    Guid? ObjectGroupId = null, int ObjectGroupMemberCount = 0);
 public sealed record IncomingCatalogReadSummary(int Incoming, int Attention, int Monitoring, int InWork, int Incomplete,
     int PriceChanged, int ReturnedFromMonitoring, int New = 0, int ProcessedToday = 0, int PossibleDuplicate = 0);
 public sealed record IncomingCatalogReadPage(IReadOnlyList<CatalogItemView> Items, int Total,
@@ -32,7 +33,19 @@ public sealed record IncomingCatalogReadPage(IReadOnlyList<CatalogItemView> Item
     IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows);
 public sealed record IncomingDuplicateCandidateView(Guid Id, long Version, Guid CandidateListingId,
     CatalogSource Source, string Title, string? Location, decimal? Price, decimal? AreaSquareMeters,
-    string? CadastralNumber, string? Url, IReadOnlyList<string> Reasons, DateTimeOffset RecordedAt);
+    string? CadastralNumber, string? Url, IReadOnlyList<string> Reasons, DateTimeOffset RecordedAt,
+    int Score = 0);
+
+public sealed record IncomingObjectGroupMemberView(Guid CatalogItemId, CatalogSource Source, string Title,
+    string? Location, decimal? Price, decimal? PricePerSotka, decimal? AreaSquareMeters,
+    string? CadastralNumber, string? Url, CatalogDisposition Disposition,
+    Guid? PropertyCaseId, string? BusinessNumber);
+public sealed record IncomingObjectGroupView(Guid Id, int MemberCount,
+    IReadOnlyList<IncomingObjectGroupMemberView> Members);
+public sealed record IncomingDuplicateLinkTargetView(Guid CatalogItemId, CatalogSource Source, string Title,
+    string? Location, decimal? Price, decimal? PricePerSotka, decimal? AreaSquareMeters,
+    string? CadastralNumber, Guid? ObjectGroupId, int ObjectGroupMemberCount,
+    Guid? PropertyCaseId, string? BusinessNumber);
 
 public sealed record DuplicateDetectionSettingsView(int CandidateThreshold, int DescriptionSimilarityPercent,
     int AreaTolerancePercent, int PhotoHammingDistance, int StrongPhotoMatches, int CommonPhotoMaxListings,
@@ -44,7 +57,8 @@ public sealed record UpdateDuplicateDetectionSettings(int CandidateThreshold, in
 public sealed record IncomingCatalogDetailRead(CatalogItemDetail Detail, IReadOnlyList<string> PhotoUrls,
     Guid? SearchConfigurationId, string? SearchConfigurationLabel, int CompletenessPercent,
     IncomingCatalogRowState RowState, bool PriceChanged, bool ReturnedFromMonitoring,
-    IncomingLandType[] LandTypes, IReadOnlyList<IncomingDuplicateCandidateView>? DuplicateCandidates = null);
+    IncomingLandType[] LandTypes, IReadOnlyList<IncomingDuplicateCandidateView>? DuplicateCandidates = null,
+    IncomingObjectGroupView? ObjectGroup = null);
 
 public sealed record IncomingFilterPresetCriteriaV1(int SchemaVersion, CatalogSource? Source,
     Guid? SearchConfigurationId, CatalogDisposition? Disposition, CatalogAgeRange Age,
@@ -62,6 +76,8 @@ public interface IIncomingCatalogReadService
 {
     Task<IncomingCatalogReadPage> ReadAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken);
     Task<IncomingCatalogDetailRead> ReadDetailAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<IncomingDuplicateLinkTargetView>> SearchDuplicateTargetsAsync(
+        Subject subject, Guid catalogItemId, string text, CancellationToken cancellationToken);
 }
 
 public interface IIncomingFilterPresetService

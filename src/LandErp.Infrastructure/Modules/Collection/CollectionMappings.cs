@@ -61,6 +61,10 @@ internal static class CollectionMappings
         builder.Entity<CollectionSchedulerStatus>().ToTable("scheduler_status", "collection");
         builder.Entity<CollectionSchedulerStatus>().Property(item => item.Id).ValueGeneratedNever();
         builder.Entity<CollectionSchedulerStatus>().Property(item => item.LastFailureCode).HasMaxLength(64);
+        builder.Entity<CatalogObjectGroup>().ToTable("object_groups", "catalog");
+        builder.Entity<CatalogObjectGroup>().HasIndex(item => new { item.OrganizationId, item.UpdatedAt });
+        builder.Entity<CatalogObjectGroup>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany()
+            .HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Listing>().ToTable("listings", "catalog");
         builder.Entity<Listing>().Property(item => item.Source).HasConversion<string>();
         builder.Entity<Listing>().Property(item => item.IngestionKind).HasConversion<string>();
@@ -68,7 +72,10 @@ internal static class CollectionMappings
         builder.Entity<Listing>().HasIndex(item => new { item.OrganizationId, item.Source, item.ExternalId }).IsUnique()
             .HasFilter("external_id IS NOT NULL");
         builder.Entity<Listing>().HasIndex(item => new { item.OrganizationId, item.ChangedAt });
+        builder.Entity<Listing>().HasIndex(item => new { item.OrganizationId, item.ObjectGroupId })
+            .HasFilter("object_group_id IS NOT NULL");
         builder.Entity<Listing>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<Listing>().HasOne<CatalogObjectGroup>().WithMany().HasForeignKey(item => item.ObjectGroupId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Listing>().HasOne<OrgUnit>().WithMany().HasForeignKey(item => item.DepartmentId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Listing>().HasOne<Team>().WithMany().HasForeignKey(item => item.TeamId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Listing>().HasOne<Employee>().WithMany().HasForeignKey(item => item.CreatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);

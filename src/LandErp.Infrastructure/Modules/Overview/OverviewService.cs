@@ -67,7 +67,8 @@ public sealed class OverviewService(
 
         if (queue != null)
         {
-            IQueryable<PropertyCase> visible = ProcurementVisibility.Apply(db.PropertyCases.AsNoTracking(), db, queue);
+            IQueryable<PropertyCase> visible = ProcurementVisibility.ApplyRead(
+                db.PropertyCases.AsNoTracking(), db, effective);
             IQueryable<PropertyCase> active = visible.Where(item => item.StageId != "rejected" && item.StageId != "acquired");
             var caseTasks = from item in active
                             join task in db.WorkTasks.AsNoTracking() on item.WorkTaskId equals task.Id

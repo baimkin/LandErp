@@ -29,6 +29,23 @@ internal static class ProcurementVisibility
         };
     }
 
+    /// <summary>
+    /// Procurement work always implies read for the same concrete case. This matters for
+    /// responsibility-based Own/AssignedObjects scopes, which are not strict subsets of
+    /// Team/Department when work is handed over across organization boundaries.
+    /// </summary>
+    public static IQueryable<PropertyCase> ApplyRead(
+        IQueryable<PropertyCase> cases, LandErpDbContext db, EffectiveEmployeeAccess access)
+    {
+        IQueryable<PropertyCase> readable = Apply(cases, db, access.ProcurementReadContext);
+        if (!access.CanManageProcurement
+            || access.Settings.ProcurementWorkScope == access.Settings.ProcurementReadScope)
+            return readable;
+
+        IQueryable<PropertyCase> workable = Apply(cases, db, access.ProcurementWorkContext);
+        return readable.Union(workable);
+    }
+
     public static bool CanSeeAfterResponsibility(PropertyCase propertyCase, EmployeeAssignment assignment,
         Guid managerEmployeeId, Guid caseAssigneeId) => assignment.Scope switch
     {

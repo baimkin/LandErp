@@ -19,7 +19,7 @@ public sealed partial class ProcurementQueueV2ReadService
         EffectiveEmployeeAccess effective = await RequireReadAsync(subject, cancellationToken);
         AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await _factory.CreateDbContextAsync(cancellationToken);
-        if (!await VisibleCases(db, context).AnyAsync(row => row.Case.Id == caseId, cancellationToken))
+        if (!await VisibleReadCases(db, effective).AnyAsync(row => row.Case.Id == caseId, cancellationToken))
             throw new AccessDeniedException();
 
         offset = Math.Max(0, offset);
@@ -57,7 +57,7 @@ public sealed partial class ProcurementQueueV2ReadService
         EffectiveEmployeeAccess effective = await RequireReadAsync(subject, cancellationToken);
         AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await _factory.CreateDbContextAsync(cancellationToken);
-        if (!await VisibleCases(db, context).AnyAsync(row => row.Case.Id == caseId, cancellationToken))
+        if (!await VisibleReadCases(db, effective).AnyAsync(row => row.Case.Id == caseId, cancellationToken))
             throw new AccessDeniedException();
 
         SiteInspection? inspection = await db.SiteInspections.AsNoTracking()

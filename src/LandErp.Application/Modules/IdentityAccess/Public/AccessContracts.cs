@@ -43,6 +43,9 @@ public static class EmployeeAccessRules
             throw new ArgumentException("Область работы закупки не может быть шире области просмотра.");
     }
 
+    // Structural configuration ordering only. Own and AssignedObjects are responsibility-based
+    // scopes and can cross Team/Department boundaries for a concrete case. Runtime Procurement
+    // read visibility therefore also includes concrete WorkScope visibility for Manager/Head.
     public static bool ContainsScope(AccessScope allowedScope, AccessScope requestedScope)
     {
         if (!Enum.IsDefined(allowedScope) || !Enum.IsDefined(requestedScope))

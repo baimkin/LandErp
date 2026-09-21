@@ -79,6 +79,15 @@ public sealed class ProcurementWorkspace(
                    select new Row { Case = item, Assignment = assignment, Task = task };
     }
 
+    private static IQueryable<Row> VisibleReadCases(LandErpDbContext db, EffectiveEmployeeAccess access)
+    {
+        IQueryable<PropertyCase> cases = ProcurementVisibility.ApplyRead(db.PropertyCases, db, access);
+        return from item in cases
+               join assignment in db.WorkAssignments on item.AssignmentId equals assignment.Id
+               join task in db.WorkTasks on item.WorkTaskId equals task.Id
+               select new Row { Case = item, Assignment = assignment, Task = task };
+    }
+
     public async Task<IncomingCatalogPage> ReadIncomingAsync(Subject subject, IncomingCatalogFilter filter, CancellationToken cancellationToken)
     {
         EffectiveEmployeeAccess effective = await RequireIncomingAsync(subject, process: false, cancellationToken);
@@ -512,7 +521,7 @@ public sealed class ProcurementWorkspace(
         if (!effective.CanReadProcurement) throw new AccessDeniedException();
         AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        return await VisibleCases(db, context).OrderByDescending(row => row.Case.RecordedAt).Take(100)
+        return await VisibleReadCases(db, effective).OrderByDescending(row => row.Case.RecordedAt).Take(100)
             .Select(row => new CaseLinkTarget(row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle)).ToArrayAsync(cancellationToken);
     }
 
@@ -893,7 +902,7 @@ public sealed class ProcurementWorkspace(
         AccessContext context = effective.ProcurementReadContext;
         ValidatePage(filter.Text, filter.Offset, filter.Size);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        IQueryable<Row> query = VisibleCases(db, context);
+        IQueryable<Row> query = VisibleReadCases(db, effective);
         if (filter.Text.Length > 0)
             query = query.Where(row => row.Case.WorkingTitle.Contains(filter.Text) || (row.Case.WorkingLocation ?? "").Contains(filter.Text)
                 || row.Case.BusinessNumber.Contains(filter.Text) || db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id
@@ -921,7 +930,7 @@ public sealed class ProcurementWorkspace(
         EffectiveEmployeeAccess effective = await RequireProcurementAsync(subject, ProcurementAccessLevel.Read, cancellationToken);
         AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == caseId, cancellationToken) ?? throw new AccessDeniedException();
+        Row row = await VisibleReadCases(db, effective).SingleOrDefaultAsync(item => item.Case.Id == caseId, cancellationToken) ?? throw new AccessDeniedException();
         Dictionary<Guid, string> names = await db.Employees.Where(item => item.OrganizationId == context.OrganizationId)
             .ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
         List<(PropertyCaseSourceLink Link, Listing Item)> sources = (await LoadSourcesAsync(db, [caseId], cancellationToken)).GetValueOrDefault(caseId, []);
@@ -1023,7 +1032,7 @@ public sealed class ProcurementWorkspace(
         Guid? caseId = await db.PropertyCaseSourceLinks.Where(item => item.CatalogItemId == listingId && item.Confirmed)
             .Select(item => (Guid?)item.PropertyCaseId).SingleOrDefaultAsync(cancellationToken);
         if (caseId == null) return null;
-        return await VisibleCases(db, context).AnyAsync(item => item.Case.Id == caseId.Value, cancellationToken) ? caseId : throw new AccessDeniedException();
+        return await VisibleReadCases(db, effective).AnyAsync(item => item.Case.Id == caseId.Value, cancellationToken) ? caseId : throw new AccessDeniedException();
     }
 
     public async Task DecideAsync(Subject subject, DecisionCommand command, string correlationId, CancellationToken cancellationToken)
@@ -1424,7 +1433,7 @@ public sealed class ProcurementWorkspace(
                 cancellationToken);
 
         bool procurementReader = effective.CanReadProcurement
-            && await VisibleCases(db, effective.ProcurementReadContext)
+            && await VisibleReadCases(db, effective)
                 .AnyAsync(item => item.Case.Id == caseId, cancellationToken);
         bool assignedInspector = inspection != null && inspection.InspectorEmployeeId == context.EmployeeId
             && effective.Settings.CanPerformInspections;
@@ -1907,7 +1916,7 @@ public sealed class ProcurementWorkspace(
                            where link.Id == attachmentId && link.OrganizationId == context.OrganizationId
                            select new { Link = link, File = file }).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
         bool procurementReader = effective.CanReadProcurement
-            && await VisibleCases(db, effective.ProcurementReadContext)
+            && await VisibleReadCases(db, effective)
                 .AnyAsync(item => item.Case.Id == value.Link.PropertyCaseId, cancellationToken);
         bool inspectorReader = value.Link.OwnerType is CaseAttachmentOwner.Inspection or CaseAttachmentOwner.InspectionItem
             && effective.Settings.CanPerformInspections

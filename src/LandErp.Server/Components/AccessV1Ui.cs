@@ -94,6 +94,12 @@ public static class AccessV1Ui
                 result.Add("Закупка доступна только для просмотра.");
             else
                 result.Add($"Изменяет: {ScopeSummary(settings.ProcurementWorkScope)}.");
+
+            if (settings.ProcurementAccess >= ProcurementAccessLevel.Manager
+                && settings.ProcurementReadScope != AccessScope.Organization)
+            {
+                result.Add("Рабочие объекты всегда остаются видимыми, даже если находятся за пределами базовой области просмотра.");
+            }
         }
 
         result.Add(settings.IncomingAccess switch

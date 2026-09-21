@@ -55,7 +55,7 @@ public sealed partial class ProcurementQueueV2ReadService(
         (DateTimeOffset todayStart, DateTimeOffset tomorrowStart) = TodayBounds();
         int offset = Math.Max(0, filter.Offset);
         int size = Math.Clamp(filter.Size, 1, 100);
-        IQueryable<Row> visible = VisibleCases(db, context);
+        IQueryable<Row> visible = VisibleReadCases(db, effective);
         Guid[] priceChangedCaseIds = await PriceChangedCaseIdsAsync(db, visible, cancellationToken);
         IQueryable<Row> query = string.IsNullOrWhiteSpace(filter.Stage)
             ? visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired")
@@ -123,7 +123,7 @@ public sealed partial class ProcurementQueueV2ReadService(
         EffectiveEmployeeAccess effective = await RequireReadAsync(subject, cancellationToken);
         AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await _factory.CreateDbContextAsync(cancellationToken);
-        IQueryable<Row> visible = VisibleCases(db, context);
+        IQueryable<Row> visible = VisibleReadCases(db, effective);
         Row? row = await visible.SingleOrDefaultAsync(item => item.Case.Id == caseId, cancellationToken);
         if (row == null) throw new AccessDeniedException();
         (DateTimeOffset todayStart, DateTimeOffset tomorrowStart) = TodayBounds();

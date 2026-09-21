@@ -158,7 +158,7 @@ public sealed class EmployeeAccessSettingsTests
     }
 
     [TestMethod]
-    public async Task CutoverMigrationBackfillsMissingRowsAndPreservesExplicitSettings()
+    public async Task CutoverMigrationBackfillsRoleMatrixPreservesExplicitSettingsAndExcludesOwner()
     {
         await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
         await using (LandErpDbContext preCutover = sandbox.Context())
@@ -172,12 +172,16 @@ public sealed class EmployeeAccessSettingsTests
             bootstrap, "access-v1-cutover-owner", "Access V1 cutover organization");
         await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerUserId);
 
-        Guid missingEmployeeId;
+        Guid managerEmployeeId;
+        Guid headEmployeeId;
+        Guid inspectorEmployeeId;
+        Guid administratorEmployeeId;
+        Guid secondOwnerEmployeeId;
         Guid explicitEmployeeId;
         EmployeeAccessConfiguration preserved = new(
             IncomingAccessLevel.Read, ProcurementAccessLevel.Read,
             AccessScope.AssignedObjects, AccessScope.Own, CollectionAccessLevel.Read,
-            false, true, false, false, false);
+            false, true, false, true, true);
 
         await using (AsyncServiceScope setupScope = bootstrap.CreateAsyncScope())
         {
@@ -187,25 +191,48 @@ public sealed class EmployeeAccessSettingsTests
             OrganizationView organization = await workspace.ReadAsync(owner, CancellationToken.None);
             Guid departmentId = organization.Departments.Single().Id;
             Guid managerRoleId = organization.Roles.Single(item => item.Name == "ProcurementManager").Id;
+            Guid headRoleId = organization.Roles.Single(item => item.Name == "ProcurementHead").Id;
+            Guid inspectorRoleId = organization.Roles.Single(item => item.Name == "Inspector").Id;
+            Guid administratorRoleId = organization.Roles.Single(item => item.Name == "Administrator").Id;
+            Guid ownerRoleId = organization.Roles.Single(item => item.Name == "Owner").Id;
 
-            TemporaryCredential missing = await workspace.CreateEmployeeAsync(owner,
-                new("Backfill manager", "cutover.backfill", departmentId, null, null, null,
+            managerEmployeeId = (await workspace.CreateEmployeeAsync(owner,
+                new("Backfill manager", "cutover.manager", departmentId, null, null, null,
                     managerRoleId, AccessScope.Department),
-                "cutover-missing", CancellationToken.None);
-            missingEmployeeId = missing.EmployeeId;
-
-            TemporaryCredential explicitEmployee = await workspace.CreateEmployeeAsync(owner,
+                "cutover-manager", CancellationToken.None)).EmployeeId;
+            headEmployeeId = (await workspace.CreateEmployeeAsync(owner,
+                new("Backfill head", "cutover.head", departmentId, null, null, null,
+                    headRoleId, AccessScope.Organization),
+                "cutover-head", CancellationToken.None)).EmployeeId;
+            inspectorEmployeeId = (await workspace.CreateEmployeeAsync(owner,
+                new("Backfill inspector", "cutover.inspector", departmentId, null, null, null,
+                    inspectorRoleId, AccessScope.Own),
+                "cutover-inspector", CancellationToken.None)).EmployeeId;
+            administratorEmployeeId = (await workspace.CreateEmployeeAsync(owner,
+                new("Backfill administrator", "cutover.admin", null, null, null, null,
+                    administratorRoleId, AccessScope.Organization),
+                "cutover-admin", CancellationToken.None)).EmployeeId;
+            secondOwnerEmployeeId = (await workspace.CreateEmployeeAsync(owner,
+                new("Second owner", "cutover.owner2", null, null, null, null,
+                    ownerRoleId, AccessScope.Organization),
+                "cutover-owner", CancellationToken.None)).EmployeeId;
+            explicitEmployeeId = (await workspace.CreateEmployeeAsync(owner,
                 new("Explicit manager", "cutover.explicit", departmentId, null, null, null,
                     managerRoleId, AccessScope.Department, true, preserved),
-                "cutover-explicit", CancellationToken.None);
-            explicitEmployeeId = explicitEmployee.EmployeeId;
+                "cutover-explicit", CancellationToken.None)).EmployeeId;
         }
 
         await using (LandErpDbContext db = sandbox.Context())
         {
-            EmployeeAccessSettings missing = await db.EmployeeAccessSettings.SingleAsync(
-                item => item.EmployeeId == missingEmployeeId);
-            db.EmployeeAccessSettings.Remove(missing);
+            Guid[] backfillIds =
+            [
+                managerEmployeeId, headEmployeeId, inspectorEmployeeId, administratorEmployeeId
+            ];
+            EmployeeAccessSettings[] generated = await db.EmployeeAccessSettings
+                .Where(item => backfillIds.Contains(item.EmployeeId)).ToArrayAsync();
+            Assert.AreEqual(backfillIds.Length, generated.Length);
+            db.EmployeeAccessSettings.RemoveRange(generated);
+            Assert.IsFalse(await db.EmployeeAccessSettings.AnyAsync(item => item.EmployeeId == secondOwnerEmployeeId));
             await db.SaveChangesAsync();
 
             IMigrator migrator = db.Database.GetService<IMigrator>();
@@ -214,14 +241,60 @@ public sealed class EmployeeAccessSettingsTests
 
         await using (LandErpDbContext verified = sandbox.Context())
         {
-            EmployeeAccessSettings backfilled = await verified.EmployeeAccessSettings.AsNoTracking()
-                .SingleAsync(item => item.EmployeeId == missingEmployeeId);
-            Assert.AreEqual(IncomingAccessLevel.Process, backfilled.IncomingAccess);
-            Assert.AreEqual(ProcurementAccessLevel.Manager, backfilled.ProcurementAccess);
-            Assert.AreEqual(AccessScope.Department, backfilled.ProcurementReadScope);
-            Assert.AreEqual(AccessScope.Department, backfilled.ProcurementWorkScope);
-            Assert.IsTrue(backfilled.CanAssignInspections);
-            Assert.IsTrue(backfilled.CanManageTemplates);
+            EmployeeAccessSettings manager = await verified.EmployeeAccessSettings.AsNoTracking()
+                .SingleAsync(item => item.EmployeeId == managerEmployeeId);
+            Assert.AreEqual(IncomingAccessLevel.Process, manager.IncomingAccess);
+            Assert.AreEqual(ProcurementAccessLevel.Manager, manager.ProcurementAccess);
+            Assert.AreEqual(AccessScope.Department, manager.ProcurementReadScope);
+            Assert.AreEqual(AccessScope.Department, manager.ProcurementWorkScope);
+            Assert.AreEqual(CollectionAccessLevel.None, manager.CollectionAccess);
+            Assert.IsTrue(manager.CanAssignInspections);
+            Assert.IsFalse(manager.CanPerformInspections);
+            Assert.IsFalse(manager.CanConfirmPurchase);
+            Assert.IsTrue(manager.CanManageTemplates);
+            Assert.IsFalse(manager.CanReadAudit);
+
+            EmployeeAccessSettings head = await verified.EmployeeAccessSettings.AsNoTracking()
+                .SingleAsync(item => item.EmployeeId == headEmployeeId);
+            Assert.AreEqual(IncomingAccessLevel.Read, head.IncomingAccess);
+            Assert.AreEqual(ProcurementAccessLevel.Head, head.ProcurementAccess);
+            Assert.AreEqual(AccessScope.Organization, head.ProcurementReadScope);
+            Assert.AreEqual(AccessScope.Organization, head.ProcurementWorkScope);
+            Assert.AreEqual(CollectionAccessLevel.Manage, head.CollectionAccess);
+            Assert.IsTrue(head.CanAssignInspections);
+            Assert.IsFalse(head.CanPerformInspections);
+            Assert.IsTrue(head.CanConfirmPurchase);
+            Assert.IsTrue(head.CanManageTemplates);
+            Assert.IsFalse(head.CanReadAudit);
+
+            EmployeeAccessSettings inspector = await verified.EmployeeAccessSettings.AsNoTracking()
+                .SingleAsync(item => item.EmployeeId == inspectorEmployeeId);
+            Assert.AreEqual(IncomingAccessLevel.None, inspector.IncomingAccess);
+            Assert.AreEqual(ProcurementAccessLevel.None, inspector.ProcurementAccess);
+            Assert.AreEqual(AccessScope.Own, inspector.ProcurementReadScope);
+            Assert.AreEqual(AccessScope.Own, inspector.ProcurementWorkScope);
+            Assert.AreEqual(CollectionAccessLevel.None, inspector.CollectionAccess);
+            Assert.IsFalse(inspector.CanAssignInspections);
+            Assert.IsTrue(inspector.CanPerformInspections);
+            Assert.IsFalse(inspector.CanConfirmPurchase);
+            Assert.IsFalse(inspector.CanManageTemplates);
+            Assert.IsFalse(inspector.CanReadAudit);
+
+            EmployeeAccessSettings administrator = await verified.EmployeeAccessSettings.AsNoTracking()
+                .SingleAsync(item => item.EmployeeId == administratorEmployeeId);
+            Assert.AreEqual(IncomingAccessLevel.Read, administrator.IncomingAccess);
+            Assert.AreEqual(ProcurementAccessLevel.Read, administrator.ProcurementAccess);
+            Assert.AreEqual(AccessScope.Organization, administrator.ProcurementReadScope);
+            Assert.AreEqual(AccessScope.Organization, administrator.ProcurementWorkScope);
+            Assert.AreEqual(CollectionAccessLevel.Manage, administrator.CollectionAccess);
+            Assert.IsFalse(administrator.CanAssignInspections);
+            Assert.IsFalse(administrator.CanPerformInspections);
+            Assert.IsFalse(administrator.CanConfirmPurchase);
+            Assert.IsFalse(administrator.CanManageTemplates);
+            Assert.IsTrue(administrator.CanReadAudit);
+
+            Assert.IsFalse(await verified.EmployeeAccessSettings.AsNoTracking()
+                .AnyAsync(item => item.EmployeeId == secondOwnerEmployeeId));
 
             EmployeeAccessSettings explicitStored = await verified.EmployeeAccessSettings.AsNoTracking()
                 .SingleAsync(item => item.EmployeeId == explicitEmployeeId);
@@ -230,7 +303,13 @@ public sealed class EmployeeAccessSettingsTests
             Assert.AreEqual(preserved.ProcurementReadScope, explicitStored.ProcurementReadScope);
             Assert.AreEqual(preserved.ProcurementWorkScope, explicitStored.ProcurementWorkScope);
             Assert.AreEqual(preserved.CollectionAccess, explicitStored.CollectionAccess);
+            Assert.AreEqual(preserved.CanAssignInspections, explicitStored.CanAssignInspections);
             Assert.AreEqual(preserved.CanPerformInspections, explicitStored.CanPerformInspections);
+            Assert.AreEqual(preserved.CanConfirmPurchase, explicitStored.CanConfirmPurchase);
+            Assert.AreEqual(preserved.CanManageTemplates, explicitStored.CanManageTemplates);
+            Assert.AreEqual(preserved.CanReadAudit, explicitStored.CanReadAudit);
+
+            Assert.IsFalse(verified.Database.HasPendingModelChanges());
         }
     }
 

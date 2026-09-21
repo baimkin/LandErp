@@ -227,7 +227,8 @@ public sealed class InspectionAcquisitionTests
         OrganizationView structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         const string inspectorLogin = "inspector-phase5@test.invalid";
         Guid inspectorUserId = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
-            structure, "Осмотрщик", inspectorLogin, "Inspector", fixture.DepartmentA, AccessScope.Own);
+            structure, "Осмотрщик", inspectorLogin, "Inspector", fixture.DepartmentA, AccessScope.Own,
+            ProcurementTestsHelper.InspectionPerformerAccess());
         structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         Guid inspectorEmployeeId = structure.Employees.Single(item => item.Login == inspectorLogin).Id;
         Subject inspector = new(inspectorUserId, false);
@@ -301,6 +302,7 @@ public sealed class InspectionAcquisitionTests
     }
 
     [TestMethod]
+    [TestCategory("Browser")]
     [Timeout(120_000)]
     public async Task FullProcurementCycleInspectionOfflineDraftAndAcquiredWorkInBrowser()
     {

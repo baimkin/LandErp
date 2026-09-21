@@ -151,6 +151,50 @@ public sealed class AccessV1Ap03UiTests
     }
 
     [TestMethod]
+    public async Task InvitationAccessChangesRequireRolesManage()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        OrganizationView structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
+        const string adminLogin = "ap03.users-only-admin@test.invalid";
+        Guid adminUserId = await ProcurementTestsHelper.InviteAsync(
+            fixture.Services, fixture.Organization, fixture.Owner, structure,
+            "AP03 Users Manager", adminLogin, "Administrator", fixture.DepartmentA, AccessScope.Organization,
+            EmployeeAccessRules.NoAccess);
+        await IdentityOrganizationTests.EnableMfaAsync(fixture.Services, adminUserId);
+
+        await using (LandErpDbContext db = fixture.Sandbox.Context())
+        {
+            Guid adminRoleId = await db.Roles.Where(item => item.Name == "Administrator")
+                .Select(item => item.Id).SingleAsync();
+            var rolesManage = await db.RolePermissions.SingleAsync(item =>
+                item.RoleId == adminRoleId && item.PermissionId == Permissions.RolesManage);
+            db.RolePermissions.Remove(rolesManage);
+            await db.SaveChangesAsync();
+        }
+
+        Subject admin = new(adminUserId, true);
+        IAccessControl access = fixture.Scope.ServiceProvider.GetRequiredService<IAccessControl>();
+        await access.RequireAsync(admin, Permissions.UsersManage, CancellationToken.None);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() =>
+            access.RequireAsync(admin, Permissions.RolesManage, CancellationToken.None));
+
+        Guid headRoleId = structure.Roles.Single(item => item.Name == "ProcurementHead").Id;
+        EmployeeAccessConfiguration elevated = EmployeeAccessRules.NoAccess with
+        {
+            IncomingAccess = IncomingAccessLevel.Process,
+            ProcurementAccess = ProcurementAccessLevel.Head,
+            ProcurementReadScope = AccessScope.Organization,
+            ProcurementWorkScope = AccessScope.Organization,
+            CanConfirmPurchase = true
+        };
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() =>
+            fixture.Organization.InviteAsync(admin,
+                new("Privilege escalation", "ap03.escalation@test.invalid", fixture.DepartmentA,
+                    null, null, null, headRoleId, AccessScope.Organization, elevated),
+                "ap03-invite-requires-roles", CancellationToken.None));
+    }
+
+    [TestMethod]
     public void UiPresetsAreFormValuesAndCanBeCustomized()
     {
         AccessV1Preset manager = AccessV1Ui.Presets.Single(item => item.Id == "procurement-manager");

@@ -45,8 +45,6 @@ public sealed class ProcurementTests
 
         await workspace.SetMonitoringAsync(fixture.Manager, new(manualId, manual.Version, 2_000_000m, null, "Ждём снижения цены"), "monitor", CancellationToken.None);
         manual = (await workspace.ReadIncomingAsync(fixture.Manager, new(Disposition: CatalogDisposition.Monitoring), CancellationToken.None)).Items.Single();
-        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => workspace.TakeToWorkAsync(fixture.Head, new(manualId), "head", CancellationToken.None));
-
         TakeToWorkResult created = await workspace.TakeToWorkAsync(fixture.Manager, new(manualId), "take", CancellationToken.None);
         TakeToWorkResult repeated = await workspace.TakeToWorkAsync(fixture.Manager, new(manualId), "repeat", CancellationToken.None);
         Assert.IsTrue(created.Created); Assert.IsFalse(repeated.Created); Assert.AreEqual(created.CaseId, repeated.CaseId);
@@ -122,10 +120,6 @@ public sealed class ProcurementTests
         ManualPropertyCaseResult direct = await fixture.Workspace.CreateManualCaseAsync(fixture.Manager,
             new("Участок от собственника", "Истра", "50:08:0000000:42", 8_500_000m, 2_000m,
                 "Собственник позвонил напрямую по рекомендации директора"), "direct-case", CancellationToken.None);
-        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.CreateManualCaseAsync(fixture.Head,
-            new("Недоступный объект", null, null, null, null, "Руководитель не создаёт менеджерский кейс"),
-            "head-direct-case", CancellationToken.None));
-
         ProcurementQueueV2ReadService read = new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Detail directWithoutSources = await read.ReadDetailAsync(
             fixture.Manager, direct.CaseId, CancellationToken.None);
@@ -170,6 +164,7 @@ public sealed class ProcurementTests
     }
 
     [TestMethod]
+    [TestCategory("Browser")]
     public async Task IncomingUiCreatesCaseUsesCanonicalRouteAndSurvivesRestart()
     {
         await using Phase1Fixture fixture = await Phase1Fixture.CreateAsync(includeSecondManager: false, includeTeams: false);
@@ -282,9 +277,12 @@ public sealed class ProcurementTests
                 await organization.CreateTeamAsync(owner, departmentB, "Команда Б", "setup", CancellationToken.None);
                 structure = await organization.ReadAsync(owner, CancellationToken.None);
             }
-            Guid manager = await ProcurementTestsHelper.InviteAsync(bootstrap, organization, owner, structure, "Manager", "manager-phase1@test.invalid", "ProcurementManager", departmentA, AccessScope.Department);
-            Guid second = includeSecondManager ? await ProcurementTestsHelper.InviteAsync(bootstrap, organization, owner, structure, "Manager 2", "manager2-phase1@test.invalid", "ProcurementManager", includeTeams ? departmentB : departmentA, AccessScope.Department) : Guid.Empty;
-            Guid head = await ProcurementTestsHelper.InviteAsync(bootstrap, organization, owner, structure, "Head", "head-phase1@test.invalid", "ProcurementHead", departmentA, AccessScope.Organization);
+            Guid manager = await ProcurementTestsHelper.InviteAsync(bootstrap, organization, owner, structure, "Manager", "manager-phase1@test.invalid", "ProcurementManager", departmentA, AccessScope.Department,
+                ProcurementTestsHelper.ProcurementManagerAccess(AccessScope.Department));
+            Guid second = includeSecondManager ? await ProcurementTestsHelper.InviteAsync(bootstrap, organization, owner, structure, "Manager 2", "manager2-phase1@test.invalid", "ProcurementManager", includeTeams ? departmentB : departmentA, AccessScope.Department,
+                ProcurementTestsHelper.ProcurementManagerAccess(AccessScope.Department)) : Guid.Empty;
+            Guid head = await ProcurementTestsHelper.InviteAsync(bootstrap, organization, owner, structure, "Head", "head-phase1@test.invalid", "ProcurementHead", departmentA, AccessScope.Organization,
+                ProcurementTestsHelper.ProcurementHeadAccess(AccessScope.Organization));
             Guid organizationId = await bootstrap.GetRequiredService<LandErpDbContext>().Organizations
                 .Where(item => item.Name == "Phase 1").Select(item => item.Id).SingleAsync();
             await sandbox.GrantRuntimeAsync();
@@ -442,18 +440,28 @@ internal sealed class MemoryFileStorage : IFileStorage
 
 internal static class ProcurementTestsHelper
 {
+    public static EmployeeAccessConfiguration ProcurementManagerAccess(AccessScope scope) =>
+        new(IncomingAccessLevel.Process, ProcurementAccessLevel.Manager, scope, scope,
+            CollectionAccessLevel.None, true, false, false, true, false);
+
+    public static EmployeeAccessConfiguration ProcurementHeadAccess(AccessScope scope) =>
+        new(IncomingAccessLevel.Process, ProcurementAccessLevel.Head, scope, scope,
+            CollectionAccessLevel.None, true, false, false, true, false);
+
+    public static EmployeeAccessConfiguration InspectionPerformerAccess() =>
+        new(IncomingAccessLevel.None, ProcurementAccessLevel.None, AccessScope.Own, AccessScope.Own,
+            CollectionAccessLevel.None, false, true, false, false, false);
+
     public static async Task<Guid> InviteAsync(ServiceProvider services, IOrganizationWorkspace workspace, Subject owner,
         OrganizationView structure, string name, string email, string role, Guid department, AccessScope scope,
         EmployeeAccessConfiguration? explicitAccess = null)
     {
+        // Compatibility fallback for older non-Access-V1 tests. Access-sensitive scenarios pass explicit settings.
         EmployeeAccessConfiguration access = explicitAccess ?? role switch
         {
-            "ProcurementHead" => new(IncomingAccessLevel.Process, ProcurementAccessLevel.Head, scope, scope,
-                CollectionAccessLevel.None, true, false, false, true, false),
-            "ProcurementManager" => new(IncomingAccessLevel.Process, ProcurementAccessLevel.Manager, scope, scope,
-                CollectionAccessLevel.None, true, false, false, true, false),
-            "Inspector" => new(IncomingAccessLevel.None, ProcurementAccessLevel.None, AccessScope.Own, AccessScope.Own,
-                CollectionAccessLevel.None, false, true, false, false, false),
+            "ProcurementHead" => ProcurementHeadAccess(scope),
+            "ProcurementManager" => ProcurementManagerAccess(scope),
+            "Inspector" => InspectionPerformerAccess(),
             _ => EmployeeAccessRules.NoAccess
         };
         InvitationResult invitation = await workspace.InviteAsync(owner, new(name, email, department, null, null, null,

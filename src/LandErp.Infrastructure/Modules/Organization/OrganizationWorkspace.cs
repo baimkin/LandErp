@@ -416,7 +416,7 @@ public sealed class OrganizationWorkspace(
 
     public async Task<InvitationResult> InviteAsync(Subject subject, InviteEmployee command, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireOrganizationAdminAsync(subject, Permissions.UsersManage, cancellationToken);
+        AccessContext context = await RequireAccessAdminAsync(subject, cancellationToken);
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
         LandErpDbContext db = scope.ServiceProvider.GetRequiredService<LandErpDbContext>();
         UserManager<LandErpUser> users = scope.ServiceProvider.GetRequiredService<UserManager<LandErpUser>>();

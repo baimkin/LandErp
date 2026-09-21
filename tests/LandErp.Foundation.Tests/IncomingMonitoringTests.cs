@@ -18,6 +18,7 @@ namespace LandErp.Foundation.Tests;
 public sealed class IncomingMonitoringTests
 {
     [TestMethod]
+    [TestCategory("Browser")]
     public async Task IncomingBrowserSupportsManualDetailMonitoringClassificationAndResponsiveLayout()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
@@ -50,8 +51,7 @@ public sealed class IncomingMonitoringTests
                  {
                      CatalogDisposition.RemovedAtSource,
                      CatalogDisposition.Sold,
-                     CatalogDisposition.Fake,
-                     CatalogDisposition.Duplicate
+                     CatalogDisposition.Fake
                  })
         {
             CatalogItemDetail active = await fixture.Workspace.ReadItemAsync(fixture.Manager, ingested.AvitoId, CancellationToken.None);
@@ -224,7 +224,25 @@ public sealed class IncomingMonitoringTests
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
         CatalogDisposition[] classifications = [CatalogDisposition.Duplicate, CatalogDisposition.Fake,
             CatalogDisposition.RemovedAtSource, CatalogDisposition.Sold];
-        foreach (CatalogDisposition classification in classifications)
+
+        Guid duplicateId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "Duplicate предложение", "Химки", 2_000_000m, 1_000m,
+                null, null, null, null, "Проверка классификации"), "phase3-manual-duplicate", CancellationToken.None);
+        Guid soldId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Telegram, "Sold предложение", "Химки", 2_000_000m, 1_000m,
+                null, null, null, null, "Проверка классификации"), "phase3-manual-sold", CancellationToken.None);
+        CatalogItemDetail duplicate = await fixture.Workspace.ReadItemAsync(fixture.Manager, duplicateId, CancellationToken.None);
+        Assert.IsNull(duplicate.Item.Url);
+        Assert.IsNull(duplicate.Item.ExternalId);
+        await fixture.Workspace.LinkCatalogItemsAsSameObjectAsync(fixture.Manager,
+            new(duplicateId, duplicate.Item.Version, soldId, "Подтверждено как тот же объект"),
+            "phase3-classify-duplicate", CancellationToken.None);
+        CatalogItemDetail sold = await fixture.Workspace.ReadItemAsync(fixture.Manager, soldId, CancellationToken.None);
+        await fixture.Workspace.SetDispositionAsync(fixture.Manager,
+            new(soldId, sold.Item.Version, CatalogDisposition.Sold, "Подтверждено в тесте"),
+            "phase3-classify-sold", CancellationToken.None);
+
+        foreach (CatalogDisposition classification in new[] { CatalogDisposition.Fake, CatalogDisposition.RemovedAtSource })
         {
             Guid id = await fixture.Workspace.CreateManualAsync(fixture.Manager,
                 new(CatalogSource.Telegram, classification + " предложение", "Химки", 2_000_000m, 1_000m,

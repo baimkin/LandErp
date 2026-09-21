@@ -20,13 +20,17 @@ public sealed class ReleasePackageB103Tests
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, true);
         OrganizationView structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         Guid headAssignedUser = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
-            structure, "Head Assigned", "head-assigned-b103@test.invalid", "ProcurementHead", fixture.DepartmentA, AccessScope.AssignedObjects);
+            structure, "Head Assigned", "head-assigned-b103@test.invalid", "ProcurementHead", fixture.DepartmentA, AccessScope.AssignedObjects,
+            ProcurementTestsHelper.ProcurementHeadAccess(AccessScope.AssignedObjects));
         _ = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
-            structure, "Head Own", "head-own-b103@test.invalid", "ProcurementHead", fixture.DepartmentA, AccessScope.Own);
+            structure, "Head Own", "head-own-b103@test.invalid", "ProcurementHead", fixture.DepartmentA, AccessScope.Own,
+            ProcurementTestsHelper.ProcurementHeadAccess(AccessScope.Own));
         Guid managerOwnUser = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
-            structure, "Manager Own", "manager-own-b103@test.invalid", "ProcurementManager", fixture.DepartmentA, AccessScope.Own);
+            structure, "Manager Own", "manager-own-b103@test.invalid", "ProcurementManager", fixture.DepartmentA, AccessScope.Own,
+            ProcurementTestsHelper.ProcurementManagerAccess(AccessScope.Own));
         Guid managerAssignedUser = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
-            structure, "Manager Assigned", "manager-assigned-b103@test.invalid", "ProcurementManager", fixture.DepartmentA, AccessScope.AssignedObjects);
+            structure, "Manager Assigned", "manager-assigned-b103@test.invalid", "ProcurementManager", fixture.DepartmentA, AccessScope.AssignedObjects,
+            ProcurementTestsHelper.ProcurementManagerAccess(AccessScope.AssignedObjects));
 
         structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         Guid headAssignedEmployee = structure.Employees.Single(item => item.Login == "head-assigned-b103@test.invalid").Id;
@@ -107,9 +111,11 @@ public sealed class ReleasePackageB103Tests
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
         OrganizationView structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         _ = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
-            structure, "Second Owner", "owner2-b103@test.invalid", "Owner", fixture.DepartmentA, AccessScope.Organization);
+            structure, "Second Owner", "owner2-b103@test.invalid", "Owner", fixture.DepartmentA, AccessScope.Organization,
+            EmployeeAccessRules.NoAccess);
         Guid adminUser = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
-            structure, "B1-03 Admin", "admin-b103@test.invalid", "Administrator", fixture.DepartmentA, AccessScope.Organization);
+            structure, "B1-03 Admin", "admin-b103@test.invalid", "Administrator", fixture.DepartmentA, AccessScope.Organization,
+            EmployeeAccessRules.NoAccess);
         await using (LandErpDbContext db = await fixture.Factory.CreateDbContextAsync())
         {
             var admin = await db.Users.SingleAsync(item => item.Id == adminUser);

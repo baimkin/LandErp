@@ -249,6 +249,20 @@ public sealed class AccessV1Ap02WorkflowTests
     }
 
     [TestMethod]
+    public async Task HeadWithIncomingProcessCanTakeIncomingToWork()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        Guid incomingId = await fixture.CreateUnlinkedManualAsync();
+
+        TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(
+            fixture.Head, new(incomingId), "ap02-head-incoming", CancellationToken.None);
+
+        Assert.IsTrue(taken.Created);
+        CaseCard card = await fixture.Workspace.ReadCardAsync(fixture.Head, taken.CaseId, CancellationToken.None);
+        Assert.IsTrue(card.CanManagerDecide);
+    }
+
+    [TestMethod]
     public async Task HeadCanDoManagerWorkButCannotApproveOwnRequest()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
@@ -256,6 +270,11 @@ public sealed class AccessV1Ap02WorkflowTests
         await fixture.SetExplicitAccessAsync(headEmployeeId,
             Access(IncomingAccessLevel.None, ProcurementAccessLevel.Head, CollectionAccessLevel.None,
                 readScope: AccessScope.Organization, workScope: AccessScope.Organization));
+
+        Guid incomingId = await fixture.CreateUnlinkedManualAsync();
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() =>
+            fixture.Workspace.TakeToWorkAsync(fixture.Head, new(incomingId),
+                "ap02-head-without-incoming", CancellationToken.None));
 
         ManualPropertyCaseResult created = await fixture.Workspace.CreateManualCaseAsync(fixture.Head,
             new("Head manager action", "Химки", null, 5_000_000m, 1500m, "AP-02 head"),

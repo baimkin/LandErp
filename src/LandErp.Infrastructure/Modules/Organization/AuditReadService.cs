@@ -357,7 +357,7 @@ public sealed class AuditReadService : IAuditReadService
                 "EmployeeWorkTransferred" => Data("Передана активная работа сотрудника", summary),
                 "EmployeeWorkHandoverPending" => Data("Требуется переназначение после отзыва доступа", summary, "warning"),
                 "EmployeeAccessChanged" => Data("Изменены настройки Access V1 сотрудника", summary),
-                "AssignmentChanged" => Data("Изменены назначение и legacy-доступ сотрудника", summary),
+                "AssignmentChanged" => Data("Изменены назначение, системная роль или административная область сотрудника", summary),
                 "CollectorAgentCreated" => Collection("Подключён парсер", summary), "CollectorAgentRevoked" => Collection("Парсер отключён", summary, "warning"),
                 "CollectorCredentialRotated" => new("Безопасность", "Входы и доступ", "warning", "↻", "Обновлён доступ парсера", summary),
                 "CollectionSearchCreated" => Collection("Создан поисковый запрос", summary), "CollectionSearchUpdated" => Collection("Изменён поисковый запрос", summary),

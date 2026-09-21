@@ -89,7 +89,7 @@ public sealed class IncomingMonitoringTests
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
         var ingested = await fixture.IngestMarketplacePairAsync();
         IncomingCatalogReadService reads = new(
-            fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+            fixture.Factory, fixture.Workspace, TimeProvider.System);
 
         await using (LandErpDbContext db = await fixture.Factory.CreateDbContextAsync())
         {
@@ -257,7 +257,7 @@ public sealed class IncomingMonitoringTests
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(true, false);
         var ingested = await fixture.IngestMarketplacePairAsync();
-        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Workspace, TimeProvider.System);
 
         IncomingCatalogReadPage before = await reads.ReadAsync(fixture.Manager, new(new()), CancellationToken.None);
         Assert.AreEqual(2, before.Summary.New);
@@ -288,7 +288,7 @@ public sealed class IncomingMonitoringTests
     public async Task ProcessedTodayCountsDecisionsButNotSimpleViews()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Workspace, TimeProvider.System);
 
         Guid classifiedId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
             new(CatalogSource.Telegram, "Классифицировать", "Химки", 2_000_000m, 1_000m,
@@ -331,7 +331,7 @@ public sealed class IncomingMonitoringTests
     public async Task DuplicateDetectorExtractsCadastralAndPersistsManagerDecision()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Workspace, TimeProvider.System);
         const string realDescription = """
             Продаём свой участок 6 соток (601 м²) в КП «Солнечный берег», д. Федюково.
             Адрес: Московская обл., Подольск г.о., д. Федюково, КП «Солнечный берег», земельный участок № 58.
@@ -375,7 +375,7 @@ public sealed class IncomingMonitoringTests
     public async Task ConfirmDuplicateMarksIncomingAsDuplicateAndAuditsDecision()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Workspace, TimeProvider.System);
         const string cadastral = "50:27:0020549:439";
 
         await fixture.Workspace.CreateManualAsync(fixture.Manager,
@@ -403,7 +403,7 @@ public sealed class IncomingMonitoringTests
     public async Task DifferentExplicitPlotNumbersSuppressCopiedTemplateFalsePositive()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Workspace, TimeProvider.System);
         string template = "КП «Солнечный берег», земельный участок № {0}. ИЖС, 601 м². "
             + "Электричество по границе, газификация, 700 м до станции. Собственник. "
             + "Тихая зелёная локация рядом с Москвой, инфраструктура в шаговой доступности.";
@@ -423,7 +423,7 @@ public sealed class IncomingMonitoringTests
     public async Task PhotoFingerprintsDriveDuplicatesAndSettingsApplyWithoutRestart()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Workspace, TimeProvider.System);
         IncomingDuplicateMatchingMaintenance matcher = new(fixture.Factory, TimeProvider.System);
         DuplicateDetectionSettingsService settings = new(fixture.Factory, fixture.Access, TimeProvider.System);
 

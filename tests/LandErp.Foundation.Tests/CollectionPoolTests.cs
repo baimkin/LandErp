@@ -27,7 +27,7 @@ public sealed class CollectionPoolTests
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
         TestClock clock = new(); Subject owner = new(ownerId, true);
-        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        CollectionAdministration administration = new(factory, clock);
         AgentConnectionCode code = await administration.CreateConnectionCodeAsync(owner, "Parser PC", "activation", CancellationToken.None);
         CollectorGateway gatewayA = new(factory, clock);
         CollectorProtocolException invalidActivation = await Assert.ThrowsExactlyAsync<CollectorProtocolException>(() =>
@@ -89,7 +89,7 @@ public sealed class CollectionPoolTests
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
         TestClock clock = new();
-        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        CollectionAdministration administration = new(factory, clock);
         Subject owner = new(ownerId, true);
         AgentCredential agent = await CreateRegisteredAsync(administration, factory, clock, owner, "Heartbeat parser", ListingSource.Avito);
         await administration.CreateSearchAsync(owner, new("Heartbeat", CatalogSource.Avito,
@@ -154,7 +154,7 @@ public sealed class CollectionPoolTests
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
         TestClock clock = new();
-        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        CollectionAdministration administration = new(factory, clock);
         Subject owner = new(ownerId, true);
         AgentCredential agent = await CreateRegisteredAsync(administration, factory, clock, owner, "One worker", ListingSource.Avito);
         await administration.CreateSearchAsync(owner, new("First", CatalogSource.Avito,
@@ -186,7 +186,7 @@ public sealed class CollectionPoolTests
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
         TestClock clock = new();
-        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        CollectionAdministration administration = new(factory, clock);
         Subject owner = new(ownerId, true);
         AgentCredential agentA = await CreateRegisteredAsync(administration, factory, clock, owner, "Agent A", ListingSource.Avito);
         AgentCredential agentB = await CreateRegisteredAsync(administration, factory, clock, owner, "Agent B", ListingSource.Avito);
@@ -223,9 +223,8 @@ public sealed class CollectionPoolTests
         await sandbox.GrantRuntimeAsync();
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
-        IAccessControl access = services.GetRequiredService<IAccessControl>();
         TestClock clock = new();
-        CollectionAdministration administration = new(factory, access, clock);
+        CollectionAdministration administration = new(factory, clock);
         Subject owner = new(ownerId, true);
 
         AgentCredential avitoA = await CreateRegisteredAsync(administration, factory, clock, owner, "Avito A", ListingSource.Avito);
@@ -322,7 +321,7 @@ public sealed class CollectionPoolTests
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
         TestClock clock = new();
-        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        CollectionAdministration administration = new(factory, clock);
         Subject owner = new(ownerId, true);
         AgentCredential restricted = await administration.CreateAgentAsync(owner, "Restricted parser", false, "parser-workspace", CancellationToken.None);
         AgentCredential manager = await administration.CreateAgentAsync(owner, "Managing parser", true, "parser-workspace", CancellationToken.None);
@@ -410,7 +409,7 @@ public sealed class CollectionPoolTests
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
         TestClock clock = new(); Subject owner = new(ownerId, true);
-        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        CollectionAdministration administration = new(factory, clock);
         AgentCredential agent = await CreateRegisteredAsync(administration, factory, clock, owner, "Recovery parser", ListingSource.Avito);
         await administration.CreateSearchAsync(owner, new("Recovery", CatalogSource.Avito,
             "https://www.avito.ru/moskva/zemelnye_uchastki", 10), "recovery", CancellationToken.None);

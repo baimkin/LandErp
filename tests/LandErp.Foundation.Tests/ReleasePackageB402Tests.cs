@@ -30,7 +30,7 @@ public sealed class ReleasePackageB402Tests
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
         TestClock clock = new();
         Subject owner = new(ownerId, true);
-        CollectionAdministration administration = new(factory, services.GetRequiredService<IAccessControl>(), clock);
+        CollectionAdministration administration = new(factory, clock);
         AgentCredential agent = await administration.CreateAgentAsync(owner, "Health parser", false, "b402", CancellationToken.None);
         CollectorGateway gateway = new(factory, clock);
         await gateway.RegisterAsync(agent, new(1, "b402", [ListingSource.Avito]), CancellationToken.None);

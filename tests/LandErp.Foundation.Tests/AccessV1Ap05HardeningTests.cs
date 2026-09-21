@@ -57,7 +57,7 @@ public sealed class AccessV1Ap05HardeningTests
             "ap05-assigned-note", CancellationToken.None);
 
         ProcurementQueueV2ReadService queueV2 =
-            new(fixture.Factory, fixture.Access, TimeProvider.System);
+            new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Page v2 = await queueV2.ReadPageAsync(
             fixture.SecondManager, new(), CancellationToken.None);
         Assert.IsTrue(v2.Items.Any(item => item.CaseId == transferred.CaseId));

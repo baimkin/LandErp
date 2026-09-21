@@ -16,7 +16,7 @@ public sealed class CatalogObjectGroupTests
     {
         await using ProcurementTests.Phase1Fixture fixture =
             await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Workspace, TimeProvider.System);
         const string cadastral = "50:27:0020549:439";
 
         Guid first = await CreateAsync(fixture, CatalogSource.Referral, "Источник один", cadastral, "group-a");
@@ -66,7 +66,7 @@ public sealed class CatalogObjectGroupTests
     {
         await using ProcurementTests.Phase1Fixture fixture =
             await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Workspace, TimeProvider.System);
         const string cadastral = "50:08:0060201:77";
 
         Guid first = await CreateAsync(fixture, CatalogSource.Referral, "Первый источник", cadastral, "unlink-a");
@@ -115,7 +115,7 @@ public sealed class CatalogObjectGroupTests
     {
         await using ProcurementTests.Phase1Fixture fixture =
             await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
-        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Workspace, TimeProvider.System);
 
         Guid first = await fixture.Workspace.CreateManualAsync(fixture.Manager,
             new(CatalogSource.Referral, "Лесной участок", "Истра", 4_500_000m, 900m,

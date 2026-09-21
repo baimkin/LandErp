@@ -29,7 +29,7 @@ public sealed class CollectorIntegrationTests
         await sandbox.GrantRuntimeAsync();
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
-        CollectionAdministration admin = new(factory, services.GetRequiredService<IAccessControl>(), TimeProvider.System);
+        CollectionAdministration admin = new(factory, TimeProvider.System);
         AgentConnectionCode code = await admin.CreateConnectionCodeAsync(new(userId, true), "HTTP Parser", "activation", CancellationToken.None);
         AgentActivation request = new(code.AgentId, code.ActivationSecret, "PC-HTTP", 1, "http-test", [ListingSource.Avito]);
         int port = PostgresTests.FreePort(); Uri origin = new($"https://127.0.0.1:{port}/");
@@ -64,8 +64,7 @@ public sealed class CollectorIntegrationTests
         await sandbox.GrantRuntimeAsync();
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         IDbContextFactory<LandErpDbContext> factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
-        IAccessControl access = services.GetRequiredService<IAccessControl>();
-        CollectionAdministration admin = new(factory,access,TimeProvider.System);
+        CollectionAdministration admin = new(factory, TimeProvider.System);
         Subject owner = new(userId,true);
         AgentCredential credential = await admin.CreateAgentAsync(owner,"Control Collector",false,"test",CancellationToken.None);
         await admin.CreateSearchAsync(owner,new("Control Avito",LandErp.Application.Modules.Catalog.Domain.CatalogSource.Avito,"https://www.avito.ru/moskva/zemelnye_uchastki",1),"test",CancellationToken.None);

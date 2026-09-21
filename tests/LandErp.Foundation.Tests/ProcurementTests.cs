@@ -126,7 +126,7 @@ public sealed class ProcurementTests
             new("Недоступный объект", null, null, null, null, "Руководитель не создаёт менеджерский кейс"),
             "head-direct-case", CancellationToken.None));
 
-        ProcurementQueueV2ReadService read = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2ReadService read = new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Detail directWithoutSources = await read.ReadDetailAsync(
             fixture.Manager, direct.CaseId, CancellationToken.None);
         Assert.AreEqual(0, directWithoutSources.Sources.Count);
@@ -182,8 +182,8 @@ public sealed class ProcurementTests
     {
         await using Phase1Fixture fixture = await Phase1Fixture.CreateAsync(includeSecondManager: true, includeTeams: false);
         Guid itemId = await fixture.CreateUnlinkedManualAsync();
-        ProcurementWorkspace first = new(fixture.Factory, fixture.Access, TimeProvider.System, fixture.FileStorage);
-        ProcurementWorkspace second = new(fixture.Factory, fixture.Access, TimeProvider.System, fixture.FileStorage);
+        ProcurementWorkspace first = new(fixture.Factory, TimeProvider.System, fixture.FileStorage);
+        ProcurementWorkspace second = new(fixture.Factory, TimeProvider.System, fixture.FileStorage);
         TakeToWorkResult[] results = await Task.WhenAll(
             first.TakeToWorkAsync(fixture.Manager, new(itemId), "concurrent-a", CancellationToken.None),
             second.TakeToWorkAsync(fixture.SecondManager, new(itemId), "concurrent-b", CancellationToken.None));
@@ -301,7 +301,7 @@ public sealed class ProcurementTests
                 Organization = scope.ServiceProvider.GetRequiredService<IOrganizationWorkspace>(),
                 Access = access,
                 Factory = factory,
-                Workspace = new(factory, access, TimeProvider.System, fileStorage),
+                Workspace = new(factory, TimeProvider.System, fileStorage),
                 FileStorage = fileStorage,
                 Owner = owner,
                 ForeignOwner = new(foreignId, true),
@@ -324,7 +324,7 @@ public sealed class ProcurementTests
 
         public async Task<(Guid AvitoId, Guid CianId, AgentCredential Agent, CollectionAdministration Administration)> IngestMarketplacePairAsync()
         {
-            CollectionAdministration administration = new(Factory, Access, TimeProvider.System);
+            CollectionAdministration administration = new(Factory, TimeProvider.System);
             CollectorGateway gateway = new(Factory, TimeProvider.System);
             AgentCredential agent = await administration.CreateAgentAsync(Owner, "Phase 1 Collector", false, "test", CancellationToken.None);
             await gateway.RegisterAsync(agent, new(1, "phase1", [ListingSource.Avito, ListingSource.Cian]), CancellationToken.None);

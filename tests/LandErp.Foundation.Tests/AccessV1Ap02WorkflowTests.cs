@@ -42,7 +42,7 @@ public sealed class AccessV1Ap02WorkflowTests
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() =>
             fixture.Workspace.ReadIncomingAsync(inspector, new(), CancellationToken.None));
 
-        CollectionAdministration collection = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        CollectionAdministration collection = new(fixture.Factory, TimeProvider.System);
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() =>
             collection.ReadAsync(inspector, CancellationToken.None));
 
@@ -76,7 +76,7 @@ public sealed class AccessV1Ap02WorkflowTests
         ProcurementQueuePage queue = await fixture.Workspace.ReadQueueAsync(reader, new(), CancellationToken.None);
         Assert.IsTrue(queue.Items.Any(item => item.CaseId == taken.CaseId));
 
-        CollectionAdministration collection = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        CollectionAdministration collection = new(fixture.Factory, TimeProvider.System);
         _ = await collection.ReadAsync(reader, CancellationToken.None);
 
         CatalogItemView listing = (await fixture.Workspace.ReadItemAsync(
@@ -175,7 +175,7 @@ public sealed class AccessV1Ap02WorkflowTests
         TakeToWorkResult ownCase = await fixture.Workspace.TakeToWorkAsync(
             fixture.Manager, new(ownListing), "ap02-own-take", CancellationToken.None);
 
-        CollectionAdministration collection = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        CollectionAdministration collection = new(fixture.Factory, TimeProvider.System);
         _ = await collection.ReadAsync(fixture.Manager, CancellationToken.None);
         _ = await collection.CreateGroupAsync(
             fixture.Manager, "AP-02 группа", 10, "ap02-group", CancellationToken.None);

@@ -15,14 +15,13 @@ namespace LandErp.Infrastructure.Modules.Catalog;
 /// </summary>
 public sealed class IncomingCatalogReadService(
     IDbContextFactory<LandErpDbContext> factory,
-    IAccessControl legacyAccess,
     IEmployeeAccessService employeeAccess,
     ICatalogWorkspace catalogWorkspace,
     TimeProvider time) : IIncomingCatalogReadService
 {
-    public IncomingCatalogReadService(IDbContextFactory<LandErpDbContext> factory, IAccessControl legacyAccess,
+    public IncomingCatalogReadService(IDbContextFactory<LandErpDbContext> factory,
         ICatalogWorkspace catalogWorkspace, TimeProvider time)
-        : this(factory, legacyAccess, new EmployeeAccessService(factory), catalogWorkspace, time) { }
+        : this(factory, new EmployeeAccessService(factory), catalogWorkspace, time) { }
 
     private async Task<AccessContext> RequireReadAsync(Subject subject, CancellationToken cancellationToken)
     {

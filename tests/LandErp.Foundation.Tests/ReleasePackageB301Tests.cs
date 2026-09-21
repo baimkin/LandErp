@@ -70,7 +70,7 @@ public sealed class ReleasePackageB301Tests
         Guid sourceId = await fixture.CreateUnlinkedManualAsync();
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(sourceId), "b301-take", CancellationToken.None);
         FailOnceFileStorage storage = new();
-        ProcurementWorkspace workspace = new(fixture.Factory, fixture.Access, TimeProvider.System, storage);
+        ProcurementWorkspace workspace = new(fixture.Factory, TimeProvider.System, storage);
         byte[] bytes = Encoding.UTF8.GetBytes("fault injected document");
 
         await Assert.ThrowsExactlyAsync<FileStorageException>(() => workspace.AddAttachmentAsync(fixture.Manager,

@@ -15,12 +15,11 @@ namespace LandErp.Infrastructure.Modules.Collection;
 
 public sealed class CollectionAdministration(
     IDbContextFactory<LandErpDbContext> factory,
-    IAccessControl legacyAccess,
     IEmployeeAccessService employeeAccess,
     TimeProvider time) : ICollectionAdministration
 {
-    public CollectionAdministration(IDbContextFactory<LandErpDbContext> factory, IAccessControl legacyAccess, TimeProvider time)
-        : this(factory, legacyAccess, new EmployeeAccessService(factory), time) { }
+    public CollectionAdministration(IDbContextFactory<LandErpDbContext> factory, TimeProvider time)
+        : this(factory, new EmployeeAccessService(factory), time) { }
 
     private async Task<AccessContext> RequireAsync(Subject subject, bool manage, CancellationToken cancellationToken)
     {

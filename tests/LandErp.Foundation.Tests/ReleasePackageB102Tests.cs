@@ -28,7 +28,7 @@ public sealed class ReleasePackageB102Tests
         CaseCard managerCard = await fixture.Workspace.ReadCardAsync(fixture.Manager, created.CaseId, CancellationToken.None);
         Assert.AreEqual("acquired", managerCard.Item.Stage);
         Assert.IsFalse(managerCard.CanManagerDecide);
-        ProcurementQueueV2ReadService read = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2ReadService read = new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Detail detail = await read.ReadDetailAsync(fixture.Manager, created.CaseId, CancellationToken.None);
         Assert.IsFalse(detail.CanManagerDecide);
 
@@ -136,7 +136,7 @@ public sealed class ReleasePackageB102Tests
     }
 
     private static ProcurementWorkspace NewWorkspace(ProcurementTests.Phase1Fixture fixture, DateTimeOffset now) =>
-        new(fixture.Factory, fixture.Access, new FixedTimeProvider(now), fixture.FileStorage);
+        new(fixture.Factory, new FixedTimeProvider(now), fixture.FileStorage);
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {

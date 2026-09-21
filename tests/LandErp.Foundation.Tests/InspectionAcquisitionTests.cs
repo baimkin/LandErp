@@ -153,7 +153,7 @@ public sealed class InspectionAcquisitionTests
 
         card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
         byte[] photo = Encoding.UTF8.GetBytes("inspection-photo");
-        ProcurementWorkspace failingUpload = new(fixture.Factory, fixture.Access, TimeProvider.System, new FailingFileStorage());
+        ProcurementWorkspace failingUpload = new(fixture.Factory, TimeProvider.System, new FailingFileStorage());
         await Assert.ThrowsExactlyAsync<IOException>(() => failingUpload.AddAttachmentAsync(fixture.Manager,
             new(taken.CaseId, CaseAttachmentOwner.Inspection, inspectionId, CaseAttachmentKind.Photo,
                 "Фото с временной ошибкой", "Ссылка должна сохраниться", "retry.jpg", "image/jpeg", photo, null),

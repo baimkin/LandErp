@@ -22,14 +22,13 @@ namespace LandErp.Infrastructure.Modules.Procurement;
 /// <summary>Catalog is organization-shared; procurement access is derived only from case responsibility.</summary>
 public sealed class ProcurementWorkspace(
     IDbContextFactory<LandErpDbContext> factory,
-    IAccessControl legacyAccess,
     IEmployeeAccessService employeeAccess,
     TimeProvider time,
     IFileStorage fileStorage) : IProcurementWorkspace, ICatalogWorkspace
 {
-    public ProcurementWorkspace(IDbContextFactory<LandErpDbContext> factory, IAccessControl legacyAccess,
+    public ProcurementWorkspace(IDbContextFactory<LandErpDbContext> factory,
         TimeProvider time, IFileStorage fileStorage)
-        : this(factory, legacyAccess, new EmployeeAccessService(factory), time, fileStorage) { }
+        : this(factory, new EmployeeAccessService(factory), time, fileStorage) { }
 
     private sealed class Row
     {

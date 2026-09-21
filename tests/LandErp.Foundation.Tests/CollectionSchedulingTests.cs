@@ -106,9 +106,8 @@ public sealed class CollectionSchedulingTests
         await sandbox.GrantRuntimeAsync();
         await using ServiceProvider services = IdentityOrganizationTests.Services(sandbox.RuntimeConnection);
         var factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
-        var access = services.GetRequiredService<IAccessControl>();
         Clock clock = new(new(2026, 9, 15, 8, 0, 0, TimeSpan.Zero));
-        CollectionAdministration admin = new(factory, access, clock);
+        CollectionAdministration admin = new(factory, clock);
         Subject owner = new(ownerId, true);
         Guid groupId = await admin.CreateGroupAsync(owner, "Московская область", 10, "schedule", CancellationToken.None);
         await admin.CreateSearchAsync(owner, new("Интервальный Avito", CatalogSource.Avito,
@@ -171,9 +170,7 @@ public sealed class CollectionSchedulingTests
             await db.SaveChangesAsync();
         }
 
-        AccessContext organization = new(Guid.CreateVersion7(), organizationId, null, null, AccessScope.Organization);
-        CollectionAdministration readOnly = new(fixture.Factory,
-            new RestrictedAccess(organization, Permissions.CollectionRead), fixture.Clock);
+        CollectionAdministration readOnly = new(fixture.Factory, fixture.Clock);
         CollectionAdminView view = await readOnly.ReadAsync(new(Guid.CreateVersion7(), true), CancellationToken.None);
         Assert.AreEqual(1, view.PendingJobs, "Pending KPI must not depend on the 100-row history window.");
         Assert.IsFalse(view.Jobs.Any(item => item.State == "Pending"));
@@ -223,7 +220,7 @@ public sealed class CollectionSchedulingTests
             this.sandbox = sandbox;
             this.services = services;
             Factory = services.GetRequiredService<IDbContextFactory<LandErpDbContext>>();
-            Admin = new(Factory, services.GetRequiredService<IAccessControl>(), clock);
+            Admin = new(Factory, clock);
             Owner = new(ownerId, true);
             Clock = clock;
         }
@@ -251,15 +248,6 @@ public sealed class CollectionSchedulingTests
     {
         public override DateTimeOffset GetUtcNow() => now;
         public void Advance(TimeSpan value) => now += value;
-    }
-
-    private sealed class RestrictedAccess(AccessContext context, params string[] allowed) : IAccessControl
-    {
-        public Task<AccessContext> ResolveAsync(Subject subject, CancellationToken cancellationToken) => Task.FromResult(context);
-        public Task<AccessContext> RequireAsync(Subject subject, string permission, CancellationToken cancellationToken) =>
-            allowed.Contains(permission, StringComparer.Ordinal)
-                ? Task.FromResult(context)
-                : Task.FromException<AccessContext>(new AccessDeniedException());
     }
 
     [TestMethod]
@@ -317,15 +305,7 @@ public sealed class CollectionSchedulingTests
     {
         await using var f = await SchedulingFixture.CreateAsync("department-collection@test.invalid",
             new(2026, 9, 17, 5, 0, 0, TimeSpan.Zero));
-        Guid organizationId;
-        await using (LandErpDbContext db = await f.Factory.CreateDbContextAsync())
-            organizationId = await db.Organizations.Select(item => item.Id).SingleAsync();
-
-        AccessContext departmentContext = new(Guid.CreateVersion7(), organizationId, Guid.CreateVersion7(), null,
-            AccessScope.Department);
-        CollectionAdministration administration = new(f.Factory,
-            new RestrictedAccess(departmentContext, Permissions.CollectionRead, Permissions.CollectionManage, Permissions.AgentsManage),
-            f.Clock);
+        CollectionAdministration administration = new(f.Factory, f.Clock);
         Subject subject = new(Guid.CreateVersion7(), false);
 
         Assert.AreEqual(0, (await administration.ReadAsync(subject, default)).Searches.Count);

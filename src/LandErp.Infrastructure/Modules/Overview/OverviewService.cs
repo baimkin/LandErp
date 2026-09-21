@@ -21,12 +21,11 @@ namespace LandErp.Infrastructure.Modules.Overview;
 
 public sealed class OverviewService(
     IDbContextFactory<LandErpDbContext> factory,
-    IAccessControl legacyAccess,
     IEmployeeAccessService employeeAccess,
     TimeProvider time) : IOverviewService
 {
-    public OverviewService(IDbContextFactory<LandErpDbContext> factory, IAccessControl legacyAccess, TimeProvider time)
-        : this(factory, legacyAccess, new EmployeeAccessService(factory), time) { }
+    public OverviewService(IDbContextFactory<LandErpDbContext> factory, TimeProvider time)
+        : this(factory, new EmployeeAccessService(factory), time) { }
 
     private static readonly IncomingLandType[] DefaultTypes = Enum.GetValues<IncomingLandType>();
     private static readonly int[] AllowedPeriods = [7, 30, 90, 180];

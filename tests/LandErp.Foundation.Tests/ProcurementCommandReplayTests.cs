@@ -235,5 +235,5 @@ public sealed class ProcurementCommandReplayTests
         "Объект для проверки B1-01", "Химки", "50:10:0000000:101", 4_000_000m, 900m, "Синтетический тест B1-01", id);
 
     private static ProcurementWorkspace NewWorkspace(ProcurementTests.Phase1Fixture fixture) =>
-        new(fixture.Factory, fixture.Access, TimeProvider.System, fixture.FileStorage);
+        new(fixture.Factory, TimeProvider.System, fixture.FileStorage);
 }

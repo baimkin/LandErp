@@ -40,7 +40,7 @@ public sealed class ReleasePackageB302Tests
         Guid sourceId = await fixture.CreateUnlinkedManualAsync();
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(sourceId), "b302-take", CancellationToken.None);
         CountingFileStorage storage = new();
-        ProcurementWorkspace workspace = new(fixture.Factory, fixture.Access, TimeProvider.System, storage);
+        ProcurementWorkspace workspace = new(fixture.Factory, TimeProvider.System, storage);
         byte[] oversize = new byte[FileUploadLimits.MaxRawFileBytes + 1];
 
         FileUploadLimitException error = await Assert.ThrowsExactlyAsync<FileUploadLimitException>(() =>

@@ -13,13 +13,11 @@ namespace LandErp.Infrastructure.Modules.Procurement;
 /// <summary>Case-centric read projection for the approved procurement queue V2 UI.</summary>
 public sealed partial class ProcurementQueueV2ReadService(
     IDbContextFactory<LandErpDbContext> factory,
-    IAccessControl legacyAccess,
     IEmployeeAccessService employeeAccess,
     TimeProvider clock) : IProcurementQueueV2ReadService
 {
-    public ProcurementQueueV2ReadService(IDbContextFactory<LandErpDbContext> factory,
-        IAccessControl legacyAccess, TimeProvider clock)
-        : this(factory, legacyAccess, new EmployeeAccessService(factory), clock) { }
+    public ProcurementQueueV2ReadService(IDbContextFactory<LandErpDbContext> factory, TimeProvider clock)
+        : this(factory, new EmployeeAccessService(factory), clock) { }
 
     private readonly IDbContextFactory<LandErpDbContext> _factory = factory;
     private readonly IEmployeeAccessService _accessV1 = employeeAccess;

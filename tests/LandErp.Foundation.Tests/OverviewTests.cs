@@ -40,7 +40,7 @@ public sealed class OverviewTests
         }
         await fixture.IngestChangedAvitoAsync(marketplace.Agent, marketplace.Administration, 3_000_000m);
 
-        OverviewService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        OverviewService service = new(fixture.Factory, TimeProvider.System);
         MarketGroupPage initial = await service.ReadMarketGroupsAsync(fixture.Owner, new(Size: 20), CancellationToken.None);
         MarketGroupRow primary = initial.Items.Single(item => item.SearchGroupId == primaryGroup);
         Assert.AreEqual(1, primary.IncludedCount, "A listing observed more than once must be counted once.");
@@ -100,11 +100,11 @@ public sealed class OverviewTests
             await db.SaveChangesAsync();
         }
 
-        OverviewService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        OverviewService service = new(fixture.Factory, TimeProvider.System);
         OverviewView firstOverview = await service.ReadAsync(fixture.Manager, CancellationToken.None);
         OverviewView secondOverview = await service.ReadAsync(fixture.SecondManager, CancellationToken.None);
         OverviewView foreignOverview = await service.ReadAsync(fixture.ForeignOwner, CancellationToken.None);
-        ProcurementQueueV2ReadService queue = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2ReadService queue = new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Page ownerQueue = await queue.ReadPageAsync(fixture.Owner, new(), CancellationToken.None);
         ProcurementQueueV2Page ownerMine = await queue.ReadPageAsync(fixture.Owner, new(MineOnly: true), CancellationToken.None);
         ProcurementQueueV2Page managerMine = await queue.ReadPageAsync(fixture.Manager, new(MineOnly: true), CancellationToken.None);

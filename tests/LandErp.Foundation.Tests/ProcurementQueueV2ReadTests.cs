@@ -61,7 +61,7 @@ public sealed class ProcurementQueueV2ReadTests
             new(caseId, CaseAttachmentOwner.Inspection, inspectionId, CaseAttachmentKind.Document,
                 "Схема участка", "", "scheme.pdf", "application/pdf", content, null), "inspection-document", CancellationToken.None);
 
-        ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2ReadService service = new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Detail detail = await service.ReadDetailAsync(fixture.Manager, caseId, CancellationToken.None);
         Assert.AreEqual(3, detail.Negotiations.Count, "Drawer remains a short preview.");
         Assert.AreEqual(3, detail.Inspection.MaterialCount);
@@ -100,7 +100,7 @@ public sealed class ProcurementQueueV2ReadTests
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(includeSecondManager: true, includeTeams: false);
         Guid caseId = await fixture.InsertIndependentCaseAsync("Участок для следующего действия");
-        ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2ReadService service = new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Detail before = await service.ReadDetailAsync(fixture.Manager, caseId, CancellationToken.None);
         Guid secondManagerId = fixture.EmployeeId("manager2-phase1@test.invalid");
         DateTimeOffset due = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.AddDays(3).ToUnixTimeMilliseconds());
@@ -175,7 +175,7 @@ public sealed class ProcurementQueueV2ReadTests
             await db.SaveChangesAsync();
         }
 
-        ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2ReadService service = new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Page cadastral = await service.ReadPageAsync(fixture.Manager,
             new ProcurementQueueV2Filter(Text: "50:10:1234567:89", Size: 1), CancellationToken.None);
         Assert.AreEqual(1, cadastral.Total);
@@ -215,7 +215,7 @@ public sealed class ProcurementQueueV2ReadTests
             source.SellerName = "Иван Иванов";
             await db.SaveChangesAsync();
         }
-        ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2ReadService service = new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Page page = await service.ReadPageAsync(fixture.Manager,
             new ProcurementQueueV2Filter(Text: "10001", Source: CatalogSource.Avito, SourceChangedOnly: true), CancellationToken.None);
 
@@ -257,7 +257,7 @@ public sealed class ProcurementQueueV2ReadTests
         await fixture.ChangeScopeAsync("manager2-phase1@test.invalid", AccessScope.Team, fixture.TeamB);
         Guid itemId = await fixture.CreateUnlinkedManualAsync();
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(itemId), "v2-scope", CancellationToken.None);
-        ProcurementQueueV2ReadService service = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2ReadService service = new(fixture.Factory, TimeProvider.System);
 
         Assert.AreEqual(1, (await service.ReadPageAsync(fixture.Manager, new(), CancellationToken.None)).Total);
         Assert.AreEqual(1, (await fixture.Workspace.ReadQueueAsync(fixture.Manager, new(), CancellationToken.None)).Total);

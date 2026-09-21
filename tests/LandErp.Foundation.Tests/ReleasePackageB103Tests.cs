@@ -69,7 +69,7 @@ public sealed class ReleasePackageB103Tests
         Assert.IsTrue(ownCard.Assignees.Any(item => item.EmployeeId == managerOwnEmployee));
         Assert.IsFalse(ownCard.Assignees.Any(item => item.EmployeeId == managerAssignedEmployee));
 
-        ProcurementQueueV2ReadService read = new(fixture.Factory, fixture.Access, TimeProvider.System);
+        ProcurementQueueV2ReadService read = new(fixture.Factory, TimeProvider.System);
         ProcurementQueueV2Detail detail = await read.ReadDetailAsync(managerOwn, created.CaseId, CancellationToken.None);
         Assert.IsFalse(detail.AvailableAssignees.Any(item => item.Id == managerAssignedEmployee));
         Assert.IsTrue(detail.AvailableAssignees.Any(item => item.Id == managerOwnEmployee));

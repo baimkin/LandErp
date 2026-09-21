@@ -50,7 +50,7 @@ public sealed class EmployeeAccessSettingsTests
     public async Task ExplicitSettingsAreRequiredPersistedAndOwnerProtected()
     {
         await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
-        await using (LandErpDbContext db = sandbox.Context()) await db.Database.MigrateAsync();
+        await using (LandErpDbContext migratorDb = sandbox.Context()) await migratorDb.Database.MigrateAsync();
 
         await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
         Guid ownerUserId = await IdentityOrganizationTests.BootstrapAsync(bootstrap, "access-v1-owner", "Access V1 organization");

@@ -28,7 +28,7 @@ public sealed class YandexDiskAttachmentTests
         using YandexDiskStorageTests.DiskHandler handler = new() { LoseUploadResponse = true };
         using HttpClient http = new(handler);
         using YandexDiskFileStorage cloud = new(YandexDiskStorageTests.Options(), http);
-        ProcurementWorkspace workspace = new(fixture.Factory, fixture.Access, TimeProvider.System, cloud);
+        ProcurementWorkspace workspace = new(fixture.Factory, TimeProvider.System, cloud);
         byte[] content = Encoding.UTF8.GetBytes("synthetic project document");
         await Assert.ThrowsExactlyAsync<FileStorageException>(() => workspace.AddAttachmentAsync(fixture.Manager,
             new(taken.CaseId, CaseAttachmentOwner.Case, null, CaseAttachmentKind.Document, "Проверка хранилища", "",

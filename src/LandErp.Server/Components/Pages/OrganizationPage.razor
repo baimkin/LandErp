@@ -122,7 +122,7 @@ else if(view!=null)
                     <label class="check-field dossier-wide"><InputCheckbox @bind-Value="employeeInput.MustChangePassword" disabled="@(editingEmployee!=null)" /> Попросить сменить временный пароль при первом входе</label>
 
                     <AuthorizeView Policy="roles.manage">
-                            <Authorized>
+                            <Authorized Context="authorizedAccess">
                                 <section class="organization-access dossier-wide">
                                     <div class="section-heading"><div><h3>Доступ</h3><p class="subtle">Права задаются отдельно от должности, отдела и руководителя.</p></div></div>
                                     @if(accessLoading)
@@ -178,7 +178,7 @@ else if(view!=null)
                                 </section>
 
                             </Authorized>
-                            <NotAuthorized>
+                            <NotAuthorized Context="unauthorizedAccess">
                                 <section class="organization-access dossier-wide">
                                     <div class="section-heading"><div><h3>Доступ</h3><p class="subtle">Только просмотр effective Access V1.</p></div></div>
                                     @if(editingAccess!=null)

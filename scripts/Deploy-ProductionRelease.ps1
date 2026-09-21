@@ -54,7 +54,27 @@ function Register-LandErpTask([string]$Name,[string]$Service) {
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'S-1-5-19' -LogonType ServiceAccount -RunLevel Limited
     Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger -Settings $settings -Principal $taskPrincipal -Description "Managed LandErp $Service process. Installed by repository deployment script." -Force -ErrorAction Stop | Out-Null
 }
+function Stop-InstalledLandErpProcesses {
+    $releasesRoot = [IO.Path]::GetFullPath((Join-Path $InstallRoot 'releases')).TrimEnd('\') + '\'
+    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name = 'LandErp.Server.exe' OR Name = 'LandErp.Worker.exe'")) {
+        $path = [string]$process.ExecutablePath
+        if ($path.StartsWith($releasesRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+function Assert-ExpectedServerListener {
+    $expected = [IO.Path]::GetFullPath((Join-Path $releaseDirectory 'Server\LandErp.Server.exe'))
+    $addresses = if ($listenUri.Host -eq 'localhost') { @('127.0.0.1','::1') } else { @($listenUri.Host) }
+    $listeners = @(Get-NetTCPConnection -LocalPort $listenUri.Port -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -in $addresses })
+    foreach ($listener in $listeners) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)"
+        if ($process -and [string]$process.ExecutablePath -ieq $expected) { return }
+    }
+    throw "Deployment health check reached a Server other than release $version."
+}
 foreach ($task in @('LandErp Server','LandErp Worker')) { Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue }
+Stop-InstalledLandErpProcesses
 Move-Item -LiteralPath $tempCurrent -Destination $currentFile -Force
 Register-LandErpTask 'LandErp Server' 'Server'
 Register-LandErpTask 'LandErp Worker' 'Worker'
@@ -64,13 +84,15 @@ try {
     $live = $false
     for ($attempt=0; $attempt -lt 30; $attempt++) { try { $response = Invoke-WebRequest -UseBasicParsing -Uri ($ServerUrl.TrimEnd('/') + '/health/live') -Headers $healthHeaders -TimeoutSec 2; if ($response.StatusCode -eq 200) { $live = $true; break } } catch { }; Start-Sleep -Seconds 1 }
     if (-not $live) { throw 'Server did not become live after deployment.' }
+    Assert-ExpectedServerListener
     $ready = Invoke-WebRequest -UseBasicParsing -Uri ($ServerUrl.TrimEnd('/') + '/health/ready') -Headers $healthHeaders -TimeoutSec 5
     if ($ready.StatusCode -ne 200) { throw 'Server is live but Database readiness failed.' }
 }
 catch {
-    if ($null -ne $previous) { Stop-ScheduledTask -TaskName 'LandErp Server' -ErrorAction SilentlyContinue; Stop-ScheduledTask -TaskName 'LandErp Worker' -ErrorAction SilentlyContinue; $previous | Set-Content -LiteralPath $currentFile -Encoding UTF8; Start-ScheduledTask -TaskName 'LandErp Worker'; Start-ScheduledTask -TaskName 'LandErp Server'; throw 'Deployment health check failed; previous release metadata was restored and previous tasks restarted.' }
+    if ($null -ne $previous) { Stop-ScheduledTask -TaskName 'LandErp Server' -ErrorAction SilentlyContinue; Stop-ScheduledTask -TaskName 'LandErp Worker' -ErrorAction SilentlyContinue; Stop-InstalledLandErpProcesses; $previous | Set-Content -LiteralPath $currentFile -Encoding UTF8; Start-ScheduledTask -TaskName 'LandErp Worker'; Start-ScheduledTask -TaskName 'LandErp Server'; throw 'Deployment health check failed; previous release metadata was restored and previous tasks restarted.' }
     Stop-ScheduledTask -TaskName 'LandErp Server' -ErrorAction SilentlyContinue
     Stop-ScheduledTask -TaskName 'LandErp Worker' -ErrorAction SilentlyContinue
+    Stop-InstalledLandErpProcesses
     throw 'First deployment health check failed; managed tasks were stopped to avoid a restart loop.'
 }
 Write-Output "LandErp release $version deployed."

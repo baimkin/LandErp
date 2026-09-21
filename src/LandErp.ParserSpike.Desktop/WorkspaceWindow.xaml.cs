@@ -409,12 +409,13 @@ public partial class WorkspaceWindow : Window
     }
     private string ListingContext(HistoryRow[] history)
     {
-        if (controller == null || history.Count == 0) return "Контекст запуска не найден.";
+        WorkspaceController? activeController = controller;
+        if (activeController == null || history.Length == 0) return "Контекст запуска не найден.";
         HistoryRow latest = history[0];
-        CollectionJob? job = controller.Store.Jobs().FirstOrDefault(x => x.Id == latest.JobId);
+        CollectionJob? job = activeController.Store.Jobs().FirstOrDefault(x => x.Id == latest.JobId);
         if (job == null) return $"Job: {latest.JobId}\nСтраница: {latest.Page}";
         string label = searches.FirstOrDefault(x => x.Id == job.LinkId || x.Url == job.Url)?.Label ?? new Uri(job.Url).Host;
-        int? hint = controller.Store.Completion(job.Id)?.SourceCountHint;
+        int? hint = activeController.Store.Completion(job.Id)?.SourceCountHint;
         return $"Поиск: {label}\nJob: {job.Id}\nСтраница: {latest.Page}\nPass: {job.PassId}" +
             (hint is int count ? $"\nОбъявлений по данным источника: {count}" : "");
     }

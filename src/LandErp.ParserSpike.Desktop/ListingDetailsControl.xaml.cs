@@ -77,12 +77,12 @@ public partial class ListingDetailsControl : UserControl
 
     private static string History(HistoryRow[] history)
     {
-        if (history.Count == 0) return "Истории пока нет.";
+        if (history.Length == 0) return "Истории пока нет.";
         List<string> rows = [];
-        for (int index = 0; index < Math.Min(100, history.Count); index++)
+        for (int index = 0; index < Math.Min(100, history.Length); index++)
         {
             HistoryRow current = history[index];
-            ListingObservation? previous = index + 1 < history.Count ? history[index + 1].Observation : null;
+            ListingObservation? previous = index + 1 < history.Length ? history[index + 1].Observation : null;
             string changes = previous == null ? "первое сохранённое наблюдение" : Changes(previous, current.Observation);
             rows.Add($"{current.Observation.ObservedAtUtc.ToLocalTime():dd.MM.yyyy HH:mm} · стр. {current.Page} · {changes}");
         }
@@ -119,23 +119,39 @@ public partial class ListingDetailsControl : UserControl
         static string T(string name, TextValue value) => $"{name}: {value.Presence} | raw={value.Raw ?? "<null>"}";
         static string N(string name, NumberValue value) => $"{name}: {value.Presence} | raw={value.Raw ?? "<null>"} | parsed={value.Parsed?.ToString(CultureInfo.InvariantCulture) ?? "<null>"}";
         StringBuilder text = new();
-        text.AppendLine($"schemaVersion: {data.SchemaVersion}").AppendLine($"adapterVersion: {data.AdapterVersion}")
-            .AppendLine($"provenance: {data.Provenance}").AppendLine($"source: {data.Source}").AppendLine($"externalId: {data.ExternalId}")
-            .AppendLine($"url: {data.Url}").AppendLine($"observedAtUtc: {data.ObservedAtUtc:O}")
-            .AppendLine($"sourcePublishedAtUtc: {data.SourcePublishedAtUtc?.ToString("O") ?? "<null>"}")
-            .AppendLine(T("title", data.Title)).AppendLine(N("price", data.Price)).AppendLine(N("unitPrice", data.UnitPrice))
-            .AppendLine(N("areaSquareMeters", data.AreaSquareMeters)).AppendLine(T("location", data.Location))
-            .AppendLine(T("transport", data.Transport)).AppendLine(T("description", data.Description))
-            .AppendLine(T("dateText", data.DateText)).AppendLine(T("cadastralNumber", data.CadastralNumber))
-            .AppendLine(N("latitude", data.Latitude)).AppendLine(N("longitude", data.Longitude))
-            .AppendLine("declaredLandTypes: " + string.Join(", ", data.DeclaredLandTypes))
-            .AppendLine("inferredLandTypes: " + string.Join(", ", data.InferredLandTypes))
-            .AppendLine($"landTypeConflict: {data.LandTypeConflict}").AppendLine(T("sellerName", data.SellerName))
-            .AppendLine(T("sellerType", data.SellerType)).AppendLine(T("sellerUrl", data.SellerUrl))
-            .AppendLine("warnings: " + (data.Warnings.Length == 0 ? "<none>" : string.Join(", ", data.Warnings)))
-            .AppendLine($"photos: {data.PhotoUrls.Length}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"schemaVersion: {data.SchemaVersion}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"adapterVersion: {data.AdapterVersion}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"provenance: {data.Provenance}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"source: {data.Source}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"externalId: {data.ExternalId}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"url: {data.Url}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"observedAtUtc: {data.ObservedAtUtc:O}");
+        text.AppendLine(CultureInfo.InvariantCulture, $"sourcePublishedAtUtc: {data.SourcePublishedAtUtc?.ToString("O", CultureInfo.InvariantCulture) ?? "<null>"}");
+        text.AppendLine(T("title", data.Title));
+        text.AppendLine(N("price", data.Price));
+        text.AppendLine(N("unitPrice", data.UnitPrice));
+        text.AppendLine(N("areaSquareMeters", data.AreaSquareMeters));
+        text.AppendLine(T("location", data.Location));
+        text.AppendLine(T("transport", data.Transport));
+        text.AppendLine(T("description", data.Description));
+        text.AppendLine(T("dateText", data.DateText));
+        text.AppendLine(T("cadastralNumber", data.CadastralNumber));
+        text.AppendLine(N("latitude", data.Latitude));
+        text.AppendLine(N("longitude", data.Longitude));
+        text.AppendLine("declaredLandTypes: " + string.Join(", ", data.DeclaredLandTypes));
+        text.AppendLine("inferredLandTypes: " + string.Join(", ", data.InferredLandTypes));
+        text.AppendLine(CultureInfo.InvariantCulture, $"landTypeConflict: {data.LandTypeConflict}");
+        text.AppendLine(T("sellerName", data.SellerName));
+        text.AppendLine(T("sellerType", data.SellerType));
+        text.AppendLine(T("sellerUrl", data.SellerUrl));
+        text.AppendLine("warnings: " + (data.Warnings.Length == 0 ? "<none>" : string.Join(", ", data.Warnings)));
+        text.AppendLine(CultureInfo.InvariantCulture, $"photos: {data.PhotoUrls.Length}");
         foreach (string photo in data.PhotoUrls) text.AppendLine("  " + photo);
-        if (history.Count > 0) text.AppendLine($"latestJobId: {history[0].JobId}").AppendLine($"latestPage: {history[0].Page}");
+        if (history.Length > 0)
+        {
+            text.AppendLine(CultureInfo.InvariantCulture, $"latestJobId: {history[0].JobId}");
+            text.AppendLine(CultureInfo.InvariantCulture, $"latestPage: {history[0].Page}");
+        }
         return text.ToString();
     }
 

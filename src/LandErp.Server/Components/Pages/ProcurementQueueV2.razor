@@ -510,7 +510,7 @@
                     <section class="inspection-report-head">
                         <div><span>Статус</span><b>@(inspectionReport.Status == InspectionStatus.Completed ? "Завершён" : "Черновик")</b></div>
                         <div><span>Инспектор</span><b>@inspectionReport.Inspector</b></div>
-                        <div><span>Дата</span><b>@ShortDateTime(inspectionReport.CompletedAt ?? inspectionReport.StartedAt)</b></div>
+                        <div><span>Дата</span><b>@(inspectionReport.CompletedAt is { } completedAt ? ShortDateTime(completedAt) : inspectionReport.StartedAt is { } startedAt ? ShortDateTime(startedAt) : "—")</b></div>
                     </section>
                     @if (!string.IsNullOrWhiteSpace(inspectionReport.OverallConclusion)) { <div class="report-note"><b>Итог</b><p>@inspectionReport.OverallConclusion</p></div> }
                     @if (!string.IsNullOrWhiteSpace(inspectionReport.PreliminaryDecision)) { <div class="report-note"><b>Предварительное решение</b><p>@inspectionReport.PreliminaryDecision</p></div> }

@@ -80,9 +80,9 @@ public sealed class ListingDetailsUiTests
                 Assert.AreSame(firstWindow, window.OwnedWindows.OfType<ListingDetailsWindow>().Single());
 
                 firstWindow.Close();
-                await Until(() => window.OwnedWindows.OfType<ListingDetailsWindow>().Count() == 0);
+                await Until(() => !window.OwnedWindows.OfType<ListingDetailsWindow>().Any());
                 grid.SelectedIndex = 0;
-                await Until(() => window.OwnedWindows.OfType<ListingDetailsWindow>().Count() == 1);
+                await Until(() => window.OwnedWindows.OfType<ListingDetailsWindow>().Any());
                 ListingDetailsWindow reopened = window.OwnedWindows.OfType<ListingDetailsWindow>().Single();
                 Assert.AreNotSame(firstWindow, reopened);
                 Assert.AreEqual(((ListingRow)grid.SelectedItem).ExternalId, reopened.CurrentExternalId);

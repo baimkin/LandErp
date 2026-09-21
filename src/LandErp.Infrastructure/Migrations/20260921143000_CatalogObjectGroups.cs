@@ -10,6 +10,9 @@ namespace LandErp.Infrastructure.Migrations;
 [Migration("20260921143000_CatalogObjectGroups")]
 public partial class CatalogObjectGroups : Migration
 {
+    private static readonly string[] OrganizationUpdatedColumns = ["organization_id", "updated_at"];
+    private static readonly string[] OrganizationGroupColumns = ["organization_id", "object_group_id"];
+
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.CreateTable(
@@ -43,7 +46,7 @@ public partial class CatalogObjectGroups : Migration
             name: "ix_object_groups_organization_id_updated_at",
             schema: "catalog",
             table: "object_groups",
-            columns: new[] { "organization_id", "updated_at" });
+            columns: OrganizationUpdatedColumns);
 
         migrationBuilder.AddColumn<Guid>(
             name: "object_group_id",
@@ -54,10 +57,16 @@ public partial class CatalogObjectGroups : Migration
             comment: "Опциональная связь объявления с подтверждённой группой одного физического объекта; null означает самостоятельное объявление.");
 
         migrationBuilder.CreateIndex(
+            name: "ix_listings_object_group_id",
+            schema: "catalog",
+            table: "listings",
+            column: "object_group_id");
+
+        migrationBuilder.CreateIndex(
             name: "ix_listings_organization_id_object_group_id",
             schema: "catalog",
             table: "listings",
-            columns: new[] { "organization_id", "object_group_id" },
+            columns: OrganizationGroupColumns,
             filter: "object_group_id IS NOT NULL");
 
         migrationBuilder.AddForeignKey(
@@ -75,6 +84,11 @@ public partial class CatalogObjectGroups : Migration
     {
         migrationBuilder.DropForeignKey(
             name: "fk_listings_object_group_id",
+            schema: "catalog",
+            table: "listings");
+
+        migrationBuilder.DropIndex(
+            name: "ix_listings_object_group_id",
             schema: "catalog",
             table: "listings");
 

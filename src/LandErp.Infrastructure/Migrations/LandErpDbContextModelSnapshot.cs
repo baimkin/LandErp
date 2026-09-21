@@ -743,6 +743,9 @@ namespace LandErp.Infrastructure.Migrations
                         .HasDatabaseName("ix_listings_organization_id_object_group_id")
                         .HasFilter("object_group_id IS NOT NULL");
 
+                    b.HasIndex("ObjectGroupId")
+                        .HasDatabaseName("ix_listings_object_group_id");
+
                     b.HasIndex("OrganizationId", "Source", "ExternalId")
                         .IsUnique()
                         .HasDatabaseName("ix_listings_organization_id_source_external_id")

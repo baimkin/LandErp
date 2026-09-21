@@ -337,7 +337,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             {
                 Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
                 ListingId = listing.Id, CandidateListingId = other.Id, Score = 0,
-                ReasonsJson = JsonSerializer.Serialize(new[] { "Связано менеджером вручную после сравнения" }),
+                ReasonsJson = JsonSerializer.Serialize<string[]>(["Связано менеджером вручную после сравнения"]),
                 Status = DuplicateCandidateStatus.Confirmed, ReviewedByEmployeeId = context.EmployeeId,
                 RecordedAt = now, UpdatedAt = now, ReviewedAt = now
             };
@@ -2529,7 +2529,7 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             {
                 Id = DataConventions.NewId(), OrganizationId = left.OrganizationId,
                 ListingId = left.Id, CandidateListingId = right.Id, Score = 0,
-                ReasonsJson = JsonSerializer.Serialize(new[] { "Разделено менеджером: это разные физические объекты" }),
+                ReasonsJson = JsonSerializer.Serialize<string[]>(["Разделено менеджером: это разные физические объекты"]),
                 Status = DuplicateCandidateStatus.Rejected, ReviewedByEmployeeId = employeeId,
                 RecordedAt = now, UpdatedAt = now, ReviewedAt = now
             });

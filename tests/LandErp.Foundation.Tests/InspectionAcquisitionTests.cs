@@ -127,7 +127,14 @@ public sealed class InspectionAcquisitionTests
         InspectionView draft = card.Inspection;
         InspectionAnswer[] answers = draft.Items.Select(item => new InspectionAnswer(item.Id, item.Version,
             item == draft.Items[0] ? InspectionItemStatus.Answered : InspectionItemStatus.NotChecked,
-            item == draft.Items[0] ? (item.AnswerType == InspectionAnswerType.Boolean ? "true" : "Проверено") : "", "")).ToArray();
+            item == draft.Items[0] ? item.AnswerType switch
+            {
+                InspectionAnswerType.Boolean => "true",
+                InspectionAnswerType.Number => "1",
+                InspectionAnswerType.Percentage => "50",
+                InspectionAnswerType.Choice => item.Options[0],
+                _ => "Проверено"
+            } : "", "")).ToArray();
         await fixture.Workspace.SaveInspectionAsync(fixture.Manager, new(taken.CaseId, inspectionId, draft.Version,
             "Черновик после восстановления связи", "Нужны дополнительные проверки", answers, false), "reconnect", CancellationToken.None);
         await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => fixture.Workspace.SaveInspectionAsync(fixture.Manager,
@@ -213,7 +220,7 @@ public sealed class InspectionAcquisitionTests
             new(CatalogSource.Manual, "Участок для осмотра", "Лобня", 3_500_000m, 1200m, null, null,
                 "50:10:0000000:777", "Назначение осмотра", "Полевой тест"), "inspection-assignment", CancellationToken.None);
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(itemId), "take", CancellationToken.None);
-        DateTimeOffset dueAt = DateTimeOffset.UtcNow.AddDays(1);
+        DateTimeOffset dueAt = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds());
 
         await fixture.Workspace.AssignInspectionAsync(fixture.Manager,
             new(taken.CaseId, inspectorEmployeeId, dueAt, "Проверить подъезд и заболоченность.", null),

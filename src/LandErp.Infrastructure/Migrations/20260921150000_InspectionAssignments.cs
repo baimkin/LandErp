@@ -10,6 +10,8 @@ namespace LandErp.Infrastructure.Migrations;
 [Migration("20260921150000_InspectionAssignments")]
 public partial class InspectionAssignments : Migration
 {
+    private static readonly string[] InspectorDueColumns = ["inspector_employee_id", "due_at"];
+
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("""
@@ -74,7 +76,7 @@ public partial class InspectionAssignments : Migration
             name: "ix_site_inspections_inspector_employee_id_due_at",
             schema: "procurement",
             table: "site_inspections",
-            columns: new[] { "inspector_employee_id", "due_at" });
+            columns: InspectorDueColumns);
 
         migrationBuilder.CreateIndex(
             name: "ix_site_inspections_requested_by_employee_id",

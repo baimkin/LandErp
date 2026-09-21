@@ -31,6 +31,7 @@ public abstract class WorkspaceComponent : ComponentBase
     protected WorkspaceWriteOutcome WriteOutcome { get; private set; }
     protected bool RefreshRequired { get; private set; }
     protected void ClearFeedback() { Error = null; Success = null; }
+    protected void ShowValidationError(string message) { Error = message; Success = null; }
     protected bool LastWriteWasConflict { get; private set; }
 
     protected abstract Task ReadAsync();

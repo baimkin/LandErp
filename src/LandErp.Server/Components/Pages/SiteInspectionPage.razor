@@ -106,7 +106,7 @@ else if(data!=null)
             {
                 <div class="form-grid">
                     <label class="field dossier-wide"><span>Осмотрщик</span><select @bind="assignment.Inspector">@foreach(var person in data.Inspectors){<option value="@person.EmployeeId">@person.Name</option>}</select></label>
-                    <label class="field"><span>Срок (МСК)</span><input type="datetime-local" @bind="assignment.Due"/></label>
+                    <label class="field"><span>Срок (МСК)</span><input type="datetime-local" value="@assignment.Due" @onchange="e => assignment.Due = e.Value?.ToString() ?? string.Empty"/></label>
                     <label class="field dossier-wide"><span>Задача / особое внимание</span><textarea @bind="assignment.Instructions" maxlength="2000" placeholder="Например: проверить подъезд, границы и заболоченность"></textarea></label>
                 </div>
                 <div class="form-actions"><button type="button" class="btn secondary" @onclick="()=>assignOpen=false">Отмена</button><ActionButton Label="Назначить" OnClick="AssignAsync" Busy="Busy"/></div>
@@ -178,7 +178,7 @@ else if(data!=null)
     }
     private async Task AssignAsync()
     {
-        if(!Guid.TryParse(assignment.Inspector,out Guid inspector)){Error="Выберите осмотрщика.";return;}
+        if(!Guid.TryParse(assignment.Inspector,out Guid inspector)){ShowValidationError("Выберите осмотрщика.");return;}
         await ExecuteAsync(()=>Workspace.AssignInspectionAsync(CurrentSubject,new(CaseId,inspector,CaseFormValues.ParseLocal(assignment.Due),assignment.Instructions,Inspection?.Version),OperationId,CancellationToken.None),"Осмотр назначен");
         if(Success!=null)assignOpen=false;
     }

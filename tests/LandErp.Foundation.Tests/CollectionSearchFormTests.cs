@@ -29,7 +29,7 @@ public sealed class CollectionSearchFormTests
             Times = [new("08:30"), new("16:45")]
         };
         CollectionSchedule schedule = form.Schedule();
-        CollectionAssert.AreEqual(new[] { "08:30", "16:45" }, schedule.FixedTimes!.ToArray());
+        Assert.AreEqual("08:30,16:45", string.Join(",", schedule.FixedTimes!));
 
         form.Times = [new("8:30")];
         ArgumentException format = Assert.ThrowsExactly<ArgumentException>(() => form.Schedule());
@@ -37,9 +37,9 @@ public sealed class CollectionSearchFormTests
 
         string markup = File.ReadAllText(Path.Combine(FoundationTests.RepositoryRoot(),
             "src", "LandErp.Server", "Components", "Pages", "Collectors.razor"));
-        StringAssert.Contains(markup, """@bind="row.Value" @bind:event="oninput" @bind:after="UpdatePreviewAsync" """);
-        Assert.IsFalse(markup.Contains("""value="@row.Value" @onchange=""", StringComparison.Ordinal),
-            "A time input displayed by the browser must also update the form model.");
+        StringAssert.Contains(markup, """value="@row.Value" @oninput="async e => { row.Value = e.Value?.ToString()""");
+        StringAssert.Contains(markup, "await UpdatePreviewAsync();",
+            "An edited browser time must update the form and schedule preview.");
     }
 
     [TestMethod]

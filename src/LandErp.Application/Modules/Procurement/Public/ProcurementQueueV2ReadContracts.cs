@@ -163,7 +163,7 @@ public sealed record ProcurementInspectionReport(
     string OverallConclusion,
     string PreliminaryDecision,
     string Inspector,
-    DateTimeOffset StartedAt,
+    DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt,
     IReadOnlyList<ProcurementInspectionReportItem> Items,
     IReadOnlyList<ProcurementQueueV2Attachment> Attachments);

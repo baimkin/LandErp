@@ -128,6 +128,8 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
         string effectiveSearch = page.CurrentUrl;
         HashSet<string> visited = new(StringComparer.Ordinal) { page.CurrentUrl };
         HashSet<string> jobWarnings = new(StringComparer.Ordinal);
+        HashSet<string> jobSeen = new(StringComparer.Ordinal);
+        int? sourceCountHint = null;
         while (number <= job.Limit)
         {
             Dictionary<string, ListingObservation> gathered = new(StringComparer.Ordinal);
@@ -139,6 +141,11 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
             {
                 await ReadyAsync(job.Source, token).ConfigureAwait(false);
                 PageObservation snapshot = await ActionAsync(job, page, number, "Чтение выдачи", () => page.ReadAsync(token), token).ConfigureAwait(false);
+                if (snapshot.SourceCountHint is int hint)
+                {
+                    if (sourceCountHint is int previous && previous != hint) jobWarnings.Add("SOURCE_COUNT_HINT_CHANGED");
+                    sourceCountHint = hint;
+                }
                 if (snapshot.Diagnostic is not null)
                 {
                     string detail = LocalJson.Write(snapshot.Diagnostic);
@@ -196,7 +203,7 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                 effectiveSearch = page.CurrentUrl;
                 await ReadyAsync(job.Source, token).ConfigureAwait(false);
                 int before = gathered.Count;
-                foreach (ListingObservation item in snapshot.Listings) gathered[item.ExternalId] = item;
+                foreach (ListingObservation item in snapshot.Listings) { gathered[item.ExternalId] = item; jobSeen.Add(item.ExternalId); }
                 foreach (string warning in snapshot.Warnings) { pageWarnings.Add(warning); jobWarnings.Add(warning); }
                 if (gathered.Count > before || snapshot.Loading) { stableRounds = 0; stable.Restart(); wait.Restart(); }
                 else stableRounds++;
@@ -221,6 +228,11 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
             }
             await ReadyAsync(job.Source, token).ConfigureAwait(false);
             PageObservation final = await ActionAsync(job, page, number, "Контроль выдачи", () => page.ReadAsync(token), token).ConfigureAwait(false);
+            if (final.SourceCountHint is int finalHint)
+            {
+                if (sourceCountHint is int previous && previous != finalHint) jobWarnings.Add("SOURCE_COUNT_HINT_CHANGED");
+                sourceCountHint = finalHint;
+            }
             if (final.Diagnostic is not null) diagnostics?.Write(job, number, "Диагностика карты", "Итог", detail: LocalJson.Write(final.Diagnostic), count: final.Listings.Length);
             if (final.Loading)
             {
@@ -246,7 +258,7 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                 Block(job, job.Owner!, "Карта: зона сбросилась или изменилась"); await ReadyAsync(job.Source, token).ConfigureAwait(false); continue;
             }
             map = final.Map;
-            foreach (ListingObservation item in final.Listings) gathered[item.ExternalId] = item;
+            foreach (ListingObservation item in final.Listings) { gathered[item.ExternalId] = item; jobSeen.Add(item.ExternalId); }
             if (!await SaveAsync(job, number, page.CurrentUrl, gathered.Values.ToArray(), false, null, "Контрольный частичный снимок", map, final.Changes)) return;
             foreach (string warning in final.Warnings) { pageWarnings.Add(warning); jobWarnings.Add(warning); }
             if (pageWarnings.Count > 0 && !serverManaged)
@@ -262,11 +274,16 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
             await ReadyAsync(job.Source, token).ConfigureAwait(false);
             if (!await SaveAsync(job, number, page.CurrentUrl, gathered.Values.ToArray(), true, next, next.Reason ?? "Страница завершена", map)) return;
             Changed?.Invoke(this, EventArgs.Empty);
-            if (next.Kind == NextKind.End) { Finish(job, JobState.Completed, CollectionCompletionKind.Success, "",
-                map is null ? "Достигнут конец выдачи" : $"Карта: собрано {gathered.Count}; подсказка источника {map.ExpectedCount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "нет"}; правый список завершён",
-                jobWarnings, true, true, stableRounds); return; }
+            if (next.Kind == NextKind.End)
+            {
+                if (sourceCountHint is int hint && hint != jobSeen.Count) jobWarnings.Add(CollectionResultReasonCodes.CountHintMismatch);
+                Finish(job, JobState.Completed, CollectionCompletionKind.Success, "",
+                    map is not null ? $"Карта: собрано {jobSeen.Count}; подсказка источника {map.ExpectedCount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "нет"}; правый список завершён"
+                    : sourceCountHint is int countHint ? $"Достигнут конец выдачи; собрано {jobSeen.Count}; подсказка источника {countHint}" : "Достигнут конец выдачи",
+                    jobWarnings, true, true, stableRounds, sourceCountHint); return;
+            }
             if (number == job.Limit) { Finish(job, JobState.LimitReached, CollectionCompletionKind.LimitReached,
-                CollectionResultReasonCodes.PageLimitReached, "Достигнут настроенный предел страниц", jobWarnings, false, true, stableRounds); return; }
+                CollectionResultReasonCodes.PageLimitReached, "Достигнут настроенный предел страниц", jobWarnings, false, true, stableRounds, sourceCountHint); return; }
             await NavigateAsync(job.Source, settings.PageIntervalSeconds, () => ActionAsync(job, page, number + 1, "Переход на следующую страницу",
                 async () => { await page.FollowAsync(next, token).ConfigureAwait(false); return true; }, token, next.Url), token).ConfigureAwait(false);
             effectiveSearch = page.CurrentUrl;
@@ -274,11 +291,11 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
         }
     }
     private bool Finish(CollectionJob job, JobState state, CollectionCompletionKind kind, string code,
-        string message, IEnumerable<string> warnings, bool endReached, bool loadingCompleted, int stableRounds)
+        string message, IEnumerable<string> warnings, bool endReached, bool loadingCompleted, int stableRounds, int? sourceCountHint = null)
     {
         string[] safeWarnings = warnings.Where(IsMachineCode).Distinct(StringComparer.Ordinal).Take(20).ToArray();
         bool finished = store.Finish(job, state, message,
-            new(kind, endReached, loadingCompleted, Math.Max(0, stableRounds), code, safeWarnings));
+            new(kind, endReached, loadingCompleted, Math.Max(0, stableRounds), code, safeWarnings, sourceCountHint));
         Changed?.Invoke(this, EventArgs.Empty); return finished;
     }
     private static bool IsMachineCode(string value) => value.Length is > 0 and <= 64

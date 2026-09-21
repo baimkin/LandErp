@@ -8,8 +8,13 @@ namespace LandErp.ParserSpike.LocalCollection;
 
 public sealed record DomCard(string Id, string Url, string? Title, string? Price, string? UnitPrice,
     string? Location, string? Transport, string? Description, string? Date, string? Seller,
-    string? SellerUrl, string? SellerStatistics, string[] Badges, string[] Photos, string? SellerType = null);
-public sealed record DomSnapshot(string Kind, DomCard[] Cards, string[] Warnings, bool Loading = false, string? Layout = null);
+    string? SellerUrl, string? SellerStatistics, string[] Badges, string[] Photos, string? SellerType = null,
+    string? StructuredPrice = null, string? StructuredArea = null, string? StructuredAreaUnit = null,
+    string? StructuredLocation = null, string? StructuredDescription = null, string[]? StructuredPhotos = null,
+    string? CadastralNumber = null, long? SourcePublishedUnix = null, decimal? Latitude = null, decimal? Longitude = null,
+    string[]? DeclaredLandTypes = null);
+public sealed record DomSnapshot(string Kind, DomCard[] Cards, string[] Warnings, bool Loading = false, string? Layout = null,
+    int? SourceCountHint = null);
 
 /// <summary>One worker owns one page. DOM selectors are source-specific; typing and orchestration are shared.</summary>
 public sealed class DomSourcePage : ISourcePage
@@ -76,28 +81,40 @@ public sealed class DomSourcePage : ISourcePage
             { errors.Add("INVALID_ID_OR_URL"); continue; }
             if (!ids.Add(card.Id)) continue;
             List<string> warnings = []; List<AreaAssertion> assertions = [];
+            string? description = card.StructuredDescription ?? card.Description;
+            string? location = card.StructuredLocation ?? card.Location;
+            AddStructuredArea(assertions, card.StructuredArea, card.StructuredAreaUnit, warnings);
             AddAreas(assertions, card.Title, "Title");
             // Description contributes only an explicit plot-area statement, never an arbitrary number near a road or house.
-            foreach (Match match in Regex.Matches(card.Description ?? "", @"(?:площадь(?:\s+участка)?\s*[:—-]\s*|участок\s+)(\d+(?:[.,]\d+)?\s*(?:сот(?:ок|ки|ка|\.)?|га\b|м[²2]))", RegexOptions.IgnoreCase))
+            foreach (Match match in Regex.Matches(description ?? "", @"(?:площадь(?:\s+участка)?\s*[:—-]\s*|участок\s+)(\d+(?:[.,]\d+)?\s*(?:сот(?:ок|ки|ка|\.)?|га\b|м[²2]))", RegexOptions.IgnoreCase))
                 AddAreas(assertions, match.Groups[1].Value, "Description");
             decimal? canonical = assertions.Count == 0 ? null : assertions[0].SquareMeters;
             if (assertions.Any(a => Math.Abs(a.SquareMeters - canonical!.Value) > 1)) { canonical = null; warnings.Add("AREA_CONFLICT"); }
-            NumberValue price = NumberValue.Read(card.Price), unit = NumberValue.Read(card.UnitPrice);
+            NumberValue price = NumberValue.Read(card.Price ?? card.StructuredPrice), unit = NumberValue.Read(card.UnitPrice);
             if (price.Presence != Presence.Present) warnings.Add("PRICE_" + price.Presence);
             if (assertions.Count == 0) warnings.Add("AREA_ABSENT");
             string? assignment = Regex.Match(card.Title ?? "", @"\b(?:ИЖС|СНТ|ДНП|ЛПХ)\b", RegexOptions.IgnoreCase) is { Success: true } use ? use.Value : null;
+            LandType[] declaredLandTypes = CianDeclaredLandTypes(source, card.DeclaredLandTypes, warnings);
+            LandType[] inferredLandTypes = LandTypeClassifier.Infer(card.Title, description);
             string? statistics = card.SellerStatistics;
             Match completed = Regex.Match(statistics ?? "", @"(\d+)\s+заверш[её]н", RegexOptions.IgnoreCase);
             TextValue sellerType = TextValue.Read(card.SellerType ?? card.Badges.FirstOrDefault(x => Regex.IsMatch(x, "^(Собственник|Агент|Агентство|Застройщик|Риелтор)$", RegexOptions.IgnoreCase)));
-            string[] photos = card.Photos.Where(x => Uri.TryCreate(x, UriKind.Absolute, out Uri? image) && image.Scheme == "https" && image.UserInfo.Length == 0
-                && (image.Host.EndsWith(".avito.st", StringComparison.OrdinalIgnoreCase) || image.Host == "avito.st"
-                || image.Host.EndsWith(".cdn-cian.ru", StringComparison.OrdinalIgnoreCase) || image.Host == "cdn-cian.ru"))
+            string[] photos = (card.StructuredPhotos ?? []).Concat(card.Photos)
+                .Where(x => Uri.TryCreate(x, UriKind.Absolute, out Uri? image) && image.Scheme == "https" && image.UserInfo.Length == 0
+                    && (image.Host.EndsWith(".avito.st", StringComparison.OrdinalIgnoreCase) || image.Host == "avito.st"
+                    || image.Host.EndsWith(".cdn-cian.ru", StringComparison.OrdinalIgnoreCase) || image.Host == "cdn-cian.ru"))
                 .Select(x => new Uri(x).GetLeftPart(UriPartial.Path)).Distinct(StringComparer.Ordinal).ToArray();
             string? sellerUrl = null;
             if (Uri.TryCreate(card.SellerUrl, UriKind.Absolute, out Uri? seller) && SearchUrls.IsPublic(seller, source)
                 && Regex.IsMatch(seller.AbsolutePath, @"^/(?:brands|user|agents|company|developers)/[a-zA-Z0-9_-]+/?$")) sellerUrl = seller.GetLeftPart(UriPartial.Path);
-            string? description = card.Description;
             if (description?.Length > 100000) { description = description[..100000]; warnings.Add("DESCRIPTION_TRUNCATED_100000"); }
+            NumberValue latitude = Coordinate(card.Latitude, -90, 90, warnings);
+            NumberValue longitude = Coordinate(card.Longitude, -180, 180, warnings);
+            DateTimeOffset? sourcePublished = SourcePublished(card.SourcePublishedUnix, now, warnings);
+            bool structured = source == SourceSite.Cian && (card.StructuredArea != null || card.StructuredDescription != null
+                || card.StructuredLocation != null || card.SourcePublishedUnix != null || card.Latitude != null
+                || card.Longitude != null || card.CadastralNumber != null || (card.DeclaredLandTypes?.Length ?? 0) > 0
+                || (card.StructuredPhotos?.Length ?? 0) > 0);
             items.Add(new()
             {
                 Source = source,
@@ -112,10 +129,16 @@ public sealed class DomSourcePage : ISourcePage
                 Areas = assertions.ToArray(),
                 DerivedPricePerSotka = canonical > 0 && price.Parsed.HasValue ? price.Parsed / (canonical / 100) : null,
                 Assignment = TextValue.Read(assignment),
-                Location = TextValue.Read(card.Location),
+                Location = TextValue.Read(location),
                 Transport = TextValue.Read(card.Transport),
                 Description = TextValue.Read(description),
                 DateText = TextValue.Read(card.Date),
+                CadastralNumber = TextValue.Read(card.CadastralNumber),
+                SourcePublishedAtUtc = sourcePublished,
+                DeclaredLandTypes = declaredLandTypes,
+                InferredLandTypes = inferredLandTypes,
+                Latitude = latitude,
+                Longitude = longitude,
                 SellerName = TextValue.Read(card.Seller),
                 SellerUrl = TextValue.Read(sellerUrl),
                 SellerStatistics = TextValue.Read(statistics),
@@ -123,10 +146,67 @@ public sealed class DomSourcePage : ISourcePage
                 CompletedAdvertisements = completed.Success ? new(Presence.Present, statistics, decimal.Parse(completed.Groups[1].Value, CultureInfo.InvariantCulture)) : NumberValue.Read(null),
                 Badges = card.Badges.Distinct(StringComparer.Ordinal).ToArray(),
                 PhotoUrls = photos,
-                Warnings = warnings.ToArray()
+                Warnings = warnings.ToArray(),
+                Provenance = structured ? "DOM+Structured" : "DOM",
+                AdapterVersion = structured ? "1.1" : "1.0"
             });
         }
-        return new(kind, items.ToArray(), errors.ToArray(), snapshot.Loading, snapshot.Layout);
+        return new(kind, items.ToArray(), errors.ToArray(), snapshot.Loading, snapshot.Layout, SourceCountHint: snapshot.SourceCountHint);
+    }
+    private static void AddStructuredArea(List<AreaAssertion> result, string? raw, string? unit, List<string> warnings)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return;
+        if (!decimal.TryParse(raw.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out decimal value) || value <= 0)
+        { warnings.Add("STRUCTURED_AREA_INVALID"); return; }
+        decimal multiplier = unit switch
+        {
+            "sotka" => 100m,
+            "hectare" or "hectar" => 10000m,
+            "squareMeter" or "squareMeters" => 1m,
+            _ => 0m
+        };
+        if (multiplier == 0) { warnings.Add("STRUCTURED_AREA_UNIT_UNKNOWN"); return; }
+        result.Add(new("Structured", $"{raw} {unit}", value * multiplier));
+    }
+    private static NumberValue Coordinate(decimal? value, decimal minimum, decimal maximum, List<string> warnings)
+    {
+        if (value == null) return NumberValue.Read(null);
+        string raw = value.Value.ToString(CultureInfo.InvariantCulture);
+        if (value < minimum || value > maximum) { warnings.Add("COORDINATES_INVALID"); return new(Presence.ParseFailed, raw, null); }
+        return new(Presence.Present, raw, value);
+    }
+    private static DateTimeOffset? SourcePublished(long? unix, DateTimeOffset now, List<string> warnings)
+    {
+        if (unix == null) return null;
+        try
+        {
+            DateTimeOffset value = DateTimeOffset.FromUnixTimeSeconds(unix.Value);
+            if (value < DateTimeOffset.UnixEpoch || value > now.AddDays(1)) { warnings.Add("SOURCE_PUBLISHED_AT_INVALID"); return null; }
+            return value;
+        }
+        catch (ArgumentOutOfRangeException) { warnings.Add("SOURCE_PUBLISHED_AT_INVALID"); return null; }
+    }
+    private static LandType[] CianDeclaredLandTypes(SourceSite source, string[]? values, List<string> warnings)
+    {
+        if (source != SourceSite.Cian || values == null || values.Length == 0) return [];
+        List<LandType> result = [];
+        foreach (string raw in values.Where(x => !string.IsNullOrWhiteSpace(x)))
+        {
+            LandType? value = raw.Trim().ToLowerInvariant() switch
+            {
+                "individualhousingconstruction" or "ижс" => LandType.Izhs,
+                "privatefarm" or "лпх" => LandType.Lph,
+                "gardening" or "садоводство" => LandType.Gardening,
+                "snt" or "снт" => LandType.Snt,
+                "dnp" or "днп" => LandType.Dnp,
+                "farm" or "kfh" or "кфх" => LandType.Kfh,
+                "industrial" => LandType.Industrial,
+                "other" => LandType.Other,
+                _ => null
+            };
+            if (value.HasValue) result.Add(value.Value); else warnings.Add("LAND_TYPE_UNMAPPED");
+        }
+        return result.Distinct().ToArray();
     }
     private static void AddAreas(List<AreaAssertion> result, string? text, string origin)
     {
@@ -226,6 +306,13 @@ public sealed class DomSourcePage : ISourcePage
     public const string SnapshotScript = """
         site => {
           const avito = site === 'Avito';
+          const cianConfig = !avito && window._cianConfig && Array.isArray(window._cianConfig['frontend-serp'])
+            ? window._cianConfig['frontend-serp'] : [];
+          const cianInitial = cianConfig.find(x => x && x.key === 'initialState')?.value;
+          const cianResults = cianInitial && cianInitial.results;
+          const cianOffers = Array.isArray(cianResults?.offers) ? cianResults.offers : [];
+          const cianById = new Map(cianOffers.map(x => [String(x?.cianId ?? x?.id ?? ''), x]).filter(x => x[0]));
+          const sourceCountHint = Number.isInteger(cianResults?.totalOffers) && cianResults.totalOffers >= 0 ? cianResults.totalOffers : null;
           const visible = e => !!e && !!e.getClientRects().length;
           const read = (root, selector, full=false) => {
             const e = [...root.querySelectorAll(selector)].find(visible);
@@ -250,13 +337,19 @@ public sealed class DomSourcePage : ISourcePage
           const cards = roots.map(e => {
             const a = e.querySelector(avito?'a[data-marker="item-title"],a[data-marker="title"]':'a[href*="/sale/"]');
             const id = avito ? e.getAttribute('data-item-id') || a?.href.match(/_(\d+)(?:\?|$)/)?.[1] : a?.href.match(/\/sale\/[^/]+\/(\d+)\//)?.[1];
+            const structured = !avito && id ? cianById.get(String(id)) : null;
+            const land = structured?.land;
+            const coordinates = structured?.geo?.coordinates;
+            const structuredPhotos = Array.isArray(structured?.photos) ? structured.photos.map(x=>x?.fullUrl).filter(Boolean) : [];
+            const rawLandStatus = land?.status;
+            const declaredLandTypes = Array.isArray(rawLandStatus) ? rawLandStatus.map(String) : rawLandStatus ? [String(rawLandStatus)] : [];
             const seller = e.querySelector(avito?'[class*="userInfoStep"] a[href], a[data-marker="seller-link/link"], a[href*="/brands/"], a[href*="/user/"]':'a[href*="/agents/"],a[href*="/company/"],a[href*="/developers/"]');
             const description = read(e,avito?'[data-marker="item-description"], [class*="bottomBlock"] > [class*="ivaItemRedesign"] > p[style*="module-max-lines"], [class*="bottomBlock"] > div:first-child > p':'[data-name="Description"]',true);
             const price = avito ? read(e,'[data-marker="item-price"]') : read(e,'[data-mark="MainPrice"], [data-name="Price"]')
               || [...e.querySelectorAll('[data-name="GeneralInfoSectionRowComponent"]')].map(x=>x.innerText.trim()).find(t=>/^[\d\s.,]+\s*₽$/.test(t)) || null;
             const unit = [...e.querySelectorAll('span,p')].filter(visible).map(x=>x.innerText.trim()).find(t=>/^[\d\s.,]+\s*₽\s*за\s+сотку$/.test(t)) || null;
             const stats = avito ? read(e,'[data-marker="seller-info/summary"],[class*="userInfoStep"] > span') : null;
-            const badges = [...e.querySelectorAll(avito?'[data-marker*="badge-title"],[data-marker="item-badge"]':'[data-name="FeatureLabels"], [data-testid*="badge"], [data-name="AgentType"]')].filter(visible).map(x=>x.innerText.trim()).filter(Boolean);
+            const badges = avito ? [...e.querySelectorAll('[data-marker*="badge-title"],[data-marker="item-badge"]')].filter(visible).map(x=>x.innerText.trim()).filter(Boolean) : [];
             const address = avito ? read(e,'[data-marker="item-address"],[data-marker="item-location"]') : null;
             const loc = avito ? address?.split('\n').filter(t=>!/(?:шоссе|МКАД).*\d+\s*км/i.test(t)).join(', ') || null
               : [...e.querySelectorAll('[data-name="GeoLabel"]')].filter(visible).map(x=>x.innerText.trim()).filter(Boolean).join(', ') || null;
@@ -268,13 +361,21 @@ public sealed class DomSourcePage : ISourcePage
             return {Id:id||'',Url:a?.href||'',Title:read(e,avito?'[data-marker="item-title"],[data-marker="title"]':'[data-name="TitleComponent"]'),Price:price,UnitPrice:unit,
               Location:loc,Transport:transport,Description:description,Date:read(e,avito?'[data-marker="item-date"]':'[data-name="TimeLabel"]'),
               Seller:seller ? seller.innerText.trim() : read(e,avito?'[data-marker="seller-info/name"]':'[data-name="AgentName"]'),SellerUrl:seller?.href||null,SellerStatistics:stats,
-              SellerType:sellerType,Badges:badges,Photos:[...e.querySelectorAll(avito?'a[data-marker="item-title"] img,[data-marker="item-photo"] img,[data-marker="item-gallery"] img,[class*="photo"] img':'[data-name="Gallery"] img')].map(x=>x.currentSrc||x.src).filter(Boolean)};
+              SellerType:sellerType,Badges:badges,Photos:[...e.querySelectorAll(avito?'a[data-marker="item-title"] img,[data-marker="item-photo"] img,[data-marker="item-gallery"] img,[class*="photo"] img':'[data-name="Gallery"] img')].map(x=>x.currentSrc||x.src).filter(Boolean),
+              StructuredPrice:Number.isFinite(structured?.bargainTerms?.priceRur)?String(structured.bargainTerms.priceRur):null,
+              StructuredArea:land?.area==null?null:String(land.area),StructuredAreaUnit:land?.areaUnitType||null,
+              StructuredLocation:structured?.isNeedHideExactAddress===false&&typeof structured?.geo?.userInput==='string'&&structured.geo.userInput.trim()?structured.geo.userInput.trim():null,
+              StructuredDescription:typeof structured?.description==='string'?structured.description:null,StructuredPhotos:structuredPhotos,
+              CadastralNumber:typeof structured?.cadastralNumber==='string'&&structured.cadastralNumber.trim()?structured.cadastralNumber.trim():null,
+              SourcePublishedUnix:Number.isSafeInteger(structured?.addedTimestamp)?structured.addedTimestamp:null,
+              Latitude:Number.isFinite(coordinates?.lat)?coordinates.lat:null,Longitude:Number.isFinite(coordinates?.lng)?coordinates.lng:null,
+              DeclaredLandTypes:declaredLandTypes};
           });
           const loadingSelector='[data-marker*="loader"],[data-name="Loader"],[data-name="Loading"],[aria-busy="true"]';
           const loading = map ? [...main.querySelectorAll(loadingSelector)].some(visible) : has(loadingSelector);
           if (!map && !cards.length && !/ничего не найдено|нет объявлений|нет предложений/i.test(main.textContent)
               && !main.querySelector('[data-marker="items/list-empty"],[data-name="EmptyResults"]')) kind='Unknown';
-          return {Kind:kind,Cards:cards,Warnings:[],Loading:loading,Layout:map?'AVITO_MAP':String(document.documentElement.scrollHeight)};
+          return {Kind:kind,Cards:cards,Warnings:[],Loading:loading,Layout:map?'AVITO_MAP':String(document.documentElement.scrollHeight),SourceCountHint:sourceCountHint};
         }
         """;
     public const string PaginationScript = """

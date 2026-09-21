@@ -1,0 +1,11 @@
+<Window x:Class="LandErp.ParserSpike.Desktop.ListingDetailsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:LandErp.ParserSpike.Desktop"
+    Title="Карточка объявления" Width="820" Height="900" MinWidth="620" MinHeight="620"
+    FontFamily="Segoe UI" FontSize="15" Foreground="#203047" Background="#F4F6FA">
+    <Window.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ParserTheme.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></Window.Resources>
+    <Border Style="{StaticResource Card}" Margin="18">
+        <local:ListingDetailsControl x:Name="DetailsView"/>
+    </Border>
+</Window>

@@ -12,6 +12,8 @@ public enum NextKind { Next, End, UnknownInvalid }
 public enum ErrorPolicy { Continue, PauseSource }
 public enum LocalScheduleKind { Manual, Interval, FixedTimes }
 public enum CollectionCompletionKind { Success, LimitReached, Partial, RateLimited, SourceError, Interrupted, Captcha, AuthenticationRequired }
+public enum LandType { Izhs, Snt, Dnp, Lph, Gardening, Kfh, Industrial, Other }
+public enum ListingQualityFilter { All, Warnings, LandTypeConflict, MissingPrice, MissingArea, MissingCoordinates, MissingSourcePublishedAt, MissingCadastralNumber }
 
 public sealed record LocalGroup(string Id, string Name, int SortOrder, bool Active, long Revision);
 
@@ -70,10 +72,10 @@ public sealed record NumberValue(Presence Presence, string? Raw, decimal? Parsed
 
 public sealed record AreaAssertion(string Origin, string Raw, decimal SquareMeters);
 
-/// <summary>Version 1 local envelope; the accepted Gate 01 JSON contract remains a separate format.</summary>
+/// <summary>Versioned local observation envelope; server transport remains a separate contract.</summary>
 public sealed record ListingObservation
 {
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
     public string AdapterVersion { get; init; } = "1.0";
     public required SourceSite Source { get; init; }
     public required string ExternalId { get; init; }
@@ -90,6 +92,12 @@ public sealed record ListingObservation
     public TextValue Transport { get; init; } = TextValue.Read(null);
     public TextValue Description { get; init; } = TextValue.Read(null);
     public TextValue DateText { get; init; } = TextValue.Read(null);
+    public TextValue CadastralNumber { get; init; } = TextValue.Read(null);
+    public DateTimeOffset? SourcePublishedAtUtc { get; init; }
+    public LandType[] DeclaredLandTypes { get; init; } = [];
+    public LandType[] InferredLandTypes { get; init; } = [];
+    public bool LandTypeConflict => DeclaredLandTypes.Length > 0 && InferredLandTypes.Length > 0
+        && !DeclaredLandTypes.ToHashSet().SetEquals(InferredLandTypes);
     public TextValue SellerName { get; init; } = TextValue.Read(null);
     public TextValue SellerUrl { get; init; } = TextValue.Read(null);
     public TextValue SellerType { get; init; } = TextValue.Read(null);
@@ -119,7 +127,7 @@ public sealed record MapDiagnostic(MapBatchDiagnostic[] Batches, int? ExpectedCo
     string[] DomNotCollected, bool ZoneConfirmed, bool Loading, double? ScrollTop = null,
     double? ClientHeight = null, double? ScrollHeight = null, string? ScrollError = null);
 
-public sealed record PageObservation(PageKind Kind, ListingObservation[] Listings, string[] Warnings, bool Loading = false, string? Layout = null, MapScope? Map = null, ListingObservation[]? Changes = null, MapDiagnostic? Diagnostic = null);
+public sealed record PageObservation(PageKind Kind, ListingObservation[] Listings, string[] Warnings, bool Loading = false, string? Layout = null, MapScope? Map = null, ListingObservation[]? Changes = null, MapDiagnostic? Diagnostic = null, int? SourceCountHint = null);
 public sealed record Pagination(NextKind Kind, string? Url = null, string? Selector = null, string? Reason = null);
 public sealed record SearchLink(string Id, string Label, string Url, SourceSite Source, bool Selected, bool Enabled, int Revision, bool Archived = false);
 public sealed record CollectionJob(string Id, string BatchId, string LinkId, int Revision, SourceSite Source,
@@ -147,7 +155,7 @@ public sealed record PageJournal(string JobId, int Page, string Url, DateTimeOff
     public bool Completed { get; init; }
 }
 public sealed record CollectionCompletionFacts(CollectionCompletionKind Kind, bool EndReached,
-    bool LoadingCompleted, int StableRounds, string ReasonCode, string[] Warnings);
+    bool LoadingCompleted, int StableRounds, string ReasonCode, string[] Warnings, int? SourceCountHint = null);
 public sealed record ListingRow(ListingObservation Observation, DateTimeOffset FirstSeen, DateTimeOffset LastSeen)
 {
     public SourceSite Source => Observation.Source;
@@ -158,9 +166,22 @@ public sealed record ListingRow(ListingObservation Observation, DateTimeOffset F
     public string Seller => Observation.SellerName.Raw ?? "";
     public decimal? Latitude => Observation.Latitude.Parsed;
     public decimal? Longitude => Observation.Longitude.Parsed;
+    public string Area => Observation.AreaSquareMeters.Raw ?? "—";
+    public string PricePerSotka => Observation.DerivedPricePerSotka is decimal value
+        ? value.ToString("N0", CultureInfo.GetCultureInfo("ru-RU")) + " ₽/сот." : Observation.UnitPrice.Raw ?? "—";
+    public string LandTypes => LandTypeLabels.Format(Observation.DeclaredLandTypes
+        .Concat(Observation.InferredLandTypes).Distinct().ToArray());
+    public string LandTypeIssue => Observation.LandTypeConflict ? "⚠" : "";
+    public string Published => Observation.SourcePublishedAtUtc?.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.CurrentCulture) ?? "—";
+    public int PhotoCount => Observation.PhotoUrls.Length;
+    public string CadastralNumber => Observation.CadastralNumber.Raw ?? "—";
+    public string Coordinates => Observation.Latitude.Parsed is decimal lat && Observation.Longitude.Parsed is decimal lon
+        ? $"{lat.ToString(CultureInfo.InvariantCulture)}, {lon.ToString(CultureInfo.InvariantCulture)}" : "—";
+    public string WarningSummary => Observation.Warnings.Length == 0 ? "" : string.Join(", ", Observation.Warnings);
 }
 public sealed record ListingFilter(string Text = "", SourceSite? Source = null, string? LinkId = null,
-    string? JobId = null, int Offset = 0, int Size = 100, bool PriceOrder = false, bool? ServerWork = null);
+    string? JobId = null, int Offset = 0, int Size = 100, bool PriceOrder = false, bool? ServerWork = null,
+    ListingQualityFilter Quality = ListingQualityFilter.All);
 public sealed record ListingPage(ListingRow[] Rows, long Total);
 public sealed record HistoryRow(string Id, string JobId, int Page, ListingObservation Observation);
 
@@ -205,7 +226,7 @@ public sealed record CollectionSettings
         if (Browser is not ("chrome" or "msedge") || !Enum.IsDefined(ErrorPolicy)) throw new ArgumentException("SETTINGS_VALUE");
     }
     // Timing, tab counts and requested limit do not change the meaning of a committed page.
-    public string Compatibility => $"local:{Version}/adapters:1/main-results/all-fields";
+    public string Compatibility => $"local:{Version}/adapters:2/main-results/all-fields";
 }
 
 public static class LocalJson

@@ -564,6 +564,10 @@ public sealed class LocalStore : IJobSource, IResultSink
             Location = T(old.Location, item.Location),
             Description = T(old.Description, item.Description),
             DateText = T(old.DateText, item.DateText),
+            CadastralNumber = T(old.CadastralNumber, item.CadastralNumber),
+            SourcePublishedAtUtc = item.SourcePublishedAtUtc ?? old.SourcePublishedAtUtc,
+            DeclaredLandTypes = item.DeclaredLandTypes,
+            InferredLandTypes = item.InferredLandTypes,
             Transport = T(old.Transport, item.Transport),
             SellerName = T(old.SellerName, item.SellerName),
             SellerUrl = T(old.SellerUrl, item.SellerUrl),
@@ -581,7 +585,7 @@ public sealed class LocalStore : IJobSource, IResultSink
     {
         if (filter.Size < 1 || filter.Size > 500 || filter.Offset < 0) throw new ArgumentOutOfRangeException(nameof(filter));
         using SqliteConnection db = Open();
-        string where = " WHERE ($source IS NULL OR l.source=$source) AND ($text='' OR local_contains(l.title||' '||l.location||' '||l.seller||' '||l.external_id,$text))";
+        string where = " WHERE ($source IS NULL OR l.source=$source) AND ($text='' OR local_contains(l.title||' '||l.location||' '||l.seller||' '||l.external_id||' '||COALESCE(json_extract(l.json,'$.cadastralNumber.raw'),''),$text))";
         List<(string, object?)> args = [("$source", filter.Source?.ToString()), ("$text", filter.Text)];
         // Workspace results use only observations sighted in that mode, never another mode's merged values.
         string prefix = filter.ServerWork == null ? "" : """
@@ -603,6 +607,17 @@ public sealed class LocalStore : IJobSource, IResultSink
         if (filter.ServerWork != null) args.Add(("$server", filter.ServerWork.Value ? 1 : 0));
         if (filter.LinkId is not null) { where += " AND EXISTS(SELECT 1 FROM local_sightings o WHERE o.source=l.source AND o.external_id=l.external_id AND o.link_id=$link)"; args.Add(("$link", filter.LinkId)); }
         if (filter.JobId is not null) { where += " AND EXISTS(SELECT 1 FROM local_sightings o WHERE o.source=l.source AND o.external_id=l.external_id AND o.job_id=$job)"; args.Add(("$job", filter.JobId)); }
+        where += filter.Quality switch
+        {
+            ListingQualityFilter.Warnings => " AND (json_array_length(COALESCE(json_extract(l.json,'$.warnings'),'[]'))>0 OR " + LandConflictSql() + ")",
+            ListingQualityFilter.LandTypeConflict => " AND " + LandConflictSql(),
+            ListingQualityFilter.MissingPrice => " AND l.price IS NULL",
+            ListingQualityFilter.MissingArea => " AND json_extract(l.json,'$.areaSquareMeters.parsed') IS NULL",
+            ListingQualityFilter.MissingCoordinates => " AND (json_extract(l.json,'$.latitude.parsed') IS NULL OR json_extract(l.json,'$.longitude.parsed') IS NULL)",
+            ListingQualityFilter.MissingSourcePublishedAt => " AND json_extract(l.json,'$.sourcePublishedAtUtc') IS NULL",
+            ListingQualityFilter.MissingCadastralNumber => " AND COALESCE(json_extract(l.json,'$.cadastralNumber.raw'),'')=''",
+            _ => ""
+        };
         long count = Convert.ToInt64(Scalar(db, null, prefix + " SELECT count(*) FROM " + table + " l" + where, args.ToArray()), CultureInfo.InvariantCulture);
         args.Add(("$limit", filter.Size)); args.Add(("$offset", filter.Offset));
         using SqliteCommand cmd = Command(db, null, prefix + " SELECT json,first_seen,last_seen FROM " + table + " l" + where
@@ -611,6 +626,17 @@ public sealed class LocalStore : IJobSource, IResultSink
         while (r.Read()) rows.Add(new(LocalJson.Read<ListingObservation>(r.GetString(0)), DateTimeOffset.Parse(r.GetString(1), CultureInfo.InvariantCulture), DateTimeOffset.Parse(r.GetString(2), CultureInfo.InvariantCulture)));
         return new(rows.ToArray(), count);
     }
+    private static string LandConflictSql() => """
+        json_array_length(COALESCE(json_extract(l.json,'$.declaredLandTypes'),'[]'))>0
+        AND json_array_length(COALESCE(json_extract(l.json,'$.inferredLandTypes'),'[]'))>0
+        AND (
+          EXISTS(SELECT 1 FROM json_each(COALESCE(json_extract(l.json,'$.declaredLandTypes'),'[]')) d
+            WHERE NOT EXISTS(SELECT 1 FROM json_each(COALESCE(json_extract(l.json,'$.inferredLandTypes'),'[]')) i WHERE i.value=d.value))
+          OR EXISTS(SELECT 1 FROM json_each(COALESCE(json_extract(l.json,'$.inferredLandTypes'),'[]')) i
+            WHERE NOT EXISTS(SELECT 1 FROM json_each(COALESCE(json_extract(l.json,'$.declaredLandTypes'),'[]')) d WHERE d.value=i.value))
+        )
+        """;
+
     public HistoryRow[] History(SourceSite source, string externalId, int offset = 0, int size = 100, bool? serverWork = null)
     {
         using SqliteConnection db = Open(); using SqliteCommand cmd = Command(db, null, "SELECT id,job_id,page,json FROM local_observations o WHERE source=$source AND external_id=$id AND ($server IS NULL OR EXISTS(SELECT 1 FROM local_sightings s WHERE s.observation_id=o.id AND (s.link_id LIKE 'server-%')=$server)) ORDER BY observed_at DESC,rowid DESC LIMIT $size OFFSET $offset",

@@ -1,0 +1,40 @@
+<UserControl x:Class="LandErp.ParserSpike.Desktop.ListingDetailsControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="Transparent">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock x:Name="TitleText" Text="Выберите объявление" FontSize="19" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <TextBlock x:Name="MetaText" Margin="0,4,0,12" Foreground="#74839A" TextWrapping="Wrap"/>
+            <Border x:Name="ConflictPanel" Visibility="Collapsed" Background="#FFF4D7" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+                <TextBlock x:Name="ConflictText" TextWrapping="Wrap"/>
+            </Border>
+            <TabControl BorderThickness="0" Background="Transparent">
+                <TabItem Header="Карточка">
+                    <StackPanel Margin="0,12,0,0">
+                        <TextBlock x:Name="FactsText" LineHeight="23" TextWrapping="Wrap"/>
+                        <TextBlock Text="Тип участка" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                        <TextBlock x:Name="DeclaredText" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="InferredText" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                        <TextBlock Text="Описание" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                        <TextBlock x:Name="DescriptionText" TextWrapping="Wrap" LineHeight="22"/>
+                        <TextBlock x:Name="PhotoCountText" FontWeight="SemiBold" Margin="0,16,0,6"/>
+                        <Border x:Name="PhotoPanel" Visibility="Collapsed" CornerRadius="8" ClipToBounds="True" Background="#EEF2F7">
+                            <Image x:Name="PhotoPreview" Height="210" Stretch="UniformToFill"/>
+                        </Border>
+                        <Button x:Name="OpenButton" Content="Открыть объявление" HorizontalAlignment="Left" Margin="0,12,0,0" Click="OpenClick" IsEnabled="False"/>
+                        <TextBlock Text="Контекст сбора" FontWeight="SemiBold" Margin="0,18,0,4"/>
+                        <TextBlock x:Name="ContextText" TextWrapping="Wrap" Foreground="#74839A"/>
+                        <TextBlock Text="История наблюдений" FontWeight="SemiBold" Margin="0,18,0,4"/>
+                        <TextBlock x:Name="HistoryText" TextWrapping="Wrap" Foreground="#74839A"/>
+                    </StackPanel>
+                </TabItem>
+                <TabItem Header="Технические данные">
+                    <TextBox x:Name="TechnicalText" Margin="0,12,0,0" IsReadOnly="True" BorderThickness="0"
+                        Background="Transparent" FontFamily="Consolas" FontSize="12.5" TextWrapping="Wrap"
+                        AcceptsReturn="True" VerticalScrollBarVisibility="Auto"/>
+                </TabItem>
+            </TabControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

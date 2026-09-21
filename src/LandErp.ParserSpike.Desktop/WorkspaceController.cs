@@ -20,6 +20,7 @@ public sealed class WorkspaceController : IAsyncDisposable
     public bool SuspendNewWork { get; set; }
     public string ConnectionStatus { get; private set; } = "Сервер не подключён";
     public ParserOperatingMode Mode { get; private set; }
+    public ListingDetailsDisplayMode ListingDetailsMode { get; private set; }
     public ServerCoordinator? Server { get; private set; }
     public LocalStore Store { get; }
     public QueueRunner Runner { get; }
@@ -35,6 +36,7 @@ public sealed class WorkspaceController : IAsyncDisposable
             Diagnostics = new DiagnosticJournal(Path.Combine(Path.GetDirectoryName(databasePath)!, "diagnostics", "collection.jsonl"));
             Runner = new QueueRunner(Store, this.sessions, Diagnostics);
             Mode = LoadMode();
+            ListingDetailsMode = LoadListingDetailsMode();
             AutomationEnabled = File.Exists(AutomationPath) && File.ReadAllText(AutomationPath).Trim() == "on";
         }
         catch { guard.Dispose(); throw; }
@@ -83,8 +85,19 @@ public sealed class WorkspaceController : IAsyncDisposable
         if (Server != null) { Server.AcceptNewWork = AutomationEnabled && !SuspendNewWork && manualPage == null; await Server.TickAsync(token); ConnectionStatus = Server.Status; }
     }
     private string ModeSettingsPath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "workspace-mode.txt");
+    private string ListingDetailsModePath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "listing-details-mode.txt");
     private ParserOperatingMode LoadMode() => File.Exists(ModeSettingsPath)
         && Enum.TryParse(File.ReadAllText(ModeSettingsPath).Trim(), out ParserOperatingMode value) ? value : ParserOperatingMode.Local;
+    private ListingDetailsDisplayMode LoadListingDetailsMode() => File.Exists(ListingDetailsModePath)
+        && Enum.TryParse(File.ReadAllText(ListingDetailsModePath).Trim(), out ListingDetailsDisplayMode value)
+        ? value : ListingDetailsDisplayMode.SidePanel;
+    public void SetListingDetailsMode(ListingDetailsDisplayMode mode)
+    {
+        if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+        string temporary = ListingDetailsModePath + ".tmp";
+        File.WriteAllText(temporary, mode.ToString()); File.Move(temporary, ListingDetailsModePath, true);
+        ListingDetailsMode = mode;
+    }
     public void SetMode(ParserOperatingMode mode)
     {
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
@@ -160,3 +173,4 @@ public sealed class WorkspaceController : IAsyncDisposable
 }
 
 public enum ParserOperatingMode { Local, Server }
+public enum ListingDetailsDisplayMode { SidePanel, SeparateWindow }

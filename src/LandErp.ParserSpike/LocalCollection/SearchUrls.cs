@@ -75,17 +75,34 @@ public static class SearchUrls
         string[] right = Terms(b).Where(x => source != SourceSite.Avito || !AvitoPresentationOnly(x)).ToArray();
         if (source == SourceSite.Cian)
         {
-            // Cian's provided DOM omits redundant location[0]=region on pagination links.
-            string? region = left.FirstOrDefault(x => x.StartsWith("region=", StringComparison.Ordinal));
-            if (region is not null && right.Contains(region, StringComparer.Ordinal))
-            {
-                string regionValue = region["region=".Length..];
-                left = left.Where(x => !(x.StartsWith("location%5B", StringComparison.Ordinal) && x.EndsWith("=" + regionValue, StringComparison.Ordinal))).ToArray();
-                right = right.Where(x => !(x.StartsWith("location%5B", StringComparison.Ordinal) && x.EndsWith("=" + regionValue, StringComparison.Ordinal))).ToArray();
-            }
+            left = CianSemanticTerms(a);
+            right = CianSemanticTerms(b);
         }
         return left.SequenceEqual(right, StringComparer.Ordinal);
     }
+    private static string[] CianSemanticTerms(Uri uri)
+    {
+        static string BaseKey(string key) => System.Text.RegularExpressions.Regex.Replace(key, @"\[\d+\]$", "[]");
+        static bool PresentationOnly(string key) => key.Equals("center", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("zoom", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("polygon_name", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("polygon_name[]", StringComparison.OrdinalIgnoreCase);
+        List<(string Key, string Value)> terms = [];
+        foreach (string term in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] parts = term.Split('=', 2);
+            string key = BaseKey(Uri.UnescapeDataString(parts[0].Replace('+', ' ')));
+            if (PresentationOnly(key)) continue;
+            string value = parts.Length == 2 ? Uri.UnescapeDataString(parts[1].Replace('+', ' ')) : "";
+            terms.Add((key, value));
+        }
+        string? region = terms.FirstOrDefault(x => x.Key.Equals("region", StringComparison.OrdinalIgnoreCase)).Value;
+        if (!string.IsNullOrEmpty(region))
+            terms.RemoveAll(x => x.Key.Equals("location[]", StringComparison.OrdinalIgnoreCase) && x.Value == region);
+        return terms.OrderBy(x => x.Key, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal)
+            .Select(x => Uri.EscapeDataString(x.Key) + "=" + Uri.EscapeDataString(x.Value)).ToArray();
+    }
+
     private static bool AvitoCategoryAlias(string first, string second)
     {
         string[] a = first.Trim('/').Split('/'), b = second.Trim('/').Split('/');

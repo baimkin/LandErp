@@ -18,6 +18,7 @@ public sealed record WorkspaceSearch(string Id, string Label, string Url, string
     public string ScheduleText => Schedule.Kind switch { LocalScheduleKind.Interval => $"Каждые {Schedule.IntervalMinutes} мин",
         LocalScheduleKind.FixedTimes => string.Join(", ", Schedule.FixedTimes ?? []), _ => "Вручную" };
 }
+public sealed record WorkspaceFilterOption(string? Id, string Label);
 
 /// <summary>One visible workspace, one destination. Local data is never uploaded by switching modes.</summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "Window Closing awaits operations; dispatcher-owned synchronization resources live until the window closes.")]
@@ -34,11 +35,14 @@ public partial class WorkspaceWindow : Window
     private int offset;
     private long total;
     private SourceSite? noticeSource;
+    private ListingDetailsWindow? detailsWindow;
     private bool IsServer => controller?.Mode == ParserOperatingMode.Server;
     public WorkspaceWindow() : this(null) { }
     public WorkspaceWindow(WorkspaceController? controller)
     {
         InitializeComponent(); this.controller = controller;
+        DetailsPanel.OpenListingRequested += OpenListingRequested;
+        InitializeResultFilters();
         Loaded += async (_, _) =>
         {
             try
@@ -49,7 +53,9 @@ public partial class WorkspaceWindow : Window
                 CollectionSettings settings = this.controller.Store.Settings();
                 BrowserInput.SelectedIndex = settings.Browser == "msedge" ? 1 : 0;
                 MaxPagesInput.Text = settings.MaxPages.ToString(CultureInfo.CurrentCulture); FreshnessInput.Text = settings.FreshnessHours.ToString(CultureInfo.CurrentCulture);
+                ListingDetailsModeInput.SelectedIndex = this.controller.ListingDetailsMode == ListingDetailsDisplayMode.SeparateWindow ? 1 : 0;
                 ModeInput.SelectedIndex = IsServer ? 1 : 0; ready = true;
+                ApplyListingDetailsMode();
                 ShowStatus(); await ActionAsync(ReloadAsync); refresh.Start();
             }
             catch (Exception ex) { StatusText.Text = FriendlyError(ex); }
@@ -82,6 +88,7 @@ public partial class WorkspaceWindow : Window
             while (ticking) await Task.Delay(20);
             try
             {
+                if (detailsWindow != null) { detailsWindow.Close(); detailsWindow = null; }
                 if (this.controller != null)
                 {
                     this.controller.Runner.ManualActionRequired -= OnNotice;
@@ -157,6 +164,7 @@ public partial class WorkspaceWindow : Window
         WorkspaceGroup[] all = [new(null, "Все поиски"), new("", "Без группы"), .. groups];
         GroupsList.ItemsSource = all; GroupsList.SelectedItem = all.FirstOrDefault(x => x.Id == groupId) ?? all[0]; ApplyGroup();
         LinksGrid.SelectedItem = LinksGrid.Items.Cast<WorkspaceSearch>().FirstOrDefault(x => x.Id == selectedSearch);
+        RefreshResultFilters();
     }
     private void ApplyGroup()
     {
@@ -171,11 +179,19 @@ public partial class WorkspaceWindow : Window
     private void RefreshJobs()
     {
         if (controller == null) return;
-        JobsGrid.ItemsSource = controller.Store.Jobs().Where(x => x.LinkId.StartsWith("server-", StringComparison.Ordinal) == IsServer).Select(x => new
+        CollectionJob[] jobs = controller.Store.Jobs().Where(x => x.LinkId.StartsWith("server-", StringComparison.Ordinal) == IsServer).ToArray();
+        JobsGrid.ItemsSource = jobs.Select(x =>
         {
-            Label = searches.FirstOrDefault(s => s.Id == x.LinkId || s.Url == x.Url)?.Label ?? new Uri(x.Url).Host,
-            Source = x.Source.ToString(), State = x.DisplayState, Progress = JobProgress(x), Started = x.StartedAtUtc.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.CurrentCulture)
+            int? hint = controller.Store.Completion(x.Id)?.SourceCountHint;
+            return new
+            {
+                Label = searches.FirstOrDefault(item => item.Id == x.LinkId || item.Url == x.Url)?.Label ?? new Uri(x.Url).Host,
+                Source = x.Source.ToString(), State = x.DisplayState,
+                Progress = JobProgress(x) + (hint is int count ? $" · источник: {count}" : ""),
+                Started = x.StartedAtUtc.ToLocalTime().ToString("dd.MM HH:mm", CultureInfo.CurrentCulture)
+            };
         }).ToArray();
+        RefreshResultFilters(jobs);
     }
     private string JobProgress(CollectionJob job)
     {
@@ -197,7 +213,8 @@ public partial class WorkspaceWindow : Window
             {
                 await controller.CloseManualAsync(); controller.SetMode(chosen == 1 ? ParserOperatingMode.Server : ParserOperatingMode.Local);
                 remote = null; searches = []; LinksGrid.ItemsSource = searches; GroupsList.ItemsSource = null;
-                ListingsGrid.ItemsSource = null; JobsGrid.ItemsSource = null; PageText.Text = "";
+                ListingsGrid.ItemsSource = null; JobsGrid.ItemsSource = null; PageText.Text = ""; DetailsPanel.Clear();
+                if (detailsWindow != null) { detailsWindow.Close(); detailsWindow = null; }
                 await ReloadAsync(); StatusText.Text = "Режим изменён. Поиски остаются в своём рабочем пространстве.";
             }
             finally { changingMode = true; ModeInput.SelectedIndex = IsServer ? 1 : 0; changingMode = false; }
@@ -349,29 +366,114 @@ public partial class WorkspaceWindow : Window
         if (!int.TryParse(MaxPagesInput.Text, out int pages) || pages is < 1 or > 100) throw new ArgumentException("Предел страниц: от 1 до 100.");
         if (!double.TryParse(FreshnessInput.Text, out double hours) || !double.IsFinite(hours) || hours is < 0 or > 168) throw new ArgumentException("Свежесть данных: от 0 до 168 часов.");
         controller!.Store.SaveSettings(controller.Store.Settings() with { Browser = BrowserInput.SelectedIndex == 1 ? "msedge" : "chrome", MaxPages = pages, FreshnessHours = hours });
+        controller.SetListingDetailsMode(ListingDetailsModeInput.SelectedIndex == 1 ? ListingDetailsDisplayMode.SeparateWindow : ListingDetailsDisplayMode.SidePanel);
+        ApplyListingDetailsMode();
         StatusText.Text = "Настройки сохранены для следующего запуска."; return Task.CompletedTask;
     });
-    private ListingFilter Filter(int start = 0, int size = 100) => new(SearchInput.Text, Offset: start, Size: size, ServerWork: IsServer);
+    private ListingFilter Filter(int start = 0, int size = 100)
+    {
+        SourceSite? source = (SourceFilterInput.SelectedItem as WorkspaceFilterOption)?.Id is string sourceId && Enum.TryParse(sourceId, out SourceSite parsedSource) ? parsedSource : null;
+        string? linkId = (SearchFilterInput.SelectedItem as WorkspaceFilterOption)?.Id;
+        string? jobId = (RunFilterInput.SelectedItem as WorkspaceFilterOption)?.Id;
+        ListingQualityFilter quality = (QualityFilterInput.SelectedItem as WorkspaceFilterOption)?.Id is string qualityId
+            && Enum.TryParse(qualityId, out ListingQualityFilter parsedQuality) ? parsedQuality : ListingQualityFilter.All;
+        return new(SearchInput.Text, source, linkId, jobId, start, size, false, IsServer, quality);
+    }
     private Task FindAsync()
     {
+        string? selectedId = (ListingsGrid.SelectedItem as ListingRow)?.ExternalId;
         ListingPage page = controller!.Store.ReadListings(Filter(offset)); total = page.Total;
         ListingsGrid.ItemsSource = page.Rows; PageText.Text = $"{(page.Rows.Length == 0 ? 0 : offset + 1)}–{offset + page.Rows.Length} из {total}";
+        ListingsGrid.SelectedItem = page.Rows.FirstOrDefault(item => item.ExternalId == selectedId);
         return Task.CompletedTask;
     }
     private async void FindClick(object sender, RoutedEventArgs e) => await ActionAsync(() => { offset = 0; return FindAsync(); });
     private async void PreviousClick(object sender, RoutedEventArgs e) => await ActionAsync(() => { offset = Math.Max(0, offset - 100); return FindAsync(); });
     private async void NextClick(object sender, RoutedEventArgs e) => await ActionAsync(() => { if (offset + 100 < total) offset += 100; return FindAsync(); });
-    private void ListingSelected(object sender, SelectionChangedEventArgs e)
+    private void ListingSelected(object sender, SelectionChangedEventArgs e) => ShowSelectedListing();
+    private void ShowSelectedListing()
     {
-        if (controller == null || ListingsGrid.SelectedItem is not ListingRow row) { OpenListingButton.IsEnabled = false; DetailsTitle.Text = "Выберите объявление"; DetailsText.Text = HistoryText.Text = ""; return; }
-        ListingObservation data = row.Observation; DetailsTitle.Text = row.Title;
-        DetailsText.Text = $"{row.Price}\n{row.Location}\n\nПлощадь: {data.AreaSquareMeters.Raw ?? "нет данных"}\nПродавец: {data.SellerName.Raw ?? "нет данных"}\n\n{data.Description.Raw}\n\nПоследнее наблюдение: {row.LastSeen.ToLocalTime():dd.MM.yyyy HH:mm}";
+        if (controller == null || ListingsGrid.SelectedItem is not ListingRow row)
+        {
+            DetailsPanel.Clear(); detailsWindow?.Clear(); return;
+        }
         HistoryRow[] history = controller.Store.History(row.Source, row.ExternalId, serverWork: IsServer);
-        HistoryText.Text = "Последние наблюдения (до 100):\n" + string.Join("\n", history.Select(x => $"{x.Observation.ObservedAtUtc.ToLocalTime():dd.MM.yyyy HH:mm} — {x.Observation.DisplayPrice}"));
-        OpenListingButton.IsEnabled = true;
+        string context = ListingContext(history);
+        if (controller.ListingDetailsMode == ListingDetailsDisplayMode.SeparateWindow)
+        {
+            DetailsPanel.Clear();
+            ListingDetailsWindow window = EnsureDetailsWindow();
+            window.ShowListing(row, history, context);
+        }
+        else DetailsPanel.ShowListing(row, history, context);
     }
-    private async void OpenListingClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
-    { if (ListingsGrid.SelectedItem is ListingRow row) await OpenBrowserAsync(row.Observation.Url); });
+    private string ListingContext(HistoryRow[] history)
+    {
+        if (controller == null || history.Count == 0) return "Контекст запуска не найден.";
+        HistoryRow latest = history[0];
+        CollectionJob? job = controller.Store.Jobs().FirstOrDefault(x => x.Id == latest.JobId);
+        if (job == null) return $"Job: {latest.JobId}\nСтраница: {latest.Page}";
+        string label = searches.FirstOrDefault(x => x.Id == job.LinkId || x.Url == job.Url)?.Label ?? new Uri(job.Url).Host;
+        int? hint = controller.Store.Completion(job.Id)?.SourceCountHint;
+        return $"Поиск: {label}\nJob: {job.Id}\nСтраница: {latest.Page}\nPass: {job.PassId}" +
+            (hint is int count ? $"\nОбъявлений по данным источника: {count}" : "");
+    }
+    private ListingDetailsWindow EnsureDetailsWindow()
+    {
+        if (detailsWindow != null) return detailsWindow;
+        ListingDetailsWindow window = new() { Owner = this };
+        window.OpenListingRequested += OpenListingRequested;
+        window.Closed += (_, _) => { if (ReferenceEquals(detailsWindow, window)) detailsWindow = null; };
+        detailsWindow = window; window.Show(); return window;
+    }
+    private void OpenListingRequested(object? sender, ListingOpenEventArgs e) => _ = ActionAsync(() => OpenBrowserAsync(e.Url));
+    private void ApplyListingDetailsMode()
+    {
+        if (controller == null) return;
+        bool side = controller.ListingDetailsMode == ListingDetailsDisplayMode.SidePanel;
+        DetailsPanel.Visibility = side ? Visibility.Visible : Visibility.Collapsed;
+        DetailsGapColumn.Width = side ? new GridLength(20) : new GridLength(0);
+        DetailsColumn.Width = side ? new GridLength(2, GridUnitType.Star) : new GridLength(0);
+        if (side && detailsWindow != null) { detailsWindow.Close(); detailsWindow = null; }
+        if (!side && ListingsGrid.SelectedItem is ListingRow) ShowSelectedListing();
+    }
+    private void InitializeResultFilters()
+    {
+        SourceFilterInput.ItemsSource = new WorkspaceFilterOption[] { new(null, "Все источники"), new(nameof(SourceSite.Avito), "Avito"), new(nameof(SourceSite.Cian), "Cian") };
+        SourceFilterInput.SelectedIndex = 0;
+        QualityFilterInput.ItemsSource = new WorkspaceFilterOption[]
+        {
+            new(null, "Все результаты"),
+            new(nameof(ListingQualityFilter.Warnings), "Только с предупреждениями"),
+            new(nameof(ListingQualityFilter.LandTypeConflict), "Конфликт типа участка"),
+            new(nameof(ListingQualityFilter.MissingPrice), "Нет цены"),
+            new(nameof(ListingQualityFilter.MissingArea), "Нет площади"),
+            new(nameof(ListingQualityFilter.MissingCoordinates), "Нет координат"),
+            new(nameof(ListingQualityFilter.MissingSourcePublishedAt), "Нет даты публикации"),
+            new(nameof(ListingQualityFilter.MissingCadastralNumber), "Нет кадастрового номера")
+        };
+        QualityFilterInput.SelectedIndex = 0;
+        SearchFilterInput.ItemsSource = new WorkspaceFilterOption[] { new(null, "Все поиски") }; SearchFilterInput.SelectedIndex = 0;
+        RunFilterInput.ItemsSource = new WorkspaceFilterOption[] { new(null, "Все запуски") }; RunFilterInput.SelectedIndex = 0;
+    }
+    private void RefreshResultFilters(CollectionJob[]? knownJobs = null)
+    {
+        if (controller == null || SearchFilterInput == null) return;
+        string? searchId = (SearchFilterInput.SelectedItem as WorkspaceFilterOption)?.Id;
+        string? runId = (RunFilterInput.SelectedItem as WorkspaceFilterOption)?.Id;
+        CollectionJob[] jobs = knownJobs ?? controller.Store.Jobs().Where(x => x.LinkId.StartsWith("server-", StringComparison.Ordinal) == IsServer).ToArray();
+        WorkspaceFilterOption[] searchOptions = [new(null, "Все поиски"), .. jobs.GroupBy(x => x.LinkId).Select(group =>
+        {
+            CollectionJob item = group.OrderByDescending(x => x.StartedAtUtc).First();
+            string label = searches.FirstOrDefault(x => x.Id == item.LinkId || x.Url == item.Url)?.Label ?? new Uri(item.Url).Host;
+            return new WorkspaceFilterOption(item.LinkId, label);
+        }).OrderBy(x => x.Label)];
+        WorkspaceFilterOption[] runOptions = [new(null, "Все запуски"), .. jobs.OrderByDescending(x => x.StartedAtUtc)
+            .Select(x => new WorkspaceFilterOption(x.Id, $"{x.StartedAtUtc.ToLocalTime():dd.MM HH:mm} · {searches.FirstOrDefault(s => s.Id == x.LinkId || s.Url == x.Url)?.Label ?? new Uri(x.Url).Host}"))];
+        SearchFilterInput.ItemsSource = searchOptions; SearchFilterInput.SelectedItem = searchOptions.FirstOrDefault(x => x.Id == searchId) ?? searchOptions[0];
+        RunFilterInput.ItemsSource = runOptions; RunFilterInput.SelectedItem = runOptions.FirstOrDefault(x => x.Id == runId) ?? runOptions[0];
+    }
+
     public static string CsvCell(string? text)
     {
         string value = text ?? "";
@@ -383,11 +485,18 @@ public partial class WorkspaceWindow : Window
         SaveFileDialog dialog = new() { Filter = "Таблица CSV|*.csv", FileName = "Объявления.csv" };
         if (DuringDialog(() => dialog.ShowDialog(this)) != true) return;
         using StreamWriter writer = new(dialog.FileName, false, new UTF8Encoding(true));
-        await writer.WriteLineAsync("Название;Цена;Адрес;Продавец;Ссылка;Последнее наблюдение");
+        await writer.WriteLineAsync("Источник;ID;Название;Цена;Площадь;Цена за сотку;Адрес;Типы участка;Конфликт типа;Дата публикации источника;Кадастровый номер;Координаты WGS84;Фото;Продавец;Предупреждения;Ссылка;Первое наблюдение;Последнее наблюдение");
         for (int start = 0; ; start += 500)
         {
             ListingPage page = controller!.Store.ReadListings(Filter(start, 500));
-            foreach (ListingRow row in page.Rows) await writer.WriteLineAsync(string.Join(';', new[] { row.Title, row.Price, row.Location, row.Seller, row.Observation.Url, row.LastSeen.ToString("O") }.Select(CsvCell)));
+            foreach (ListingRow row in page.Rows)
+                await writer.WriteLineAsync(string.Join(';', new[]
+                {
+                    row.Source.ToString(), row.ExternalId, row.Title, row.Price, row.Area, row.PricePerSotka, row.Location,
+                    row.LandTypes, row.LandTypeIssue, row.Published, row.CadastralNumber, row.Coordinates,
+                    row.PhotoCount.ToString(CultureInfo.InvariantCulture), row.Seller, row.WarningSummary, row.Observation.Url,
+                    row.FirstSeen.ToString("O"), row.LastSeen.ToString("O")
+                }.Select(CsvCell)));
             if (start + page.Rows.Length >= page.Total) break;
         }
         StatusText.Text = "Таблица сохранена.";

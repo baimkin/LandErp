@@ -9,6 +9,7 @@ using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Overview.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;
+using LandErp.Infrastructure.Modules.IdentityAccess;
 using LandErp.Infrastructure.Modules.Organization;
 using LandErp.Infrastructure.Modules.Procurement;
 using LandErp.Infrastructure.Persistence;
@@ -20,9 +21,13 @@ namespace LandErp.Infrastructure.Modules.Overview;
 
 public sealed class OverviewService(
     IDbContextFactory<LandErpDbContext> factory,
-    IAccessControl access,
+    IAccessControl legacyAccess,
+    IEmployeeAccessService employeeAccess,
     TimeProvider time) : IOverviewService
 {
+    public OverviewService(IDbContextFactory<LandErpDbContext> factory, IAccessControl legacyAccess, TimeProvider time)
+        : this(factory, legacyAccess, new EmployeeAccessService(factory), time) { }
+
     private static readonly IncomingLandType[] DefaultTypes = Enum.GetValues<IncomingLandType>();
     private static readonly int[] AllowedPeriods = [7, 30, 90, 180];
     private const int CompactMarketSize = 5;
@@ -36,10 +41,11 @@ public sealed class OverviewService(
 
     public async Task<OverviewView> ReadAsync(Subject subject, CancellationToken cancellationToken)
     {
-        AccessContext identity = await access.ResolveAsync(subject, cancellationToken);
-        AccessContext? queue = await TryRequireAsync(subject, Permissions.QueueRead, cancellationToken);
-        bool canManage = await IsAllowedAsync(subject, Permissions.ManagerDecide, cancellationToken);
-        AccessContext? collection = await CollectionContextAsync(subject, cancellationToken);
+        EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        AccessContext identity = effective.OrganizationContext;
+        AccessContext? queue = effective.CanReadProcurement ? effective.ProcurementReadContext : null;
+        bool canManage = effective.CanProcessIncoming;
+        AccessContext? collection = effective.CanReadCollection ? effective.OrganizationContext : null;
         DateTimeOffset now = time.GetUtcNow();
         (DateTimeOffset todayStart, DateTimeOffset tomorrowStart) = TodayBounds(now);
 
@@ -78,10 +84,13 @@ public sealed class OverviewService(
                                         && source.DataRevision > link.ReviewedDataRevision))
                             };
 
-            newIncoming = await db.Listings.AsNoTracking().CountAsync(item => item.OrganizationId == queue.OrganizationId
-                && item.Disposition == CatalogDisposition.Incoming, cancellationToken);
-            receivedToday = await db.Listings.AsNoTracking().CountAsync(item => item.OrganizationId == queue.OrganizationId
-                && item.Disposition == CatalogDisposition.Incoming && item.ReceivedAt >= todayStart, cancellationToken);
+            if (effective.CanReadIncoming)
+            {
+                newIncoming = await db.Listings.AsNoTracking().CountAsync(item => item.OrganizationId == queue.OrganizationId
+                    && item.Disposition == CatalogDisposition.Incoming, cancellationToken);
+                receivedToday = await db.Listings.AsNoTracking().CountAsync(item => item.OrganizationId == queue.OrganizationId
+                    && item.Disposition == CatalogDisposition.Incoming && item.ReceivedAt >= todayStart, cancellationToken);
+            }
             activeCount = await active.CountAsync(cancellationToken);
             waitingCount = await active.CountAsync(item => item.StageId == "pending_head", cancellationToken);
             overdueCount = await caseTasks.CountAsync(row => !row.Task.Completed && row.Task.DueAt < todayStart, cancellationToken);
@@ -148,7 +157,7 @@ public sealed class OverviewService(
                     names.GetValueOrDefault(item.EmployeeId, "Сотрудник"), item.ActiveCases, item.OverdueCases)).ToList();
             }
 
-            market = await ReadMarketGroupsCoreAsync(db, queue.OrganizationId, canManage: collection != null,
+            market = await ReadMarketGroupsCoreAsync(db, queue.OrganizationId, canManage: effective.CanManageCollection,
                 new("", MarketGroupSort.Name, 0, CompactMarketSize), now, cancellationToken);
         }
 
@@ -164,9 +173,10 @@ public sealed class OverviewService(
             }
         }
 
-        int incomingAttention = queue == null ? 0 : await db.Listings.AsNoTracking().CountAsync(item => item.OrganizationId == queue.OrganizationId
-            && item.Disposition == CatalogDisposition.Incoming && item.AttentionRequired, cancellationToken);
-        if (queue != null && incomingAttention > 0 && attentionItems.Count < FeedSize)
+        int incomingAttention = queue == null || !effective.CanReadIncoming ? 0
+            : await db.Listings.AsNoTracking().CountAsync(item => item.OrganizationId == queue.OrganizationId
+                && item.Disposition == CatalogDisposition.Incoming && item.AttentionRequired, cancellationToken);
+        if (queue != null && effective.CanReadIncoming && incomingAttention > 0 && attentionItems.Count < FeedSize)
             attentionItems.Add(new("incoming", OverviewSeverity.Info, $"{incomingAttention} новых предложений требуют разбора",
                 "Входящие ещё не обработаны", Age(await db.Listings.AsNoTracking().Where(item => item.OrganizationId == queue.OrganizationId
                     && item.Disposition == CatalogDisposition.Incoming && item.AttentionRequired).MinAsync(item => (DateTimeOffset?)item.ReceivedAt, cancellationToken), now),
@@ -176,22 +186,26 @@ public sealed class OverviewService(
         int attentionTotal = procurementAttentionCount + incomingAttention + collectionAttention;
         List<OverviewQuickAction> quick = [];
         if (canManage) quick.Add(new("add", "+ Добавить предложение", "/incoming?manual=true", true));
+        if (effective.CanReadIncoming)
+            quick.Add(new("incoming", "Открыть входящие", "/incoming", false));
         if (queue != null)
         {
-            quick.Add(new("incoming", "Открыть входящие", "/incoming", false));
             quick.Add(new("queue", "Очередь закупки", "/procurement", false));
             quick.Add(new("mine", "Мои объекты", "/procurement?mine=true", false));
         }
 
         int maxStage = Math.Max(1, Math.Max(newIncoming, Math.Max(activeCount, Math.Max(deepCount, Math.Max(waitingCount, acquiredCount)))));
-        OverviewStageItem[] stages = queue == null ? [] :
-        [
-            Stage("incoming", "Входящие", newIncoming, "новых предложений", maxStage, "/incoming"),
-            Stage("work", "В работе", activeCount, overdueCount == 0 ? "объектов в работе" : $"{overdueCount} просрочено", maxStage, "/procurement"),
-            Stage("deep", "Глубокая проверка", deepCount, "юридическая проверка", maxStage, "/procurement"),
-            Stage("decision", "Решение", waitingCount, "ждут руководителя", maxStage, "/procurement?stage=pending_head"),
-            Stage("acquired", "Куплено", acquiredCount, "за последние 30 дней", maxStage, "/procurement?stage=acquired")
-        ];
+        List<OverviewStageItem> stageItems = [];
+        if (effective.CanReadIncoming)
+            stageItems.Add(Stage("incoming", "Входящие", newIncoming, "новых предложений", maxStage, "/incoming"));
+        if (queue != null)
+        {
+            stageItems.Add(Stage("work", "В работе", activeCount, overdueCount == 0 ? "объектов в работе" : $"{overdueCount} просрочено", maxStage, "/procurement"));
+            stageItems.Add(Stage("deep", "Глубокая проверка", deepCount, "юридическая проверка", maxStage, "/procurement"));
+            stageItems.Add(Stage("decision", "Решение", waitingCount, "ждут руководителя", maxStage, "/procurement?stage=pending_head"));
+            stageItems.Add(Stage("acquired", "Куплено", acquiredCount, "за последние 30 дней", maxStage, "/procurement?stage=acquired"));
+        }
+        OverviewStageItem[] stages = stageItems.ToArray();
 
         return new(queue != null,
             new(newIncoming, receivedToday == 0 ? "нет новых сегодня" : $"{receivedToday} получено сегодня"),
@@ -204,17 +218,21 @@ public sealed class OverviewService(
 
     public async Task<MarketGroupPage> ReadMarketGroupsAsync(Subject subject, MarketGroupQuery query, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
-        AccessContext? collection = await CollectionContextAsync(subject, cancellationToken);
+        EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        if (!effective.CanReadProcurement && !effective.CanReadCollection)
+            throw new AccessDeniedException();
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        return await ReadMarketGroupsCoreAsync(db, context.OrganizationId, collection != null, query, time.GetUtcNow(), cancellationToken);
+        return await ReadMarketGroupsCoreAsync(db, effective.OrganizationId, effective.CanManageCollection,
+            query, time.GetUtcNow(), cancellationToken);
     }
 
     public async Task<SearchGroupMarketSettingsView> SaveMarketSettingsAsync(Subject subject,
         SaveSearchGroupMarketSettings command, string correlationId, CancellationToken cancellationToken)
     {
         Validate(command);
-        AccessContext context = await CollectionContextAsync(subject, cancellationToken) ?? throw new AccessDeniedException();
+        EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        if (!effective.CanManageCollection) throw new AccessDeniedException();
+        AccessContext context = effective.OrganizationContext;
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         SearchGroup group = await db.SearchGroups.SingleOrDefaultAsync(item => item.Id == command.SearchGroupId
             && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken) ?? throw new AccessDeniedException();
@@ -392,23 +410,6 @@ public sealed class OverviewService(
         statuses.Add(new(OverviewSeverity.Info, "Последнее новое предложение", lastNew == null ? "данных пока нет" : RelativeTime(lastNew, now), "/incoming"));
         return new(online, enabled, searches, processed, statuses, "/collectors");
     }
-
-    private async Task<AccessContext?> CollectionContextAsync(Subject subject, CancellationToken cancellationToken)
-    {
-        AccessContext? agents = await TryRequireAsync(subject, Permissions.AgentsManage, cancellationToken);
-        if (agents?.Scope != AccessScope.Organization) return null;
-        AccessContext? searches = await TryRequireAsync(subject, Permissions.CollectionManage, cancellationToken);
-        return searches?.Scope == AccessScope.Organization && searches.OrganizationId == agents.OrganizationId ? agents : null;
-    }
-
-    private async Task<AccessContext?> TryRequireAsync(Subject subject, string permission, CancellationToken cancellationToken)
-    {
-        try { return await access.RequireAsync(subject, permission, cancellationToken); }
-        catch (AccessDeniedException) { return null; }
-    }
-
-    private async Task<bool> IsAllowedAsync(Subject subject, string permission, CancellationToken cancellationToken) =>
-        await TryRequireAsync(subject, permission, cancellationToken) != null;
 
     private static OverviewAttentionItem ProjectAttention(CaseTaskRow row, DateTimeOffset now, DateTimeOffset todayStart)
     {

@@ -4,6 +4,7 @@ using LandErp.Application.Modules.Organization.Domain;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;
+using LandErp.Infrastructure.Modules.IdentityAccess;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,12 +13,24 @@ namespace LandErp.Infrastructure.Modules.Procurement;
 /// <summary>Case-centric read projection for the approved procurement queue V2 UI.</summary>
 public sealed partial class ProcurementQueueV2ReadService(
     IDbContextFactory<LandErpDbContext> factory,
-    IAccessControl access,
+    IAccessControl legacyAccess,
+    IEmployeeAccessService employeeAccess,
     TimeProvider clock) : IProcurementQueueV2ReadService
 {
+    public ProcurementQueueV2ReadService(IDbContextFactory<LandErpDbContext> factory,
+        IAccessControl legacyAccess, TimeProvider clock)
+        : this(factory, legacyAccess, new EmployeeAccessService(factory), clock) { }
+
     private readonly IDbContextFactory<LandErpDbContext> _factory = factory;
-    private readonly IAccessControl _access = access;
+    private readonly IEmployeeAccessService _accessV1 = employeeAccess;
     private readonly TimeProvider _clock = clock;
+
+    private async Task<EffectiveEmployeeAccess> RequireReadAsync(Subject subject, CancellationToken cancellationToken)
+    {
+        EffectiveEmployeeAccess effective = await _accessV1.ResolveAsync(subject, cancellationToken);
+        if (!effective.CanReadProcurement) throw new AccessDeniedException();
+        return effective;
+    }
 
     private sealed class Row
     {
@@ -36,7 +49,8 @@ public sealed partial class ProcurementQueueV2ReadService(
 
     public async Task<ProcurementQueueV2Page> ReadPageAsync(Subject subject, ProcurementQueueV2Filter filter, CancellationToken cancellationToken)
     {
-        AccessContext context = await _access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        EffectiveEmployeeAccess effective = await RequireReadAsync(subject, cancellationToken);
+        AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await _factory.CreateDbContextAsync(cancellationToken);
         (DateTimeOffset todayStart, DateTimeOffset tomorrowStart) = TodayBounds();
         int offset = Math.Max(0, filter.Offset);
@@ -99,13 +113,15 @@ public sealed partial class ProcurementQueueV2ReadService(
 
         ProcurementQueueV2Row[] items = pageRows.Select(row => ProjectRow(row, names, sourcesByCase.GetValueOrDefault(row.Case.Id, []),
             checksByCase.GetValueOrDefault(row.Case.Id, []), contactsByCase.GetValueOrDefault(row.Case.Id), todayStart, tomorrowStart)).ToArray();
-        bool canCreateManualCase = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        bool canCreateManualCase = effective.CanManageProcurement
+            && ProcurementVisibility.CanReceiveNewCase(effective.ProcurementWorkContext);
         return new(items, total, summary, assignees, stages, offset, size, canCreateManualCase);
     }
 
     public async Task<ProcurementQueueV2Detail> ReadDetailAsync(Subject subject, Guid caseId, CancellationToken cancellationToken)
     {
-        AccessContext context = await _access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        EffectiveEmployeeAccess effective = await RequireReadAsync(subject, cancellationToken);
+        AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await _factory.CreateDbContextAsync(cancellationToken);
         IQueryable<Row> visible = VisibleCases(db, context);
         Row? row = await visible.SingleOrDefaultAsync(item => item.Case.Id == caseId, cancellationToken);
@@ -126,16 +142,16 @@ public sealed partial class ProcurementQueueV2ReadService(
 
         CheckDb[] checks = await db.CaseChecks.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
             .Select(item => new CheckDb(item.PropertyCaseId, item.Level, item.Status, item.Blocker, item.ResponsibleEmployeeId)).ToArrayAsync(cancellationToken);
-        IQueryable<EmployeeAssignment> visibleRecipientAssignments = ProcurementVisibility.EligibleRecipientAssignments(
-            db, row.Case, row.Assignment.EmployeeId, ProcurementRecipientAccess.CurrentVisibility);
-        var assigneeRows = await (from assignment in visibleRecipientAssignments
-                                  join employee in db.Employees.AsNoTracking() on assignment.EmployeeId equals employee.Id
-                                  where db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.QueueRead)
-                                      && (db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.ManagerDecide)
-                                          || db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId && grant.PermissionId == Permissions.HeadDecide))
-                                  select new { employee.Id, Name = employee.DisplayName })
-            .Distinct().OrderBy(item => item.Name).ToArrayAsync(cancellationToken);
-        ProcurementQueueV2Assignee[] availableAssignees = assigneeRows.Select(item => new ProcurementQueueV2Assignee(item.Id, item.Name)).ToArray();
+        Guid[] availableAssigneeIds = (await _accessV1.ResolveActiveEmployeesAsync(context.OrganizationId, cancellationToken))
+            .Where(item => item.CanManageProcurement
+                && ProcurementVisibility.CanSeeAfterResponsibility(row.Case, item.ProcurementWorkContext,
+                    row.Case.ManagerEmployeeId, row.Assignment.EmployeeId))
+            .Select(item => item.EmployeeId).ToArray();
+        ProcurementQueueV2Assignee[] availableAssignees = await db.Employees.AsNoTracking()
+            .Where(item => item.OrganizationId == context.OrganizationId && availableAssigneeIds.Contains(item.Id))
+            .OrderBy(item => item.DisplayName)
+            .Select(item => new ProcurementQueueV2Assignee(item.Id, item.DisplayName))
+            .ToArrayAsync(cancellationToken);
         Guid[] peopleIds = checks.Where(item => item.ResponsibleEmployeeId != null).Select(item => item.ResponsibleEmployeeId!.Value)
             .Append(row.Task.EmployeeId).Concat(availableAssignees.Select(item => item.Id)).Distinct().ToArray();
         Dictionary<Guid, string> people = await db.Employees.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId && peopleIds.Contains(item.Id))
@@ -153,8 +169,11 @@ public sealed partial class ProcurementQueueV2ReadService(
         decimal? priceDeltaPercent = priceDelta != null && startPrice is > 0m
             ? decimal.Round(priceDelta.Value / startPrice.Value * 100m, 1, MidpointRounding.AwayFromZero)
             : null;
-        bool managerPermission = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken);
-        bool headPermission = await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
+        bool workVisible = effective.CanManageProcurement
+            && await VisibleCases(db, effective.ProcurementWorkContext)
+                .AnyAsync(item => item.Case.Id == caseId, cancellationToken);
+        bool managerPermission = workVisible;
+        bool headPermission = workVisible && effective.CanHeadProcurement;
         bool canManagerDecide = managerPermission && row.Assignment.EmployeeId == context.EmployeeId
             && row.Case.StageId is not ("pending_head" or "acquired")
             && (row.Case.StageId != "rejected" || sourceChanged);

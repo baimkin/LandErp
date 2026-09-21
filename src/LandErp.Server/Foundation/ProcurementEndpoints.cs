@@ -11,7 +11,7 @@ internal static class ProcurementEndpoints
 {
     public static void MapProcurementEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/api/procurement").RequireAuthorization(Permissions.QueueRead);
+        var group = app.MapGroup("/api/procurement").RequireAuthorization();
         group.MapGet("/queue", async (HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => Results.Ok(await workspace.ReadQueueAsync(PermissionAuthorization.SubjectFrom(http.User), new(), token)));
         group.MapGet("/cases/{id:guid}", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => Results.Ok(await workspace.ReadCardAsync(PermissionAuthorization.SubjectFrom(http.User), id, token)));
         group.MapPost("/cases/manual", async (CreateManualPropertyCase command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
@@ -62,8 +62,12 @@ internal static class ProcurementEndpoints
         { await workspace.SetDispositionAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/incoming/monitoring", async (SetCatalogMonitoring command, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
         { await workspace.SetMonitoringAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapGet("/incoming/procurement-targets", async (HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
+            Results.Ok(await workspace.ReadProcurementTargetsAsync(PermissionAuthorization.SubjectFrom(http.User), token)));
         group.MapPost("/incoming/take-to-work", async (TakeCatalogItemToWork command, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
             Results.Ok(await workspace.TakeToWorkAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token))).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapPost("/incoming/transfer-to-procurement", async (TransferCatalogItemToProcurement command, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
+            Results.Ok(await workspace.TransferToProcurementAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token))).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/incoming/resume-case", async (ResumeCatalogItemCase command, HttpContext http, ICatalogWorkspace workspace, CancellationToken token) =>
             Results.Ok(await workspace.ResumeCaseAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token))).AddEndpointFilter(ValidateCsrfAsync);
     }

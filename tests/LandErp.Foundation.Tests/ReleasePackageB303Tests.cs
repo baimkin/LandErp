@@ -1,4 +1,5 @@
 using LandErp.Application.Modules.Catalog.Contracts;
+using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -16,8 +17,10 @@ public sealed class ReleasePackageB303Tests
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
         Guid sourceId = await fixture.CreateUnlinkedManualAsync();
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(sourceId), "b303-take", CancellationToken.None);
+        InspectionWorkspaceView assigned = await AssignManagerInspectionAsync(fixture, taken.CaseId);
         Guid inspectionId = await fixture.Workspace.SaveInspectionAsync(fixture.Manager,
-            new(taken.CaseId, null, null, "", "", [], false), "b303-start", CancellationToken.None);
+            new(taken.CaseId, assigned.Inspection!.Id, assigned.Inspection.Version, "", "", [], false),
+            "b303-start", CancellationToken.None);
         CaseCard card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
         InspectionView inspection = card.Inspection!;
 
@@ -55,8 +58,10 @@ public sealed class ReleasePackageB303Tests
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
         Guid sourceId = await fixture.CreateUnlinkedManualAsync();
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(sourceId), "b303-take", CancellationToken.None);
+        InspectionWorkspaceView assigned = await AssignManagerInspectionAsync(fixture, taken.CaseId);
         Guid inspectionId = await fixture.Workspace.SaveInspectionAsync(fixture.Manager,
-            new(taken.CaseId, null, null, "", "", [], false), "b303-start", CancellationToken.None);
+            new(taken.CaseId, assigned.Inspection!.Id, assigned.Inspection.Version, "", "", [], false),
+            "b303-start", CancellationToken.None);
         CaseCard first = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
         InspectionView stale = first.Inspection!;
 
@@ -72,6 +77,20 @@ public sealed class ReleasePackageB303Tests
 
         CaseCard current = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
         Assert.AreEqual("Новая серверная версия", current.Inspection!.OverallConclusion);
+    }
+
+    private static async Task<InspectionWorkspaceView> AssignManagerInspectionAsync(
+        ProcurementTests.Phase1Fixture fixture, Guid caseId)
+    {
+        await fixture.SetExplicitAccessAsync(fixture.ManagerEmployeeId,
+            new(IncomingAccessLevel.Process, ProcurementAccessLevel.Manager,
+                AccessScope.Department, AccessScope.Department, CollectionAccessLevel.None,
+                CanAssignInspections: true, CanPerformInspections: true, CanConfirmPurchase: false,
+                CanManageTemplates: true, CanReadAudit: false));
+        await fixture.Workspace.AssignInspectionAsync(fixture.Manager,
+            new(caseId, fixture.ManagerEmployeeId, null, "B3-03 self-assignment", null),
+            "b303-assign", CancellationToken.None);
+        return await fixture.Workspace.ReadInspectionAsync(fixture.Manager, caseId, CancellationToken.None);
     }
 
     private static async Task AssertInvalidAsync(ProcurementTests.Phase1Fixture fixture, Guid caseId,

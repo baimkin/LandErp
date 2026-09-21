@@ -128,12 +128,6 @@ public sealed partial class ProcurementQueueV2ReadService
             new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), zone)));
     }
 
-    private async Task<bool> AllowedAsync(Subject subject, string permission, CancellationToken cancellationToken)
-    {
-        try { await _access.RequireAsync(subject, permission, cancellationToken); return true; }
-        catch (AccessDeniedException) { return false; }
-    }
-
     private static string? FirstPhoto(SourceDb[] sources) => sources.OrderByDescending(item => item.LastObservedAt ?? item.ChangedAt)
         .SelectMany(item => PhotoUrls(item.PhotosJson)).FirstOrDefault();
     private static string SourceLabel(SourceDb source) => string.IsNullOrWhiteSpace(source.ExternalId) ? source.Source.ToString() : $"{source.Source} · {source.ExternalId}";

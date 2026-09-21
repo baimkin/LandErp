@@ -1,5 +1,5 @@
 @page "/procurement/{CaseId:guid}"
-@attribute [Authorize(Policy = "manager_queue.read")]
+@attribute [Authorize]
 @using LandErp.Server.Components.Procurement
 <PageTitle>Объект закупки · LandErp</PageTitle>
 <CaseWorkspace CaseId="CaseId" FullPage="true" />

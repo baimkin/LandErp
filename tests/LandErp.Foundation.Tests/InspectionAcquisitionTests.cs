@@ -113,8 +113,19 @@ public sealed class InspectionAcquisitionTests
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(itemId), "take", CancellationToken.None);
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.SaveInspectionAsync(fixture.ForeignOwner,
             new(taken.CaseId, null, null, "", "", [], false), "foreign", CancellationToken.None));
+        await fixture.SetExplicitAccessAsync(fixture.ManagerEmployeeId,
+            new(IncomingAccessLevel.Process, ProcurementAccessLevel.Manager,
+                AccessScope.Department, AccessScope.Department, CollectionAccessLevel.None,
+                CanAssignInspections: true, CanPerformInspections: true, CanConfirmPurchase: false,
+                CanManageTemplates: true, CanReadAudit: false));
+        await fixture.Workspace.AssignInspectionAsync(fixture.Manager,
+            new(taken.CaseId, fixture.ManagerEmployeeId, null, "Self-assigned for inspection behavior test", null),
+            "assign-self", CancellationToken.None);
+        InspectionWorkspaceView managerInspection = await fixture.Workspace.ReadInspectionAsync(
+            fixture.Manager, taken.CaseId, CancellationToken.None);
         Guid inspectionId = await fixture.Workspace.SaveInspectionAsync(fixture.Manager,
-            new(taken.CaseId, null, null, "", "", [], false), "start", CancellationToken.None);
+            new(taken.CaseId, managerInspection.Inspection!.Id, managerInspection.Inspection.Version,
+                "", "", [], false), "start", CancellationToken.None);
         CaseCard card = await fixture.Workspace.ReadCardAsync(fixture.Manager, taken.CaseId, CancellationToken.None);
         Assert.AreEqual(20, card.Inspection!.Items.Count); string firstTitle = card.Inspection.Items[0].Title;
         InspectionTemplateView template = await FirstInspectionTemplateAsync(fixture, card.Inspection.Items[0].TemplateItemId);

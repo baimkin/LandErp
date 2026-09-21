@@ -1,5 +1,5 @@
 @page "/inspections"
-@attribute [Authorize(Policy = "inspections.read")]
+@attribute [Authorize]
 @using LandErp.Application.Modules.Procurement.Contracts
 @inherits WorkspaceComponent
 @inject IProcurementWorkspace Workspace

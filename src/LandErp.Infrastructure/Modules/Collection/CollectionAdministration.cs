@@ -5,6 +5,7 @@ using LandErp.Application.Modules.Collection.Contracts;
 using LandErp.Application.Modules.Collection.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Collector.Contracts.V1;
+using LandErp.Infrastructure.Modules.IdentityAccess;
 using LandErp.Infrastructure.Modules.Organization;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -12,13 +13,24 @@ using System.Security.Cryptography;
 
 namespace LandErp.Infrastructure.Modules.Collection;
 
-public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext> factory, IAccessControl access, TimeProvider time) : ICollectionAdministration
+public sealed class CollectionAdministration(
+    IDbContextFactory<LandErpDbContext> factory,
+    IAccessControl legacyAccess,
+    IEmployeeAccessService employeeAccess,
+    TimeProvider time) : ICollectionAdministration
 {
-    private Task<AccessContext> RequireAsync(Subject subject, string permission, CancellationToken cancellationToken) =>
-        access.RequireAsync(subject, permission, cancellationToken);
+    public CollectionAdministration(IDbContextFactory<LandErpDbContext> factory, IAccessControl legacyAccess, TimeProvider time)
+        : this(factory, legacyAccess, new EmployeeAccessService(factory), time) { }
+
+    private async Task<AccessContext> RequireAsync(Subject subject, bool manage, CancellationToken cancellationToken)
+    {
+        EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        if (manage ? !effective.CanManageCollection : !effective.CanReadCollection) throw new AccessDeniedException();
+        return effective.OrganizationContext;
+    }
     public async Task<CollectionAdminView> ReadAsync(Subject subject, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.CollectionRead, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: false, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         DateTimeOffset now = time.GetUtcNow();
         DateTimeOffset onlineSince = now.AddMinutes(-3);
@@ -64,7 +76,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     }
     public async Task<AgentCredential> CreateAgentAsync(Subject subject, string name, bool canManageSearches, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.AgentsManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         CollectorAgent agent = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
@@ -76,7 +88,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     }
     public async Task<AgentConnectionCode> CreateConnectionCodeAsync(Subject subject, string name, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.AgentsManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         string secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         DateTimeOffset expiresAt = time.GetUtcNow().AddMinutes(15);
@@ -94,7 +106,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     }
     public async Task RevokeAgentAsync(Subject subject, Guid agentId, long expectedVersion, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.AgentsManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         CollectorAgent agent = await db.CollectorAgents.SingleOrDefaultAsync(item => item.Id == agentId && item.OrganizationId == context.OrganizationId, cancellationToken)
             ?? throw new AccessDeniedException();
@@ -106,7 +118,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     public async Task SetAgentSearchManagementAsync(Subject subject, Guid agentId, long expectedVersion, bool allowed,
         string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.AgentsManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         CollectorAgent agent = await db.CollectorAgents.SingleOrDefaultAsync(item => item.Id == agentId
             && item.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
@@ -119,7 +131,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     public async Task<DateTimeOffset?> PreviewScheduleAsync(Subject subject, CollectionSchedule schedule, Guid? searchId,
         bool enabled, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.CollectionManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         string zone = await db.Organizations.Where(x => x.Id == context.OrganizationId)
             .Select(x => x.BusinessTimeZone).SingleAsync(cancellationToken);
@@ -135,7 +147,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
 
     public async Task CreateSearchAsync(Subject subject, CreateSearch command, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.CollectionManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         if (!ContractRules.IsSourceUrl(command.Url, CollectorSource(command.Source)) || command.Url.Length > 2000 || command.MaxPages is < 1 or > 100)
             throw new ArgumentException("Укажите публичную HTTPS-ссылку Avito/Cian и предел 1–100 страниц.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
@@ -161,7 +173,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     }
     public async Task UpdateSearchAsync(Subject subject, UpdateSearch command, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.CollectionManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         if (!ContractRules.IsSourceUrl(command.Url, CollectorSource(command.Source)) || command.Url.Length > 2000 || command.MaxPages is < 1 or > 100) throw new ArgumentException("Параметры поиска некорректны.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         SearchConfiguration search = await db.SearchConfigurations.SingleOrDefaultAsync(item => item.Id == command.Id && item.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
@@ -188,7 +200,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     }
     public async Task<Guid> CreateGroupAsync(Subject subject, string name, int sortOrder, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.CollectionManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         if (sortOrder is < 0 or > 10000) throw new ArgumentException("Порядок группы должен быть от 0 до 10000.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         SearchGroup group = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, Name = OrganizationWorkspace.ValidateName(name), SortOrder = sortOrder, RecordedAt = time.GetUtcNow() };
@@ -203,7 +215,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     }
     public async Task ArchiveGroupAsync(Subject subject, Guid groupId, long expectedVersion, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.CollectionManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         SearchGroup group = await db.SearchGroups.SingleOrDefaultAsync(item => item.Id == groupId && item.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
         if (group.Version != expectedVersion) throw new DbUpdateConcurrencyException();
@@ -213,7 +225,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     }
     public async Task<AgentCredential> RotateCredentialAsync(Subject subject, Guid agentId, long expectedVersion, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.AgentsManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         CollectorAgent agent = await db.CollectorAgents.SingleOrDefaultAsync(item => item.Id == agentId && item.OrganizationId == context.OrganizationId, cancellationToken)
             ?? throw new AccessDeniedException();
@@ -230,7 +242,7 @@ public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext>
     }
     public async Task EnqueueAsync(Subject subject, Guid searchId, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, Permissions.CollectionManage, cancellationToken);
+        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var searches = await db.SearchConfigurations.FromSqlInterpolated($"SELECT * FROM collection.search_configurations WHERE id={searchId} AND organization_id={context.OrganizationId} FOR UPDATE").ToListAsync(cancellationToken);

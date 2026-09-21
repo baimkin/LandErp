@@ -6,8 +6,8 @@ using Microsoft.EntityFrameworkCore;
 namespace LandErp.Infrastructure.Modules.IdentityAccess;
 
 /// <summary>
-/// Resolves Access V1 settings without switching existing authorization checks.
-/// Missing explicit settings deliberately fall back to the current permission model until AP-02.
+/// Resolves the effective Access V1 settings used by workflow authorization.
+/// Missing explicit settings deliberately fall back to the current permission model during the AP-02/AP-03 transition.
 /// </summary>
 public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> factory) : IEmployeeAccessService
 {
@@ -55,6 +55,67 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
         Validate(legacy);
         return Effective(employee.Id, employee.OrganizationId, employee.OrgUnitId, employee.TeamId,
             legacy, EmployeeAccessSource.LegacyPermissions);
+    }
+
+    public async Task<IReadOnlyList<EffectiveEmployeeAccess>> ResolveActiveEmployeesAsync(
+        Guid organizationId, CancellationToken cancellationToken)
+    {
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        var rows = await (from employee in db.Employees.AsNoTracking()
+                          join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
+                          join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
+                          where employee.OrganizationId == organizationId && employee.Active
+                          select new
+                          {
+                              employee.Id,
+                              employee.OrganizationId,
+                              assignment.OrgUnitId,
+                              assignment.TeamId,
+                              assignment.RoleId,
+                              assignment.Scope,
+                              RoleName = role.Name
+                          }).ToArrayAsync(cancellationToken);
+        if (rows.Length == 0) return [];
+
+        Guid[] employeeIds = rows.Select(item => item.Id).ToArray();
+        Dictionary<Guid, EmployeeAccessSettings> configured = await db.EmployeeAccessSettings.AsNoTracking()
+            .Where(item => employeeIds.Contains(item.EmployeeId))
+            .ToDictionaryAsync(item => item.EmployeeId, cancellationToken);
+        Guid[] roleIds = rows.Select(item => item.RoleId).Distinct().ToArray();
+        var grantRows = await db.RolePermissions.AsNoTracking()
+            .Where(item => roleIds.Contains(item.RoleId))
+            .Select(item => new { item.RoleId, item.PermissionId })
+            .ToArrayAsync(cancellationToken);
+        Dictionary<Guid, string[]> permissions = grantRows.GroupBy(item => item.RoleId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.PermissionId).ToArray());
+
+        List<EffectiveEmployeeAccess> result = new(rows.Length);
+        foreach (var row in rows)
+        {
+            EmployeeAccessConfiguration settings;
+            EmployeeAccessSource source;
+            if (string.Equals(row.RoleName, "Owner", StringComparison.Ordinal))
+            {
+                settings = OwnerConfiguration();
+                source = EmployeeAccessSource.SystemOwner;
+            }
+            else if (configured.TryGetValue(row.Id, out EmployeeAccessSettings? explicitSettings))
+            {
+                settings = ToConfiguration(explicitSettings);
+                Validate(settings);
+                source = EmployeeAccessSource.Configured;
+            }
+            else
+            {
+                settings = LegacyConfiguration(permissions.GetValueOrDefault(row.RoleId) ?? [], row.Scope);
+                Validate(settings);
+                source = EmployeeAccessSource.LegacyPermissions;
+            }
+
+            result.Add(Effective(row.Id, row.OrganizationId, row.OrgUnitId, row.TeamId, settings, source));
+        }
+
+        return result;
     }
 
     private static EffectiveEmployeeAccess Effective(Guid employeeId, Guid organizationId, Guid? departmentId,

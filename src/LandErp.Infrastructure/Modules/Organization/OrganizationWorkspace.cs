@@ -17,9 +17,16 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace LandErp.Infrastructure.Modules.Organization;
 
-public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFactory<LandErpDbContext> factory,
+public sealed class OrganizationWorkspace(
+    IAccessControl access,
+    IEmployeeAccessService employeeAccess,
+    IDbContextFactory<LandErpDbContext> factory,
     IServiceScopeFactory scopes) : IOrganizationWorkspace
 {
+    public OrganizationWorkspace(IAccessControl access, IDbContextFactory<LandErpDbContext> factory,
+        IServiceScopeFactory scopes)
+        : this(access, new EmployeeAccessService(factory), factory, scopes) { }
+
     public Task CreateDepartmentAsync(Subject subject, string name, string correlationId, CancellationToken cancellationToken) =>
         SaveDepartmentAsync(subject, new(null, null, name, string.Empty, null), correlationId, cancellationToken);
 
@@ -296,6 +303,7 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
                 AffectedCases = impact?.AffectedCases ?? 0,
                 OpenTasks = impact?.OpenTasks ?? 0,
                 OpenChecks = impact?.OpenChecks ?? 0,
+                OpenInspections = impact?.OpenInspections ?? 0,
                 PendingApprovals = impact?.PendingApprovals ?? 0
             }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
@@ -384,15 +392,15 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         bool Manager, bool Assignment, bool OpenTask, int OpenChecks, bool PendingApproval);
 
     private sealed record EmployeeWorkState(Employee Source, CaseWorkImpact[] Cases,
-        EmployeeHandoverCandidate[] Candidates)
+        SiteInspection[] Inspections, EmployeeHandoverCandidate[] Candidates)
     {
         public EmployeeWorkImpact View => new(Source.Id, Source.DisplayName, Cases.Length,
             Cases.Count(item => item.Manager), Cases.Count(item => item.Assignment),
             Cases.Count(item => item.OpenTask), Cases.Sum(item => item.OpenChecks),
-            Cases.Count(item => item.PendingApproval), Candidates);
+            Inspections.Length, Cases.Count(item => item.PendingApproval), Candidates);
     }
 
-    private static async Task<EmployeeWorkState> BuildEmployeeWorkStateAsync(LandErpDbContext db, Guid organizationId,
+    private async Task<EmployeeWorkState> BuildEmployeeWorkStateAsync(LandErpDbContext db, Guid organizationId,
         Guid employeeId, CancellationToken cancellationToken)
     {
         Employee source = await db.Employees.AsNoTracking().SingleOrDefaultAsync(
@@ -431,50 +439,41 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         }).Where(item => item.Manager || item.Assignment || item.OpenTask || item.OpenChecks > 0 || item.PendingApproval)
           .ToArray();
 
-        if (impacts.Length == 0) return new(source, impacts, []);
-
-        var candidateRows = await (from employee in db.Employees.AsNoTracking()
-                                   join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
-                                   where employee.OrganizationId == organizationId && employee.Active && employee.Id != employeeId
-                                   select new { Employee = employee, Assignment = assignment })
+        SiteInspection[] inspections = await db.SiteInspections.AsNoTracking()
+            .Where(item => item.OrganizationId == organizationId && item.InspectorEmployeeId == employeeId
+                && item.Status != InspectionStatus.Completed)
             .ToArrayAsync(cancellationToken);
-        Guid[] roleIds = candidateRows.Select(item => item.Assignment.RoleId).Distinct().ToArray();
-        var grantRows = await db.RolePermissions.AsNoTracking()
-            .Where(item => roleIds.Contains(item.RoleId))
-            .Select(item => new { item.RoleId, item.PermissionId })
-            .ToArrayAsync(cancellationToken);
-        Dictionary<Guid, HashSet<string>> permissions = grantRows.GroupBy(item => item.RoleId)
-            .ToDictionary(group => group.Key, group => group.Select(item => item.PermissionId).ToHashSet(StringComparer.Ordinal));
+        if (impacts.Length == 0 && inspections.Length == 0) return new(source, impacts, inspections, []);
 
-        EmployeeHandoverCandidate[] candidates = candidateRows
-            .Where(candidate => CanReceiveAllWork(candidate.Employee.Id, candidate.Assignment,
-                permissions.GetValueOrDefault(candidate.Assignment.RoleId) ?? [], impacts))
-            .OrderBy(candidate => candidate.Employee.DisplayName)
-            .Select(candidate => new EmployeeHandoverCandidate(candidate.Employee.Id, candidate.Employee.DisplayName))
+        EffectiveEmployeeAccess[] effectiveCandidates = (await employeeAccess.ResolveActiveEmployeesAsync(
+            organizationId, cancellationToken))
+            .Where(item => item.EmployeeId != employeeId)
+            .Where(item => CanReceiveAllWork(item, impacts, inspections.Length > 0))
             .ToArray();
-        return new(source, impacts, candidates);
+        Guid[] candidateIds = effectiveCandidates.Select(item => item.EmployeeId).ToArray();
+        EmployeeHandoverCandidate[] candidates = await db.Employees.AsNoTracking()
+            .Where(item => item.OrganizationId == organizationId && candidateIds.Contains(item.Id))
+            .OrderBy(item => item.DisplayName)
+            .Select(item => new EmployeeHandoverCandidate(item.Id, item.DisplayName))
+            .ToArrayAsync(cancellationToken);
+        return new(source, impacts, inspections, candidates);
     }
 
-    private static bool CanReceiveAllWork(Guid candidateId, EmployeeAssignment candidateAssignment,
-        HashSet<string> permissions, CaseWorkImpact[] impacts)
+    private static bool CanReceiveAllWork(EffectiveEmployeeAccess candidate,
+        CaseWorkImpact[] impacts, bool hasInspections)
     {
-        if (!permissions.Contains(Permissions.QueueRead)) return false;
+        if (hasInspections && !candidate.Settings.CanPerformInspections) return false;
         foreach (CaseWorkImpact impact in impacts)
         {
-            Guid finalManager = impact.Manager ? candidateId : impact.Case.ManagerEmployeeId;
-            Guid finalAssignee = impact.Assignment ? candidateId : impact.CaseAssigneeEmployeeId;
-            if (!ProcurementVisibility.CanSeeAfterResponsibility(impact.Case, candidateAssignment, finalManager, finalAssignee))
+            if (!candidate.CanManageProcurement) return false;
+            Guid finalManager = impact.Manager ? candidate.EmployeeId : impact.Case.ManagerEmployeeId;
+            Guid finalAssignee = impact.Assignment ? candidate.EmployeeId : impact.CaseAssigneeEmployeeId;
+            if (!ProcurementVisibility.CanSeeAfterResponsibility(
+                impact.Case, candidate.ProcurementWorkContext, finalManager, finalAssignee))
                 return false;
-            if (impact.Manager && !permissions.Contains(Permissions.ManagerDecide)) return false;
-            if (impact.Assignment)
-            {
-                string required = impact.Case.StageId == "pending_head" ? Permissions.HeadDecide : Permissions.ManagerDecide;
-                if (!permissions.Contains(required)) return false;
-            }
-            if ((impact.OpenTask || impact.OpenChecks > 0) && !impact.Manager && !impact.Assignment
-                && !permissions.Contains(Permissions.ManagerDecide) && !permissions.Contains(Permissions.HeadDecide))
+            if (impact.Assignment && impact.Case.StageId == "pending_head" && !candidate.CanHeadProcurement)
                 return false;
-            if (impact.PendingApproval && finalManager == candidateId) return false;
+            if (impact.PendingApproval && finalManager == candidate.EmployeeId) return false;
         }
         return true;
     }
@@ -548,6 +547,31 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
             });
         }
 
+        Guid[] inspectionIds = state.Inspections.Select(item => item.Id).ToArray();
+        SiteInspection[] inspections = inspectionIds.Length == 0 ? [] : await db.SiteInspections
+            .Where(item => inspectionIds.Contains(item.Id) && item.Status != InspectionStatus.Completed)
+            .ToArrayAsync(cancellationToken);
+        foreach (SiteInspection inspection in inspections)
+        {
+            inspection.InspectorEmployeeId = recipientEmployeeId;
+            inspection.RequestedByEmployeeId = context.EmployeeId;
+            inspection.RequestedAt = now;
+            db.BusinessTimeline.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+                ObjectId = inspection.PropertyCaseId, ActorEmployeeId = context.EmployeeId, Kind = "InspectionReassigned",
+                Title = "Осмотр переназначен при передаче работы",
+                Body = $"{state.Source.DisplayName} → {recipient.DisplayName}.",
+                TargetEmployeeId = recipientEmployeeId, DueAt = inspection.DueAt, RecordedAt = now
+            });
+            db.Notifications.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, EmployeeId = recipientEmployeeId,
+                ObjectType = "PropertyCase", ObjectId = inspection.PropertyCaseId,
+                Title = "Назначен незавершённый осмотр после передачи работы", RecordedAt = now
+            });
+        }
+
         AddAudit(db, context, subject, "EmployeeWorkTransferred", "Employee", state.Source.Id,
             new
             {
@@ -558,6 +582,7 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
                 state.View.AssignedCases,
                 state.View.OpenTasks,
                 state.View.OpenChecks,
+                state.View.OpenInspections,
                 state.View.PendingApprovals
             }, correlationId);
     }
@@ -577,6 +602,19 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
                 RecordedAt = now
             });
         }
+        Guid[] caseIdsWithTimeline = state.Cases.Select(item => item.Case.Id).ToArray();
+        foreach (Guid caseId in state.Inspections.Select(item => item.PropertyCaseId).Distinct()
+            .Where(item => !caseIdsWithTimeline.Contains(item)))
+        {
+            db.BusinessTimeline.Add(new()
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+                ObjectId = caseId, ActorEmployeeId = context.EmployeeId, Kind = "InspectionHandoverPending",
+                Title = "Осмотр требует переназначения",
+                Body = $"Доступ {state.Source.DisplayName} отозван срочно. Незавершённый осмотр остался без активного исполнителя.",
+                RecordedAt = now
+            });
+        }
         AddAudit(db, context, subject, "EmployeeWorkHandoverPending", "Employee", state.Source.Id,
             new
             {
@@ -585,6 +623,7 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
                 state.View.AssignedCases,
                 state.View.OpenTasks,
                 state.View.OpenChecks,
+                state.View.OpenInspections,
                 state.View.PendingApprovals
             }, correlationId);
     }

@@ -39,6 +39,26 @@ internal static class ProcurementVisibility
         _ => assignment.EmployeeId == managerEmployeeId
     };
 
+    public static bool CanSeeAfterResponsibility(PropertyCase propertyCase, AccessContext context,
+        Guid managerEmployeeId, Guid caseAssigneeId) => context.Scope switch
+    {
+        AccessScope.Organization => propertyCase.OrganizationId == context.OrganizationId,
+        AccessScope.Department => propertyCase.OrganizationId == context.OrganizationId
+            && propertyCase.DepartmentId != null && context.DepartmentId == propertyCase.DepartmentId,
+        AccessScope.Team => propertyCase.OrganizationId == context.OrganizationId
+            && propertyCase.TeamId != null && context.TeamId == propertyCase.TeamId,
+        AccessScope.AssignedObjects => propertyCase.OrganizationId == context.OrganizationId
+            && context.EmployeeId == caseAssigneeId,
+        _ => propertyCase.OrganizationId == context.OrganizationId && context.EmployeeId == managerEmployeeId
+    };
+
+    public static bool CanReceiveNewCase(AccessContext context) => context.Scope switch
+    {
+        AccessScope.Department => context.DepartmentId != null,
+        AccessScope.Team => context.TeamId != null,
+        _ => true
+    };
+
     public static IQueryable<EmployeeAssignment> EligibleRecipientAssignments(
         LandErpDbContext db,
         PropertyCase propertyCase,

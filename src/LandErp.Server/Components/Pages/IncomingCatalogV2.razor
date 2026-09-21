@@ -1,15 +1,17 @@
 @page "/incoming"
 @page "/incoming-v2"
-@attribute [Authorize(Policy = "manager_queue.read")]
+@attribute [Authorize]
 @using System.Globalization
 @using Microsoft.AspNetCore.Components
 @using LandErp.Application.Modules.Catalog.Contracts
 @using LandErp.Application.Modules.Catalog.Domain
+@using LandErp.Application.Modules.IdentityAccess.Contracts
 @using LandErp.Server.Components.Procurement
 @inherits WorkspaceComponent
 @inject ICatalogWorkspace Workspace
 @inject IIncomingCatalogReadService IncomingReads
 @inject IIncomingFilterPresetService FilterPresets
+@inject IEmployeeAccessService AccessV1
 @inject NavigationManager Navigation
 
 <PageTitle>Входящие предложения · LandErp</PageTitle>
@@ -1141,6 +1143,8 @@
 
     private async Task<bool> RegisterViewedForUiAsync(Guid id)
     {
+        EffectiveEmployeeAccess effective = await AccessV1.ResolveAsync(CurrentSubject, CancellationToken.None);
+        if (!effective.CanProcessIncoming) return true;
         bool recorded = await ExecuteConfirmedAsync(() => Workspace.RegisterViewAsync(CurrentSubject, id,
             Guid.CreateVersion7().ToString(), CancellationToken.None), nameof(OpenDetailAsync));
         Success = null;

@@ -2,6 +2,7 @@ using LandErp.Application.Foundation;
 using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
+using LandErp.Infrastructure.Modules.IdentityAccess;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
@@ -14,13 +15,24 @@ namespace LandErp.Infrastructure.Modules.Catalog;
 /// </summary>
 public sealed class IncomingCatalogReadService(
     IDbContextFactory<LandErpDbContext> factory,
-    IAccessControl access,
+    IAccessControl legacyAccess,
+    IEmployeeAccessService employeeAccess,
     ICatalogWorkspace catalogWorkspace,
     TimeProvider time) : IIncomingCatalogReadService
 {
+    public IncomingCatalogReadService(IDbContextFactory<LandErpDbContext> factory, IAccessControl legacyAccess,
+        ICatalogWorkspace catalogWorkspace, TimeProvider time)
+        : this(factory, legacyAccess, new EmployeeAccessService(factory), catalogWorkspace, time) { }
+
+    private async Task<AccessContext> RequireReadAsync(Subject subject, CancellationToken cancellationToken)
+    {
+        EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        if (!effective.CanReadIncoming) throw new AccessDeniedException();
+        return effective.OrganizationContext;
+    }
     public async Task<IncomingCatalogReadPage> ReadAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        AccessContext context = await RequireReadAsync(subject, cancellationToken);
         IncomingCatalogFilter baseFilter = filter.Base;
         Validate(filter);
 
@@ -258,7 +270,7 @@ public sealed class IncomingCatalogReadService(
     public async Task<IncomingCatalogDetailRead> ReadDetailAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken)
     {
         CatalogItemDetail detail = await catalogWorkspace.ReadItemAsync(subject, catalogItemId, cancellationToken);
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        AccessContext context = await RequireReadAsync(subject, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         Listing item = await db.Listings.AsNoTracking().SingleAsync(value => value.Id == catalogItemId
             && value.OrganizationId == context.OrganizationId, cancellationToken);
@@ -323,7 +335,7 @@ public sealed class IncomingCatalogReadService(
     public async Task<IReadOnlyList<IncomingDuplicateLinkTargetView>> SearchDuplicateTargetsAsync(
         Subject subject, Guid catalogItemId, string text, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        AccessContext context = await RequireReadAsync(subject, cancellationToken);
         string search = text.Trim();
         if (search.Length > 200) throw new ArgumentException("Поиск ограничен 200 символами.");
 

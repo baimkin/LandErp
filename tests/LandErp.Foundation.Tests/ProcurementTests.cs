@@ -5,6 +5,7 @@ using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Collection.Contracts;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
+using LandErp.Application.Modules.IdentityAccess.Domain;
 using LandErp.Application.Modules.Organization.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
@@ -385,6 +386,29 @@ public sealed class ProcurementTests
             EmployeeView employee = (await Organization.ReadAsync(Owner, CancellationToken.None)).Employees.Single(item => item.Login == login);
             await Organization.ChangeAssignmentAsync(Owner, new(employee.Id, employee.DepartmentId, employee.PositionId, team,
                 employee.ManagerId, employee.RoleId, scope, employee.Version), "scope", CancellationToken.None);
+        }
+
+        public async Task SetExplicitAccessAsync(Guid employeeId, EmployeeAccessConfiguration settings)
+        {
+            await using LandErpDbContext db = Sandbox.Context();
+            EmployeeAccessSettings? row = await db.EmployeeAccessSettings.SingleOrDefaultAsync(
+                item => item.EmployeeId == employeeId);
+            if (row == null)
+            {
+                row = new EmployeeAccessSettings { EmployeeId = employeeId };
+                db.EmployeeAccessSettings.Add(row);
+            }
+            row.IncomingAccess = settings.IncomingAccess;
+            row.ProcurementAccess = settings.ProcurementAccess;
+            row.ProcurementReadScope = settings.ProcurementReadScope;
+            row.ProcurementWorkScope = settings.ProcurementWorkScope;
+            row.CollectionAccess = settings.CollectionAccess;
+            row.CanAssignInspections = settings.CanAssignInspections;
+            row.CanPerformInspections = settings.CanPerformInspections;
+            row.CanConfirmPurchase = settings.CanConfirmPurchase;
+            row.CanManageTemplates = settings.CanManageTemplates;
+            row.CanReadAudit = settings.CanReadAudit;
+            await db.SaveChangesAsync();
         }
 
         private static ListingData Data(ListingSource source, string id, decimal price, DateTimeOffset? observed = null) => new()

@@ -68,6 +68,15 @@ public sealed record EffectiveEmployeeAccess(
     EmployeeAccessSource Source)
 {
     public bool IsSystemOwner => Source == EmployeeAccessSource.SystemOwner;
+    public bool CanReadIncoming => Settings.IncomingAccess >= IncomingAccessLevel.Read;
+    public bool CanProcessIncoming => Settings.IncomingAccess >= IncomingAccessLevel.Process;
+    public bool CanReadProcurement => Settings.ProcurementAccess >= ProcurementAccessLevel.Read;
+    public bool CanManageProcurement => Settings.ProcurementAccess >= ProcurementAccessLevel.Manager;
+    public bool CanHeadProcurement => Settings.ProcurementAccess >= ProcurementAccessLevel.Head;
+    public bool CanReadCollection => Settings.CollectionAccess >= CollectionAccessLevel.Read;
+    public bool CanManageCollection => Settings.CollectionAccess >= CollectionAccessLevel.Manage;
+    public AccessContext OrganizationContext =>
+        new(EmployeeId, OrganizationId, DepartmentId, TeamId, AccessScope.Organization);
     public AccessContext ProcurementReadContext =>
         new(EmployeeId, OrganizationId, DepartmentId, TeamId, Settings.ProcurementReadScope);
     public AccessContext ProcurementWorkContext =>
@@ -77,6 +86,8 @@ public sealed record EffectiveEmployeeAccess(
 public interface IEmployeeAccessService
 {
     Task<EffectiveEmployeeAccess> ResolveAsync(Subject subject, CancellationToken cancellationToken);
+    Task<IReadOnlyList<EffectiveEmployeeAccess>> ResolveActiveEmployeesAsync(
+        Guid organizationId, CancellationToken cancellationToken);
     void Validate(EmployeeAccessConfiguration settings);
 }
 

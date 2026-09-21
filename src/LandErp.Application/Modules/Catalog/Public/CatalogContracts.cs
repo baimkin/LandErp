@@ -35,6 +35,8 @@ public sealed record LinkCatalogItemsAsSameObject(Guid CatalogItemId, long Expec
 public sealed record UnlinkCatalogItemFromObjectGroup(Guid CatalogItemId, long ExpectedCatalogVersion, string Reason);
 public sealed record ResumeCatalogItemCase(Guid CatalogItemId, long ExpectedCatalogVersion);
 public sealed record TakeCatalogItemToWork(Guid CatalogItemId, Guid? ExistingCaseId = null);
+public sealed record TransferCatalogItemToProcurement(Guid CatalogItemId, Guid ProcurementEmployeeId);
+public sealed record IncomingProcurementTarget(Guid EmployeeId, string Name);
 public sealed record CorrectCatalogItemCaseLink(Guid CatalogItemId, long ExpectedCatalogVersion,
     Guid ExpectedCaseId, Guid? TargetCaseId, string Reason);
 public sealed record TakeToWorkResult(Guid CaseId, string BusinessNumber, bool Created);
@@ -52,7 +54,11 @@ public interface ICatalogWorkspace
     Task LinkCatalogItemsAsSameObjectAsync(Subject subject, LinkCatalogItemsAsSameObject command, string correlationId, CancellationToken cancellationToken);
     Task UnlinkCatalogItemFromObjectGroupAsync(Subject subject, UnlinkCatalogItemFromObjectGroup command, string correlationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CaseLinkTarget>> ReadLinkTargetsAsync(Subject subject, CancellationToken cancellationToken);
+    Task<IReadOnlyList<IncomingProcurementTarget>> ReadProcurementTargetsAsync(
+        Subject subject, CancellationToken cancellationToken);
     Task<TakeToWorkResult> TakeToWorkAsync(Subject subject, TakeCatalogItemToWork command, string correlationId, CancellationToken cancellationToken);
+    Task<TakeToWorkResult> TransferToProcurementAsync(Subject subject, TransferCatalogItemToProcurement command,
+        string correlationId, CancellationToken cancellationToken);
     Task CorrectCaseLinkAsync(Subject subject, CorrectCatalogItemCaseLink command, string correlationId, CancellationToken cancellationToken);
     Task<TakeToWorkResult> ResumeCaseAsync(Subject subject, ResumeCatalogItemCase command, string correlationId, CancellationToken cancellationToken);
 }

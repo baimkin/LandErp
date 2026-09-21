@@ -9,8 +9,16 @@ using NpgsqlTypes;
 namespace LandErp.Infrastructure.Modules.Catalog;
 
 /// <summary>Organization-scoped saved Incoming filter states. Search group is optional organization metadata, not filter semantics.</summary>
-public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAccessControl access) : IIncomingFilterPresetService
+public sealed class IncomingFilterPresetService(
+    NpgsqlDataSource dataSource,
+    IEmployeeAccessService employeeAccess) : IIncomingFilterPresetService
 {
+    private async Task<AccessContext> RequireAsync(Subject subject, bool process, CancellationToken cancellationToken)
+    {
+        EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        if (process ? !effective.CanProcessIncoming : !effective.CanReadIncoming) throw new AccessDeniedException();
+        return effective.OrganizationContext;
+    }
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() }
@@ -18,7 +26,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
 
     public async Task<IReadOnlyList<IncomingFilterPresetView>> ReadAsync(Subject subject, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        AccessContext context = await RequireAsync(subject, process: false, cancellationToken);
         await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText = """
@@ -36,7 +44,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
 
     public async Task<IncomingFilterPresetView> CreateAsync(Subject subject, CreateIncomingFilterPreset command, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        AccessContext context = await RequireAsync(subject, process: true, cancellationToken);
         string name = ValidateName(command.Name);
         ValidateCriteria(command.Criteria);
         await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync(cancellationToken);
@@ -91,7 +99,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
 
     public async Task<IncomingFilterPresetView> RenameAsync(Subject subject, RenameIncomingFilterPreset command, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        AccessContext context = await RequireAsync(subject, process: true, cancellationToken);
         string name = ValidateName(command.Name);
         await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync(cancellationToken);
         try
@@ -118,7 +126,7 @@ public sealed class IncomingFilterPresetService(NpgsqlDataSource dataSource, IAc
 
     public async Task DeleteAsync(Subject subject, DeleteIncomingFilterPreset command, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.ManagerDecide, cancellationToken);
+        AccessContext context = await RequireAsync(subject, process: true, cancellationToken);
         await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using NpgsqlCommand update = connection.CreateCommand();
         update.CommandText = """

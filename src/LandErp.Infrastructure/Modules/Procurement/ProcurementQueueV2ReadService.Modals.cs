@@ -16,7 +16,8 @@ public sealed partial class ProcurementQueueV2ReadService
     public async Task<ProcurementNegotiationHistoryPage> ReadNegotiationsAsync(Subject subject, Guid caseId,
         int offset, int size, CancellationToken cancellationToken)
     {
-        AccessContext context = await _access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        EffectiveEmployeeAccess effective = await RequireReadAsync(subject, cancellationToken);
+        AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await _factory.CreateDbContextAsync(cancellationToken);
         if (!await VisibleCases(db, context).AnyAsync(row => row.Case.Id == caseId, cancellationToken))
             throw new AccessDeniedException();
@@ -53,7 +54,8 @@ public sealed partial class ProcurementQueueV2ReadService
     public async Task<ProcurementInspectionReport?> ReadInspectionReportAsync(Subject subject, Guid caseId,
         CancellationToken cancellationToken)
     {
-        AccessContext context = await _access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        EffectiveEmployeeAccess effective = await RequireReadAsync(subject, cancellationToken);
+        AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await _factory.CreateDbContextAsync(cancellationToken);
         if (!await VisibleCases(db, context).AnyAsync(row => row.Case.Id == caseId, cancellationToken))
             throw new AccessDeniedException();

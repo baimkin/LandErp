@@ -31,10 +31,10 @@ public sealed record ChangeAssignment(Guid EmployeeId, Guid? DepartmentId, Guid?
     Guid? TeamId, Guid? ManagerId, Guid RoleId, AccessScope Scope, long ExpectedVersion);
 public sealed record EmployeeHandoverCandidate(Guid EmployeeId, string Name);
 public sealed record EmployeeWorkImpact(Guid EmployeeId, string EmployeeName, int AffectedCases, int ManagedCases,
-    int AssignedCases, int OpenTasks, int OpenChecks, int PendingApprovals,
+    int AssignedCases, int OpenTasks, int OpenChecks, int OpenInspections, int PendingApprovals,
     IReadOnlyList<EmployeeHandoverCandidate> Candidates)
 {
-    public bool HasWork => AffectedCases > 0 || OpenTasks > 0 || OpenChecks > 0 || PendingApprovals > 0;
+    public bool HasWork => AffectedCases > 0 || OpenTasks > 0 || OpenChecks > 0 || OpenInspections > 0 || PendingApprovals > 0;
 }
 public sealed record TransferEmployeeWork(Guid EmployeeId, Guid RecipientEmployeeId);
 public sealed record SetEmployeeActive(Guid EmployeeId, long ExpectedVersion, bool Active,

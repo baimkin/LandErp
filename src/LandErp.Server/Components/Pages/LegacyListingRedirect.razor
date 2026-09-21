@@ -1,5 +1,5 @@
 @page "/procurement/listings/{ListingId:guid}"
-@attribute [Authorize(Policy = "manager_queue.read")]
+@attribute [Authorize]
 @using LandErp.Application.Modules.Procurement.Contracts
 @inherits WorkspaceComponent
 @inject IProcurementWorkspace Workspace

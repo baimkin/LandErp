@@ -110,9 +110,9 @@ public sealed class AccessV1Ap02WorkflowTests
             Access(IncomingAccessLevel.None, ProcurementAccessLevel.Manager, CollectionAccessLevel.None));
 
         IEmployeeAccessService resolver = fixture.Scope.ServiceProvider.GetRequiredService<IEmployeeAccessService>();
-        Assert.AreEqual(EmployeeAccessSource.LegacyPermissions,
+        Assert.AreEqual(EmployeeAccessSource.Configured,
             (await resolver.ResolveAsync(fixture.Manager, CancellationToken.None)).Source,
-            "Unmigrated employees must keep AP-01 fallback behavior.");
+            "AP-04 fixtures must resolve from explicit EmployeeAccessSettings.");
 
         Guid listingId = await fixture.Workspace.CreateManualAsync(incoming,
             new(CatalogSource.Other, "Incoming-only AP-02", "Химки", 2_500_000m, 1200m,
@@ -341,10 +341,9 @@ public sealed class AccessV1Ap02WorkflowTests
         OrganizationView structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         Guid userId = await ProcurementTestsHelper.InviteAsync(
             fixture.Services, fixture.Organization, fixture.Owner, structure,
-            login, login, role, fixture.DepartmentA, AccessScope.Own);
+            login, login, role, fixture.DepartmentA, AccessScope.Own, settings);
         structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         Guid employeeId = structure.Employees.Single(item => item.Login == login).Id;
-        await fixture.SetExplicitAccessAsync(employeeId, settings);
         return (new Subject(userId, false), employeeId);
     }
 }

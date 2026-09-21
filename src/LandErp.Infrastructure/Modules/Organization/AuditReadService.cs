@@ -147,10 +147,10 @@ public sealed class AuditReadService : IAuditReadService
     {
         EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
         if (!effective.CanReadAudit) throw new AccessDeniedException();
-        if (effective.Source != EmployeeAccessSource.Configured)
+        if (effective.IsSystemOwner)
         {
-            AccessContext transition = await legacyAccess.RequireAsync(subject, Permissions.AuditRead, cancellationToken);
-            if (transition.Scope != AccessScope.Organization) throw new AccessDeniedException();
+            AccessContext ownerSecurity = await legacyAccess.RequireAsync(subject, Permissions.AuditRead, cancellationToken);
+            if (ownerSecurity.Scope != AccessScope.Organization) throw new AccessDeniedException();
         }
         return effective.OrganizationContext;
     }

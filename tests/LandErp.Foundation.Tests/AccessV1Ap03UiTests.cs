@@ -24,8 +24,8 @@ public sealed class AccessV1Ap03UiTests
 
         OrganizationView before = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         EmployeeView beforeEmployee = before.Employees.Single(item => item.Id == employeeId);
-        Assert.AreEqual(EmployeeAccessSource.LegacyPermissions, beforeEmployee.Access.Source);
-        Assert.IsNull(beforeEmployee.Access.Version);
+        Assert.AreEqual(EmployeeAccessSource.Configured, beforeEmployee.Access.Source);
+        Assert.IsNotNull(beforeEmployee.Access.Version);
 
         EmployeeAccessConfiguration configured = Access(
             IncomingAccessLevel.Process, ProcurementAccessLevel.Manager, CollectionAccessLevel.Manage,
@@ -33,7 +33,7 @@ public sealed class AccessV1Ap03UiTests
             canAssign: true, canPerform: false, canConfirm: true, canTemplates: true, canAudit: true);
 
         EmployeeAccessView saved = await fixture.Organization.SaveEmployeeAccessAsync(
-            fixture.Owner, new(employeeId, null, configured), "ap03-access-save", CancellationToken.None);
+            fixture.Owner, new(employeeId, beforeEmployee.Access.Version, configured), "ap03-access-save", CancellationToken.None);
 
         Assert.AreEqual(EmployeeAccessSource.Configured, saved.Source);
         Assert.IsNotNull(saved.Version);
@@ -57,7 +57,7 @@ public sealed class AccessV1Ap03UiTests
         using JsonDocument payload = JsonDocument.Parse(audit.Changes);
         Assert.IsTrue(payload.RootElement.TryGetProperty("Before", out JsonElement previous));
         Assert.IsTrue(payload.RootElement.TryGetProperty("After", out JsonElement current));
-        Assert.AreEqual(nameof(EmployeeAccessSource.LegacyPermissions),
+        Assert.AreEqual(nameof(EmployeeAccessSource.Configured),
             payload.RootElement.GetProperty("BeforeSource").GetString());
         Assert.AreEqual((int)ProcurementAccessLevel.Manager,
             previous.GetProperty("ProcurementAccess").GetInt32());
@@ -66,7 +66,7 @@ public sealed class AccessV1Ap03UiTests
 
         await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() =>
             fixture.Organization.SaveEmployeeAccessAsync(
-                fixture.Owner, new(employeeId, null, configured with { CanConfirmPurchase = false }),
+                fixture.Owner, new(employeeId, beforeEmployee.Access.Version, configured with { CanConfirmPurchase = false }),
                 "ap03-stale", CancellationToken.None));
     }
 
@@ -106,19 +106,16 @@ public sealed class AccessV1Ap03UiTests
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
         OrganizationView structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         const string inspectorLogin = "ap03.inspector@test.invalid";
-        Guid inspectorUserId = await ProcurementTestsHelper.InviteAsync(
-            fixture.Services, fixture.Organization, fixture.Owner, structure,
-            "AP03 Inspector", inspectorLogin, "Inspector", fixture.DepartmentA, AccessScope.Own);
-        _ = inspectorUserId;
-        structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
-        Guid inspectorEmployeeId = structure.Employees.Single(item => item.Login == inspectorLogin).Id;
-
         EmployeeAccessConfiguration inspectorAccess = Access(
             IncomingAccessLevel.None, ProcurementAccessLevel.None, CollectionAccessLevel.None,
             AccessScope.Own, AccessScope.Own, canPerform: true);
-        EmployeeAccessView inspectorSaved = await fixture.Organization.SaveEmployeeAccessAsync(
-            fixture.Owner, new(inspectorEmployeeId, null, inspectorAccess),
-            "ap03-inspector-access", CancellationToken.None);
+        Guid inspectorUserId = await ProcurementTestsHelper.InviteAsync(
+            fixture.Services, fixture.Organization, fixture.Owner, structure,
+            "AP03 Inspector", inspectorLogin, "Inspector", fixture.DepartmentA, AccessScope.Own, inspectorAccess);
+        _ = inspectorUserId;
+        structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
+        Guid inspectorEmployeeId = structure.Employees.Single(item => item.Login == inspectorLogin).Id;
+        EmployeeAccessView inspectorSaved = structure.Employees.Single(item => item.Id == inspectorEmployeeId).Access;
 
         Guid listingId = await fixture.CreateUnlinkedManualAsync();
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(
@@ -221,23 +218,13 @@ public sealed class AccessV1Ap03UiTests
         Assert.IsFalse(readOnly.CanManageProcurement);
         Assert.IsFalse(readOnly.CanManageCollection);
 
-        EmployeeAccessConfiguration legacyAuditSettings = readOnly.Settings with
+        EffectiveEmployeeAccess explicitAuditor = readOnly with
         {
-            ProcurementReadScope = AccessScope.Department,
-            ProcurementWorkScope = AccessScope.Own,
-            CanReadAudit = true
+            Settings = readOnly.Settings with { CanReadAudit = true },
+            Source = EmployeeAccessSource.Configured
         };
-        EffectiveEmployeeAccess legacyDepartment = readOnly with
-        {
-            Settings = legacyAuditSettings,
-            Source = EmployeeAccessSource.LegacyPermissions
-        };
-        Assert.IsFalse(legacyDepartment.CanReadAudit,
-            "Legacy audit fallback must preserve the historical organization-scope requirement until AP-04.");
-        Assert.IsTrue((legacyDepartment with
-        {
-            Settings = legacyAuditSettings with { ProcurementReadScope = AccessScope.Organization }
-        }).CanReadAudit);
+        Assert.IsTrue(explicitAuditor.CanReadAudit,
+            "After AP-04 explicit CanReadAudit is independent from Procurement scope.");
     }
 
     [TestMethod]

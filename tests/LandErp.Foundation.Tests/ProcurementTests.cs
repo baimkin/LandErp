@@ -443,10 +443,21 @@ internal sealed class MemoryFileStorage : IFileStorage
 internal static class ProcurementTestsHelper
 {
     public static async Task<Guid> InviteAsync(ServiceProvider services, IOrganizationWorkspace workspace, Subject owner,
-        OrganizationView structure, string name, string email, string role, Guid department, AccessScope scope)
+        OrganizationView structure, string name, string email, string role, Guid department, AccessScope scope,
+        EmployeeAccessConfiguration? explicitAccess = null)
     {
+        EmployeeAccessConfiguration access = explicitAccess ?? role switch
+        {
+            "ProcurementHead" => new(IncomingAccessLevel.Process, ProcurementAccessLevel.Head, scope, scope,
+                CollectionAccessLevel.None, true, false, false, true, false),
+            "ProcurementManager" => new(IncomingAccessLevel.Process, ProcurementAccessLevel.Manager, scope, scope,
+                CollectionAccessLevel.None, true, false, false, true, false),
+            "Inspector" => new(IncomingAccessLevel.None, ProcurementAccessLevel.None, AccessScope.Own, AccessScope.Own,
+                CollectionAccessLevel.None, false, true, false, false, false),
+            _ => EmployeeAccessRules.NoAccess
+        };
         InvitationResult invitation = await workspace.InviteAsync(owner, new(name, email, department, null, null, null,
-            structure.Roles.Single(item => item.Name == role).Id, scope), "test", CancellationToken.None);
+            structure.Roles.Single(item => item.Name == role).Id, scope, access), "test", CancellationToken.None);
         await using AsyncServiceScope activation = services.CreateAsyncScope();
         await activation.ServiceProvider.GetRequiredService<AccountActivation>().ActivateAsync(invitation.InvitationId,
             invitation.OneTimeToken, "Synthetic1!PasswordForTests", CancellationToken.None);

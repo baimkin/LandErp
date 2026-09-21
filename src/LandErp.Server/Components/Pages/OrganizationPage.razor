@@ -21,7 +21,7 @@ else if(view!=null)
         <header class="organization-heading">
             <div><span class="kicker">Администрирование / Организация</span><h1>Организация</h1><p>Структура компании, сотрудники и должности. Права доступа не смешиваются с оргструктурой.</p></div>
             <div class="organization-heading-actions">
-                <AuthorizeView Policy="users.manage" Context="employeeManage"><button class="btn secondary" @onclick="OpenEmployeeCreate">+ Сотрудник</button></AuthorizeView>
+                <AuthorizeView Policy="roles.manage"><button class="btn secondary" @onclick="OpenEmployeeCreate">+ Сотрудник</button></AuthorizeView>
                 <AuthorizeView Policy="organization.manage" Context="organizationManage"><button class="btn primary" @onclick="()=>OpenDepartment(null)">+ Отдел</button></AuthorizeView>
             </div>
         </header>
@@ -72,7 +72,7 @@ else if(view!=null)
             }
             else if(activeTab=="employees")
             {
-                <div class="organization-toolbar"><input @bind="employeeSearch" @bind:event="oninput" placeholder="Найти сотрудника" /><select @bind="employeeDepartment"><option value="">Все отделы</option>@foreach(var department in view.Departments.Where(x=>x.Active)){<option value="@department.Id">@department.Name</option>}</select><select @bind="employeeState"><option value="">Все состояния</option>@foreach(var state in Enum.GetValues<EmployeeState>()){<option value="@state">@EmployeeStateLabel(state)</option>}</select><span></span><AuthorizeView Policy="users.manage" Context="employeeListManage"><button class="btn primary" @onclick="OpenEmployeeCreate">+ Добавить сотрудника</button></AuthorizeView></div>
+                <div class="organization-toolbar"><input @bind="employeeSearch" @bind:event="oninput" placeholder="Найти сотрудника" /><select @bind="employeeDepartment"><option value="">Все отделы</option>@foreach(var department in view.Departments.Where(x=>x.Active)){<option value="@department.Id">@department.Name</option>}</select><select @bind="employeeState"><option value="">Все состояния</option>@foreach(var state in Enum.GetValues<EmployeeState>()){<option value="@state">@EmployeeStateLabel(state)</option>}</select><span></span><AuthorizeView Policy="roles.manage"><button class="btn primary" @onclick="OpenEmployeeCreate">+ Добавить сотрудника</button></AuthorizeView></div>
                 <div class="table-wrap"><table class="data-table organization-employees"><thead><tr><th>Сотрудник</th><th>Отдел / команда</th><th>Должность</th><th>Доступ</th><th>Руководитель</th><th>Состояние</th><th></th></tr></thead><tbody>
                     @foreach(EmployeeView employee in FilteredEmployees)
                     {
@@ -121,9 +121,7 @@ else if(view!=null)
                     <label class="field"><span>Руководитель</span><InputSelect @bind-Value="employeeInput.ManagerId"><option value="">Не назначен</option>@foreach(var item in view.Employees.Where(x=>x.State==EmployeeState.Active&&x.Id!=editingEmployee?.Id)){<option value="@item.Id">@item.Name</option>}</InputSelect></label>
                     <label class="check-field dossier-wide"><InputCheckbox @bind-Value="employeeInput.MustChangePassword" disabled="@(editingEmployee!=null)" /> Попросить сменить временный пароль при первом входе</label>
 
-                    @if(editingEmployee!=null)
-                    {
-                        <AuthorizeView Policy="roles.manage">
+                    <AuthorizeView Policy="roles.manage">
                             <Authorized>
                                 <section class="organization-access dossier-wide">
                                     <div class="section-heading"><div><h3>Доступ</h3><p class="subtle">Права задаются отдельно от должности, отдела и руководителя.</p></div></div>
@@ -131,12 +129,12 @@ else if(view!=null)
                                     {
                                         <p class="subtle">Загружаем effective access…</p>
                                     }
-                                    else if(editingAccess?.SystemProtected==true)
+                                    else if(editingAccess?.SystemProtected==true || (editingEmployee==null && SelectedRoleIsOwner))
                                     {
                                         <div class="organization-notice"><strong>Owner — системный полный доступ.</strong><br/>Обычные настройки Access V1 не могут его ограничить.</div>
-                                        @foreach(string line in AccessV1Ui.Summary(editingAccess.Settings, editingAccess.Source)){<p class="subtle">@line</p>}
+                                        @foreach(string line in AccessV1Ui.Summary(editingAccess?.Settings ?? EmployeeAccessRules.NoAccess, EmployeeAccessSource.SystemOwner)){<p class="subtle">@line</p>}
                                     }
-                                    else if(editingAccess!=null)
+                                    else if(editingEmployee==null || editingAccess!=null)
                                     {
                                         <div class="form-actions">
                                             <span class="subtle">Готовые профили:</span>
@@ -163,12 +161,19 @@ else if(view!=null)
                                             <strong>Итог доступа</strong>
                                             @foreach(string line in AccessV1Ui.Summary(accessInput.ToConfiguration(), EmployeeAccessSource.Configured)){<div>@line</div>}
                                         </div>
-                                        <p class="subtle">@EmployeeAccessSourceLabel(editingAccess)</p>
-                                        <div class="form-actions">
-                                            @if(editingEmployee.State==EmployeeState.Active){<button type="button" class="btn secondary" @onclick="()=>OpenEmployeeHandoverAsync(editingEmployee)">Переназначить активную работу</button>}
-                                            <span></span>
-                                            <ActionButton Label="Сохранить доступ" OnClick="SaveAccessAsync" Busy="Busy" />
-                                        </div>
+                                        @if(editingAccess!=null){<p class="subtle">@EmployeeAccessSourceLabel(editingAccess)</p>}
+                                        @if(editingEmployee!=null)
+                                        {
+                                            <div class="form-actions">
+                                                @if(editingEmployee.State==EmployeeState.Active){<button type="button" class="btn secondary" @onclick="()=>OpenEmployeeHandoverAsync(editingEmployee)">Переназначить активную работу</button>}
+                                                <span></span>
+                                                <ActionButton Label="Сохранить доступ" OnClick="SaveAccessAsync" Busy="Busy" />
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <p class="organization-notice">Эти настройки Access V1 будут сохранены вместе с новым сотрудником.</p>
+                                        }
                                     }
                                 </section>
 
@@ -182,19 +187,18 @@ else if(view!=null)
                                     }
                                 </section>
                             </NotAuthorized>
-                        </AuthorizeView>
-                    }
+                    </AuthorizeView>
 
                     <details class="organization-access dossier-wide">
-                        <summary>Совместимость до AP-04 · legacy роль и область</summary>
+                        <summary>Системная роль и административная область</summary>
                         <div class="form-grid">
-                            <label class="field"><span>Legacy роль</span><InputSelect @bind-Value="employeeInput.RoleId"><option value="">Выберите роль</option>@foreach(var item in view.Roles){<option value="@item.Id">@item.Name</option>}</InputSelect></label>
-                            <label class="field"><span>Legacy область</span><InputSelect @bind-Value="employeeInput.Scope">@foreach(var scope in Enum.GetValues<AccessScope>()){<option value="@scope">@AccessV1Ui.ScopeLabel(scope)</option>}</InputSelect></label>
+                            <label class="field"><span>Системная роль</span><InputSelect @bind-Value="employeeInput.RoleId"><option value="">Выберите роль</option>@foreach(var item in view.Roles){<option value="@item.Id">@item.Name</option>}</InputSelect></label>
+                            <label class="field"><span>Административная область</span><InputSelect @bind-Value="employeeInput.Scope">@foreach(var scope in Enum.GetValues<AccessScope>()){<option value="@scope">@AccessV1Ui.ScopeLabel(scope)</option>}</InputSelect></label>
                         </div>
-                        <p class="subtle">Эти поля пока нужны fallback-модели до AP-04. Они не являются Access V1 и не определяются должностью.</p>
+                        <p class="subtle">Эти поля используются для административных и account-прав. Рабочие возможности задаются только блоком Access V1 выше.</p>
                     </details>
 
-                    @if(editingEmployee==null){<p class="organization-notice dossier-wide">После создания сотрудника откройте его карточку и сохраните явные настройки Access V1. До этого действует совместимый legacy fallback.</p>}
+                    @if(editingEmployee==null){<p class="organization-notice dossier-wide">Сотрудник будет создан сразу с явными настройками Access V1. Если рабочий доступ не нужен, оставьте значения «Нет доступа».</p>}
                     <div class="form-actions dossier-wide">
                         @if(editingEmployee!=null)
                         {
@@ -254,6 +258,7 @@ else if(view!=null)
     private IReadOnlyList<DepartmentView> StructureDepartments=>view!.Departments.Where(x=>(showArchived||x.Active)&&MatchesStructure(x)).ToArray();
     private IReadOnlyList<EmployeeView> FilteredEmployees=>view!.Employees.Where(x=>(employeeSearch.Length==0||x.Name.Contains(employeeSearch,StringComparison.OrdinalIgnoreCase)||x.Login.Contains(employeeSearch,StringComparison.OrdinalIgnoreCase))&&(employeeDepartment.Length==0||x.DepartmentId?.ToString()==employeeDepartment)&&(employeeState.Length==0||x.State.ToString()==employeeState)).ToArray();
     private IReadOnlyList<PositionView> FilteredPositions=>view!.Positions.Where(x=>(showArchivedPositions||x.Active)&&(positionSearch.Length==0||x.Name.Contains(positionSearch,StringComparison.OrdinalIgnoreCase))).ToArray();
+    private bool SelectedRoleIsOwner=>view?.Roles.FirstOrDefault(x=>x.Id==employeeInput.RoleId)?.Name=="Owner";
     [SupplyParameterFromQuery(Name="tab")] public string? RequestedTab{get;set;}
     protected override async Task OnInitializedAsync(){string path=Navigation.ToBaseRelativePath(Navigation.Uri).Split('?',2)[0];activeTab=path.Equals("employees",StringComparison.OrdinalIgnoreCase)?"employees":"structure";await base.OnInitializedAsync();}
     protected override void OnParametersSet(){if(RequestedTab!=null&&Tabs.Any(item=>item.Id==RequestedTab))activeTab=RequestedTab;}
@@ -268,7 +273,7 @@ else if(view!=null)
     private string EditorTitle=>organizationInput.Id==null?(editorKind=="department"?"Новый отдел":editorKind=="team"?"Новая команда":"Новая должность"):(editorKind=="department"?"Изменить отдел":editorKind=="team"?"Изменить команду":"Изменить должность");
     private string EditorNameLabel=>editorKind=="department"?"Название отдела":editorKind=="team"?"Название команды":"Название должности";
     private async Task SaveOrganizationItemAsync(){string kind=editorKind!;await ExecuteAsync(()=>kind=="department"?Workspace.SaveDepartmentAsync(CurrentSubject,new(organizationInput.Id,organizationInput.Version,organizationInput.Name,organizationInput.Description,organizationInput.ManagerId),Correlation(),CancellationToken.None):kind=="team"?Workspace.SaveTeamAsync(CurrentSubject,new(organizationInput.Id,organizationInput.Version,organizationInput.DepartmentId??throw new ArgumentException("Выберите отдел."),organizationInput.Name,organizationInput.Description,organizationInput.ManagerId),Correlation(),CancellationToken.None):Workspace.SavePositionAsync(CurrentSubject,new(organizationInput.Id,organizationInput.Version,organizationInput.Name,organizationInput.Description),Correlation(),CancellationToken.None));if(Success!=null)CloseEditor();}
-    private void OpenEmployeeCreate(){editingEmployee=null;editingAccess=null;accessInput=new();employeeInput=new();employeeOpen=true;}
+    private void OpenEmployeeCreate(){editingEmployee=null;editingAccess=null;accessInput=EmployeeAccessInput.From(EmployeeAccessRules.NoAccess);employeeInput=new();employeeOpen=true;}
     private async Task OpenEmployeeEditAsync(EmployeeView item)
     {
         editingEmployee=item;
@@ -309,8 +314,8 @@ else if(view!=null)
             Success="Доступ сотрудника сохранён";
         }
     }
-    private async Task SaveEmployeeAsync(){if(editingEmployee==null){TemporaryCredential? result=null;await ExecuteAsync(async()=>result=await Workspace.CreateEmployeeAsync(CurrentSubject,new(employeeInput.Name,employeeInput.Login,employeeInput.DepartmentId,employeeInput.PositionId,employeeInput.TeamId,employeeInput.ManagerId,employeeInput.RoleId,employeeInput.Scope,employeeInput.MustChangePassword),Correlation(),CancellationToken.None));if(Success!=null){credential=result;credentialFromReset=false;CloseEmployee();}}else{EmployeeView target=editingEmployee;await ExecuteAsync(()=>Workspace.ChangeAssignmentAsync(CurrentSubject,new(target.Id,employeeInput.DepartmentId,employeeInput.PositionId,employeeInput.TeamId,employeeInput.ManagerId,employeeInput.RoleId,employeeInput.Scope,target.Version),Correlation(),CancellationToken.None));if(Success!=null)CloseEmployee();}}
-    private async Task InviteEmployeeAsync(){InvitationResult? result=null;await ExecuteAsync(async()=>result=await Workspace.InviteAsync(CurrentSubject,new(employeeInput.Name,employeeInput.Login,employeeInput.DepartmentId,employeeInput.PositionId,employeeInput.TeamId,employeeInput.ManagerId,employeeInput.RoleId,employeeInput.Scope),Correlation(),CancellationToken.None));if(Success!=null){invitation=result;CloseEmployee();}}
+    private async Task SaveEmployeeAsync(){if(editingEmployee==null){TemporaryCredential? result=null;await ExecuteAsync(async()=>result=await Workspace.CreateEmployeeAsync(CurrentSubject,new(employeeInput.Name,employeeInput.Login,employeeInput.DepartmentId,employeeInput.PositionId,employeeInput.TeamId,employeeInput.ManagerId,employeeInput.RoleId,employeeInput.Scope,employeeInput.MustChangePassword,accessInput.ToConfiguration()),Correlation(),CancellationToken.None));if(Success!=null){credential=result;credentialFromReset=false;CloseEmployee();}}else{EmployeeView target=editingEmployee;await ExecuteAsync(()=>Workspace.ChangeAssignmentAsync(CurrentSubject,new(target.Id,employeeInput.DepartmentId,employeeInput.PositionId,employeeInput.TeamId,employeeInput.ManagerId,employeeInput.RoleId,employeeInput.Scope,target.Version),Correlation(),CancellationToken.None));if(Success!=null)CloseEmployee();}}
+    private async Task InviteEmployeeAsync(){InvitationResult? result=null;await ExecuteAsync(async()=>result=await Workspace.InviteAsync(CurrentSubject,new(employeeInput.Name,employeeInput.Login,employeeInput.DepartmentId,employeeInput.PositionId,employeeInput.TeamId,employeeInput.ManagerId,employeeInput.RoleId,employeeInput.Scope,accessInput.ToConfiguration()),Correlation(),CancellationToken.None));if(Success!=null){invitation=result;CloseEmployee();}}
     private async Task ResetPasswordAsync(){TemporaryCredential? result=null;Guid id=editingEmployee!.Id;await ExecuteAsync(async()=>result=await Workspace.ResetTemporaryPasswordAsync(CurrentSubject,id,Correlation(),CancellationToken.None));if(Success!=null){credential=result;credentialFromReset=true;CloseEmployee();}}
     private void CloseCredential(){credential=null;credentialFromReset=false;}
     private async Task OpenEmployeeDeactivateAsync(EmployeeView employee)=>await LoadHandoverAsync(employee,true);
@@ -364,7 +369,7 @@ else if(view!=null)
     {
         EmployeeAccessSource.SystemOwner=>"Системный доступ Owner",
         EmployeeAccessSource.Configured=>$"Access V1 сохранён явно · версия {value.Version}",
-        _=>"Пока используется legacy fallback; сохранение создаст явные настройки Access V1"
+        _=>"Access V1"
     };
     private static string Initials(string value)=>string.Concat(value.Split(' ',StringSplitOptions.RemoveEmptyEntries).Take(2).Select(x=>char.ToUpperInvariant(x[0]))); private static string Correlation()=>Guid.CreateVersion7().ToString();
     private sealed class OrganizationInput{public Guid? Id{get;set;}public long? Version{get;set;}public Guid? DepartmentId{get;set;}[Required,MaxLength(200)]public string Name{get;set;}="";[MaxLength(1000)]public string Description{get;set;}="";public Guid? ManagerId{get;set;}}

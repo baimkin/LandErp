@@ -5,7 +5,7 @@ public enum AccessScope { Own, AssignedObjects, Team, Department, Organization }
 public enum IncomingAccessLevel { None, Read, Process }
 public enum ProcurementAccessLevel { None, Read, Manager, Head }
 public enum CollectionAccessLevel { None, Read, Manage }
-public enum EmployeeAccessSource { Configured, LegacyPermissions, SystemOwner }
+public enum EmployeeAccessSource { Configured, SystemOwner }
 
 public sealed record EmployeeAccessConfiguration(
     IncomingAccessLevel IncomingAccess,
@@ -21,6 +21,12 @@ public sealed record EmployeeAccessConfiguration(
 
 public static class EmployeeAccessRules
 {
+    public static EmployeeAccessConfiguration NoAccess { get; } = new(
+        IncomingAccessLevel.None, ProcurementAccessLevel.None,
+        AccessScope.Own, AccessScope.Own, CollectionAccessLevel.None,
+        CanAssignInspections: false, CanPerformInspections: false,
+        CanConfirmPurchase: false, CanManageTemplates: false, CanReadAudit: false);
+
     public static void Validate(EmployeeAccessConfiguration settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -75,8 +81,7 @@ public sealed record EffectiveEmployeeAccess(
     public bool CanHeadProcurement => Settings.ProcurementAccess >= ProcurementAccessLevel.Head;
     public bool CanReadCollection => Settings.CollectionAccess >= CollectionAccessLevel.Read;
     public bool CanManageCollection => Settings.CollectionAccess >= CollectionAccessLevel.Manage;
-    public bool CanReadAudit => Settings.CanReadAudit
-        && (Source != EmployeeAccessSource.LegacyPermissions || Settings.ProcurementReadScope == AccessScope.Organization);
+    public bool CanReadAudit => Settings.CanReadAudit;
     public AccessContext OrganizationContext =>
         new(EmployeeId, OrganizationId, DepartmentId, TeamId, AccessScope.Organization);
     public AccessContext ProcurementReadContext =>

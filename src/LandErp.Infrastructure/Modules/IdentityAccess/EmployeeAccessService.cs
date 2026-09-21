@@ -7,12 +7,12 @@ namespace LandErp.Infrastructure.Modules.IdentityAccess;
 
 /// <summary>
 /// Resolves the effective Access V1 settings used by workflow authorization.
-/// Missing explicit settings deliberately fall back to the current permission model during the AP-02/AP-03 transition.
+/// After AP-04 every non-Owner employee must have explicit EmployeeAccessSettings; missing settings fail closed.
 /// </summary>
 public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> factory) : IEmployeeAccessService
 {
     private sealed record EmployeeRow(Guid Id, Guid OrganizationId, Guid? DepartmentId, Guid? TeamId,
-        Guid RoleId, AccessScope Scope, string RoleName);
+        string RoleName);
 
     public void Validate(EmployeeAccessConfiguration settings) => EmployeeAccessRules.Validate(settings);
 
@@ -24,7 +24,7 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
                                   join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
                                   where employee.UserId == subject.UserId && employee.Active
                                   select new EmployeeRow(employee.Id, employee.OrganizationId, assignment.OrgUnitId,
-                                      assignment.TeamId, assignment.RoleId, assignment.Scope, role.Name!))
+                                      assignment.TeamId, role.Name!))
             .SingleOrDefaultAsync(cancellationToken);
         if (row == null) throw new AccessDeniedException();
         return (await ResolveRowsAsync(db, [row], cancellationToken)).Single();
@@ -39,7 +39,7 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
                                     join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
                                     where employee.OrganizationId == organizationId && employee.Active
                                     select new EmployeeRow(employee.Id, employee.OrganizationId, assignment.OrgUnitId,
-                                        assignment.TeamId, assignment.RoleId, assignment.Scope, role.Name!))
+                                        assignment.TeamId, role.Name!))
             .ToArrayAsync(cancellationToken);
         return await ResolveRowsAsync(db, rows, cancellationToken);
     }
@@ -56,7 +56,7 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
                                     join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
                                     where employee.OrganizationId == organizationId && ids.Contains(employee.Id)
                                     select new EmployeeRow(employee.Id, employee.OrganizationId, assignment.OrgUnitId,
-                                        assignment.TeamId, assignment.RoleId, assignment.Scope, role.Name!))
+                                        assignment.TeamId, role.Name!))
             .ToArrayAsync(cancellationToken);
         return await ResolveRowsAsync(db, rows, cancellationToken);
     }
@@ -69,38 +69,24 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
         Dictionary<Guid, EmployeeAccessSettings> configured = await db.EmployeeAccessSettings.AsNoTracking()
             .Where(item => employeeIds.Contains(item.EmployeeId))
             .ToDictionaryAsync(item => item.EmployeeId, cancellationToken);
-        Guid[] roleIds = rows.Select(item => item.RoleId).Distinct().ToArray();
-        var grantRows = await db.RolePermissions.AsNoTracking()
-            .Where(item => roleIds.Contains(item.RoleId))
-            .Select(item => new { item.RoleId, item.PermissionId })
-            .ToArrayAsync(cancellationToken);
-        Dictionary<Guid, string[]> permissions = grantRows.GroupBy(item => item.RoleId)
-            .ToDictionary(group => group.Key, group => group.Select(item => item.PermissionId).ToArray());
 
         List<EffectiveEmployeeAccess> result = new(rows.Count);
         foreach (EmployeeRow row in rows)
         {
-            EmployeeAccessConfiguration settings;
-            EmployeeAccessSource source;
             if (string.Equals(row.RoleName, "Owner", StringComparison.Ordinal))
             {
-                settings = OwnerConfiguration();
-                source = EmployeeAccessSource.SystemOwner;
-            }
-            else if (configured.TryGetValue(row.Id, out EmployeeAccessSettings? explicitSettings))
-            {
-                settings = ToConfiguration(explicitSettings);
-                Validate(settings);
-                source = EmployeeAccessSource.Configured;
-            }
-            else
-            {
-                settings = LegacyConfiguration(permissions.GetValueOrDefault(row.RoleId) ?? [], row.Scope);
-                Validate(settings);
-                source = EmployeeAccessSource.LegacyPermissions;
+                result.Add(Effective(row.Id, row.OrganizationId, row.DepartmentId, row.TeamId,
+                    OwnerConfiguration(), EmployeeAccessSource.SystemOwner));
+                continue;
             }
 
-            result.Add(Effective(row.Id, row.OrganizationId, row.DepartmentId, row.TeamId, settings, source));
+            if (!configured.TryGetValue(row.Id, out EmployeeAccessSettings? explicitSettings))
+                throw new AccessDeniedException();
+
+            EmployeeAccessConfiguration settings = ToConfiguration(explicitSettings);
+            Validate(settings);
+            result.Add(Effective(row.Id, row.OrganizationId, row.DepartmentId, row.TeamId,
+                settings, EmployeeAccessSource.Configured));
         }
 
         return result;
@@ -121,30 +107,4 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
             CanAssignInspections: true, CanPerformInspections: true, CanConfirmPurchase: true,
             CanManageTemplates: true, CanReadAudit: true);
 
-    private static EmployeeAccessConfiguration LegacyConfiguration(IEnumerable<string> permissionValues, AccessScope scope)
-    {
-        HashSet<string> permissions = permissionValues.ToHashSet(StringComparer.Ordinal);
-        bool Has(string permission) => permissions.Contains(permission);
-
-        IncomingAccessLevel incoming = Has(Permissions.ManagerDecide)
-            ? IncomingAccessLevel.Process
-            : Has(Permissions.QueueRead) ? IncomingAccessLevel.Read : IncomingAccessLevel.None;
-
-        ProcurementAccessLevel procurement = Has(Permissions.HeadDecide)
-            ? ProcurementAccessLevel.Head
-            : Has(Permissions.ManagerDecide)
-                ? ProcurementAccessLevel.Manager
-                : Has(Permissions.QueueRead) ? ProcurementAccessLevel.Read : ProcurementAccessLevel.None;
-
-        CollectionAccessLevel collection = Has(Permissions.CollectionManage) || Has(Permissions.AgentsManage)
-            ? CollectionAccessLevel.Manage
-            : Has(Permissions.CollectionRead) ? CollectionAccessLevel.Read : CollectionAccessLevel.None;
-
-        return new(incoming, procurement, scope, scope, collection,
-            CanAssignInspections: Has(Permissions.InspectionRequest),
-            CanPerformInspections: Has(Permissions.InspectionPerform),
-            CanConfirmPurchase: Has(Permissions.PurchaseConfirm),
-            CanManageTemplates: Has(Permissions.ManagerDecide) || Has(Permissions.HeadDecide),
-            CanReadAudit: Has(Permissions.AuditRead));
-    }
 }

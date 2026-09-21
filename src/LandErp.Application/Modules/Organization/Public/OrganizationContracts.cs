@@ -24,10 +24,12 @@ public sealed record SaveTeam(Guid? Id, long? ExpectedVersion, Guid DepartmentId
 public sealed record SavePosition(Guid? Id, long? ExpectedVersion, string Name, string Description);
 public sealed record SetOrganizationItemActive(Guid Id, long ExpectedVersion, bool Active);
 public sealed record CreateEmployee(string Name, string Login, Guid? DepartmentId, Guid? PositionId,
-    Guid? TeamId, Guid? ManagerId, Guid RoleId, AccessScope Scope, bool MustChangePassword = true);
+    Guid? TeamId, Guid? ManagerId, Guid RoleId, AccessScope Scope, bool MustChangePassword = true,
+    EmployeeAccessConfiguration? Access = null);
 public sealed record TemporaryCredential(Guid EmployeeId, string Login, string Password);
 public sealed record InviteEmployee(string Name, string Login, Guid? DepartmentId,
-    Guid? PositionId, Guid? TeamId, Guid? ManagerId, Guid RoleId, AccessScope Scope);
+    Guid? PositionId, Guid? TeamId, Guid? ManagerId, Guid RoleId, AccessScope Scope,
+    EmployeeAccessConfiguration? Access = null);
 public sealed record InvitationResult(Guid InvitationId, string OneTimeToken);
 public sealed record ChangeAssignment(Guid EmployeeId, Guid? DepartmentId, Guid? PositionId,
     Guid? TeamId, Guid? ManagerId, Guid RoleId, AccessScope Scope, long ExpectedVersion);

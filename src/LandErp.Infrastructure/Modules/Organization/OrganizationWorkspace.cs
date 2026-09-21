@@ -204,18 +204,26 @@ public sealed class OrganizationWorkspace(
         LandErpDbContext db = scope.ServiceProvider.GetRequiredService<LandErpDbContext>();
         UserManager<LandErpUser> users = scope.ServiceProvider.GetRequiredService<UserManager<LandErpUser>>();
         await ValidateAssignmentAsync(db, context, command.DepartmentId, command.PositionId, command.TeamId, command.ManagerId, command.RoleId, command.Scope, subject, true, cancellationToken);
+        string role = await db.Roles.Where(item => item.Id == command.RoleId).Select(item => item.Name!).SingleAsync(cancellationToken);
+        EmployeeAccessConfiguration explicitAccess = command.Access ?? EmployeeAccessRules.NoAccess;
+        employeeAccess.Validate(explicitAccess);
+        if (!string.Equals(role, "Owner", StringComparison.Ordinal))
+            ValidateAccessScopeReferences(command.DepartmentId, command.TeamId, explicitAccess);
         string login = ValidateLogin(command.Login); string password = GenerateTemporaryPassword();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         LandErpUser user = new() { Id = DataConventions.NewId(), UserName = login, MustChangePassword = command.MustChangePassword, LockoutEnabled = true };
         EnsureIdentity(await users.CreateAsync(user, password));
-        string role = await db.Roles.Where(item => item.Id == command.RoleId).Select(item => item.Name!).SingleAsync(cancellationToken);
         EnsureIdentity(await users.AddToRoleAsync(user, role));
         Employee employee = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, UserId = user.Id, DisplayName = ValidateName(command.Name), Active = true };
         db.Employees.Add(employee);
         db.EmployeeAssignments.Add(new() { Id = DataConventions.NewId(), EmployeeId = employee.Id, OrgUnitId = command.DepartmentId,
             PositionId = command.PositionId, TeamId = command.TeamId, ManagerEmployeeId = command.ManagerId, RoleId = command.RoleId, Scope = command.Scope });
+        if (!string.Equals(role, "Owner", StringComparison.Ordinal))
+            db.EmployeeAccessSettings.Add(ToAccessSettings(employee.Id, explicitAccess));
         AddAudit(db, context, subject, "EmployeeCreated", "Employee", employee.Id,
-            new { employee.DisplayName, Login = login, command.DepartmentId, command.PositionId, command.TeamId, command.ManagerId, Role = role, command.Scope, command.MustChangePassword }, correlationId);
+            new { employee.DisplayName, Login = login, command.DepartmentId, command.PositionId, command.TeamId, command.ManagerId,
+                Role = role, command.Scope, Access = string.Equals(role, "Owner", StringComparison.Ordinal) ? (object)"SystemOwner" : explicitAccess,
+                command.MustChangePassword }, correlationId);
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return new(employee.Id, login, password);
     }
@@ -269,7 +277,7 @@ public sealed class OrganizationWorkspace(
 
         if (string.Equals(target.RoleName, "Owner", StringComparison.Ordinal))
             throw new ArgumentException("Доступ Owner системный и не может быть ограничен настройками Access V1.");
-        ValidateAccessScopeReferences(target.Assignment, command.Settings);
+        ValidateAccessScopeReferences(target.Assignment.OrgUnitId, target.Assignment.TeamId, command.Settings);
 
         EmployeeAccessSettings? row = await db.EmployeeAccessSettings
             .SingleOrDefaultAsync(item => item.EmployeeId == command.EmployeeId, cancellationToken);
@@ -286,8 +294,8 @@ public sealed class OrganizationWorkspace(
             throw new DbUpdateConcurrencyException("Настройки доступа уже изменились. Обновите карточку сотрудника.");
         }
 
-        await ValidateAccessChangeAgainstActiveWorkAsync(db, target.Employee, target.Assignment,
-            command.Settings, cancellationToken);
+        await ValidateAccessChangeAgainstActiveWorkAsync(db, target.Employee,
+            target.Assignment.OrgUnitId, target.Assignment.TeamId, command.Settings, cancellationToken);
 
         row.IncomingAccess = command.Settings.IncomingAccess;
         row.ProcurementAccess = command.Settings.ProcurementAccess;
@@ -413,21 +421,28 @@ public sealed class OrganizationWorkspace(
         LandErpDbContext db = scope.ServiceProvider.GetRequiredService<LandErpDbContext>();
         UserManager<LandErpUser> users = scope.ServiceProvider.GetRequiredService<UserManager<LandErpUser>>();
         await ValidateAssignmentAsync(db, context, command.DepartmentId, command.PositionId, command.TeamId, command.ManagerId, command.RoleId, command.Scope, subject, true, cancellationToken);
+        string role = await db.Roles.Where(item => item.Id == command.RoleId).Select(item => item.Name!).SingleAsync(cancellationToken);
+        EmployeeAccessConfiguration explicitAccess = command.Access ?? EmployeeAccessRules.NoAccess;
+        employeeAccess.Validate(explicitAccess);
+        if (!string.Equals(role, "Owner", StringComparison.Ordinal))
+            ValidateAccessScopeReferences(command.DepartmentId, command.TeamId, explicitAccess);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         string login = ValidateLogin(command.Login);
         LandErpUser user = new() { Id = DataConventions.NewId(), UserName = login, Email = login, MustChangePassword = false };
         EnsureIdentity(await users.CreateAsync(user));
-        string role = await db.Roles.Where(item => item.Id == command.RoleId).Select(item => item.Name!).SingleAsync(cancellationToken);
         EnsureIdentity(await users.AddToRoleAsync(user, role));
         Employee employee = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, UserId = user.Id, DisplayName = ValidateName(command.Name), Active = false };
         db.Employees.Add(employee);
         db.EmployeeAssignments.Add(new() { Id = DataConventions.NewId(), EmployeeId = employee.Id, OrgUnitId = command.DepartmentId, PositionId = command.PositionId,
             TeamId = command.TeamId, ManagerEmployeeId = command.ManagerId, RoleId = command.RoleId, Scope = command.Scope });
+        if (!string.Equals(role, "Owner", StringComparison.Ordinal))
+            db.EmployeeAccessSettings.Add(ToAccessSettings(employee.Id, explicitAccess));
         string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         EmployeeInvitation invitation = new() { Id = DataConventions.NewId(), EmployeeId = employee.Id, TokenHash = HashToken(token), ExpiresAt = DateTimeOffset.UtcNow.AddDays(2) };
         db.EmployeeInvitations.Add(invitation);
         AddAudit(db, context, subject, "EmployeeInvited", "Employee", employee.Id,
-            new { employee.DisplayName, command.DepartmentId, command.PositionId, Role = role, command.Scope }, correlationId);
+            new { employee.DisplayName, command.DepartmentId, command.PositionId, Role = role, command.Scope,
+                Access = string.Equals(role, "Owner", StringComparison.Ordinal) ? (object)"SystemOwner" : explicitAccess }, correlationId);
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return new(invitation.Id, token);
     }
@@ -462,6 +477,21 @@ public sealed class OrganizationWorkspace(
         if (oldRole == "Owner" && newRole != "Owner"
             && await IsLastActiveOwnerAsync(db, employee.Id, context.OrganizationId, cancellationToken))
             throw new ArgumentException("Нельзя снять роль последнего активного Owner.");
+
+        if (newRole != "Owner")
+        {
+            EmployeeAccessSettings? explicitSettings = await db.EmployeeAccessSettings
+                .SingleOrDefaultAsync(item => item.EmployeeId == employee.Id, cancellationToken);
+            EmployeeAccessConfiguration effectiveSettings = explicitSettings == null
+                ? EmployeeAccessRules.NoAccess
+                : ToConfiguration(explicitSettings);
+            employeeAccess.Validate(effectiveSettings);
+            ValidateAccessScopeReferences(command.DepartmentId, command.TeamId, effectiveSettings);
+            await ValidateAccessChangeAgainstActiveWorkAsync(db, employee, command.DepartmentId, command.TeamId,
+                effectiveSettings, cancellationToken);
+            if (explicitSettings == null)
+                db.EmployeeAccessSettings.Add(ToAccessSettings(employee.Id, effectiveSettings));
+        }
 
         var before = new { assignment.OrgUnitId, assignment.PositionId, assignment.TeamId, assignment.ManagerEmployeeId, Role = oldRole, assignment.Scope };
         assignment.OrgUnitId = command.DepartmentId;
@@ -740,21 +770,43 @@ public sealed class OrganizationWorkspace(
         return new(employeeId, effective.Settings, effective.Source, version, effective.IsSystemOwner);
     }
 
+    private static EmployeeAccessSettings ToAccessSettings(Guid employeeId, EmployeeAccessConfiguration settings) =>
+        new()
+        {
+            EmployeeId = employeeId,
+            IncomingAccess = settings.IncomingAccess,
+            ProcurementAccess = settings.ProcurementAccess,
+            ProcurementReadScope = settings.ProcurementReadScope,
+            ProcurementWorkScope = settings.ProcurementWorkScope,
+            CollectionAccess = settings.CollectionAccess,
+            CanAssignInspections = settings.CanAssignInspections,
+            CanPerformInspections = settings.CanPerformInspections,
+            CanConfirmPurchase = settings.CanConfirmPurchase,
+            CanManageTemplates = settings.CanManageTemplates,
+            CanReadAudit = settings.CanReadAudit
+        };
+
+    private static EmployeeAccessConfiguration ToConfiguration(EmployeeAccessSettings value) =>
+        new(value.IncomingAccess, value.ProcurementAccess, value.ProcurementReadScope, value.ProcurementWorkScope,
+            value.CollectionAccess, value.CanAssignInspections, value.CanPerformInspections,
+            value.CanConfirmPurchase, value.CanManageTemplates, value.CanReadAudit);
+
     private static void ValidateAccessScopeReferences(
-        EmployeeAssignment assignment, EmployeeAccessConfiguration settings)
+        Guid? departmentId, Guid? teamId, EmployeeAccessConfiguration settings)
     {
         if ((settings.ProcurementReadScope == AccessScope.Team || settings.ProcurementWorkScope == AccessScope.Team)
-            && assignment.TeamId == null)
+            && teamId == null)
             throw new ArgumentException("Для области «Команда» сотрудник должен быть назначен в команду.");
         if ((settings.ProcurementReadScope == AccessScope.Department || settings.ProcurementWorkScope == AccessScope.Department)
-            && assignment.OrgUnitId == null)
+            && departmentId == null)
             throw new ArgumentException("Для области «Отдел» сотрудник должен быть назначен в отдел.");
     }
 
     private async Task ValidateAccessChangeAgainstActiveWorkAsync(
         LandErpDbContext db,
         Employee employee,
-        EmployeeAssignment assignment,
+        Guid? departmentId,
+        Guid? teamId,
         EmployeeAccessConfiguration proposed,
         CancellationToken cancellationToken)
     {
@@ -770,8 +822,8 @@ public sealed class OrganizationWorkspace(
             throw new ArgumentException(
                 "У сотрудника есть активная работа в закупке. Сначала переназначьте её, затем уменьшайте доступ к закупке.");
 
-        AccessContext proposedWork = new(employee.Id, employee.OrganizationId, assignment.OrgUnitId,
-            assignment.TeamId, proposed.ProcurementWorkScope);
+        AccessContext proposedWork = new(employee.Id, employee.OrganizationId, departmentId,
+            teamId, proposed.ProcurementWorkScope);
         foreach (CaseWorkImpact impact in state.Cases)
         {
             if (!ProcurementVisibility.CanSeeAfterResponsibility(

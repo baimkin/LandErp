@@ -89,12 +89,12 @@
                 Subject subject = PermissionAuthorization.SubjectFrom(state.User);
                 effectiveAccess = await AccessV1.ResolveAsync(subject, CancellationToken.None);
                 navigationAccess = AccessV1Ui.Navigation(effectiveAccess);
-                if (navigationAccess.Audit && effectiveAccess.Source != EmployeeAccessSource.Configured)
+                if (navigationAccess.Audit && effectiveAccess.IsSystemOwner)
                 {
                     try
                     {
-                        AccessContext transition = await LegacyAccess.RequireAsync(subject, Permissions.AuditRead, CancellationToken.None);
-                        if (transition.Scope != AccessScope.Organization) navigationAccess = navigationAccess with { Audit = false };
+                        AccessContext ownerSecurity = await LegacyAccess.RequireAsync(subject, Permissions.AuditRead, CancellationToken.None);
+                        if (ownerSecurity.Scope != AccessScope.Organization) navigationAccess = navigationAccess with { Audit = false };
                     }
                     catch (AccessDeniedException)
                     {

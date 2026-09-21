@@ -71,6 +71,8 @@ try
     await using AsyncServiceScope scope = host.Services.CreateAsyncScope();
     LandErpDbContext db = scope.ServiceProvider.GetRequiredService<LandErpDbContext>();
     await db.Database.MigrateAsync();
+    await BuiltInAccessCatalog.SynchronizeAsync(db,
+        scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>());
     if (!await db.Users.AnyAsync())
     {
         string login = Environment.GetEnvironmentVariable("LANDERP_OWNER_LOGIN") ?? "owner@landerp.local";

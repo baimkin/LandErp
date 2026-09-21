@@ -1925,7 +1925,7 @@ namespace LandErp.Infrastructure.Migrations
 
                     b.ToTable("case_attachments", "procurement", t =>
                         {
-                            t.HasComment("Связи вложений с PropertyCase, переговорами, проверками, осмотром или его пунктом; доступ всегда наследуется от owning PropertyCase.");
+                            t.HasComment("Связи вложений с PropertyCase, переговорами, проверками, осмотром или его пунктом; материалы осмотра доступны также назначенному осмотрщику.");
 
                             t.HasCheckConstraint("ck_case_attachments_owner", "(owner_type = 'Case' AND negotiation_id IS NULL AND check_id IS NULL AND inspection_id IS NULL AND inspection_item_id IS NULL) OR (owner_type = 'Negotiation' AND negotiation_id IS NOT NULL AND check_id IS NULL AND inspection_id IS NULL AND inspection_item_id IS NULL) OR (owner_type = 'Check' AND negotiation_id IS NULL AND check_id IS NOT NULL AND inspection_id IS NULL AND inspection_item_id IS NULL) OR (owner_type = 'Inspection' AND negotiation_id IS NULL AND check_id IS NULL AND inspection_id IS NOT NULL AND inspection_item_id IS NULL) OR (owner_type = 'InspectionItem' AND negotiation_id IS NULL AND check_id IS NULL AND inspection_id IS NULL AND inspection_item_id IS NOT NULL)");
                         });
@@ -2728,9 +2728,21 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("completed_at");
 
+                    b.Property<DateTimeOffset?>("DueAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("due_at")
+                        .HasComment("Опциональный UTC срок полевого осмотра.");
+
                     b.Property<Guid>("InspectorEmployeeId")
                         .HasColumnType("uuid")
                         .HasColumnName("inspector_employee_id");
+
+                    b.Property<string>("Instructions")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("instructions")
+                        .HasComment("Краткая цель и указания для полевого осмотра без предоставления осмотрщику прав на решение по закупке.");
 
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
@@ -2754,7 +2766,17 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("property_case_id")
                         .HasComment("Самостоятельный рабочий объект закупки, к которому относится источник.");
 
-                    b.Property<DateTimeOffset>("StartedAt")
+                    b.Property<DateTimeOffset?>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at")
+                        .HasComment("UTC момент последнего назначения или переназначения осмотра.");
+
+                    b.Property<Guid?>("RequestedByEmployeeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("requested_by_employee_id")
+                        .HasComment("Сотрудник закупки, назначивший полевой осмотр; не становится исполнителем осмотра автоматически.");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("started_at");
 
@@ -2772,16 +2794,19 @@ namespace LandErp.Infrastructure.Migrations
                     b.HasKey("Id")
                         .HasName("pk_site_inspections");
 
-                    b.HasIndex("InspectorEmployeeId")
-                        .HasDatabaseName("ix_site_inspections_inspector_employee_id");
+                    b.HasIndex("InspectorEmployeeId", "DueAt")
+                        .HasDatabaseName("ix_site_inspections_inspector_employee_id_due_at");
 
                     b.HasIndex("PropertyCaseId")
                         .IsUnique()
                         .HasDatabaseName("ix_site_inspections_property_case_id");
 
+                    b.HasIndex("RequestedByEmployeeId")
+                        .HasDatabaseName("ix_site_inspections_requested_by_employee_id");
+
                     b.ToTable("site_inspections", "procurement", t =>
                         {
-                            t.HasComment("Полевой осмотр конкретного PropertyCase: черновик, общий вывод, решение и факт завершения.");
+                            t.HasComment("Полевой осмотр конкретного PropertyCase: назначение исполнителя, срок, snapshot чек-листа, черновик и факт завершения.");
                         });
                 });
 
@@ -4290,6 +4315,12 @@ namespace LandErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_site_inspections_property_case_id");
+
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("RequestedByEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_site_inspections_requested_by_employee_id");
                 });
 
             modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.SiteInspectionItem", b =>

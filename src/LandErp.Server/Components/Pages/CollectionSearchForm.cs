@@ -30,7 +30,9 @@ public sealed class CollectionSearchForm : IValidatableObject
         if (errors.Length > 0) throw new ArgumentException(errors[0].ErrorMessage);
         return new(ScheduleKind,
             ScheduleKind == CollectionScheduleKind.Interval ? IntervalValue * IntervalUnit : null,
-            ScheduleKind == CollectionScheduleKind.FixedTimes ? Times.Select(x => x.Value).Order().ToArray() : []);
+            ScheduleKind == CollectionScheduleKind.FixedTimes
+                ? Times.Select(x => NormalizeTime(x.Value)).Order(StringComparer.Ordinal).ToArray()
+                : []);
     }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
@@ -40,10 +42,23 @@ public sealed class CollectionSearchForm : IValidatableObject
             yield return new("Интервал должен быть от 5 минут до 7 дней.");
         if (ScheduleKind == CollectionScheduleKind.FixedTimes)
         {
-            if (Times.Count is < 1 or > 12 || Times.Any(x => !TimeOnly.TryParseExact(x.Value, "HH:mm",
-                    CultureInfo.InvariantCulture, DateTimeStyles.None, out _)))
+            if (Times.Count is < 1 or > 12)
+            {
                 yield return new("Укажите от 1 до 12 времён запуска.");
-            if (Times.Select(x => x.Value).Distinct().Count() != Times.Count)
+                yield break;
+            }
+
+            string[] normalized = new string[Times.Count];
+            for (int index = 0; index < Times.Count; index++)
+            {
+                if (!TryNormalizeTime(Times[index].Value, out normalized[index]))
+                {
+                    yield return new("Укажите корректное время запуска в формате ЧЧ:ММ.");
+                    yield break;
+                }
+            }
+
+            if (normalized.Distinct(StringComparer.Ordinal).Count() != normalized.Length)
                 yield return new("Время запуска не должно повторяться.");
         }
     }
@@ -60,6 +75,23 @@ public sealed class CollectionSearchForm : IValidatableObject
             Times = search.FixedTimes.Length > 0 ? search.FixedTimes.Select(x => new TimeRow(x)).ToList() : [new("09:00")]
         };
     }
+
+    private static bool TryNormalizeTime(string value, out string normalized)
+    {
+        if (TimeOnly.TryParseExact(value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out TimeOnly time))
+        {
+            normalized = time.ToString("HH:mm", CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        normalized = "";
+        return false;
+    }
+
+    private static string NormalizeTime(string value) =>
+        TryNormalizeTime(value, out string normalized)
+            ? normalized
+            : throw new ArgumentException("Укажите корректное время запуска в формате ЧЧ:ММ.");
 
     public sealed class TimeRow(string value) { public string Value { get; set; } = value; }
 }

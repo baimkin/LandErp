@@ -1212,23 +1212,285 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<Guid> SaveInspectionAsync(Subject subject, SaveInspection command, string correlationId, CancellationToken cancellationToken)
+    public async Task<InspectionTaskPage> ReadMyInspectionsAsync(Subject subject, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
-        await RequireDossierPermissionAsync(subject, cancellationToken);
+        AccessContext context = await access.RequireAsync(subject, Permissions.InspectionRead, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        var rows = await (from inspection in db.SiteInspections.AsNoTracking()
+                          join propertyCase in db.PropertyCases.AsNoTracking() on inspection.PropertyCaseId equals propertyCase.Id
+                          where inspection.OrganizationId == context.OrganizationId
+                              && inspection.InspectorEmployeeId == context.EmployeeId
+                          orderby inspection.RequestedAt descending
+                          select new { Inspection = inspection, Case = propertyCase })
+            .Take(500).ToArrayAsync(cancellationToken);
+
+        Guid[] inspectionIds = rows.Select(item => item.Inspection.Id).ToArray();
+        var counts = await db.SiteInspectionItems.AsNoTracking()
+            .Where(item => inspectionIds.Contains(item.InspectionId))
+            .GroupBy(item => item.InspectionId)
+            .Select(group => new
+            {
+                Id = group.Key,
+                Total = group.Count(),
+                Done = group.Count(item => item.Status != InspectionItemStatus.Unanswered)
+            }).ToArrayAsync(cancellationToken);
+        Dictionary<Guid, (int Total, int Done)> countMap = counts.ToDictionary(
+            item => item.Id, item => (item.Total, item.Done));
+
+        Guid[] employeeIds = rows.SelectMany(item => new Guid?[]
+            { item.Inspection.RequestedByEmployeeId, item.Inspection.InspectorEmployeeId })
+            .Where(item => item.HasValue).Select(item => item!.Value).Distinct().ToArray();
+        Dictionary<Guid, string> names = await db.Employees.AsNoTracking()
+            .Where(item => employeeIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
+        string zone = await db.Organizations.Where(item => item.Id == context.OrganizationId)
+            .Select(item => item.BusinessTimeZone).SingleAsync(cancellationToken);
+
+        InspectionTaskItem[] items = rows
+            .OrderBy(item => item.Inspection.Status == InspectionStatus.Completed)
+            .ThenBy(item => item.Inspection.DueAt == null)
+            .ThenBy(item => item.Inspection.DueAt)
+            .ThenByDescending(item => item.Inspection.RequestedAt)
+            .Take(200)
+            .Select(item =>
+            {
+                (int total, int done) = countMap.GetValueOrDefault(item.Inspection.Id);
+                InspectionTaskState state = item.Inspection.Status == InspectionStatus.Completed
+                    ? InspectionTaskState.Completed
+                    : item.Inspection.StartedAt == null ? InspectionTaskState.Assigned : InspectionTaskState.InProgress;
+                return new InspectionTaskItem(item.Case.Id, item.Case.BusinessNumber, item.Case.WorkingTitle,
+                    item.Case.WorkingLocation, item.Case.CadastralNumber,
+                    item.Inspection.RequestedByEmployeeId == null ? null
+                        : names.GetValueOrDefault(item.Inspection.RequestedByEmployeeId.Value, "Сотрудник"),
+                    item.Inspection.RequestedAt, item.Inspection.DueAt, state, done, total);
+            }).ToArray();
+        return new(items, zone);
+    }
+
+    public async Task<InspectionWorkspaceView> ReadInspectionAsync(Subject subject, Guid caseId,
+        CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.ResolveAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        SiteInspection? inspection = await db.SiteInspections.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.PropertyCaseId == caseId && item.OrganizationId == context.OrganizationId,
+                cancellationToken);
+
+        bool procurementReader = await AllowedAsync(subject, Permissions.QueueRead, cancellationToken)
+            && await VisibleCases(db, context).AnyAsync(item => item.Case.Id == caseId, cancellationToken);
+        bool assignedInspector = inspection != null && inspection.InspectorEmployeeId == context.EmployeeId
+            && await AllowedAsync(subject, Permissions.InspectionRead, cancellationToken);
+        if (!procurementReader && !assignedInspector) throw new AccessDeniedException();
+
+        PropertyCase propertyCase = await db.PropertyCases.AsNoTracking().SingleOrDefaultAsync(
+            item => item.Id == caseId && item.OrganizationId == context.OrganizationId, cancellationToken)
+            ?? throw new AccessDeniedException();
+        SiteInspectionItem[] inspectionItems = inspection == null ? [] : await db.SiteInspectionItems.AsNoTracking()
+            .Where(item => item.InspectionId == inspection.Id).OrderBy(item => item.SortOrderSnapshot)
+            .ToArrayAsync(cancellationToken);
+        var attachments = await (from link in db.CaseAttachments.AsNoTracking()
+                                 join file in db.StoredFiles.AsNoTracking() on link.StoredFileId equals file.Id
+                                 where link.PropertyCaseId == caseId
+                                     && (link.OwnerType == CaseAttachmentOwner.Inspection
+                                         || link.OwnerType == CaseAttachmentOwner.InspectionItem)
+                                 orderby link.RecordedAt descending
+                                 select new { Link = link, File = file }).ToArrayAsync(cancellationToken);
+
+        string[] photoJson = await (from sourceLink in db.PropertyCaseSourceLinks.AsNoTracking()
+                                    join listing in db.Listings.AsNoTracking() on sourceLink.CatalogItemId equals listing.Id
+                                    where sourceLink.PropertyCaseId == caseId && sourceLink.Confirmed
+                                    select listing.PhotosJson).ToArrayAsync(cancellationToken);
+        string[] photos = photoJson.SelectMany(value => JsonSerializer.Deserialize<string[]>(value) ?? [])
+            .Distinct(StringComparer.Ordinal).ToArray();
+
+        Dictionary<Guid, string> names = await db.Employees.AsNoTracking()
+            .Where(item => item.OrganizationId == context.OrganizationId)
+            .ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
+
+        bool canAssign = procurementReader && inspection?.Status != InspectionStatus.Completed
+            && await AllowedAsync(subject, Permissions.InspectionRequest, cancellationToken);
+        bool procurementPerformer = procurementReader
+            && (await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken)
+                || await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken));
+        bool inspectorPerformer = inspection != null && inspection.InspectorEmployeeId == context.EmployeeId
+            && await AllowedAsync(subject, Permissions.InspectionPerform, cancellationToken);
+        bool canPerform = inspection != null && inspection.Status != InspectionStatus.Completed
+            && propertyCase.StageId is not ("rejected" or "monitor" or "acquired")
+            && (procurementPerformer || inspectorPerformer);
+
+        DecisionTarget[] inspectors = [];
+        if (canAssign)
+        {
+            inspectors = await (from employee in db.Employees.AsNoTracking()
+                                join assignment in db.EmployeeAssignments.AsNoTracking() on employee.Id equals assignment.EmployeeId
+                                where employee.OrganizationId == context.OrganizationId && employee.Active
+                                    && db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId
+                                        && grant.PermissionId == Permissions.InspectionRead)
+                                    && db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId
+                                        && grant.PermissionId == Permissions.InspectionPerform)
+                                select new { employee.Id, employee.DisplayName })
+                .Distinct().OrderBy(item => item.DisplayName)
+                .Select(item => new DecisionTarget(item.Id, item.DisplayName))
+                .ToArrayAsync(cancellationToken);
+        }
+
+        InspectionView? inspectionView = inspection == null ? null : new InspectionView(
+            inspection.Id, inspection.Status, inspection.OverallConclusion, inspection.PreliminaryDecision,
+            names.GetValueOrDefault(inspection.InspectorEmployeeId, "Сотрудник"), inspection.StartedAt,
+            inspection.CompletedAt, inspection.Version,
+            inspectionItems.Select(item => new InspectionItemView(item.Id, item.TemplateItemId, item.TemplateItemVersion,
+                item.TitleSnapshot, item.SortOrderSnapshot, item.AnswerTypeSnapshot,
+                JsonSerializer.Deserialize<string[]>(item.OptionsJsonSnapshot) ?? [], item.UnitSnapshot,
+                item.NormalAnswerSnapshot, item.AllowAttachmentsSnapshot, item.RequiredSnapshot, item.Status,
+                item.Answer, item.Note, item.Version)).ToArray());
+
+        InspectionAssignmentView? assignmentView = inspection == null ? null : new InspectionAssignmentView(
+            inspection.InspectorEmployeeId, names.GetValueOrDefault(inspection.InspectorEmployeeId, "Сотрудник"),
+            inspection.RequestedByEmployeeId == null ? null
+                : names.GetValueOrDefault(inspection.RequestedByEmployeeId.Value, "Сотрудник"),
+            inspection.RequestedAt, inspection.DueAt, inspection.Instructions);
+
+        AttachmentView[] attachmentViews = attachments.Select(item => new AttachmentView(item.Link.Id,
+            item.Link.OwnerType, AttachmentOwnerId(item.Link), item.Link.Kind, item.Link.Label, item.Link.Description,
+            AttachmentOwnerLabel(item.Link, Array.Empty<CaseNegotiation>(), Array.Empty<CaseCheck>(), inspectionItems),
+            item.File.OriginalName, item.File.ContentType, item.File.SizeBytes, item.File.Status,
+            item.File.ExternalUrl != null, item.Link.RecordedAt, item.Link.DocumentRequirementId)).ToArray();
+
+        return new(propertyCase.Id, propertyCase.BusinessNumber, propertyCase.WorkingTitle,
+            propertyCase.WorkingLocation, propertyCase.CadastralNumber, photos, assignmentView, inspectionView,
+            attachmentViews, inspectors, canAssign, canPerform, procurementReader);
+    }
+
+    public async Task AssignInspectionAsync(Subject subject, AssignInspection command, string correlationId,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = time.GetUtcNow();
+        if (command.DueAt is DateTimeOffset due && (due.Offset != TimeSpan.Zero || due > now.AddYears(2)))
+            throw new ArgumentException("Укажите корректный срок осмотра в UTC.");
+        string instructions = Optional(command.Instructions, 2000) ?? "";
+
+        AccessContext context = await access.RequireAsync(subject, Permissions.InspectionRequest, cancellationToken);
+        await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
-        if (row.Case.StageId is "rejected" or "monitor" or "acquired") throw new ArgumentException("Осмотр нельзя изменять в текущем состоянии PropertyCase.");
-        SiteInspection? inspection = await db.SiteInspections.SingleOrDefaultAsync(item => item.PropertyCaseId == row.Case.Id, cancellationToken);
+        await db.PropertyCases.FromSqlInterpolated(
+            $"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .LoadAsync(cancellationToken);
+        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId,
+            cancellationToken) ?? throw new AccessDeniedException();
+        if (row.Case.StageId is "rejected" or "monitor" or "acquired")
+            throw new ArgumentException("Осмотр нельзя назначить в текущем состоянии PropertyCase.");
+
+        string? inspectorName = await (from employee in db.Employees
+                                      join assignment in db.EmployeeAssignments on employee.Id equals assignment.EmployeeId
+                                      where employee.Id == command.InspectorEmployeeId
+                                          && employee.OrganizationId == context.OrganizationId && employee.Active
+                                          && db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId
+                                              && grant.PermissionId == Permissions.InspectionRead)
+                                          && db.RolePermissions.Any(grant => grant.RoleId == assignment.RoleId
+                                              && grant.PermissionId == Permissions.InspectionPerform)
+                                      select employee.DisplayName).SingleOrDefaultAsync(cancellationToken);
+        if (inspectorName == null) throw new AccessDeniedException();
+
+        SiteInspection? inspection = await db.SiteInspections.SingleOrDefaultAsync(
+            item => item.PropertyCaseId == row.Case.Id, cancellationToken);
+        if (command.DueAt is DateTimeOffset requestedDue && requestedDue < now
+            && (inspection == null || inspection.DueAt != requestedDue))
+            throw new ArgumentException("Новый или изменённый срок осмотра должен быть в будущем.");
+        Guid? previousInspector = inspection?.InspectorEmployeeId;
         if (inspection == null)
         {
-            if (command.InspectionId != null) throw new DbUpdateConcurrencyException();
+            if (command.ExpectedInspectionVersion != null) throw new DbUpdateConcurrencyException();
             InspectionTemplateItem[] templates = await EnsureInspectionTemplateAsync(db, context.OrganizationId, cancellationToken);
-            DateTimeOffset now = time.GetUtcNow(); inspection = new()
+            inspection = new SiteInspection
             {
                 Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, PropertyCaseId = row.Case.Id,
-                InspectorEmployeeId = context.EmployeeId, StartedAt = now
+                InspectorEmployeeId = command.InspectorEmployeeId, RequestedByEmployeeId = context.EmployeeId,
+                RequestedAt = now, DueAt = command.DueAt, Instructions = instructions
+            };
+            db.SiteInspections.Add(inspection);
+            db.SiteInspectionItems.AddRange(templates.Where(item => item.Active).Select(item => new SiteInspectionItem
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, InspectionId = inspection.Id,
+                TemplateItemId = item.Id, TemplateItemVersion = item.Version, TitleSnapshot = item.Title,
+                SortOrderSnapshot = item.SortOrder, AnswerTypeSnapshot = item.AnswerType,
+                OptionsJsonSnapshot = item.OptionsJson, UnitSnapshot = item.Unit,
+                NormalAnswerSnapshot = item.NormalAnswer, AllowAttachmentsSnapshot = item.AllowAttachments,
+                RequiredSnapshot = item.Required
+            }));
+        }
+        else
+        {
+            if (inspection.Version != command.ExpectedInspectionVersion) throw new DbUpdateConcurrencyException();
+            if (inspection.Status == InspectionStatus.Completed)
+                throw new ArgumentException("Завершённый осмотр нельзя переназначить.");
+            inspection.InspectorEmployeeId = command.InspectorEmployeeId;
+            inspection.RequestedByEmployeeId = context.EmployeeId;
+            inspection.RequestedAt = now;
+            inspection.DueAt = command.DueAt;
+            inspection.Instructions = instructions;
+        }
+
+        db.BusinessTimeline.Add(new BusinessTimelineEntry
+        {
+            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+            ObjectId = row.Case.Id, ActorEmployeeId = context.EmployeeId, Kind = "InspectionAssigned",
+            Title = previousInspector == null ? "Назначен осмотр участка" : "Осмотр переназначен",
+            Body = instructions, TargetEmployeeId = command.InspectorEmployeeId, DueAt = command.DueAt, RecordedAt = now
+        });
+        OrganizationWorkspace.AddAudit(db, context, subject, "SiteInspectionAssigned", "PropertyCase", row.Case.Id,
+            new { InspectionId = inspection.Id, PreviousInspector = previousInspector, command.InspectorEmployeeId,
+                Inspector = inspectorName, command.DueAt, Instructions = instructions }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<Guid> SaveInspectionAsync(Subject subject, SaveInspection command, string correlationId, CancellationToken cancellationToken)
+    {
+        AccessContext context = await access.ResolveAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        SiteInspection? inspection = await db.SiteInspections.SingleOrDefaultAsync(
+            item => item.PropertyCaseId == command.CaseId && item.OrganizationId == context.OrganizationId,
+            cancellationToken);
+        bool dossierPerformer = await AllowedAsync(subject, Permissions.ManagerDecide, cancellationToken)
+            || await AllowedAsync(subject, Permissions.HeadDecide, cancellationToken);
+        bool assignedInspector = inspection != null && inspection.InspectorEmployeeId == context.EmployeeId
+            && await AllowedAsync(subject, Permissions.InspectionPerform, cancellationToken);
+
+        Row row;
+        if (dossierPerformer)
+        {
+            await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+            row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId,
+                cancellationToken) ?? throw new AccessDeniedException();
+        }
+        else if (assignedInspector)
+        {
+            PropertyCase propertyCase = await db.PropertyCases.SingleOrDefaultAsync(
+                item => item.Id == command.CaseId && item.OrganizationId == context.OrganizationId, cancellationToken)
+                ?? throw new AccessDeniedException();
+            row = new Row { Case = propertyCase };
+        }
+        else
+        {
+            throw new AccessDeniedException();
+        }
+
+        if (row.Case.StageId is "rejected" or "monitor" or "acquired")
+            throw new ArgumentException("Осмотр нельзя изменять в текущем состоянии PropertyCase.");
+
+        if (inspection == null)
+        {
+            if (!dossierPerformer || command.InspectionId != null) throw new AccessDeniedException();
+            InspectionTemplateItem[] templates = await EnsureInspectionTemplateAsync(db, context.OrganizationId, cancellationToken);
+            DateTimeOffset now = time.GetUtcNow();
+            inspection = new SiteInspection
+            {
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, PropertyCaseId = row.Case.Id,
+                InspectorEmployeeId = context.EmployeeId, RequestedByEmployeeId = context.EmployeeId,
+                RequestedAt = now, StartedAt = now
             };
             db.SiteInspections.Add(inspection);
             db.SiteInspectionItems.AddRange(templates.Where(item => item.Active).Select(item => new SiteInspectionItem
@@ -1240,22 +1502,42 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
                 RequiredSnapshot = item.Required
             }));
             OrganizationWorkspace.AddAudit(db, context, subject, "SiteInspectionStarted", "PropertyCase", row.Case.Id,
-                new { InspectionId = inspection.Id }, correlationId);
-            await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return inspection.Id;
+                new { InspectionId = inspection.Id, inspection.InspectorEmployeeId }, correlationId);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return inspection.Id;
         }
-        if (command.InspectionId != inspection.Id || command.ExpectedInspectionVersion != inspection.Version) throw new DbUpdateConcurrencyException();
-        if (inspection.Status == InspectionStatus.Completed) throw new ArgumentException("Завершённый осмотр доступен только для чтения.");
-        SiteInspectionItem[] items = await db.SiteInspectionItems.Where(item => item.InspectionId == inspection.Id).ToArrayAsync(cancellationToken);
+
+        if (command.InspectionId != inspection.Id || command.ExpectedInspectionVersion != inspection.Version)
+            throw new DbUpdateConcurrencyException();
+        if (inspection.Status == InspectionStatus.Completed)
+            throw new ArgumentException("Завершённый осмотр доступен только для чтения.");
+
+        bool startedNow = false;
+        if (inspection.StartedAt == null)
+        {
+            inspection.StartedAt = time.GetUtcNow();
+            startedNow = true;
+            OrganizationWorkspace.AddAudit(db, context, subject, "SiteInspectionStarted", "PropertyCase", row.Case.Id,
+                new { InspectionId = inspection.Id, inspection.InspectorEmployeeId }, correlationId);
+        }
+
+        SiteInspectionItem[] items = await db.SiteInspectionItems.Where(item => item.InspectionId == inspection.Id)
+            .ToArrayAsync(cancellationToken);
         foreach (InspectionAnswer answer in command.Answers)
         {
-            SiteInspectionItem item = items.SingleOrDefault(value => value.Id == answer.ItemId) ?? throw new AccessDeniedException();
+            SiteInspectionItem item = items.SingleOrDefault(value => value.Id == answer.ItemId)
+                ?? throw new AccessDeniedException();
             if (item.Version != answer.ExpectedItemVersion) throw new DbUpdateConcurrencyException();
             if (!Enum.IsDefined(answer.Status)) throw new ArgumentException("Некорректное состояние пункта осмотра.");
             string value = Optional(answer.Answer, 4000) ?? "";
             string note = Optional(answer.Note, 4000) ?? "";
             value = NormalizeInspectionAnswer(item, answer.Status, value);
-            item.Status = answer.Status; item.Answer = value; item.Note = note;
+            item.Status = answer.Status;
+            item.Answer = value;
+            item.Note = note;
         }
+
         inspection.OverallConclusion = Optional(command.OverallConclusion, 4000) ?? "";
         inspection.PreliminaryDecision = Optional(command.PreliminaryDecision, 1000) ?? "";
         if (command.Complete)
@@ -1263,17 +1545,28 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
             if (items.Any(item => item.RequiredSnapshot && item.Status == InspectionItemStatus.Unanswered))
                 throw new ArgumentException("Обработайте обязательные пункты осмотра.");
             inspection.OverallConclusion = Required(command.OverallConclusion, 3, 4000, "Укажите общий вывод осмотра.");
-            inspection.Status = InspectionStatus.Completed; inspection.CompletedAt = time.GetUtcNow();
-            db.BusinessTimeline.Add(new()
+            inspection.Status = InspectionStatus.Completed;
+            inspection.CompletedAt = time.GetUtcNow();
+            db.BusinessTimeline.Add(new BusinessTimelineEntry
             {
-                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
-                ActorEmployeeId = context.EmployeeId, Kind = "Inspection", Title = "Осмотр участка завершён",
-                Body = inspection.OverallConclusion, RecordedAt = inspection.CompletedAt.Value
+                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
+                ObjectId = row.Case.Id, ActorEmployeeId = context.EmployeeId, Kind = "Inspection",
+                Title = "Осмотр участка завершён", Body = inspection.OverallConclusion,
+                RecordedAt = inspection.CompletedAt.Value
             });
         }
-        OrganizationWorkspace.AddAudit(db, context, subject, command.Complete ? "SiteInspectionCompleted" : "SiteInspectionDraftSaved",
-            "PropertyCase", row.Case.Id, new { InspectionId = inspection.Id, inspection.Status }, correlationId);
-        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return inspection.Id;
+
+        if (!startedNow || command.Answers.Count > 0 || command.Complete
+            || inspection.OverallConclusion.Length > 0 || inspection.PreliminaryDecision.Length > 0)
+        {
+            OrganizationWorkspace.AddAudit(db, context, subject,
+                command.Complete ? "SiteInspectionCompleted" : "SiteInspectionDraftSaved",
+                "PropertyCase", row.Case.Id, new { InspectionId = inspection.Id, inspection.Status }, correlationId);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return inspection.Id;
     }
 
     public async Task MarkAcquiredAsync(Subject subject, MarkCaseAcquired command, string correlationId, CancellationToken cancellationToken)
@@ -1353,10 +1646,31 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
     public async Task<Guid> AddAttachmentAsync(Subject subject, AddCaseAttachment command, string correlationId, CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(command.OwnerType) || !Enum.IsDefined(command.Kind)) throw new ArgumentException("Некорректный тип вложения.");
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
-        await RequireDossierPermissionAsync(subject, cancellationToken);
+        AccessContext context = await access.ResolveAsync(subject, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
+        bool inspectionOwner = command.OwnerType is CaseAttachmentOwner.Inspection or CaseAttachmentOwner.InspectionItem
+            && command.DocumentRequirementId == null;
+        bool assignedInspector = inspectionOwner && await AllowedAsync(subject, Permissions.InspectionPerform, cancellationToken)
+            && await db.SiteInspections.AnyAsync(item => item.PropertyCaseId == command.CaseId
+                && item.OrganizationId == context.OrganizationId && item.InspectorEmployeeId == context.EmployeeId
+                && item.Status == InspectionStatus.Draft, cancellationToken);
+        Row row;
+        if (assignedInspector)
+        {
+            PropertyCase propertyCase = await db.PropertyCases.SingleOrDefaultAsync(
+                item => item.Id == command.CaseId && item.OrganizationId == context.OrganizationId, cancellationToken)
+                ?? throw new AccessDeniedException();
+            if (propertyCase.StageId is "rejected" or "monitor" or "acquired")
+                throw new ArgumentException("Материалы нельзя добавлять к осмотру в текущем состоянии PropertyCase.");
+            row = new Row { Case = propertyCase };
+        }
+        else
+        {
+            context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+            await RequireDossierPermissionAsync(subject, cancellationToken);
+            row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken)
+                ?? throw new AccessDeniedException();
+        }
         Guid? negotiationId = command.OwnerType == CaseAttachmentOwner.Negotiation ? command.OwnerId : null;
         Guid? checkId = command.OwnerType == CaseAttachmentOwner.Check ? command.OwnerId : null;
         Guid? inspectionId = command.OwnerType == CaseAttachmentOwner.Inspection ? command.OwnerId : null;
@@ -1482,13 +1796,20 @@ public sealed class ProcurementWorkspace(IDbContextFactory<LandErpDbContext> fac
 
     public async Task<AttachmentContent> ReadAttachmentAsync(Subject subject, Guid attachmentId, CancellationToken cancellationToken)
     {
-        AccessContext context = await access.RequireAsync(subject, Permissions.QueueRead, cancellationToken);
+        AccessContext context = await access.ResolveAsync(subject, cancellationToken);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         var value = await (from link in db.CaseAttachments.AsNoTracking()
                            join file in db.StoredFiles.AsNoTracking() on link.StoredFileId equals file.Id
                            where link.Id == attachmentId && link.OrganizationId == context.OrganizationId
                            select new { Link = link, File = file }).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
-        if (!await VisibleCases(db, context).AnyAsync(item => item.Case.Id == value.Link.PropertyCaseId, cancellationToken)) throw new AccessDeniedException();
+        bool procurementReader = await AllowedAsync(subject, Permissions.QueueRead, cancellationToken)
+            && await VisibleCases(db, context).AnyAsync(item => item.Case.Id == value.Link.PropertyCaseId, cancellationToken);
+        bool inspectorReader = value.Link.OwnerType is CaseAttachmentOwner.Inspection or CaseAttachmentOwner.InspectionItem
+            && await AllowedAsync(subject, Permissions.InspectionRead, cancellationToken)
+            && await db.SiteInspections.AnyAsync(item => item.PropertyCaseId == value.Link.PropertyCaseId
+                && item.OrganizationId == context.OrganizationId && item.InspectorEmployeeId == context.EmployeeId,
+                cancellationToken);
+        if (!procurementReader && !inspectorReader) throw new AccessDeniedException();
         if (value.File.Status != StoredFileStatus.Available) throw new InvalidOperationException("Вложение ещё не доступно.");
         if (value.File.ExternalUrl != null) return new(value.File.OriginalName, value.File.ContentType, null, value.File.ExternalUrl);
         if (value.File.StorageKey == null) throw new InvalidOperationException("Вложение повреждено.");

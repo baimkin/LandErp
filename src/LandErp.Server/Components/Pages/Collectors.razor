@@ -116,7 +116,7 @@ else if (view is not null)
                         <div class="time-rows">
                             @foreach(var row in searchInput.Times)
                             {
-                                <div class="time-row" @key="row"><label class="field"><span>Время запуска</span><input type="time" value="@row.Value" @onchange="async e => { row.Value=e.Value?.ToString() ?? string.Empty; await UpdatePreviewAsync(); }" /></label><button type="button" class="icon-action" aria-label="Удалить время запуска" disabled="@(searchInput.Times.Count==1)" @onclick="async () => { searchInput.Times.Remove(row); await UpdatePreviewAsync(); }">×</button></div>
+                                <div class="time-row" @key="row"><label class="field"><span>Время запуска</span><input type="time" @bind="row.Value" @bind:event="oninput" @bind:after="UpdatePreviewAsync" /></label><button type="button" class="icon-action" aria-label="Удалить время запуска" disabled="@(searchInput.Times.Count==1)" @onclick="async () => { searchInput.Times.Remove(row); await UpdatePreviewAsync(); }">×</button></div>
                             }
                         </div>
                         <button type="button" class="text-action" disabled="@(searchInput.Times.Count>=12)" @onclick="AddTime">+ Добавить время</button>

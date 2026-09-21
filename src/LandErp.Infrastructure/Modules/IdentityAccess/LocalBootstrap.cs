@@ -1,5 +1,4 @@
 using LandErp.Application.Foundation;
-using LandErp.Application.Modules.IdentityAccess.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Organization.Domain;
 using LandErp.Infrastructure.Persistence;
@@ -69,43 +68,7 @@ public static class OwnerBootstrap
         RoleManager<IdentityRole<Guid>> roles, string login, string password, string organizationName,
         bool mustChangePassword, string correlationId)
     {
-        string[] admin = [Permissions.UsersRead, Permissions.UsersManage, Permissions.OrganizationManage,
-            Permissions.RolesManage, Permissions.AuditRead, Permissions.AgentsManage,
-            Permissions.CollectionRead, Permissions.CollectionManage];
-        Dictionary<string, string[]> catalog = new(StringComparer.Ordinal)
-        {
-            ["Owner"] = [.. admin, Permissions.QueueRead, Permissions.ManagerDecide, Permissions.HeadDecide, Permissions.PurchaseConfirm],
-            ["Administrator"] = admin,
-            ["ProcurementManager"] = [Permissions.UsersRead, Permissions.QueueRead, Permissions.ManagerDecide],
-            ["ProcurementHead"] = [Permissions.UsersRead, Permissions.QueueRead, Permissions.HeadDecide, Permissions.PurchaseConfirm],
-            ["Viewer"] = [Permissions.UsersRead, Permissions.QueueRead]
-        };
-        foreach (string permission in catalog.Values.SelectMany(item => item).Distinct(StringComparer.Ordinal))
-        {
-            if (!await db.Permissions.AnyAsync(item => item.Id == permission))
-            {
-                db.Permissions.Add(new() { Id = permission, Description = "Серверное разрешение Stage 1: " + permission });
-            }
-        }
-
-        await db.SaveChangesAsync();
-        foreach ((string name, string[] permissions) in catalog)
-        {
-            IdentityRole<Guid>? role = await roles.FindByNameAsync(name);
-            if (role == null)
-            {
-                role = new(name) { Id = DataConventions.NewId() };
-                Organization.OrganizationWorkspace.EnsureIdentity(await roles.CreateAsync(role));
-            }
-
-            foreach (string permission in permissions)
-            {
-                if (!await db.RolePermissions.AnyAsync(item => item.RoleId == role.Id && item.PermissionId == permission))
-                {
-                    db.RolePermissions.Add(new() { RoleId = role.Id, PermissionId = permission });
-                }
-            }
-        }
+        await BuiltInAccessCatalog.SynchronizeAsync(db, roles);
 
         LandErpUser user = new() { Id = DataConventions.NewId(), UserName = login, Email = login,
             EmailConfirmed = true, MustChangePassword = mustChangePassword, LockoutEnabled = mustChangePassword };

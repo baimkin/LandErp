@@ -167,9 +167,12 @@ internal static class ProcurementMappings
         builder.Entity<SiteInspection>().Property(item => item.Status).HasConversion<string>();
         builder.Entity<SiteInspection>().Property(item => item.OverallConclusion).HasMaxLength(4000);
         builder.Entity<SiteInspection>().Property(item => item.PreliminaryDecision).HasMaxLength(1000);
+        builder.Entity<SiteInspection>().Property(item => item.Instructions).HasMaxLength(2000);
         builder.Entity<SiteInspection>().HasIndex(item => item.PropertyCaseId).IsUnique();
+        builder.Entity<SiteInspection>().HasIndex(item => new { item.InspectorEmployeeId, item.DueAt });
         builder.Entity<SiteInspection>().HasOne<PropertyCase>().WithMany().HasForeignKey(item => item.PropertyCaseId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<SiteInspection>().HasOne<Employee>().WithMany().HasForeignKey(item => item.InspectorEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<SiteInspection>().HasOne<Employee>().WithMany().HasForeignKey(item => item.RequestedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<SiteInspectionItem>().ToTable("site_inspection_items", "procurement");
         builder.Entity<SiteInspectionItem>().Property(item => item.AnswerTypeSnapshot).HasConversion<string>();

@@ -44,6 +44,11 @@ public sealed class IdentityOrganizationTests
         await workspace.CreateTeamAsync(actor, department, "Команда 1", "test", CancellationToken.None);
         organization = await workspace.ReadAsync(actor, CancellationToken.None);
         Guid role = organization.Roles.Single(item => item.Name == "ProcurementManager").Id;
+        Guid administratorRole = organization.Roles.Single(item => item.Name == "Administrator").Id;
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => workspace.InviteAsync(actor,
+            new("Неверный администратор", "bad-admin@test.invalid", department, organization.Positions[0].Id,
+                organization.Teams[0].Id, organization.Employees[0].Id, administratorRole, AccessScope.Department),
+            "admin-scope", CancellationToken.None));
         InvitationResult invitation = await workspace.InviteAsync(actor, new("Менеджер 1", "manager@test.invalid", department,
             organization.Positions[0].Id, organization.Teams[0].Id, organization.Employees[0].Id, role, AccessScope.Department),
             "test", CancellationToken.None);

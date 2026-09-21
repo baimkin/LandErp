@@ -41,6 +41,12 @@ internal static class ProcurementEndpoints
             return attachment.ExternalUrl != null ? Results.Redirect(attachment.ExternalUrl) : Results.File(attachment.Content!, attachment.ContentType, attachment.OriginalName);
         });
         group.MapPost("/facts/source", async (ApplySourceFact command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.ApplySourceFactAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+
+        app.MapGet("/api/inspection/attachments/{id:guid}", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
+        {
+            AttachmentContent attachment = await workspace.ReadAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), id, token);
+            return attachment.ExternalUrl != null ? Results.Redirect(attachment.ExternalUrl) : Results.File(attachment.Content!, attachment.ContentType, attachment.OriginalName);
+        }).RequireAuthorization();
         group.MapGet("/incoming", async (string? text, CatalogSource? source, CatalogDisposition? disposition,
             CatalogAgeRange? age, decimal? minPrice, decimal? maxPrice, decimal? minAreaSquareMeters,
             decimal? maxAreaSquareMeters, bool? attentionOnly, int? offset, int? size, HttpContext http,

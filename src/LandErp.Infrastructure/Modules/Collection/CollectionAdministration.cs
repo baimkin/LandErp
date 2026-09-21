@@ -14,12 +14,8 @@ namespace LandErp.Infrastructure.Modules.Collection;
 
 public sealed class CollectionAdministration(IDbContextFactory<LandErpDbContext> factory, IAccessControl access, TimeProvider time) : ICollectionAdministration
 {
-    private async Task<AccessContext> RequireAsync(Subject subject, string permission, CancellationToken cancellationToken)
-    {
-        AccessContext context = await access.RequireAsync(subject, permission, cancellationToken);
-        if (context.Scope != AccessScope.Organization) throw new AccessDeniedException();
-        return context;
-    }
+    private Task<AccessContext> RequireAsync(Subject subject, string permission, CancellationToken cancellationToken) =>
+        access.RequireAsync(subject, permission, cancellationToken);
     public async Task<CollectionAdminView> ReadAsync(Subject subject, CancellationToken cancellationToken)
     {
         AccessContext context = await RequireAsync(subject, Permissions.CollectionRead, cancellationToken);

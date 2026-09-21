@@ -1,94 +1,203 @@
 @page "/procurement/{CaseId:guid}/inspection"
-@attribute [Authorize(Policy = "manager_queue.read")]
+@attribute [Authorize]
 @using LandErp.Application.Foundation.Files
 @using LandErp.Application.Modules.Procurement.Contracts
 @using LandErp.Application.Modules.Procurement.Domain
 @using LandErp.Server.Components.Procurement
 @using Microsoft.AspNetCore.Components.Forms
-@using System.Text.Json.Serialization
 @using Microsoft.JSInterop
 @inherits CaseWorkspaceComponent
 @implements IAsyncDisposable
 @inject IProcurementWorkspace Workspace
 @inject IJSRuntime Js
+
 <PageTitle>Осмотр участка · LandErp</PageTitle>
-@if(Loading){<PageState Kind="loading" Title="Открываем осмотр…"/>}
+@if(Loading){<PageState Kind="loading" Title="Загружаем осмотр…"/>}
 else if(Forbidden){<PageState Kind="forbidden" Title="Нет доступа к осмотру"/>}
-else if(card!=null)
+else if(data!=null)
 {
     <CaseToast Message="@Success"/>
     <main class="inspection-workspace" data-inspection-ready="true" data-inspection-root="true">
-        <header class="inspection-heading"><div><a class="back" href="/procurement/@CaseId">← Карточка объекта · @card.Item.BusinessNumber</a><h1>Осмотр участка</h1><p>@card.Item.Title · @card.Item.Location</p></div><span class="inspection-status">@DraftStateLabel()</span></header>
-        @if(Error!=null&&!mediaOpen&&!finishOpen){<div class="feedback" role="alert">@Error</div>}
+        <header class="inspection-heading">
+            <div>
+                <a class="back" href="@(data.ReturnToProcurement?$"/procurement/{CaseId}":"/inspections")">← @(data.ReturnToProcurement?"Карточка объекта":"Мои осмотры")</a>
+                <h1>Осмотр участка</h1>
+                <p>@data.BusinessNumber · @data.Title @if(!string.IsNullOrWhiteSpace(data.Location)){<span> · @data.Location</span>}</p>
+                @if(!string.IsNullOrWhiteSpace(data.CadastralNumber)){<p>Кадастровый № @data.CadastralNumber</p>}
+            </div>
+            <span class="inspection-status">@StatusLabel()</span>
+        </header>
+
+        @if(Error!=null&&!mediaOpen&&!finishOpen&&!assignOpen){<div class="feedback" role="alert">@Error</div>}
         @if(RefreshWarning!=null){<div class="feedback">@RefreshWarning <button class="btn secondary" @onclick="RefreshCommittedServerAsync">Обновить</button></div>}
         @if(inspectionConflict){<div class="feedback" role="alert"><strong>Конфликт версии.</strong> Серверный осмотр изменился после создания локального черновика. Ответы сохранены на этом устройстве и не будут записаны поверх новой версии. <button class="btn secondary" @onclick="UseServerVersionAsync">Отбросить локальный черновик и загрузить серверную версию</button></div>}
-        @if(card.Inspection==null){<article class="panel"><h2>Осмотр ещё не начат</h2><p>Чек-лист поможет зафиксировать состояние участка и материалы проверки.</p>@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<ActionButton Label="Начать осмотр" OnClick="StartAsync" Busy="Busy"/>}</article>}
+
+        <section class="panel assignment-panel">
+            <div class="assignment-head">
+                <div><h2>Задание на осмотр</h2><p>Исполнитель получает доступ только к этому осмотру, без права принимать решение по закупке.</p></div>
+                @if(data.CanAssign){<button class="btn secondary" @onclick="OpenAssign">@(data.Assignment==null?"Назначить":"Изменить назначение")</button>}
+            </div>
+            @if(data.Assignment==null)
+            {
+                <p class="empty compact">Осмотрщик ещё не назначен.</p>
+            }
+            else
+            {
+                <div class="assignment-grid">
+                    <div><small>Исполнитель</small><strong>@data.Assignment.Inspector</strong></div>
+                    <div><small>Срок</small><strong class="@DueTone(data.Assignment.DueAt)">@DueLabel(data.Assignment.DueAt)</strong></div>
+                    <div><small>Поставил</small><strong>@(data.Assignment.RequestedBy??"—")</strong></div>
+                    <div><small>Назначено</small><strong>@Time(data.Assignment.RequestedAt)</strong></div>
+                </div>
+                @if(!string.IsNullOrWhiteSpace(data.Assignment.Instructions)){<div class="inspection-instructions"><small>Что проверить особенно внимательно</small><p>@data.Assignment.Instructions</p></div>}
+            }
+        </section>
+
+        @if(data.Inspection==null)
+        {
+            <article class="panel"><h2>Осмотр не назначен</h2><p>Сначала выберите осмотрщика и при необходимости укажите срок и комментарий.</p>@if(data.CanAssign){<button class="btn primary" @onclick="OpenAssign">Назначить осмотр</button>}</article>
+        }
+        else if(data.Inspection.StartedAt==null)
+        {
+            <article class="panel start-panel"><div><h2>Осмотр назначен</h2><p>Чек-лист уже подготовлен. Начните работу, когда окажетесь на объекте.</p></div>@if(data.CanPerform){<ActionButton Label="Начать осмотр" OnClick="StartAsync" Busy="Busy"/>}</article>
+        }
         else
         {
-            <section class="inspection-layout"><aside class="panel inspection-nav"><div class="inspection-nav-heading"><div><h3>Чек-лист</h3><p class="subtle">Обработано @DoneCount из @answers.Count</p></div><strong>@ProgressPercent%</strong></div><div class="progress-track"><i style="width:@ProgressPercent%"></i></div><nav aria-label="Разделы осмотра">@for(int i=0;i<SectionCount;i++){int part=i;<button type="button" class="@(section==i?"active":"")" @onclick="()=>section=part"><span>Пункты @(i*5+1)–@Math.Min((i+1)*5,answers.Count)</span><small>@answers.OrderBy(x=>x.SortOrder).Skip(i*5).Take(5).Count(x=>x.Status!=InspectionItemStatus.Unanswered) / @answers.Skip(i*5).Take(5).Count()</small></button>}</nav><button class="btn quiet inspection-general-media" @onclick="()=>{ClearFeedback();media=new();mediaOpen=true;}" disabled="@(!Editable)">＋ Общий материал</button></aside>
-            <div><article class="panel"><div class="section-heading"><h2>Осмотр объекта</h2><div class="filters"><button class="@(!onlyUnanswered?"active":"")" @onclick="()=>onlyUnanswered=false">Все</button><button class="@(onlyUnanswered?"active":"")" @onclick="()=>onlyUnanswered=true">Без ответа</button></div></div>
-                @if(!VisibleAnswers.Any()){<p class="empty">Все пункты этой части обработаны.</p>}
-                @foreach(var item in VisibleAnswers)
-                {
-                    <article class="question" @key="item.Id"><div class="question-heading"><div><strong>@item.Title</strong><small>@(item.Required?"Обязательный пункт":"Дополнительный пункт")</small></div>@if(item.Status!=InspectionItemStatus.Unanswered){<span class="badge">@AnswerLabel(item)</span>}</div>
-                    <fieldset disabled="@(!Editable||Busy)"><div class="answers">
-                        @if(item.AnswerType==InspectionAnswerType.Boolean){<button class="@(item.Answer=="true"?"selected":"")" data-inspection-answer="@item.Id" data-inspection-value="true" @onclick='()=>SetAnswerAsync(item,"true")'>Да</button><button class="@(item.Answer=="false"?"selected":"")" data-inspection-answer="@item.Id" data-inspection-value="false" @onclick='()=>SetAnswerAsync(item,"false")'>Нет</button>}
-                        else if(item.AnswerType==InspectionAnswerType.Choice){@foreach(var option in item.Options){<button class="@(item.Answer==option?"selected":"")" data-inspection-answer="@item.Id" data-inspection-value="@option" @onclick="()=>SetAnswerAsync(item,option)">@option</button>}}
-                        else{<label class="answer-field"><span>@(item.Unit.Length==0?"Ответ":"Значение, "+item.Unit)</span><input value="@item.Answer" data-inspection-answer="@item.Id" inputmode="@(item.AnswerType is InspectionAnswerType.Number or InspectionAnswerType.Percentage?"decimal":"text")" @onchange="e=>SetAnswerAsync(item,e.Value?.ToString()??string.Empty)"/></label>}
-                        <button class="not-checked @(item.Status==InspectionItemStatus.NotChecked?"selected":"")" data-inspection-not-checked="@item.Id" @onclick="()=>NotCheckedAsync(item)">Не удалось проверить</button>
-                    </div><div class="question-tools"><details open="@(item.Note.Length>0)"><summary>Комментарий</summary><textarea value="@item.Note" data-inspection-note="@item.Id" aria-label="Комментарий: @item.Title" @oninput="e=>SetNoteAsync(item,e.Value?.ToString()??string.Empty)"></textarea></details>@if(item.AllowAttachments){<button class="btn quiet" @onclick="()=>PrepareItemMedia(item)">＋ Материал</button>}</div></fieldset>
-                    @foreach(var file in card.Attachments.Where(x=>x.OwnerId==item.Id)){<a class="material-link" href="/api/procurement/attachments/@file.Id" target="_blank" rel="noopener">@file.Label · @ProcurementLabels.FileStatus(file.Status)</a>}
+            <section class="inspection-layout">
+                <aside class="panel inspection-nav">
+                    <div class="inspection-nav-heading"><div><h3>Чек-лист</h3><p class="subtle">Обработано @DoneCount из @answers.Count</p></div><strong>@ProgressPercent%</strong></div>
+                    <div class="progress-track"><i style="width:@ProgressPercent%"></i></div>
+                    <nav aria-label="Разделы осмотра">@for(int i=0;i<SectionCount;i++){int part=i;<button type="button" class="@(section==i?"active":"")" @onclick="()=>section=part"><span>Пункты @(i*5+1)–@Math.Min((i+1)*5,answers.Count)</span><small>@answers.OrderBy(x=>x.SortOrder).Skip(i*5).Take(5).Count(x=>x.Status!=InspectionItemStatus.Unanswered) / @answers.OrderBy(x=>x.SortOrder).Skip(i*5).Take(5).Count()</small></button>}</nav>
+                    <button class="btn quiet inspection-general-media" @onclick="()=>{ClearFeedback();media=new();mediaOpen=true;}" disabled="@(!Editable)">＋ Фото / материал</button>
+                </aside>
+                <div>
+                    <article class="panel">
+                        <div class="section-heading"><h2>Осмотр объекта</h2><div class="filters"><button type="button" class="@(!onlyUnanswered?"active":"")" @onclick="()=>onlyUnanswered=false">Все</button><button type="button" class="@(onlyUnanswered?"active":"")" @onclick="()=>onlyUnanswered=true">Без ответа</button></div></div>
+                        @if(!VisibleAnswers.Any()){<p class="empty">Все пункты этой части обработаны.</p>}
+                        @foreach(var item in VisibleAnswers)
+                        {
+                            <article class="question" @key="item.Id">
+                                <div class="question-heading"><div><strong>@item.Title</strong><small>@(item.Required?"Обязательный пункт":"Дополнительный пункт")</small></div>@if(item.Status!=InspectionItemStatus.Unanswered){<span class="badge">@AnswerLabel(item)</span>}</div>
+                                <fieldset disabled="@(!Editable||Busy)">
+                                    <div class="answers">
+                                        @if(item.AnswerType==InspectionAnswerType.Boolean){<button type="button" class="@(item.Answer=="true"?"selected":"")" data-inspection-answer="@item.Id" data-inspection-value="true" @onclick='()=>SetAnswerAsync(item,"true")'>Да</button><button type="button" class="@(item.Answer=="false"?"selected":"")" data-inspection-answer="@item.Id" data-inspection-value="false" @onclick='()=>SetAnswerAsync(item,"false")'>Нет</button>}
+                                        else if(item.AnswerType==InspectionAnswerType.Choice){@foreach(var option in item.Options){<button type="button" class="@(item.Answer==option?"selected":"")" data-inspection-answer="@item.Id" data-inspection-value="@option" @onclick="()=>SetAnswerAsync(item,option)">@option</button>}}
+                                        else{<label class="answer-field"><span>@(item.Unit.Length==0?"Ответ":"Значение, "+item.Unit)</span><input value="@item.Answer" data-inspection-answer="@item.Id" inputmode="@(item.AnswerType is InspectionAnswerType.Number or InspectionAnswerType.Percentage?"decimal":"text")" @onchange="e=>SetAnswerAsync(item,e.Value?.ToString()??string.Empty)"/></label>}
+                                        <button type="button" class="not-checked @(item.Status==InspectionItemStatus.NotChecked?"selected":"")" data-inspection-not-checked="@item.Id" @onclick="()=>NotCheckedAsync(item)">Не удалось проверить</button>
+                                    </div>
+                                    <div class="question-tools"><details open="@(item.Note.Length>0)"><summary>Комментарий</summary><textarea value="@item.Note" data-inspection-note="@item.Id" aria-label="Комментарий: @item.Title" @oninput="e=>SetNoteAsync(item,e.Value?.ToString()??string.Empty)"></textarea></details>@if(item.AllowAttachments){<button type="button" class="btn quiet" @onclick="()=>PrepareItemMedia(item)">＋ Материал</button>}</div>
+                                </fieldset>
+                                @foreach(var file in data.Attachments.Where(x=>x.OwnerId==item.Id)){<a class="material-link" href="/api/inspection/attachments/@file.Id" target="_blank" rel="noopener">@file.Label · @ProcurementLabels.FileStatus(file.Status)</a>}
+                            </article>
+                        }
                     </article>
-                }
-            </article><footer class="inspection-footer"><small>@DraftStateLabel()</small><div><ActionButton Label="Сохранить черновик" Tone="secondary" OnClick="()=>SaveAsync(false)" Busy="Busy" Disabled="@(!Editable)"/><button class="btn primary" @onclick="()=>{ClearFeedback();finishOpen=true;}" disabled="@(!Editable||Busy)">Завершить осмотр</button></div></footer></div></section>
-            <section class="panel inspection-summary"><h3>Общие материалы и вывод</h3>@foreach(var file in card.Attachments.Where(x=>x.OwnerType==CaseAttachmentOwner.Inspection)){<a class="material-link" href="/api/procurement/attachments/@file.Id" target="_blank" rel="noopener">@file.Label</a>}<p>@conclusion</p><p>@decision</p></section>
+                    <footer class="inspection-footer"><small>@DraftStateLabel()</small><div><ActionButton Label="Сохранить черновик" Tone="secondary" OnClick="()=>SaveAsync(false)" Busy="Busy" Disabled="@(!Editable)"/><button type="button" class="btn primary" @onclick="()=>{ClearFeedback();finishOpen=true;}" disabled="@(!Editable||Busy)">Завершить осмотр</button></div></footer>
+                </div>
+            </section>
+            <section class="panel inspection-summary"><h3>Общие материалы и вывод</h3>@foreach(var file in data.Attachments.Where(x=>x.OwnerType==CaseAttachmentOwner.Inspection)){<a class="material-link" href="/api/inspection/attachments/@file.Id" target="_blank" rel="noopener">@file.Label</a>}@if(!string.IsNullOrWhiteSpace(conclusion)){<p>@conclusion</p>}@if(!string.IsNullOrWhiteSpace(decision)){<p>@decision</p>}</section>
         }
     </main>
-    @if(mediaOpen){<CaseModal Title="Добавить материал осмотра" Error="@Error" Busy="Busy" OnClose="()=>mediaOpen=false"><label class="upload"><strong>@(selectedFile?.Name??"＋ Выберите или перетащите файл")</strong><small>Фото, видео, аудио или документ · до @FileUploadLimits.MaxRawFileMegabytes МБ</small><InputFile OnChange="SelectMedia" accept="image/*,video/*,audio/*,.pdf"/>@if(UploadFileTooLarge(selectedFile)){<small class="case-problem">@FileUploadLimits.TooLargeMessage</small>}</label><div class="form-grid"><label class="field dossier-wide"><span>Название</span><input @bind="media.Label"/></label><label class="field"><span>Тип</span><select @bind="media.Kind"><option value="Photo">Фото</option><option value="Video">Видео</option><option value="Audio">Аудио</option><option value="Document">Документ</option></select></label><label class="field"><span>Относится к</span><select @bind="media.Owner"><option value="inspection">Осмотр в целом</option>@foreach(var item in answers.Where(x=>x.AllowAttachments)){<option value="@item.Id">@item.Title</option>}</select></label><label class="field dossier-wide"><span>Комментарий</span><textarea @bind="media.Description"/></label><div class="form-actions"><ActionButton Label="Загрузить материал" OnClick="UploadMediaAsync" Busy="Busy" Disabled="@(selectedFile==null||UploadFileTooLarge(selectedFile)||inspectionConflict)"/></div></div></CaseModal>}
-    @if(finishOpen){<CaseModal Title="Завершить осмотр" Subtitle="Проверьте ответы и зафиксируйте общий вывод" Error="@Error" Busy="Busy" OnClose="()=>finishOpen=false"><p class="subtle">Обработано @DoneCount из @answers.Count пунктов. Для обязательных пунктов нужен ответ либо явная отметка «Не удалось проверить».</p><label class="field"><span>Общий вывод</span><textarea data-inspection-conclusion="true" @bind="conclusion" @bind:event="oninput" @bind:after="SaveLocalSoon"/></label><label class="field"><span>Предварительное решение</span><select data-inspection-decision="true" @bind="decision" @bind:after="SaveLocalSoon"><option value="">Не выбрано</option><option>Осмотр пройден, критичных проблем нет</option><option>Нужны дополнительные проверки</option><option>Есть существенные технические риски</option><option>Рекомендую отказаться</option></select></label><div class="form-actions"><ActionButton Label="Завершить осмотр" OnClick="()=>SaveAsync(true)" Busy="Busy"/></div></CaseModal>}
+
+    @if(assignOpen)
+    {
+        <CaseModal Title="Назначить осмотр" Subtitle="Осмотрщик получит доступ только к этому заданию и чек-листу" Error="@Error" Busy="Busy" OnClose="()=>assignOpen=false">
+            @if(data.Inspectors.Count==0){<p class="feedback">Нет активных сотрудников с ролью Inspector. Добавьте сотрудника или назначьте ему эту роль в разделе организации.</p>}
+            else
+            {
+                <div class="form-grid">
+                    <label class="field dossier-wide"><span>Осмотрщик</span><select @bind="assignment.Inspector">@foreach(var person in data.Inspectors){<option value="@person.EmployeeId">@person.Name</option>}</select></label>
+                    <label class="field"><span>Срок (МСК)</span><input type="datetime-local" @bind="assignment.Due"/></label>
+                    <label class="field dossier-wide"><span>Задача / особое внимание</span><textarea @bind="assignment.Instructions" maxlength="2000" placeholder="Например: проверить подъезд, границы и заболоченность"></textarea></label>
+                </div>
+                <div class="form-actions"><button type="button" class="btn secondary" @onclick="()=>assignOpen=false">Отмена</button><ActionButton Label="Назначить" OnClick="AssignAsync" Busy="Busy"/></div>
+            }
+        </CaseModal>
+    }
+    @if(mediaOpen)
+    {
+        <CaseModal Title="Добавить материал осмотра" Error="@Error" Busy="Busy" OnClose="()=>mediaOpen=false">
+            <label class="upload"><strong>@(selectedFile?.Name??"＋ Выберите или сделайте фото")</strong><small>Фото, видео, аудио или документ · до @FileUploadLimits.MaxRawFileMegabytes МБ</small><InputFile OnChange="SelectMedia" accept="image/*,video/*,audio/*,.pdf" capture="environment"/>@if(UploadFileTooLarge(selectedFile)){<small class="case-problem">@FileUploadLimits.TooLargeMessage</small>}</label>
+            <div class="form-grid"><label class="field dossier-wide"><span>Название</span><input @bind="media.Label"/></label><label class="field"><span>Тип</span><select @bind="media.Kind"><option value="Photo">Фото</option><option value="Video">Видео</option><option value="Audio">Аудио</option><option value="Document">Документ</option></select></label><label class="field dossier-wide"><span>Комментарий</span><textarea @bind="media.Description"/></label><div class="form-actions"><ActionButton Label="Загрузить материал" OnClick="UploadMediaAsync" Busy="Busy" Disabled="@(selectedFile==null||UploadFileTooLarge(selectedFile)||inspectionConflict)"/></div></div>
+        </CaseModal>
+    }
+    @if(finishOpen)
+    {
+        <CaseModal Title="Завершить осмотр" Subtitle="Проверьте ответы и зафиксируйте общий вывод" Error="@Error" Busy="Busy" OnClose="()=>finishOpen=false">
+            <p class="subtle">Обработано @DoneCount из @answers.Count пунктов. Для обязательных пунктов нужен ответ либо явная отметка «Не удалось проверить».</p>
+            <label class="field"><span>Общий вывод</span><textarea data-inspection-conclusion="true" @bind="conclusion" @bind:event="oninput" @bind:after="SaveLocalSoon"/></label>
+            <label class="field"><span>Предварительный вывод</span><select data-inspection-decision="true" @bind="decision" @bind:after="SaveLocalSoon"><option value="">Не выбрано</option><option>Осмотр пройден, критичных проблем нет</option><option>Нужны дополнительные проверки</option><option>Есть существенные технические риски</option><option>Рекомендую отказаться</option></select></label>
+            <div class="form-actions"><ActionButton Label="Завершить осмотр" OnClick="()=>SaveAsync(true)" Busy="Busy"/></div>
+        </CaseModal>
+    }
 }
 @code {
     [Parameter] public Guid CaseId { get; set; }
-    private IJSObjectReference? draftModule;
-    public async ValueTask DisposeAsync(){if(draftModule!=null){try{await draftModule.DisposeAsync();}catch(JSDisconnectedException){}}}
-    private bool mediaOpen,finishOpen,hasLocalDraft,localSaved,inspectionConflict,acceptServerInspectionRead; private int section; private bool onlyUnanswered;
-    private Guid draftInspectionId; private long draftVersion;
-    private bool Editable=>card?.CanManageDossier==true&&card.Item.Stage!="acquired"&&card.Inspection?.Status!=InspectionStatus.Completed&&!inspectionConflict&&!RefreshRequired;
+    private InspectionWorkspaceView? data; private IJSObjectReference? draftModule;
+    private bool mediaOpen,finishOpen,assignOpen,hasLocalDraft,localSaved,inspectionConflict,acceptServerInspectionRead;
+    private int section; private bool onlyUnanswered; private Guid loaded,draftInspectionId; private long draftVersion;
+    private string conclusion="",decision=""; private List<AnswerDraft> answers=[]; private IBrowserFile? selectedFile;
+    private MediaDraft media=new(); private AssignmentInput assignment=new(); private bool localChecked;
+    private InspectionView? Inspection=>data?.Inspection;
+    private bool Editable=>data?.CanPerform==true&&Inspection?.StartedAt!=null&&Inspection.Status!=InspectionStatus.Completed&&!inspectionConflict&&!RefreshRequired;
     private IEnumerable<AnswerDraft> VisibleAnswers=>answers.OrderBy(x=>x.SortOrder).Skip(section*5).Take(5).Where(x=>!onlyUnanswered||x.Status==InspectionItemStatus.Unanswered);
     private int SectionCount=>Math.Max(1,(answers.Count+4)/5);
-    private CaseCard? card; private Guid loaded; private bool localChecked;
-    private string conclusion=""; private string decision=""; private List<AnswerDraft> answers=[]; private IBrowserFile? selectedFile; private MediaDraft media=new();
-    private string StorageKey=>$"landerp.inspection.{CaseId}";
     private int DoneCount=>answers.Count(x=>x.Status!=InspectionItemStatus.Unanswered);
     private decimal ProgressPercent=>answers.Count==0?0:decimal.Round(100m*DoneCount/answers.Count,0);
-    private string DraftStateLabel()=>inspectionConflict?"Конфликт версии":Busy?"Синхронизация…":hasLocalDraft?(localSaved?"Черновик на устройстве":"Есть несохранённые изменения"):card?.Inspection?.Status==InspectionStatus.Completed?"Осмотр завершён":"Сохранено на сервере";
-    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);loaded=CaseId;if(card.Inspection is not { } inspection)return;if(!acceptServerInspectionRead&&hasLocalDraft&&draftInspectionId==inspection.Id){if(draftVersion!=inspection.Version)inspectionConflict=true;return;}MapServer();}
+    private string StorageKey=>$"landerp.inspection.{CaseId}";
+
+    public async ValueTask DisposeAsync(){if(draftModule!=null){try{await draftModule.DisposeAsync();}catch(JSDisconnectedException){}}}
+    protected override async Task ReadAsync()
+    {
+        data=await Workspace.ReadInspectionAsync(CurrentSubject,CaseId,CancellationToken.None);loaded=CaseId;
+        if(Inspection?.StartedAt==null){answers=[];return;}
+        if(!acceptServerInspectionRead&&hasLocalDraft&&draftInspectionId==Inspection.Id){if(draftVersion!=Inspection.Version)inspectionConflict=true;return;}
+        MapServer();
+    }
     protected override async Task OnParametersSetAsync(){if(loaded!=CaseId){localChecked=false;hasLocalDraft=false;localSaved=false;inspectionConflict=false;draftInspectionId=Guid.Empty;draftVersion=0;section=0;await ReloadAsync();}}
-    protected override async Task OnAfterRenderAsync(bool firstRender){draftModule??=await Js.InvokeAsync<IJSObjectReference>("import","./Components/Pages/SiteInspectionPage.razor.js");if(!localChecked&&card?.Inspection!=null){localChecked=true;InspectionDraft? saved=await draftModule.InvokeAsync<InspectionDraft?>("load",StorageKey);if(saved?.InspectionId==card.Inspection.Id){RestoreDraft(saved);hasLocalDraft=true;localSaved=true;inspectionConflict=saved.Version!=card.Inspection.Version;StateHasChanged();return;}}if(card?.Inspection!=null)await draftModule.InvokeVoidAsync("attach",StorageKey,CurrentDraft());}
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        draftModule??=await Js.InvokeAsync<IJSObjectReference>("import","./Components/Pages/SiteInspectionPage.razor.js");
+        if(!localChecked&&Inspection?.StartedAt!=null){localChecked=true;InspectionDraft? saved=await draftModule.InvokeAsync<InspectionDraft?>("load",StorageKey);if(saved?.InspectionId==Inspection.Id){RestoreDraft(saved);hasLocalDraft=true;localSaved=true;inspectionConflict=saved.Version!=Inspection.Version;StateHasChanged();return;}}
+        if(Inspection?.StartedAt!=null)await draftModule.InvokeVoidAsync("attach",StorageKey,CurrentDraft());
+    }
+    private void MapServer(){if(Inspection is not { } inspection)return;draftInspectionId=inspection.Id;draftVersion=inspection.Version;conclusion=inspection.OverallConclusion;decision=inspection.PreliminaryDecision;answers=inspection.Items.Select(x=>new AnswerDraft(x)).ToList();inspectionConflict=false;}
     private InspectionDraft CurrentDraft()=>new(draftInspectionId,draftVersion,conclusion,decision,answers);
     private void RestoreDraft(InspectionDraft draft){draftInspectionId=draft.InspectionId;draftVersion=draft.Version;conclusion=draft.Conclusion;decision=draft.Decision;answers=draft.Answers;}
-    private void MapServer(){if(card?.Inspection is not { } inspection)return;draftInspectionId=inspection.Id;draftVersion=inspection.Version;conclusion=inspection.OverallConclusion;decision=inspection.PreliminaryDecision;answers=inspection.Items.Select(x=>new AnswerDraft(x)).ToList();inspectionConflict=false;}
-    private async Task StartAsync(){if(RefreshRequired)return;await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,null,null,"","",[],false),OperationId,CancellationToken.None));}
+    private string StatusLabel()=>Inspection==null?"Не назначен":Inspection.Status==InspectionStatus.Completed?"Завершён":Inspection.StartedAt==null?"Назначен":"В работе";
+    private string DraftStateLabel()=>inspectionConflict?"Конфликт версии":Busy?"Синхронизация…":hasLocalDraft?(localSaved?"Черновик на устройстве":"Есть несохранённые изменения"):Inspection?.Status==InspectionStatus.Completed?"Осмотр завершён":"Сохранено на сервере";
+    private string Time(DateTimeOffset? value)=>value==null?"—":TimeZoneInfo.ConvertTime(value.Value,TimeZoneInfo.FindSystemTimeZoneById("Europe/Moscow")).ToString("dd.MM HH:mm");
+    private bool IsOverdue(DateTimeOffset? value)=>value is DateTimeOffset due&&due<DateTimeOffset.UtcNow&&Inspection?.Status!=InspectionStatus.Completed;
+    private string DueLabel(DateTimeOffset? value)=>value==null?"Без срока":(IsOverdue(value)?"Просрочено · ":"")+Time(value);
+    private string DueTone(DateTimeOffset? value)=>IsOverdue(value)?"overdue":"";
+
+    private void OpenAssign()
+    {
+        ClearFeedback();string selected=data!.Assignment?.InspectorEmployeeId.ToString()??"";
+        if(!data.Inspectors.Any(x=>x.EmployeeId.ToString()==selected))selected=data.Inspectors.FirstOrDefault()?.EmployeeId.ToString()??"";
+        assignment=new(){Inspector=selected,Due=ProcurementLabels.LocalInput(data.Assignment?.DueAt),Instructions=data.Assignment?.Instructions??""};assignOpen=true;
+    }
+    private async Task AssignAsync()
+    {
+        if(!Guid.TryParse(assignment.Inspector,out Guid inspector)){Error="Выберите осмотрщика.";return;}
+        await ExecuteAsync(()=>Workspace.AssignInspectionAsync(CurrentSubject,new(CaseId,inspector,CaseFormValues.ParseLocal(assignment.Due),assignment.Instructions,Inspection?.Version),OperationId,CancellationToken.None),"Осмотр назначен");
+        if(Success!=null)assignOpen=false;
+    }
+    private async Task StartAsync(){if(Inspection==null||RefreshRequired)return;await ExecuteAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,Inspection.Id,Inspection.Version,"","",[],false),OperationId,CancellationToken.None),"Осмотр начат");}
     private async Task SetAnswerAsync(AnswerDraft item,string value){item.Answer=value;item.Status=value.Length==0?InspectionItemStatus.Unanswered:InspectionItemStatus.Answered;await MarkLocalDraftAsync();}
     private async Task SetNoteAsync(AnswerDraft item,string value){item.Note=value;await MarkLocalDraftAsync();}
     private async Task NotCheckedAsync(AnswerDraft item){item.Answer="";item.Status=InspectionItemStatus.NotChecked;await MarkLocalDraftAsync();}
-    private async Task EditAnswerAsync(AnswerDraft item){item.Status=InspectionItemStatus.Unanswered;await MarkLocalDraftAsync();}
     private void PrepareItemMedia(AnswerDraft item){ClearFeedback();mediaOpen=true;media.Owner=item.Id.ToString();media.Label="Материал · "+item.Title;}
     private async Task SaveLocalSoon(){await MarkLocalDraftAsync();}
     private async Task MarkLocalDraftAsync(){hasLocalDraft=true;await SaveLocalAsync();}
-    private async ValueTask SaveLocalAsync(){if(draftInspectionId==Guid.Empty)return;try{await draftModule!.InvokeVoidAsync("save",StorageKey,CurrentDraft());localSaved=true;}catch(JSException){localSaved=false;}}
-    private async Task UseServerVersionAsync(){if(Busy)return;await draftModule!.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;await ReloadAsync();}
-    private async Task RefreshCommittedServerAsync(){if(Busy)return;acceptServerInspectionRead=true;try{await ReloadAsync();}finally{acceptServerInspectionRead=false;}if(!RefreshRequired&&Error==null){await draftModule!.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;}}
+    private async ValueTask SaveLocalAsync(){if(draftInspectionId==Guid.Empty||draftModule==null)return;try{await draftModule.InvokeVoidAsync("save",StorageKey,CurrentDraft());localSaved=true;}catch(JSException){localSaved=false;}}
+    private async Task UseServerVersionAsync(){if(Busy||draftModule==null)return;await draftModule.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;await ReloadAsync();}
+    private async Task RefreshCommittedServerAsync(){if(Busy)return;acceptServerInspectionRead=true;try{await ReloadAsync();}finally{acceptServerInspectionRead=false;}if(!RefreshRequired&&Error==null&&draftModule!=null){await draftModule.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;}}
     private async Task SaveAsync(bool complete)
     {
-        if(RefreshRequired||inspectionConflict)return;
-        hasLocalDraft=true;
-        await SaveLocalAsync();
-        acceptServerInspectionRead=true;
-        bool committed;
+        if(RefreshRequired||inspectionConflict||Inspection==null)return;hasLocalDraft=true;await SaveLocalAsync();acceptServerInspectionRead=true;bool committed;
         try{committed=await ExecuteConfirmedAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,draftInspectionId,draftVersion,conclusion,decision,answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),OperationId,CancellationToken.None));}
         finally{acceptServerInspectionRead=false;}
-        if(committed&&!RefreshRequired){await draftModule!.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;finishOpen=false;}
+        if(committed&&!RefreshRequired&&draftModule!=null){await draftModule.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;finishOpen=false;}
         else if(LastWriteWasConflict){inspectionConflict=true;hasLocalDraft=true;await SaveLocalAsync();}
     }
     private void SelectMedia(InputFileChangeEventArgs args){selectedFile=args.File;media.Kind=selectedFile.ContentType.StartsWith("image/")?CaseAttachmentKind.Photo:selectedFile.ContentType.StartsWith("video/")?CaseAttachmentKind.Video:selectedFile.ContentType.StartsWith("audio/")?CaseAttachmentKind.Audio:CaseAttachmentKind.Document;media.Label=selectedFile.Name;}
@@ -96,18 +205,13 @@ else if(card!=null)
     private static async Task<byte[]> ReadUploadAsync(IBrowserFile file){FileUploadLimits.EnsureRawFileSize(file.Size);await using Stream input=file.OpenReadStream(FileUploadLimits.MaxRawFileBytes);using MemoryStream buffer=new();await input.CopyToAsync(buffer);return buffer.ToArray();}
     private async Task UploadMediaAsync()
     {
-        if(inspectionConflict)return;
-        if(hasLocalDraft)await SaveLocalAsync();
-        await ExecuteAsync(async()=>{
-            if(selectedFile==null)throw new ArgumentException("Выберите файл.");
-            if(string.IsNullOrWhiteSpace(media.Label))throw new ArgumentException("Укажите название материала.");
-            byte[] content=await ReadUploadAsync(selectedFile);
-            Guid owner=media.Owner=="inspection"?draftInspectionId:Guid.Parse(media.Owner);CaseAttachmentOwner type=media.Owner=="inspection"?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;
-            await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,media.Kind,media.Label,media.Description,selectedFile.Name,selectedFile.ContentType,content,null),OperationId,CancellationToken.None);
-        },"Материал осмотра добавлен");if(Success!=null){selectedFile=null;media=new();mediaOpen=false;}
+        if(inspectionConflict||Inspection==null)return;if(hasLocalDraft)await SaveLocalAsync();
+        await ExecuteAsync(async()=>{if(selectedFile==null)throw new ArgumentException("Выберите файл.");if(string.IsNullOrWhiteSpace(media.Label))throw new ArgumentException("Укажите название материала.");byte[] content=await ReadUploadAsync(selectedFile);Guid owner=string.IsNullOrWhiteSpace(media.Owner)?Inspection.Id:Guid.Parse(media.Owner);CaseAttachmentOwner type=string.IsNullOrWhiteSpace(media.Owner)?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,media.Kind,media.Label,media.Description,selectedFile.Name,selectedFile.ContentType,content,null),OperationId,CancellationToken.None);},"Материал осмотра добавлен");
+        if(Success!=null){selectedFile=null;media=new();mediaOpen=false;}
     }
     private static string AnswerLabel(AnswerDraft item)=>item.Status==InspectionItemStatus.NotChecked?"Не удалось проверить":(item.AnswerType==InspectionAnswerType.Boolean?(item.Answer=="true"?"Да":"Нет"):item.Answer)+(item.Unit.Length==0?"":" "+item.Unit);
     private sealed class AnswerDraft{public Guid Id{get;set;}public long Version{get;set;}public string Title{get;set;}="";public int SortOrder{get;set;}public InspectionAnswerType AnswerType{get;set;}public string[] Options{get;set;}=[];public string Unit{get;set;}="";public bool AllowAttachments{get;set;}public bool Required{get;set;}public InspectionItemStatus Status{get;set;}public string Answer{get;set;}="";public string Note{get;set;}="";public AnswerDraft(){}public AnswerDraft(InspectionItemView value){Id=value.Id;Version=value.Version;Title=value.Title;SortOrder=value.SortOrder;AnswerType=value.AnswerType;Options=value.Options;Unit=value.Unit;AllowAttachments=value.AllowAttachments;Required=value.Required;Status=value.Status;Answer=value.Answer;Note=value.Note;}}
     private sealed record InspectionDraft(Guid InspectionId,long Version,string Conclusion,string Decision,List<AnswerDraft> Answers);
-    private sealed class MediaDraft{public CaseAttachmentKind Kind{get;set;}=CaseAttachmentKind.Photo;public string Owner{get;set;}="inspection";public string Label{get;set;}="";public string Description{get;set;}="";}
+    private sealed class MediaDraft{public CaseAttachmentKind Kind{get;set;}=CaseAttachmentKind.Photo;public string Owner{get;set;}="";public string Label{get;set;}="";public string Description{get;set;}="";}
+    private sealed class AssignmentInput{public string Inspector{get;set;}="";public string Due{get;set;}="";public string Instructions{get;set;}="";}
 }

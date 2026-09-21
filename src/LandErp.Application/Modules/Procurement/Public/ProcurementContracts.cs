@@ -39,7 +39,16 @@ public sealed record InspectionItemView(Guid Id, Guid TemplateItemId, long Templ
     InspectionAnswerType AnswerType, string[] Options, string Unit, string NormalAnswer, bool AllowAttachments, bool Required,
     InspectionItemStatus Status, string Answer, string Note, long Version);
 public sealed record InspectionView(Guid Id, InspectionStatus Status, string OverallConclusion, string PreliminaryDecision,
-    string Inspector, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, long Version, IReadOnlyList<InspectionItemView> Items);
+    string Inspector, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt, long Version, IReadOnlyList<InspectionItemView> Items);
+public enum InspectionTaskState { Assigned, InProgress, Completed }
+public sealed record InspectionTaskItem(Guid CaseId, string BusinessNumber, string Title, string? Location, string? CadastralNumber,
+    string? RequestedBy, DateTimeOffset? RequestedAt, DateTimeOffset? DueAt, InspectionTaskState State, int DoneItems, int TotalItems);
+public sealed record InspectionTaskPage(IReadOnlyList<InspectionTaskItem> Items, string BusinessTimeZone);
+public sealed record InspectionAssignmentView(Guid InspectorEmployeeId, string Inspector, string? RequestedBy,
+    DateTimeOffset? RequestedAt, DateTimeOffset? DueAt, string Instructions);
+public sealed record InspectionWorkspaceView(Guid CaseId, string BusinessNumber, string Title, string? Location, string? CadastralNumber,
+    string[] Photos, InspectionAssignmentView? Assignment, InspectionView? Inspection, IReadOnlyList<AttachmentView> Attachments,
+    IReadOnlyList<DecisionTarget> Inspectors, bool CanAssign, bool CanPerform, bool ReturnToProcurement);
 public sealed record SourceDiscrepancyView(Guid CatalogItemId, CatalogSource Source, CaseFactField Field,
     string WorkingValue, string SourceValue, bool Different);
 public sealed record CaseCard(QueueItem Item, string? Description, string? SellerName, string[] Photos,
@@ -77,6 +86,8 @@ public sealed record SaveInspectionTemplate(Guid? Id, long? ExpectedVersion, str
 public sealed record InspectionAnswer(Guid ItemId, long ExpectedItemVersion, InspectionItemStatus Status, string Answer, string Note);
 public sealed record SaveInspection(Guid CaseId, Guid? InspectionId, long? ExpectedInspectionVersion,
     string OverallConclusion, string PreliminaryDecision, IReadOnlyList<InspectionAnswer> Answers, bool Complete);
+public sealed record AssignInspection(Guid CaseId, Guid InspectorEmployeeId, DateTimeOffset? DueAt,
+    string Instructions, long? ExpectedInspectionVersion);
 public sealed record MarkCaseAcquired(Guid CaseId, long ExpectedCaseVersion, decimal ActualPrice, DateOnly AcquisitionDate, string Comment);
 public sealed record CorrectCaseAcquisition(Guid CaseId, long ExpectedCaseVersion, decimal ActualPrice,
     DateOnly AcquisitionDate, string Comment, string Reason);
@@ -106,6 +117,9 @@ public interface IProcurementWorkspace
     Task SaveDocumentRequirementAsync(Subject subject, SaveDocumentRequirement command, string correlationId, CancellationToken cancellationToken);
     Task RetryAttachmentAsync(Subject subject, RetryCaseAttachment command, string correlationId, CancellationToken cancellationToken);
     Task SaveInspectionTemplateAsync(Subject subject, SaveInspectionTemplate command, string correlationId, CancellationToken cancellationToken);
+    Task<InspectionTaskPage> ReadMyInspectionsAsync(Subject subject, CancellationToken cancellationToken);
+    Task<InspectionWorkspaceView> ReadInspectionAsync(Subject subject, Guid caseId, CancellationToken cancellationToken);
+    Task AssignInspectionAsync(Subject subject, AssignInspection command, string correlationId, CancellationToken cancellationToken);
     Task<Guid> SaveInspectionAsync(Subject subject, SaveInspection command, string correlationId, CancellationToken cancellationToken);
     Task MarkAcquiredAsync(Subject subject, MarkCaseAcquired command, string correlationId, CancellationToken cancellationToken);
     Task CorrectAcquisitionAsync(Subject subject, CorrectCaseAcquisition command, string correlationId, CancellationToken cancellationToken);

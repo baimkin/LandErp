@@ -1,3 +1,4 @@
+using LandErp.Application.Modules.Collection.Domain;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -137,10 +138,14 @@ public sealed class IdentityUiTests
             await page.GetByLabel("Ссылка поиска", new() { Exact = true }).FillAsync("https://www.avito.ru/moskva/zemelnye_uchastki");
             await page.WaitForTimeoutAsync(200);
             await page.GetByLabel("Группа", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Автотесты" });
-            await page.GetByLabel("Расписание", new() { Exact = true }).SelectOptionAsync("Interval");
-            await page.GetByLabel("Интервал, минут", new() { Exact = true }).FillAsync("30");
+            await page.GetByLabel("Расписание", new() { Exact = true }).SelectOptionAsync("FixedTimes");
+            await page.GetByLabel("Время запуска", new() { Exact = true }).FillAsync("08:30");
             await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить поиск", Exact = true }).ClickAsync();
             await page.GetByText("Поиск UI", new() { Exact = true }).First.WaitForAsync();
+            var savedSearch = await db.SearchConfigurations.SingleAsync(item => item.Label == "Поиск UI");
+            Assert.AreEqual(CollectionScheduleKind.FixedTimes, savedSearch.ScheduleKind);
+            Assert.AreEqual("[\"08:30\"]", savedSearch.FixedTimesJson,
+                "Edited browser time must reach the Blazor model and be persisted.");
             await page.GetByRole(AriaRole.Button, new() { Name = "Запустить сейчас", Exact = true }).ClickAsync();
             await page.GetByText("Ожидает", new() { Exact = true }).WaitForAsync();
             Assert.AreEqual(1, await db.CollectionJobs.CountAsync());

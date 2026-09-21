@@ -4,6 +4,7 @@ using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
+using LandErp.Application.Modules.Organization.Contracts;
 using LandErp.Application.Foundation.Files;
 using LandErp.Infrastructure.Modules.Procurement;
 using Microsoft.EntityFrameworkCore;
@@ -193,6 +194,82 @@ public sealed class InspectionAcquisitionTests
         Assert.AreEqual(1, await fixture.CountAsync(db => db.AuditEvents.CountAsync(item => item.ObjectId == taken.CaseId && item.Action == "PropertyCaseAcquired")));
         Assert.AreEqual(1, await fixture.CountAsync(db => db.AuditEvents.CountAsync(item => item.ObjectId == taken.CaseId && item.Action == "PropertyCaseAcquisitionCorrected")));
         Assert.IsTrue(await fixture.CountAsync(db => db.WorkTasks.Where(item => item.ObjectId == taken.CaseId).Select(item => item.Completed).CountAsync(value => value)) == 1);
+    }
+
+    [TestMethod]
+    [Timeout(120_000)]
+    public async Task AssignedInspectorGetsOnlyTheInspectionAndCanStartIt()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        OrganizationView structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
+        const string inspectorLogin = "inspector-phase5@test.invalid";
+        Guid inspectorUserId = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
+            structure, "Осмотрщик", inspectorLogin, "Inspector", fixture.DepartmentA, AccessScope.Own);
+        structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
+        Guid inspectorEmployeeId = structure.Employees.Single(item => item.Login == inspectorLogin).Id;
+        Subject inspector = new(inspectorUserId, false);
+
+        Guid itemId = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Manual, "Участок для осмотра", "Лобня", 3_500_000m, 1200m, null, null,
+                "50:10:0000000:777", "Назначение осмотра", "Полевой тест"), "inspection-assignment", CancellationToken.None);
+        TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(itemId), "take", CancellationToken.None);
+        DateTimeOffset dueAt = DateTimeOffset.UtcNow.AddDays(1);
+
+        await fixture.Workspace.AssignInspectionAsync(fixture.Manager,
+            new(taken.CaseId, inspectorEmployeeId, dueAt, "Проверить подъезд и заболоченность.", null),
+            "assign", CancellationToken.None);
+
+        InspectionTaskPage queue = await fixture.Workspace.ReadMyInspectionsAsync(inspector, CancellationToken.None);
+        InspectionTaskItem task = queue.Items.Single();
+        Assert.AreEqual(InspectionTaskState.Assigned, task.State);
+        Assert.AreEqual(taken.CaseId, task.CaseId);
+        Assert.AreEqual(dueAt, task.DueAt);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() =>
+            fixture.Workspace.ReadQueueAsync(inspector, new(), CancellationToken.None));
+
+        InspectionWorkspaceView assigned = await fixture.Workspace.ReadInspectionAsync(inspector, taken.CaseId, CancellationToken.None);
+        Assert.IsTrue(assigned.CanPerform);
+        Assert.IsFalse(assigned.CanAssign);
+        Assert.IsFalse(assigned.ReturnToProcurement);
+        Assert.AreEqual("Проверить подъезд и заболоченность.", assigned.Assignment!.Instructions);
+        Assert.IsNull(assigned.Inspection!.StartedAt);
+
+        await fixture.Workspace.SaveInspectionAsync(inspector,
+            new(taken.CaseId, assigned.Inspection.Id, assigned.Inspection.Version, "", "", [], false),
+            "start-inspection", CancellationToken.None);
+        assigned = await fixture.Workspace.ReadInspectionAsync(inspector, taken.CaseId, CancellationToken.None);
+        Assert.IsNotNull(assigned.Inspection!.StartedAt);
+        Assert.AreEqual(InspectionTaskState.InProgress,
+            (await fixture.Workspace.ReadMyInspectionsAsync(inspector, CancellationToken.None)).Items.Single().State);
+
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.AssignInspectionAsync(inspector,
+            new(taken.CaseId, inspectorEmployeeId, dueAt.AddDays(1), "Попытка переназначения", assigned.Inspection.Version),
+            "forbidden-assign", CancellationToken.None));
+        long currentCaseVersion = (await fixture.Workspace.ReadCardAsync(
+            fixture.Manager, taken.CaseId, CancellationToken.None)).Item.CaseVersion;
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.MarkAcquiredAsync(inspector,
+            new(taken.CaseId, currentCaseVersion, 3_500_000m, DateOnly.FromDateTime(DateTime.UtcNow), ""),
+            "forbidden-purchase", CancellationToken.None));
+
+        structure = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
+        Guid administratorUserId = await ProcurementTestsHelper.InviteAsync(fixture.Services, fixture.Organization, fixture.Owner,
+            structure, "Administrator", "administrator-phase5@test.invalid", "Administrator", fixture.DepartmentA, AccessScope.Organization);
+        await IdentityOrganizationTests.EnableMfaAsync(fixture.Services, administratorUserId);
+        Subject administrator = new(administratorUserId, true);
+        ProcurementQueuePage adminQueue = await fixture.Workspace.ReadQueueAsync(administrator, new(), CancellationToken.None);
+        Assert.IsTrue(adminQueue.Items.Any(item => item.CaseId == taken.CaseId));
+        InspectionWorkspaceView adminInspection = await fixture.Workspace.ReadInspectionAsync(administrator, taken.CaseId, CancellationToken.None);
+        Assert.IsFalse(adminInspection.CanAssign);
+        Assert.IsFalse(adminInspection.CanPerform);
+        Assert.IsTrue(adminInspection.ReturnToProcurement);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.CreateManualAsync(administrator,
+            new(CatalogSource.Manual, "Администратор не закупщик", "Москва", null, null, null, null, null, null, "Проверка права"),
+            "admin-decision", CancellationToken.None));
+        long adminCaseVersion = (await fixture.Workspace.ReadCardAsync(
+            administrator, taken.CaseId, CancellationToken.None)).Item.CaseVersion;
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => fixture.Workspace.MarkAcquiredAsync(administrator,
+            new(taken.CaseId, adminCaseVersion, 3_500_000m, DateOnly.FromDateTime(DateTime.UtcNow), ""),
+            "admin-purchase", CancellationToken.None));
     }
 
     [TestMethod]

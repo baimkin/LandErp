@@ -1,0 +1,50 @@
+@page "/inspections"
+@attribute [Authorize(Policy = "inspections.read")]
+@using LandErp.Application.Modules.Procurement.Contracts
+@inherits WorkspaceComponent
+@inject IProcurementWorkspace Workspace
+
+<PageTitle>Мои осмотры · LandErp</PageTitle>
+<div class="inspection-list-page">
+    <PageHeader Title="Мои осмотры" Breadcrumb="Работа / Осмотры" Description="Назначенные вам выезды. С телефона можно открыть объект, заполнить чек-лист и приложить материалы." />
+    @if(Loading){<PageState Kind="loading" Title="Загружаем осмотры…"/>}
+    else if(Forbidden){<PageState Kind="forbidden" Title="Нет доступа к осмотрам"/>}
+    else if(Error!=null){<PageState Kind="error" Title="@Error"/>}
+    else if(view!=null)
+    {
+        <div class="inspection-list-toolbar">
+            <div class="segmented"><button type="button" class="@(!completed?"active":"")" @onclick="()=>completed=false">Активные <span>@ActiveItems.Count</span></button><button type="button" class="@(completed?"active":"")" @onclick="()=>completed=true">Завершённые <span>@CompletedItems.Count</span></button></div>
+            <span>Время: @ZoneLabel</span>
+        </div>
+        @if(CurrentItems.Count==0)
+        {
+            <PageState Kind="empty" Title="@(completed?"Завершённых осмотров пока нет":"Активных осмотров нет")" Description="Новые назначения появятся здесь автоматически." />
+        }
+        else
+        {
+            <section class="inspection-cards">
+                @foreach(var item in CurrentItems)
+                {
+                    <article class="inspection-task @(IsOverdue(item)?"overdue":"")" @key="item.CaseId">
+                        <div class="task-head"><div><span>@item.BusinessNumber</span><h2>@item.Title</h2><p>@(item.Location??"Локация не указана")</p></div><strong class="task-status">@State(item)</strong></div>
+                        <dl><div><dt>Срок</dt><dd class="@(IsOverdue(item)?"danger":"")">@Due(item)</dd></div><div><dt>Поставил</dt><dd>@(item.RequestedBy??"—")</dd></div><div><dt>Прогресс</dt><dd>@item.DoneItems / @item.TotalItems</dd></div></dl>
+                        <a class="btn primary task-open" href="/procurement/@item.CaseId/inspection">@(item.State==InspectionTaskState.Assigned?"Начать осмотр":item.State==InspectionTaskState.InProgress?"Продолжить":"Открыть результат")</a>
+                    </article>
+                }
+            </section>
+        }
+    }
+</div>
+@code {
+    private InspectionTaskPage? view; private bool completed;
+    private IReadOnlyList<InspectionTaskItem> ActiveItems=>view?.Items.Where(x=>x.State!=InspectionTaskState.Completed).ToArray()??[];
+    private IReadOnlyList<InspectionTaskItem> CompletedItems=>view?.Items.Where(x=>x.State==InspectionTaskState.Completed).ToArray()??[];
+    private IReadOnlyList<InspectionTaskItem> CurrentItems=>completed?CompletedItems:ActiveItems;
+    private string ZoneLabel=>view?.BusinessTimeZone??"Europe/Moscow";
+    protected override async Task ReadAsync()=>view=await Workspace.ReadMyInspectionsAsync(CurrentSubject,CancellationToken.None);
+    private bool IsOverdue(InspectionTaskItem item)=>item.State!=InspectionTaskState.Completed
+        && item.DueAt is DateTimeOffset due && due<DateTimeOffset.UtcNow;
+    private string Time(DateTimeOffset value)=>TimeZoneInfo.ConvertTime(value,TimeZoneInfo.FindSystemTimeZoneById(ZoneLabel)).ToString("dd.MM HH:mm");
+    private string Due(InspectionTaskItem item)=>item.DueAt==null?"Без срока":(IsOverdue(item)?"Просрочено · ":"")+Time(item.DueAt.Value);
+    private static string State(InspectionTaskItem item)=>item.State switch{InspectionTaskState.Assigned=>"Назначен",InspectionTaskState.InProgress=>"В работе",_=>"Завершён"};
+}

@@ -17,6 +17,9 @@
                 <NavLink class="nav-item" href="/incoming" @onclick="() => menuOpen = false" title="Входящие объявления" aria-label="Входящие объявления"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 4h16v16H4z M4 14h5l2 3h2l2-3h5 M12 3v8 M9 8l3 3 3-3"/></svg></span><span class="nav-caption">Входящие объявления</span></NavLink>
                 <NavLink class="nav-item" href="/procurement" Match="NavLinkMatch.All" @onclick="() => menuOpen = false" title="Очередь закупки" aria-label="Очередь закупки"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M8 5h13 M8 12h13 M8 19h13 M3 5h1 M3 12h1 M3 19h1"/></svg></span><span class="nav-caption">Очередь закупки</span></NavLink>
             </AuthorizeView>
+            <AuthorizeView Policy="inspections.read">
+                <NavLink class="nav-item" href="/inspections" @onclick="() => menuOpen = false" title="Мои осмотры" aria-label="Мои осмотры"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M7 3h10v4H7z M5 5h2 M17 5h2 M5 5v16h14V5 M8 11l2 2 5-5 M8 17h8"/></svg></span><span class="nav-caption">Мои осмотры</span></NavLink>
+            </AuthorizeView>
             <span class="nav-item nav-item-disabled" aria-disabled="true" title="Раздел ещё не подключён"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V3h8v4 M3 12h18 M10 12v3h4v-3"/></svg></span><span class="nav-caption">Проекты и финансы</span></span>
 
             <p class="nav-label">Система</p>

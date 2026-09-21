@@ -129,7 +129,11 @@ public sealed class SiteInspection
     public string OverallConclusion { get; set; } = "";
     public string PreliminaryDecision { get; set; } = "";
     public Guid InspectorEmployeeId { get; set; }
-    public DateTimeOffset StartedAt { get; set; }
+    public Guid? RequestedByEmployeeId { get; set; }
+    public DateTimeOffset? RequestedAt { get; set; }
+    public DateTimeOffset? DueAt { get; set; }
+    public string Instructions { get; set; } = "";
+    public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public long Version { get; set; } = 1;
 }

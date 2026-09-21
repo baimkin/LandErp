@@ -84,6 +84,25 @@ public sealed class FoundationTests
             || assembly.Name.Contains("LandErp.Infrastructure",StringComparison.Ordinal) || assembly.Name.Contains("LandErp.Application",StringComparison.Ordinal)));
     }
 
+    [TestMethod]
+    public void IisCertificateRenewalIsTargetedAndHasImmediateAndFallbackPaths()
+    {
+        string root = RepositoryRoot();
+        string sync = File.ReadAllText(Path.Combine(root, "scripts", "Sync-IisCertificate.ps1"));
+        string install = File.ReadAllText(Path.Combine(root, "scripts", "Install-IisCertificateRenewal.ps1"));
+
+        StringAssert.Contains(sync, "Get-WebBinding -Name $SiteName -Protocol 'https'");
+        StringAssert.Contains(sync, ".AddSslCertificate($thumbprint, 'My')");
+        StringAssert.Contains(sync, "$ssl.AuthenticateAsClient($HostName)");
+        Assert.IsFalse(sync.Contains("Remove-Item Cert:\\LocalMachine", StringComparison.OrdinalIgnoreCase),
+            "Renewal must not delete unrelated certificates.");
+
+        StringAssert.Contains(install, "LandErp IIS Certificate");
+        StringAssert.Contains(install, "Certbot-DeployHook.cmd");
+        StringAssert.Contains(install, "New-ScheduledTaskTrigger -Daily");
+        StringAssert.Contains(install, "Expected exactly one HTTPS binding");
+    }
+
     internal static string RepositoryRoot()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);

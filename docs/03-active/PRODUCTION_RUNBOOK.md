@@ -63,8 +63,11 @@ Before a later release containing migrations, configure `LANDERP_MIGRATOR_CONNEC
 Do not put migrator credentials into `production.json`; runtime uses the limited application role.
 
 Then run `Initialize-ProductionDatabase.ps1`; the idempotent command applies
-pending migrations and refreshes the explicit runtime grant set before the new
-binaries are deployed.
+pending migrations, synchronizes the canonical built-in roles/permissions and
+refreshes the explicit runtime grant set before the new binaries are deployed.
+This is also the supported way to apply later built-in permission changes to an
+existing production database; Server/Worker still never mutate schema or role
+catalogs on startup.
 
 ## 4.1 Initial Owner
 
@@ -125,6 +128,42 @@ Optional minimal Caddy example:
     }
 
 Equivalent IIS/nginx configuration is acceptable when it preserves the same TLS/header boundary.
+
+### 7.1 IIS + Certbot certificate renewal
+
+Certbot renews its PEM lineage, but an IIS binding that points to an imported
+Windows certificate does not follow that file automatically. For IIS deployments,
+install the LandErp synchronization once from elevated PowerShell:
+
+    ./scripts/Install-IisCertificateRenewal.ps1 `
+      -SiteName "LandErp" `
+      -HostName "erp.example.com" `
+      -LineagePath "C:\path\to\certbot\live\erp.example.com"
+
+The host must have `openssl.exe` available (or pass `-OpenSslPath`). The
+installer validates that exactly one HTTPS binding matches the supplied IIS site
+and hostname, stores only paths/names in
+`C:\ProgramData\LandErp\config\https-renewal.json`, performs an initial
+synchronization and registers the SYSTEM task `LandErp IIS Certificate` for a
+daily 03:30 fallback check.
+
+The installer also creates:
+
+    C:\ProgramData\LandErp\bin\Certbot-DeployHook.cmd
+
+Configure the existing Certbot renewal job to call that file as its
+`--deploy-hook`. The deploy hook switches IIS immediately after a successful
+renewal; the daily LandErp task is only a recovery path if that hook was skipped.
+Do not create a second Certbot renewal schedule just for LandErp.
+
+`Sync-IisCertificate.ps1` converts the current Certbot
+`fullchain.pem` + `privkey.pem` to a temporary password-protected PFX without
+placing the password on the command line, imports the new leaf certificate into
+`LocalMachine\My`, updates only the exact configured IIS hostname binding and
+performs a local TLS handshake using that hostname. It refuses certificates with
+seven days or less remaining and does not delete old or unrelated certificates.
+A failed verification leaves a visible Scheduled Task/Certbot hook failure for
+operator investigation instead of reporting a false success.
 
 ## 8. Persistent Data Protection
 

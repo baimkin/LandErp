@@ -1,0 +1,18 @@
+.inspection-list-page{display:grid;gap:18px;min-width:0}
+.inspection-list-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.inspection-list-toolbar>span{font-size:var(--text-sm);color:var(--text-muted)}
+.segmented{display:flex;gap:4px;padding:4px;border-radius:10px;background:var(--surface-subtle)}
+.segmented button{min-height:44px;border:0;border-radius:8px;padding:8px 14px;background:transparent;color:var(--text-muted);font-size:var(--text-ui)}
+.segmented button.active{background:white;color:var(--text-strong);box-shadow:var(--shadow-sm)}
+.segmented span{margin-left:5px;color:var(--text-muted)}
+.inspection-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:14px}
+.inspection-task{display:grid;gap:16px;padding:18px;background:white;border:1px solid var(--border);border-radius:14px;min-width:0}
+.inspection-task.overdue{border-color:var(--danger)}
+.task-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.task-head>div{min-width:0}.task-head span{font-size:var(--text-sm);color:var(--text-muted)}.task-head h2{font-size:var(--text-section);margin:3px 0 4px;overflow-wrap:anywhere}.task-head p{margin:0;color:var(--text-muted);font-size:var(--text-sm)}
+.task-status{white-space:nowrap;padding:5px 9px;border-radius:999px;background:var(--surface-subtle);font-size:var(--text-sm)}
+.inspection-task dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}
+.inspection-task dl>div{display:grid;gap:4px;padding:10px;border-radius:9px;background:var(--surface-subtle)}
+.inspection-task dt{font-size:var(--text-sm);color:var(--text-muted)}.inspection-task dd{margin:0;font-size:var(--text-ui);font-weight:var(--weight-semibold)}.inspection-task dd.danger{color:var(--danger)}
+.task-open{width:100%;min-height:46px;justify-content:center;text-decoration:none}
+@media(max-width:560px){.inspection-list-toolbar{align-items:stretch}.segmented{width:100%}.segmented button{flex:1;padding-inline:8px}.inspection-cards{grid-template-columns:1fr}.inspection-task{padding:16px}.inspection-task dl{grid-template-columns:1fr}.task-head{display:grid;grid-template-columns:1fr}.task-status{justify-self:start}}

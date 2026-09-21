@@ -22,10 +22,22 @@ internal static class CollectionScheduleRules
         }
         else if (schedule.Kind == CollectionScheduleKind.FixedTimes)
         {
-            string[] values = (schedule.FixedTimes ?? []).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-            if (values.Length is < 1 or > 12 || values.Any(value => !TimeOnly.TryParseExact(value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)))
-                throw new ArgumentException("Укажите от 1 до 12 моментов времени в формате ЧЧ:ММ.");
-            search.FixedTimesJson = JsonSerializer.Serialize(values);
+            string[] input = schedule.FixedTimes ?? [];
+            if (input.Length is < 1 or > 12)
+                throw new ArgumentException("Укажите от 1 до 12 времён запуска.");
+
+            string[] values = new string[input.Length];
+            for (int index = 0; index < input.Length; index++)
+            {
+                if (!TimeOnly.TryParseExact(input[index], "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out TimeOnly time))
+                    throw new ArgumentException("Укажите корректное время запуска в формате ЧЧ:ММ.");
+                values[index] = time.ToString("HH:mm", CultureInfo.InvariantCulture);
+            }
+
+            if (values.Distinct(StringComparer.Ordinal).Count() != values.Length)
+                throw new ArgumentException("Время запуска не должно повторяться.");
+
+            search.FixedTimesJson = JsonSerializer.Serialize(values.Order(StringComparer.Ordinal).ToArray());
         }
         else if (schedule.Kind != CollectionScheduleKind.Manual) throw new ArgumentException("Тип расписания не поддерживается.");
         // Editing a label/group must not postpone an already due run. Schedule changes

@@ -94,7 +94,8 @@ builder.Services.AddAuthorization(options =>
     foreach (string permission in new[] { Permissions.UsersRead, Permissions.UsersManage,
         Permissions.OrganizationManage, Permissions.RolesManage, Permissions.AuditRead,
         Permissions.AgentsManage, Permissions.CollectionRead, Permissions.CollectionManage, Permissions.QueueRead,
-        Permissions.ManagerDecide, Permissions.HeadDecide, Permissions.PurchaseConfirm })
+        Permissions.ManagerDecide, Permissions.HeadDecide, Permissions.PurchaseConfirm,
+        Permissions.InspectionRead, Permissions.InspectionRequest, Permissions.InspectionPerform })
     {
         options.AddPolicy(permission, policy => policy.RequireAuthenticatedUser().AddRequirements(new PermissionRequirement(permission)));
     }

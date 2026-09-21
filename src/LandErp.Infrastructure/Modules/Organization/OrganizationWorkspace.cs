@@ -619,6 +619,8 @@ public sealed class OrganizationWorkspace(IAccessControl access, IDbContextFacto
         if (assignmentScope == AccessScope.Department && department == null || assignmentScope == AccessScope.Team && team == null)
             throw new ArgumentException("Для выбранной области требуется подразделение или команда.");
         string roleName = await db.Roles.Where(item => item.Id == role).Select(item => item.Name!).SingleAsync(cancellationToken);
+        if ((roleName is "Owner" or "Administrator") && assignmentScope != AccessScope.Organization)
+            throw new ArgumentException("Для роли Owner или Administrator требуется область доступа «Организация».");
         if (roleName == "Owner" && !await (from employee in db.Employees join assignment in db.EmployeeAssignments on employee.Id equals assignment.EmployeeId
             join currentRole in db.Roles on assignment.RoleId equals currentRole.Id where employee.UserId == subject.UserId && currentRole.Name == "Owner" select employee.Id).AnyAsync(cancellationToken))
             throw new AccessDeniedException();

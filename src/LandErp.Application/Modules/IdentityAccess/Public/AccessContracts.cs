@@ -31,4 +31,7 @@ public static class Permissions
     public const string ManagerDecide = "manager_decisions.create";
     public const string HeadDecide = "procurement_approvals.decide";
     public const string PurchaseConfirm = "procurement_purchase.confirm";
+    public const string InspectionRead = "inspections.read";
+    public const string InspectionRequest = "inspections.request";
+    public const string InspectionPerform = "inspections.perform";
 }

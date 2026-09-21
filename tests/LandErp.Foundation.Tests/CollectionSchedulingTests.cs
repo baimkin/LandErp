@@ -313,6 +313,30 @@ public sealed class CollectionSchedulingTests
     }
 
     [TestMethod]
+    public async Task CollectionManagementDoesNotBroadenProcurementScope()
+    {
+        await using var f = await SchedulingFixture.CreateAsync("department-collection@test.invalid",
+            new(2026, 9, 17, 5, 0, 0, TimeSpan.Zero));
+        Guid organizationId;
+        await using (LandErpDbContext db = await f.Factory.CreateDbContextAsync())
+            organizationId = await db.Organizations.Select(item => item.Id).SingleAsync();
+
+        AccessContext departmentContext = new(Guid.CreateVersion7(), organizationId, Guid.CreateVersion7(), null,
+            AccessScope.Department);
+        CollectionAdministration administration = new(f.Factory,
+            new RestrictedAccess(departmentContext, Permissions.CollectionRead, Permissions.CollectionManage, Permissions.AgentsManage),
+            f.Clock);
+        Subject subject = new(Guid.CreateVersion7(), false);
+
+        Assert.AreEqual(0, (await administration.ReadAsync(subject, default)).Searches.Count);
+        Guid groupId = await administration.CreateGroupAsync(subject, "Руководитель закупки", 0, "group", default);
+        AgentConnectionCode code = await administration.CreateConnectionCodeAsync(subject, "Parser руководителя", "agent", default);
+
+        Assert.AreNotEqual(Guid.Empty, groupId);
+        Assert.AreNotEqual(Guid.Empty, code.AgentId);
+    }
+
+    [TestMethod]
     public async Task DailyNineAndSixteenSkipDuplicateWhilePendingAndRecoverOneMissedSlot()
     {
         await using var f = await SchedulingFixture.CreateAsync("two-slots@test.invalid", new(2026, 9, 17, 5, 0, 0, TimeSpan.Zero));

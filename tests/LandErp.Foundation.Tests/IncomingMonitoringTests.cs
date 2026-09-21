@@ -25,6 +25,65 @@ public sealed class IncomingMonitoringTests
     }
 
     [TestMethod]
+    public async Task IncomingDetailSeparatesDeclaredAndTextLandTypesAndExposesContacts()
+    {
+        await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        Guid id = await fixture.Workspace.CreateManualAsync(fixture.Manager,
+            new(CatalogSource.Referral, "Участок ИЖС", "Балашиха", 12_000_000m, 800m,
+                null, null, "50:15:0012345:678", "В тексте также указано СНТ.", "Тест enriched read"),
+            "enriched-read", CancellationToken.None);
+        DateTimeOffset published = new(2026, 9, 18, 9, 0, 0, TimeSpan.Zero);
+        DateTimeOffset contactObserved = new(2026, 9, 21, 9, 0, 0, TimeSpan.Zero);
+
+        await using (LandErpDbContext db = await fixture.Factory.CreateDbContextAsync())
+        {
+            Listing listing = await db.Listings.SingleAsync(item => item.Id == id);
+            listing.SourcePublishedAt = published;
+            listing.Latitude = 55.758585m;
+            listing.Longitude = 37.970089m;
+            listing.DeclaredLandTypes = [nameof(IncomingLandType.Izhs), nameof(IncomingLandType.Lph)];
+            db.ListingContacts.Add(new()
+            {
+                Id = Guid.CreateVersion7(),
+                OrganizationId = listing.OrganizationId,
+                ListingId = listing.Id,
+                Type = CatalogContactType.Phone,
+                Value = "+7 (999) 123-45-67",
+                NormalizedValue = "+79991234567",
+                DisplayValue = "+7 (999) 123-45-67",
+                Source = listing.Source,
+                IsPrimary = true,
+                FirstObservedAt = contactObserved,
+                LastObservedAt = contactObserved
+            });
+            await db.SaveChangesAsync();
+        }
+
+        IncomingCatalogReadService reads = new(fixture.Factory, fixture.Access, fixture.Workspace, TimeProvider.System);
+        IncomingCatalogDetailRead detail = await reads.ReadDetailAsync(fixture.Manager, id, CancellationToken.None);
+
+        CollectionAssert.AreEquivalent((IncomingLandType[])[IncomingLandType.Izhs, IncomingLandType.Lph],
+            detail.DeclaredLandTypes!);
+        CollectionAssert.AreEquivalent((IncomingLandType[])[IncomingLandType.Izhs, IncomingLandType.Snt],
+            detail.LandTypes);
+        Assert.IsTrue(detail.LandTypeConflict);
+        Assert.AreEqual(published, detail.SourcePublishedAt);
+        Assert.AreEqual(55.758585m, detail.Latitude); Assert.AreEqual(37.970089m, detail.Longitude);
+        IncomingListingContactView contact = detail.Contacts!.Single();
+        Assert.AreEqual(CatalogContactType.Phone, contact.Type);
+        Assert.AreEqual("+7 (999) 123-45-67", contact.DisplayValue);
+        Assert.IsTrue(contact.IsPrimary);
+
+        IncomingCatalogReadPage declaredOnlyFilter = await reads.ReadAsync(fixture.Manager,
+            new(new(), LandTypes: [IncomingLandType.Lph]), CancellationToken.None);
+        Assert.IsTrue(declaredOnlyFilter.Items.Any(item => item.Id == id));
+        IncomingCatalogRowRead row = declaredOnlyFilter.Rows[id];
+        Assert.IsTrue(row.LandTypeConflict);
+        CollectionAssert.Contains(row.DeclaredLandTypes!, IncomingLandType.Lph);
+        CollectionAssert.Contains(row.LandTypes, IncomingLandType.Snt);
+    }
+
+    [TestMethod]
     public async Task ResumeAvailabilityFollowsLinkedCaseLifecycleNotSourceDisposition()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);

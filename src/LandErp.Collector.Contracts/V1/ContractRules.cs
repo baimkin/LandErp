@@ -16,13 +16,32 @@ public static class ContractRules
             || data.ObservedAt > DateTimeOffset.UtcNow.AddMinutes(5) || data.Currency != "RUB"
             || string.IsNullOrWhiteSpace(data.AdapterVersion) || data.AdapterVersion.Length > 32
             || string.IsNullOrWhiteSpace(data.Provenance) || data.Provenance.Length > 100
-            || data.PhotoUrls == null || data.PhotoUrls.Length > 100 || data.Warnings == null || data.Warnings.Length > 50)
+            || data.PhotoUrls == null || data.PhotoUrls.Length > 100 || data.Warnings == null || data.Warnings.Length > 50
+            || data.DeclaredLandTypes == null || data.DeclaredLandTypes.Length > 16
+            || data.Contacts == null || data.Contacts.Length > 30
+            || data.SourcePublishedAt is { } published && (published.Offset != TimeSpan.Zero || published < DateTimeOffset.UnixEpoch
+                || published > data.ObservedAt.AddDays(1))
+            || (data.Latitude == null) != (data.Longitude == null)
+            || data.Latitude is < -90 or > 90 || data.Longitude is < -180 or > 180)
             throw new ArgumentException("COLLECTION_FIELD_INVALID");
         foreach (TextField field in new[] { data.Title, data.Location, data.Description, data.SellerName })
         {
             if (field == null || !Enum.IsDefined(field.Presence) || field.Raw?.Length > 20000
                 || field.Presence == FieldPresence.Present && string.IsNullOrWhiteSpace(field.Raw))
                 throw new ArgumentException("COLLECTION_TEXT_INVALID");
+        }
+        if (data.CadastralNumber == null || !Enum.IsDefined(data.CadastralNumber.Presence)
+            || data.CadastralNumber.Raw?.Length > 128
+            || data.CadastralNumber.Presence == FieldPresence.Present && string.IsNullOrWhiteSpace(data.CadastralNumber.Raw))
+            throw new ArgumentException("COLLECTION_CADASTRAL_INVALID");
+        if (data.DeclaredLandTypes.Any(value => !Enum.IsDefined(value)))
+            throw new ArgumentException("COLLECTION_LAND_TYPE_INVALID");
+        foreach (ListingContactData contact in data.Contacts)
+        {
+            if (contact == null || !Enum.IsDefined(contact.Type) || string.IsNullOrWhiteSpace(contact.Value)
+                || contact.Value.Length > 512 || contact.Value.Any(char.IsControl)
+                || contact.DisplayValue?.Length > 512 || contact.DisplayValue?.Any(char.IsControl) == true)
+                throw new ArgumentException("COLLECTION_CONTACT_INVALID");
         }
         foreach (DecimalField field in new[] { data.Price, data.AreaSquareMeters })
         {

@@ -564,6 +564,12 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("data_revision")
                         .HasComment("Версия существенных данных объявления. Не увеличивается от неизменного повторного наблюдения.");
 
+                    b.Property<string[]>("DeclaredLandTypes")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("declared_land_types")
+                        .HasComment("Типы участка, структурированно заявленные площадкой; не юридически подтверждённый ВРИ или категория земли.");
+
                     b.Property<Guid?>("DepartmentId")
                         .HasColumnType("uuid")
                         .HasColumnName("department_id")
@@ -625,10 +631,22 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("last_observed_at")
                         .HasComment("Самый новый принятый UTC момент наблюдения для обновления current state.");
 
+                    b.Property<decimal?>("Latitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)")
+                        .HasColumnName("latitude")
+                        .HasComment("Широта WGS84 (EPSG:4326), если источник отдал координаты и они нормализованы адаптером.");
+
                     b.Property<string>("Location")
                         .HasMaxLength(20000)
                         .HasColumnType("character varying(20000)")
                         .HasColumnName("location");
+
+                    b.Property<decimal?>("Longitude")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)")
+                        .HasColumnName("longitude")
+                        .HasComment("Долгота WGS84 (EPSG:4326), если источник отдал координаты и они нормализованы адаптером.");
 
                     b.Property<DateTimeOffset?>("MonitoringStartedAt")
                         .HasColumnType("timestamp with time zone")
@@ -689,6 +707,11 @@ namespace LandErp.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("source");
+
+                    b.Property<DateTimeOffset?>("SourcePublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("source_published_at")
+                        .HasComment("UTC момент публикации/добавления на площадке, если источник отдал надёжное значение; не заменяет FirstObservedAt.");
 
                     b.Property<decimal?>("TargetPricePerSotka")
                         .HasPrecision(19, 4)
@@ -754,6 +777,86 @@ namespace LandErp.Infrastructure.Migrations
                     b.ToTable("listings", "catalog", t =>
                         {
                             t.HasComment("Универсальные входящие предложения Catalog из автоматических и ручных источников; не идентичность земельного участка.");
+                        });
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.ListingContact", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("DisplayValue")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("display_value")
+                        .HasComment("Человекочитаемое отображение публичного контакта в том виде, в котором его удобно показать пользователю.");
+
+                    b.Property<DateTimeOffset>("FirstObservedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_observed_at")
+                        .HasComment("Самый ранний известный UTC момент наблюдения этого объявления.");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_primary")
+                        .HasComment("Признак основного контакта в последнем наблюдении, где этот контакт присутствовал.");
+
+                    b.Property<DateTimeOffset>("LastObservedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_observed_at")
+                        .HasComment("Самый новый принятый UTC момент наблюдения для обновления current state.");
+
+                    b.Property<Guid>("ListingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("listing_id");
+
+                    b.Property<string>("NormalizedValue")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("normalized_value")
+                        .HasComment("Нормализованное значение контакта для дедупликации внутри объявления; исходное отображение хранится отдельно.");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source")
+                        .HasComment("Источник объявления, в котором наблюдался контакт.");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("type")
+                        .HasComment("Тип публичного контакта: телефон, email, Telegram, WhatsApp, сайт или другое.");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("value")
+                        .HasComment("Публичное значение контакта, наблюдаемое в объявлении; не credential и не секрет.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_listing_contacts");
+
+                    b.HasIndex("ListingId", "Type", "NormalizedValue")
+                        .IsUnique()
+                        .HasDatabaseName("ix_listing_contacts_listing_id_type_normalized_value");
+
+                    b.HasIndex("OrganizationId", "Type", "NormalizedValue")
+                        .HasDatabaseName("ix_listing_contacts_organization_id_type_normalized_value");
+
+                    b.ToTable("listing_contacts", "catalog", t =>
+                        {
+                            t.HasComment("Наблюдаемые публичные контакты конкретного объявления. Не являются общей CRM-карточкой продавца и не удаляются только из-за отсутствия в следующем снимке.");
                         });
                 });
 
@@ -3870,6 +3973,23 @@ namespace LandErp.Infrastructure.Migrations
                         .HasForeignKey("TeamId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_listings_team_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.ListingContact", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Catalog.Domain.Listing", null)
+                        .WithMany()
+                        .HasForeignKey("ListingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_listing_contacts_listing_id");
+
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_listing_contacts_organization_id");
                 });
 
             modelBuilder.Entity("LandErp.Application.Modules.Collection.Domain.CollectionDelivery", b =>

@@ -116,13 +116,38 @@ public sealed class CollectorIntegrationTests
             Assert.AreEqual(0,receipt.NewListings); Assert.AreEqual(0,receipt.ChangedListings);
             Assert.AreEqual(receipt,await adapter.SendResultAsync(result,CancellationToken.None));
             await Assert.ThrowsExactlyAsync<ServerDeliveryException>(()=>adapter.SendResultAsync(result with { Final=true },CancellationToken.None));
-            ListingData missing=data with { ObservedAt=data.ObservedAt.AddSeconds(1), Price=new(FieldPresence.Absent,null,null),
-                AreaSquareMeters=new(FieldPresence.ParseFailed,"неизвестно",null), Location=new(FieldPresence.Present,"Новый адрес") };
+            ListingData missing=data with
+            {
+                ObservedAt=data.ObservedAt.AddSeconds(1), Price=new(FieldPresence.Absent,null,null),
+                AreaSquareMeters=new(FieldPresence.ParseFailed,"неизвестно",null), Location=new(FieldPresence.Present,"Новый адрес"),
+                CadastralNumber=new(FieldPresence.Present,"50:15:0012345:678"),
+                SourcePublishedAt=data.ObservedAt.AddDays(-3), Latitude=55.758585m, Longitude=37.970089m,
+                DeclaredLandTypes=[ListingLandType.Izhs,ListingLandType.Lph],
+                Contacts=[
+                    new() { Type=ListingContactType.Phone, Value="+7 (999) 123-45-67", DisplayValue="+7 (999) 123-45-67", IsPrimary=true },
+                    new() { Type=ListingContactType.Telegram, Value="@seller_test", DisplayValue="@seller_test" }
+                ]
+            };
             await adapter.SendResultAsync(new(Guid.CreateVersion7(),second.JobId,second.LeaseId,CollectionOutcome.Success,[new("missing",missing)],false),CancellationToken.None);
-            ListingData old=data with { ObservedAt=data.ObservedAt.AddSeconds(-1),Price=new(FieldPresence.Present,"1 ₽",1m) };
+            ListingData old=data with
+            {
+                ObservedAt=data.ObservedAt.AddSeconds(-1), Price=new(FieldPresence.Present,"1 ₽",1m),
+                Contacts=[new() { Type=ListingContactType.Phone, Value="89991234567", DisplayValue="8 999 123-45-67" }]
+            };
             await adapter.SendResultAsync(new(Guid.CreateVersion7(),second.JobId,second.LeaseId,CollectionOutcome.Success,[new("late",old)],false),CancellationToken.None);
             listing=await db.Listings.AsNoTracking().SingleAsync();
             Assert.AreEqual(1500000m,listing.Price); Assert.AreEqual(1000m,listing.AreaSquareMeters); Assert.AreEqual("Новый адрес",listing.Location);
+            Assert.AreEqual("50:15:0012345:678",listing.CadastralNumber);
+            Assert.AreEqual(missing.SourcePublishedAt,listing.SourcePublishedAt);
+            Assert.AreEqual(55.758585m,listing.Latitude); Assert.AreEqual(37.970089m,listing.Longitude);
+            CollectionAssert.AreEqual((string[])["Izhs","Lph"],listing.DeclaredLandTypes);
+            var contacts=await db.ListingContacts.AsNoTracking().OrderBy(item=>item.Type).ToArrayAsync();
+            Assert.AreEqual(2,contacts.Length);
+            var phone=contacts.Single(item=>item.Type==LandErp.Application.Modules.Catalog.Domain.CatalogContactType.Phone);
+            Assert.AreEqual("+79991234567",phone.NormalizedValue); Assert.AreEqual(missing.ObservedAt,phone.LastObservedAt);
+            Assert.AreEqual(old.ObservedAt,phone.FirstObservedAt);
+            Assert.IsTrue(phone.IsPrimary);
+            Assert.AreEqual("@seller_test",contacts.Single(item=>item.Type==LandErp.Application.Modules.Catalog.Domain.CatalogContactType.Telegram).DisplayValue);
             Assert.AreEqual(2L,listing.DataRevision); Assert.IsTrue(listing.QueueReason.Contains("местоположение",StringComparison.Ordinal));
             Assert.AreEqual(3,await db.ListingObservations.CountAsync());
             await adapter.SendResultAsync(new(Guid.CreateVersion7(),second.JobId,second.LeaseId,CollectionOutcome.Captcha,[],true),CancellationToken.None);

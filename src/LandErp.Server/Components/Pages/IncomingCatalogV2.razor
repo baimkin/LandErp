@@ -147,7 +147,7 @@
                             <label class="v2-filter-field"><span>Площадь до, сот.</span><InputNumber @bind-Value="filter.MaxAreaSotki" /></label>
                             <label class="v2-check"><InputCheckbox @bind-Value="filter.AttentionOnly" /> <span>Требует внимания</span></label>
                             <div class="v2-land-types">
-                                <span class="v2-filter-caption">Тип участка <small>по тексту объявления, не ВРИ Росреестра</small></span>
+                                <span class="v2-filter-caption">Тип участка <small>заявлено источником или найдено в тексте; не подтверждённый ВРИ</small></span>
                                 <div class="v2-land-type-options">
                                     @foreach (IncomingLandType type in Enum.GetValues<IncomingLandType>())
                                     {
@@ -233,9 +233,10 @@
                                         <td><div class="v2-price">@ProcurementLabels.Money(item.Price)</div><div class="v2-sub">@(item.PricePerSotka == null ? "за сотку неизвестно" : ProcurementLabels.Money(item.PricePerSotka) + " / сот.")</div></td>
                                         <td><strong class="v2-area">@AreaSotki(item.AreaSquareMeters)</strong></td>
                                         <td>
-                                            @if (row is { LandTypes.Length: > 0 })
+                                            @if (row != null && RowLandTypes(row).Length > 0)
                                             {
-                                                <div class="v2-land-type-badges">@foreach (IncomingLandType type in row.LandTypes) { <span class="v2-land-type-badge">@LandTypeResultLabel(type)</span> }</div>
+                                                <div class="v2-land-type-badges">@foreach (IncomingLandType type in RowLandTypes(row)) { <span class="v2-land-type-badge">@LandTypeResultLabel(type)</span> }</div>
+                                                @if (row.LandTypeConflict) { <span class="v2-badge warn" title="Заявленный тип участка расходится с текстом объявления">Расхождение</span> }
                                             }
                                             else
                                             {
@@ -300,19 +301,52 @@
                     <div class="v2-fact"><label>₽ / сот.</label><strong>@ProcurementLabels.Money(detail.Item.PricePerSotka)</strong></div>
                     <div class="v2-fact"><label>Кадастровый номер</label><strong>@(detail.Item.CadastralNumber ?? "Не указан")</strong></div>
                     <div class="v2-fact"><label>Получено</label><strong>@ProcurementLabels.Time(detail.Item.ReceivedAt)</strong></div>
-                    <div class="v2-fact full v2-land-type-fact"><label>Тип участка <span>по тексту объявления</span></label>
+                    <div class="v2-fact"><label>Опубликовано источником</label><strong>@(detailRead?.SourcePublishedAt is { } published ? ProcurementLabels.Time(published) : "Не указано")</strong></div>
+                    <div class="v2-fact"><label>Координаты WGS84</label><strong>@CoordinatesText(detailRead?.Latitude, detailRead?.Longitude)</strong></div>
+                    <div class="v2-fact full v2-land-type-fact"><label>Заявлено источником <span>не юридически подтверждённый ВРИ</span></label>
+                        @if (detailRead?.DeclaredLandTypes is { Length: > 0 } declaredLandTypes)
+                        {
+                            <div class="v2-land-type-badges">@foreach (IncomingLandType type in declaredLandTypes) { <span class="v2-land-type-badge">@LandTypeResultLabel(type)</span> }</div>
+                        }
+                        else
+                        {
+                            <strong>Нет структурированных данных</strong>
+                        }
+                    </div>
+                    <div class="v2-fact full v2-land-type-fact"><label>Найдено в тексте объявления</label>
                         @if (detailRead is { LandTypes.Length: > 0 })
                         {
                             <div class="v2-land-type-badges">@foreach (IncomingLandType type in detailRead.LandTypes) { <span class="v2-land-type-badge">@LandTypeResultLabel(type)</span> }</div>
                         }
                         else
                         {
-                            <strong>Не определён</strong>
+                            <strong>Не определено</strong>
+                        }
+                        @if (detailRead?.LandTypeConflict == true)
+                        {
+                            <span class="v2-badge warn">Есть расхождение между заявленным типом и текстом</span>
                         }
                     </div>
                     <div class="v2-fact full"><label>Поиск</label><strong>@(detailRead?.SearchConfigurationLabel ?? "Не из поисковой конфигурации")</strong></div>
                 </div>
             </section>
+
+            @if (detailRead?.Contacts is { Count: > 0 } contacts)
+            {
+                <section class="v2-card">
+                    <h3>Контакты продавца</h3>
+                    <div class="v2-facts">
+                        @foreach (IncomingListingContactView contact in contacts)
+                        {
+                            <div class="v2-fact">
+                                <label>@ContactTypeLabel(contact.Type) @if (contact.IsPrimary) { <span>· основной</span> }</label>
+                                <strong>@contact.DisplayValue</strong>
+                                <span class="v2-sub">Последний раз найден: @ProcurementLabels.Time(contact.LastObservedAt)</span>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
 
             @if (!string.IsNullOrWhiteSpace(detail.Item.Description) || !string.IsNullOrWhiteSpace(detail.IngressComment))
             {
@@ -1585,6 +1619,24 @@
     };
 
     private static string LandTypeResultLabel(IncomingLandType value) => LandTypeFilterLabel(value);
+
+    private static IncomingLandType[] RowLandTypes(IncomingCatalogRowRead row) =>
+        (row.DeclaredLandTypes ?? []).Concat(row.LandTypes).Distinct().Order().ToArray();
+
+    private static string ContactTypeLabel(CatalogContactType value) => value switch
+    {
+        CatalogContactType.Phone => "Телефон",
+        CatalogContactType.Email => "Email",
+        CatalogContactType.Telegram => "Telegram",
+        CatalogContactType.WhatsApp => "WhatsApp",
+        CatalogContactType.Website => "Сайт",
+        _ => "Другой контакт"
+    };
+
+    private static string CoordinatesText(decimal? latitude, decimal? longitude) =>
+        latitude is decimal lat && longitude is decimal lon
+            ? $"{lat.ToString("0.######", CultureInfo.InvariantCulture)}, {lon.ToString("0.######", CultureInfo.InvariantCulture)}"
+            : "Не указаны";
 
     private static bool HasTypedPriceChange(CatalogEventView item) =>
         item.Kind == CatalogEventKind.SourceChanged

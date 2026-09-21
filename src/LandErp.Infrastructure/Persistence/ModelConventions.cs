@@ -35,6 +35,7 @@ internal static class ModelConventions
         ["deliveries"] = "Неизменяемые квитанции доставки Collector. Повтор ResultId с тем же payload возвращает прежний ответ; другой payload запрещён.",
         ["scheduler_status"] = "Текущее техническое состояние server scheduler: последний старт, успешный цикл, ошибка и число поставленных работ.",
         ["listings"] = "Универсальные входящие предложения Catalog из автоматических и ручных источников; не идентичность земельного участка.",
+        ["listing_contacts"] = "Наблюдаемые публичные контакты конкретного объявления. Не являются общей CRM-карточкой продавца и не удаляются только из-за отсутствия в следующем снимке.",
         ["object_groups"] = "Подтверждённые группы объявлений одного физического объекта. Группа не имеет главного объявления и не заменяет PropertyCase.",
         ["observations"] = "Неизменяемые наблюдения публичных объявлений: Source/ExternalId, Raw/Parsed/Presence, provenance и версия адаптера. Browser state и raw HTML здесь не хранятся.",
         ["events"] = "Неизменяемая бизнес-история внимания к входящему предложению: изменения источника, мониторинг цены, классификация и возобновление кейса.",
@@ -97,6 +98,10 @@ internal static class ModelConventions
         ["ReceivedAt"] = "UTC момент поступления элемента в Catalog; для автоматического источника отличается от времени наблюдения при задержке доставки.",
         ["ExternalId"] = "Опциональный внешний ID в конкретном источнике; отсутствие не заменяется пустой строкой или synthetic ID.",
         ["CadastralNumber"] = "Кадастровый номер, если известен; не является обязательной или единственной идентичностью объекта.",
+        ["SourcePublishedAt"] = "UTC момент публикации/добавления на площадке, если источник отдал надёжное значение; не заменяет FirstObservedAt.",
+        ["Latitude"] = "Широта WGS84 (EPSG:4326), если источник отдал координаты и они нормализованы адаптером.",
+        ["Longitude"] = "Долгота WGS84 (EPSG:4326), если источник отдал координаты и они нормализованы адаптером.",
+        ["DeclaredLandTypes"] = "Типы участка, структурированно заявленные площадкой; не юридически подтверждённый ВРИ или категория земли.",
         ["ObjectGroupId"] = "Опциональная связь объявления с подтверждённой группой одного физического объекта; null означает самостоятельное объявление.",
         ["PreviousObservedPrice"] = "Предыдущее известное значение публичной цены непосредственно перед событием изменения источника.",
         ["PreviousObservedPricePerSotka"] = "Предыдущая вычисленная цена за сотку непосредственно перед событием изменения источника.",
@@ -223,6 +228,12 @@ internal static class ModelConventions
                 }
                 else if (table == "search_configurations" && property.Name == "NextRunAt") property.SetComment("Следующий расчётный запуск UTC; отсутствует у ручного или приостановленного поиска.");
                 else if (table == "jobs" && property.Name == "ScheduledFor") property.SetComment("Расчётный момент запуска UTC; обеспечивает идемпотентность планировщика.");
+                else if (table == "listing_contacts" && property.Name == "Value") property.SetComment("Публичное значение контакта, наблюдаемое в объявлении; не credential и не секрет.");
+                else if (table == "listing_contacts" && property.Name == "NormalizedValue") property.SetComment("Нормализованное значение контакта для дедупликации внутри объявления; исходное отображение хранится отдельно.");
+                else if (table == "listing_contacts" && property.Name == "DisplayValue") property.SetComment("Человекочитаемое отображение публичного контакта в том виде, в котором его удобно показать пользователю.");
+                else if (table == "listing_contacts" && property.Name == "IsPrimary") property.SetComment("Признак основного контакта в последнем наблюдении, где этот контакт присутствовал.");
+                else if (table == "listing_contacts" && property.Name == "Source") property.SetComment("Источник объявления, в котором наблюдался контакт.");
+                else if (table == "listing_contacts" && property.Name == "Type") property.SetComment("Тип публичного контакта: телефон, email, Telegram, WhatsApp, сайт или другое.");
                 else if (table == "events" && property.Name == "CatalogItemId") property.SetComment("Входящий элемент Catalog, к которому относится неизменяемое событие внимания.");
                 else if (table == "events" && property.Name == "Kind") property.SetComment("Стабильный тип события: изменение источника, мониторинг, классификация или возобновление кейса.");
                 else if (table == "events" && property.Name == "Message") property.SetComment("Человекочитаемое объяснение события без секретов и raw payload источника.");

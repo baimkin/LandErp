@@ -346,12 +346,17 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
                 || db.ListingObservations.Local.Any(item => item.ListingId == listing.Id && item.ObservedAt == data.ObservedAt && item.ContentHash == hash))
             { duplicates++; continue; }
             List<string> changes = [];
-            if (isNew || data.ObservedAt > listing.LastObservedAt)
+            bool isLatest = isNew || data.ObservedAt > listing.LastObservedAt;
+            decimal? previousPrice = listing.Price;
+            decimal? previousPricePerSotka = PricePerSotka(listing.Price, listing.AreaSquareMeters);
+            if (isLatest)
             {
-                decimal? previousPrice = listing.Price;
-                decimal? previousPricePerSotka = PricePerSotka(listing.Price, listing.AreaSquareMeters);
                 ApplyKnown(listing, data, changes);
                 IncomingDuplicateDetector.ApplyExtractedCadastral(listing);
+            }
+            await ApplyContactsAsync(db, listing, data, source, isNew, isLatest ? changes : null, cancellationToken);
+            if (isLatest)
+            {
                 listing.LastObservedAt = data.ObservedAt;
                 if (changes.Count > 0 && !isNew)
                 {
@@ -541,11 +546,148 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         if (data.Location.Presence == FieldPresence.Present && listing.Location != data.Location.Raw) { listing.Location = data.Location.Raw; changes.Add("местоположение"); }
         if (data.Description.Presence == FieldPresence.Present && listing.Description != data.Description.Raw) { listing.Description = data.Description.Raw; changes.Add("описание"); }
         if (data.SellerName.Presence == FieldPresence.Present && listing.SellerName != data.SellerName.Raw) { listing.SellerName = data.SellerName.Raw; changes.Add("продавец"); }
+        if (data.CadastralNumber.Presence == FieldPresence.Present)
+        {
+            string cadastral = data.CadastralNumber.Raw!.Trim();
+            if (listing.CadastralNumber != cadastral) { listing.CadastralNumber = cadastral; changes.Add("кадастровый номер"); }
+        }
+        if (data.SourcePublishedAt is { } published && listing.SourcePublishedAt != published)
+        { listing.SourcePublishedAt = published; changes.Add("дата публикации"); }
+        if (data.Latitude is decimal latitude && data.Longitude is decimal longitude)
+        {
+            latitude = decimal.Round(latitude, 6, MidpointRounding.ToEven);
+            longitude = decimal.Round(longitude, 6, MidpointRounding.ToEven);
+            if (listing.Latitude != latitude || listing.Longitude != longitude)
+            { listing.Latitude = latitude; listing.Longitude = longitude; changes.Add("координаты"); }
+        }
+        if (data.DeclaredLandTypes.Length > 0)
+        {
+            string[] declared = data.DeclaredLandTypes.Distinct().Order().Select(value => value.ToString()).ToArray();
+            if (!listing.DeclaredLandTypes.SequenceEqual(declared, StringComparer.Ordinal))
+            { listing.DeclaredLandTypes = declared; changes.Add("тип участка (заявлено)"); }
+        }
         if (data.Price.Presence == FieldPresence.Present && listing.Price != DataConventions.RoundRubles(data.Price.Parsed!.Value)) { listing.Price = DataConventions.RoundRubles(data.Price.Parsed!.Value); changes.Add("цена"); }
         if (data.AreaSquareMeters.Presence == FieldPresence.Present && listing.AreaSquareMeters != decimal.Round(data.AreaSquareMeters.Parsed!.Value, 4, MidpointRounding.ToEven)) { listing.AreaSquareMeters = decimal.Round(data.AreaSquareMeters.Parsed!.Value, 4, MidpointRounding.ToEven); changes.Add("площадь"); }
         string photos = JsonSerializer.Serialize(data.PhotoUrls.Distinct());
         if (data.PhotoUrls.Length > 0 && listing.PhotosJson != photos) { listing.PhotosJson = photos; changes.Add("фотографии"); }
         listing.Url = data.Url;
+    }
+
+    private static async Task ApplyContactsAsync(LandErpDbContext db, Listing listing, ListingData data,
+        CatalogSource source, bool isNew, List<string>? changes, CancellationToken cancellationToken)
+    {
+        if (data.Contacts.Length == 0) return;
+        var incoming = data.Contacts
+            .Select(contact => new
+            {
+                Data = contact,
+                Type = MapContactType(contact.Type),
+                Normalized = NormalizeContact(contact.Type, contact.Value)
+            })
+            .GroupBy(item => (item.Type, item.Normalized))
+            .Select(group => group.OrderByDescending(item => item.Data.IsPrimary).First())
+            .ToArray();
+
+        ListingContact[] existing = isNew ? [] : await db.ListingContacts
+            .Where(item => item.ListingId == listing.Id).ToArrayAsync(cancellationToken);
+        bool businessChanged = false;
+        foreach (var contact in incoming)
+        {
+            string value = contact.Data.Value.Trim();
+            string display = string.IsNullOrWhiteSpace(contact.Data.DisplayValue) ? value : contact.Data.DisplayValue.Trim();
+            ListingContact? saved = existing.FirstOrDefault(item => item.Type == contact.Type
+                && item.NormalizedValue == contact.Normalized)
+                ?? db.ListingContacts.Local.FirstOrDefault(item => item.ListingId == listing.Id
+                    && item.Type == contact.Type && item.NormalizedValue == contact.Normalized);
+            if (saved == null)
+            {
+                db.ListingContacts.Add(new()
+                {
+                    Id = DataConventions.NewId(),
+                    OrganizationId = listing.OrganizationId,
+                    ListingId = listing.Id,
+                    Type = contact.Type,
+                    Value = value,
+                    NormalizedValue = contact.Normalized,
+                    DisplayValue = display,
+                    Source = source,
+                    IsPrimary = contact.Data.IsPrimary,
+                    FirstObservedAt = data.ObservedAt,
+                    LastObservedAt = data.ObservedAt
+                });
+                businessChanged = true;
+                continue;
+            }
+
+            if (data.ObservedAt < saved.FirstObservedAt) saved.FirstObservedAt = data.ObservedAt;
+            if (data.ObservedAt > saved.LastObservedAt)
+            {
+                saved.LastObservedAt = data.ObservedAt;
+                saved.Source = source;
+                saved.Value = value;
+                saved.DisplayValue = display;
+                if (saved.IsPrimary != contact.Data.IsPrimary)
+                {
+                    saved.IsPrimary = contact.Data.IsPrimary;
+                    businessChanged = true;
+                }
+            }
+        }
+        if (businessChanged && changes != null && !changes.Contains("контакты", StringComparer.Ordinal))
+            changes.Add("контакты");
+    }
+
+    private static CatalogContactType MapContactType(ListingContactType type) => type switch
+    {
+        ListingContactType.Phone => CatalogContactType.Phone,
+        ListingContactType.Email => CatalogContactType.Email,
+        ListingContactType.Telegram => CatalogContactType.Telegram,
+        ListingContactType.WhatsApp => CatalogContactType.WhatsApp,
+        ListingContactType.Website => CatalogContactType.Website,
+        ListingContactType.Other => CatalogContactType.Other,
+        _ => throw new ArgumentOutOfRangeException(nameof(type))
+    };
+
+    private static string NormalizeContact(ListingContactType type, string raw)
+    {
+        string value = raw.Trim();
+        return type switch
+        {
+            ListingContactType.Phone or ListingContactType.WhatsApp => NormalizePhone(value),
+            ListingContactType.Email => value.ToLowerInvariant(),
+            ListingContactType.Telegram => NormalizeTelegram(value),
+            ListingContactType.Website => NormalizeWebsite(value),
+            _ => value.ToLowerInvariant()
+        };
+    }
+
+    private static string NormalizePhone(string value)
+    {
+        string digits = new(value.Where(char.IsAsciiDigit).ToArray());
+        if (digits.Length == 11 && digits[0] == '8') digits = "7" + digits[1..];
+        else if (digits.Length == 10 && digits[0] == '9') digits = "7" + digits;
+        return digits.Length > 0 ? "+" + digits : value.ToLowerInvariant();
+    }
+
+    private static string NormalizeWebsite(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)) return value.TrimEnd('/');
+        UriBuilder builder = new(uri)
+        {
+            Scheme = uri.Scheme.ToLowerInvariant(),
+            Host = uri.Host.ToLowerInvariant()
+        };
+        return builder.Uri.AbsoluteUri.TrimEnd('/');
+    }
+
+    private static string NormalizeTelegram(string value)
+    {
+        string text = value.Trim();
+        if (Uri.TryCreate(text, UriKind.Absolute, out Uri? uri)
+            && (uri.Host.Equals("t.me", StringComparison.OrdinalIgnoreCase)
+                || uri.Host.Equals("telegram.me", StringComparison.OrdinalIgnoreCase)))
+            text = uri.AbsolutePath.Trim('/');
+        return text.TrimStart('@').TrimEnd('/').ToLowerInvariant();
     }
 
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");

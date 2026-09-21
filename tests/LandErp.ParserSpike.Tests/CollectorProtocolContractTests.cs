@@ -10,6 +10,43 @@ public sealed class CollectorProtocolContractTests
     private static readonly string[] FixedTimes = ["09:00", "18:00"];
 
     [TestMethod]
+    public void ListingEnrichmentIsAdditiveAndValidated()
+    {
+        DateTimeOffset observed = new(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        ListingData legacy = new()
+        {
+            Source = ListingSource.Cian,
+            ExternalId = "334043735",
+            Url = "https://www.cian.ru/sale/suburban/334043735/",
+            ObservedAt = observed,
+            AdapterVersion = "1.1",
+            Provenance = "DOM"
+        };
+        ContractRules.Validate(legacy);
+        Assert.AreEqual(0, legacy.DeclaredLandTypes.Length);
+        Assert.AreEqual(0, legacy.Contacts.Length);
+        Assert.IsNull(legacy.SourcePublishedAt);
+
+        ListingData enriched = legacy with
+        {
+            CadastralNumber = new(FieldPresence.Present, "50:15:0012345:678"),
+            SourcePublishedAt = observed.AddDays(-2),
+            Latitude = 55.758585m,
+            Longitude = 37.970089m,
+            DeclaredLandTypes = [ListingLandType.Izhs],
+            Contacts = [new() { Type = ListingContactType.Email, Value = "seller@example.test" }]
+        };
+        ContractRules.Validate(enriched);
+
+        Assert.ThrowsExactly<ArgumentException>(() => ContractRules.Validate(enriched with { Longitude = null }));
+        Assert.ThrowsExactly<ArgumentException>(() => ContractRules.Validate(enriched with { Latitude = 91m }));
+        Assert.ThrowsExactly<ArgumentException>(() => ContractRules.Validate(enriched with
+        {
+            Contacts = [new() { Type = ListingContactType.Email, Value = " " }]
+        }));
+    }
+
+    [TestMethod]
     public void LegacyHeartbeatRemainsReadableWithAdditiveRuntimeFields()
     {
         Guid jobId = Guid.Parse("0199f54b-8bc0-7a2a-8f51-1477d047b4cc");

@@ -243,8 +243,12 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
         Source = Enum.Parse<ListingSource>(observation.Source.ToString()), ExternalId = observation.ExternalId,
         Url = observation.Url, ObservedAt = observation.ObservedAtUtc, AdapterVersion = observation.AdapterVersion,
         Provenance = observation.Provenance, Title = Text(observation.Title), Location = Text(observation.Location),
-        Description = Text(observation.Description), SellerName = Text(observation.SellerName), Price = Number(observation.Price),
-        AreaSquareMeters = Number(observation.AreaSquareMeters), PhotoUrls = observation.PhotoUrls.Distinct(StringComparer.Ordinal).Take(100).ToArray(), Warnings = observation.Warnings
+        Description = Text(observation.Description), SellerName = Text(observation.SellerName),
+        CadastralNumber = Text(observation.CadastralNumber), SourcePublishedAt = observation.SourcePublishedAtUtc,
+        Latitude = observation.Latitude.Parsed, Longitude = observation.Longitude.Parsed,
+        DeclaredLandTypes = observation.DeclaredLandTypes.Select(value => Enum.Parse<ListingLandType>(value.ToString())).Distinct().ToArray(),
+        Price = Number(observation.Price), AreaSquareMeters = Number(observation.AreaSquareMeters),
+        PhotoUrls = observation.PhotoUrls.Distinct(StringComparer.Ordinal).Take(100).ToArray(), Warnings = observation.Warnings
     };
     private static TextField Text(TextValue value) => new(Enum.Parse<FieldPresence>(value.Presence.ToString()), value.Raw);
     private static DecimalField Number(NumberValue value) => new(Enum.Parse<FieldPresence>(value.Presence.ToString()), value.Raw, value.Parsed);

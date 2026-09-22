@@ -146,6 +146,8 @@ public sealed class ServerTransportTests
         }));
         await using QueueRunner runner = new(store, new NoSessions());
         await using ServerCoordinator coordinator = new(store, runner, outbox, Adapter(http));
+        typeof(ServerCoordinator).GetField("nextPoll", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(coordinator, DateTimeOffset.UtcNow.AddSeconds(45));
 
         await coordinator.TickAsync(CancellationToken.None);
         Assert.AreEqual(1, finals); Assert.IsNull(outbox.ReadWork()); Assert.AreEqual(0, outbox.Pending().Length);

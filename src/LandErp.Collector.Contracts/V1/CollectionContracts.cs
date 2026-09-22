@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 namespace LandErp.Collector.Contracts.V1;
 
 public enum ListingSource { Avito, Cian }
+public enum ListingLandType { Izhs, Snt, Dnp, Lph, Gardening, Kfh, Industrial, Other }
+public enum ListingContactType { Phone, Email, Telegram, WhatsApp, Website, Other }
 public enum FieldPresence { NotInspected, Absent, Empty, Present, ParseFailed }
 public enum CollectionOutcome { Unknown, Success, Captcha, AuthenticationRequired, RateLimited, SourceError, Interrupted, LimitReached, Partial }
 public enum AgentRuntimeState { Idle, Claiming, Parsing, AwaitingManualAction, Delivering, Paused, Recovering }
@@ -11,6 +13,13 @@ public enum SourceRuntimeState { Ready, Captcha, AuthenticationRequired, RateLim
 public enum CollectionProgressPhase { Preparing, OpeningPage, ReadingPage, SavingPage, WaitingForUser, PreparingResult, DeliveringResult }
 public sealed record TextField(FieldPresence Presence, string? Raw);
 public sealed record DecimalField(FieldPresence Presence, string? Raw, decimal? Parsed);
+public sealed record ListingContactData
+{
+    public required ListingContactType Type { get; init; }
+    public required string Value { get; init; }
+    public string? DisplayValue { get; init; }
+    public bool IsPrimary { get; init; }
+}
 public sealed record AgentRegistration(int ContractVersion, string Version, ListingSource[] Capabilities);
 public sealed record CollectionProgress(int? Page, int? MaxPages, int ProcessedCount, int? TotalCount,
     CollectionProgressPhase Phase, DateTimeOffset? LastUsefulActionAt);
@@ -58,6 +67,12 @@ public sealed record ListingData
     public TextField Location { get; init; } = new(FieldPresence.NotInspected, null);
     public TextField Description { get; init; } = new(FieldPresence.NotInspected, null);
     public TextField SellerName { get; init; } = new(FieldPresence.NotInspected, null);
+    public TextField CadastralNumber { get; init; } = new(FieldPresence.NotInspected, null);
+    public DateTimeOffset? SourcePublishedAt { get; init; }
+    public decimal? Latitude { get; init; }
+    public decimal? Longitude { get; init; }
+    public ListingLandType[] DeclaredLandTypes { get; init; } = [];
+    public ListingContactData[] Contacts { get; init; } = [];
     public DecimalField Price { get; init; } = new(FieldPresence.NotInspected, null, null);
     public DecimalField AreaSquareMeters { get; init; } = new(FieldPresence.NotInspected, null, null);
     public string Currency { get; init; } = "RUB";

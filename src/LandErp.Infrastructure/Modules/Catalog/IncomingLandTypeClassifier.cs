@@ -5,8 +5,9 @@ using Microsoft.EntityFrameworkCore;
 namespace LandErp.Infrastructure.Modules.Catalog;
 
 /// <summary>
-/// Deterministic source-text classifier for Incoming. Values describe wording in Title/Description only;
-/// they are not Rosreestr facts, legal land category or confirmed VRI.
+/// Deterministic text classifier for Incoming. Classify() describes wording in Title/Description only;
+/// ApplyFilter() matches either that wording or the source-declared normalized values.
+/// Neither layer is a Rosreestr fact, legal land category or confirmed VRI.
 /// </summary>
 internal static class IncomingLandTypeClassifier
 {
@@ -39,29 +40,37 @@ internal static class IncomingLandTypeClassifier
         bool other = types.Contains(IncomingLandType.Other);
 
         return query.Where(item =>
-            (izhs && (EF.Functions.ILike(item.Title ?? "", "%ижс%") || EF.Functions.ILike(item.Description ?? "", "%ижс%")
+            (izhs && (item.DeclaredLandTypes.Contains(nameof(IncomingLandType.Izhs))
+                || EF.Functions.ILike(item.Title ?? "", "%ижс%") || EF.Functions.ILike(item.Description ?? "", "%ижс%")
                 || ((EF.Functions.ILike(item.Title ?? "", "%индивидуальн%") || EF.Functions.ILike(item.Description ?? "", "%индивидуальн%"))
                     && (EF.Functions.ILike(item.Title ?? "", "%жил%") || EF.Functions.ILike(item.Description ?? "", "%жил%")))))
-            || (snt && (EF.Functions.ILike(item.Title ?? "", "%снт%") || EF.Functions.ILike(item.Description ?? "", "%снт%")
+            || (snt && (item.DeclaredLandTypes.Contains(nameof(IncomingLandType.Snt))
+                || EF.Functions.ILike(item.Title ?? "", "%снт%") || EF.Functions.ILike(item.Description ?? "", "%снт%")
                 || ((EF.Functions.ILike(item.Title ?? "", "%садов%") || EF.Functions.ILike(item.Description ?? "", "%садов%"))
                     && (EF.Functions.ILike(item.Title ?? "", "%товариществ%") || EF.Functions.ILike(item.Description ?? "", "%товариществ%")))))
-            || (dnp && (EF.Functions.ILike(item.Title ?? "", "%днп%") || EF.Functions.ILike(item.Description ?? "", "%днп%")
+            || (dnp && (item.DeclaredLandTypes.Contains(nameof(IncomingLandType.Dnp))
+                || EF.Functions.ILike(item.Title ?? "", "%днп%") || EF.Functions.ILike(item.Description ?? "", "%днп%")
                 || ((EF.Functions.ILike(item.Title ?? "", "%дачн%") || EF.Functions.ILike(item.Description ?? "", "%дачн%"))
                     && (EF.Functions.ILike(item.Title ?? "", "%партнерств%") || EF.Functions.ILike(item.Description ?? "", "%партнерств%")))))
-            || (lph && (EF.Functions.ILike(item.Title ?? "", "%лпх%") || EF.Functions.ILike(item.Description ?? "", "%лпх%")
+            || (lph && (item.DeclaredLandTypes.Contains(nameof(IncomingLandType.Lph))
+                || EF.Functions.ILike(item.Title ?? "", "%лпх%") || EF.Functions.ILike(item.Description ?? "", "%лпх%")
                 || ((EF.Functions.ILike(item.Title ?? "", "%личн%") || EF.Functions.ILike(item.Description ?? "", "%личн%"))
                     && (EF.Functions.ILike(item.Title ?? "", "%подсобн%") || EF.Functions.ILike(item.Description ?? "", "%подсобн%"))
                     && (EF.Functions.ILike(item.Title ?? "", "%хозяйств%") || EF.Functions.ILike(item.Description ?? "", "%хозяйств%")))))
-            || (gardening && (EF.Functions.ILike(item.Title ?? "", "%садоводств%") || EF.Functions.ILike(item.Description ?? "", "%садоводств%")
+            || (gardening && (item.DeclaredLandTypes.Contains(nameof(IncomingLandType.Gardening))
+                || EF.Functions.ILike(item.Title ?? "", "%садоводств%") || EF.Functions.ILike(item.Description ?? "", "%садоводств%")
                 || EF.Functions.ILike(item.Title ?? "", "%садовый участок%") || EF.Functions.ILike(item.Description ?? "", "%садовый участок%")))
-            || (kfh && (EF.Functions.ILike(item.Title ?? "", "%кфх%") || EF.Functions.ILike(item.Description ?? "", "%кфх%")
+            || (kfh && (item.DeclaredLandTypes.Contains(nameof(IncomingLandType.Kfh))
+                || EF.Functions.ILike(item.Title ?? "", "%кфх%") || EF.Functions.ILike(item.Description ?? "", "%кфх%")
                 || ((EF.Functions.ILike(item.Title ?? "", "%фермерск%") || EF.Functions.ILike(item.Description ?? "", "%фермерск%"))
                     && (EF.Functions.ILike(item.Title ?? "", "%хозяйств%") || EF.Functions.ILike(item.Description ?? "", "%хозяйств%")))))
-            || (industrial && (EF.Functions.ILike(item.Title ?? "", "%промназнач%") || EF.Functions.ILike(item.Description ?? "", "%промназнач%")
+            || (industrial && (item.DeclaredLandTypes.Contains(nameof(IncomingLandType.Industrial))
+                || EF.Functions.ILike(item.Title ?? "", "%промназнач%") || EF.Functions.ILike(item.Description ?? "", "%промназнач%")
                 || EF.Functions.ILike(item.Title ?? "", "%промышленн%") || EF.Functions.ILike(item.Description ?? "", "%промышленн%")
                 || EF.Functions.ILike(item.Title ?? "", "%производственн%") || EF.Functions.ILike(item.Description ?? "", "%производственн%")
                 || EF.Functions.ILike(item.Title ?? "", "%складск%") || EF.Functions.ILike(item.Description ?? "", "%складск%")))
-            || (other && (EF.Functions.ILike(item.Title ?? "", "%сельхозназнач%") || EF.Functions.ILike(item.Description ?? "", "%сельхозназнач%")
+            || (other && (item.DeclaredLandTypes.Contains(nameof(IncomingLandType.Other))
+                || EF.Functions.ILike(item.Title ?? "", "%сельхозназнач%") || EF.Functions.ILike(item.Description ?? "", "%сельхозназнач%")
                 || EF.Functions.ILike(item.Title ?? "", "%сельскохозяйственн%") || EF.Functions.ILike(item.Description ?? "", "%сельскохозяйственн%")
                 || EF.Functions.ILike(item.Title ?? "", "%рекреац%") || EF.Functions.ILike(item.Description ?? "", "%рекреац%")
                 || EF.Functions.ILike(item.Title ?? "", "%коммерческ%") || EF.Functions.ILike(item.Description ?? "", "%коммерческ%")

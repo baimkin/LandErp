@@ -6,6 +6,7 @@ public enum CatalogIngestionKind { Collector, Employee, Migration, Integration }
 public enum CatalogEventKind { ReviewStarted, SourceChanged, MonitoringStarted, MonitoringTriggered, Classified, CaseResumed }
 public enum DuplicateCandidateStatus { Pending, Confirmed, Rejected, Obsolete }
 public enum PhotoFingerprintStatus { Ready, Retry, Unsupported }
+public enum CatalogContactType { Phone, Email, Telegram, WhatsApp, Website, Other }
 
 public sealed class Listing
 {
@@ -32,6 +33,10 @@ public sealed class Listing
     public string Provenance { get; set; } = "Collector";
     public string? IngressComment { get; set; }
     public string? CadastralNumber { get; set; }
+    public DateTimeOffset? SourcePublishedAt { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+    public string[] DeclaredLandTypes { get; set; } = [];
     public CatalogDisposition Disposition { get; set; } = CatalogDisposition.Incoming;
     public DateTimeOffset ReceivedAt { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
@@ -47,6 +52,21 @@ public sealed class Listing
     public DateTimeOffset? LastEvaluatedAt { get; set; }
     public long DataRevision { get; set; } = 1;
     public long Version { get; set; } = 1;
+}
+
+public sealed class ListingContact
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public Guid ListingId { get; set; }
+    public CatalogContactType Type { get; set; }
+    public string Value { get; set; } = "";
+    public string NormalizedValue { get; set; } = "";
+    public string DisplayValue { get; set; } = "";
+    public CatalogSource Source { get; set; }
+    public bool IsPrimary { get; set; }
+    public DateTimeOffset FirstObservedAt { get; set; }
+    public DateTimeOffset LastObservedAt { get; set; }
 }
 
 public sealed class CatalogEvent

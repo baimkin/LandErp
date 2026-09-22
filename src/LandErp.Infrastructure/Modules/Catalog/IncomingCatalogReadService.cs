@@ -240,7 +240,10 @@ public sealed class IncomingCatalogReadService(
             bool priceChanged = flags?.PriceChanged ?? false;
             bool returned = flags?.Returned ?? false;
             string[] photos = PhotoUrls(item.PhotosJson);
-            IncomingLandType[] landTypes = IncomingLandTypeClassifier.Classify(item.Title, item.Description);
+            IncomingLandType[] inferredLandTypes = IncomingLandTypeClassifier.Classify(item.Title, item.Description);
+            IncomingLandType[] declaredLandTypes = DeclaredLandTypes(item);
+            IncomingLandType[] landTypes = inferredLandTypes;
+            bool landTypeConflict = HasLandTypeConflict(declaredLandTypes, inferredLandTypes);
             (IncomingCatalogMatchField? matchedField, string? matchedValue) = SearchMatch(item, searchTerms);
             int objectGroupMemberCount = item.ObjectGroupId is Guid groupId && groupCounts.TryGetValue(groupId, out int count)
                 ? count : 0;
@@ -248,7 +251,8 @@ public sealed class IncomingCatalogReadService(
                 RowState(item, priceChanged, returned), priceChanged, returned, photos.FirstOrDefault(), photos.Length,
                 landTypes, matchedField, matchedValue, Reviewed: reviewedOnPage.Contains(item.Id),
                 PossibleDuplicate: possibleDuplicatesOnPage.Contains(item.Id),
-                ObjectGroupId: item.ObjectGroupId, ObjectGroupMemberCount: objectGroupMemberCount);
+                ObjectGroupId: item.ObjectGroupId, ObjectGroupMemberCount: objectGroupMemberCount,
+                DeclaredLandTypes: declaredLandTypes, LandTypeConflict: landTypeConflict);
             return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId, objectGroupMemberCount);
         }).ToArray();
 
@@ -303,6 +307,13 @@ public sealed class IncomingCatalogReadService(
                 value.Title ?? "Название неизвестно", value.Location, value.Price, value.AreaSquareMeters,
                 value.CadastralNumber, value.Url, DuplicateReasons(value.ReasonsJson), value.RecordedAt, value.Score)).ToArray();
 
+        IncomingListingContactView[] contacts = await db.ListingContacts.AsNoTracking()
+            .Where(value => value.OrganizationId == context.OrganizationId && value.ListingId == catalogItemId)
+            .OrderByDescending(value => value.IsPrimary).ThenBy(value => value.Type).ThenBy(value => value.DisplayValue)
+            .Select(value => new IncomingListingContactView(value.Type, value.Value, value.DisplayValue,
+                value.Source, value.IsPrimary, value.FirstObservedAt, value.LastObservedAt))
+            .ToArrayAsync(cancellationToken);
+
         IncomingObjectGroupView? objectGroup = null;
         if (item.ObjectGroupId is Guid objectGroupId)
         {
@@ -326,9 +337,13 @@ public sealed class IncomingCatalogReadService(
             objectGroup = new(objectGroupId, memberViews.Length, memberViews);
         }
 
+        IncomingLandType[] inferredLandTypes = IncomingLandTypeClassifier.Classify(item.Title, item.Description);
+        IncomingLandType[] declaredLandTypes = DeclaredLandTypes(item);
         return new(detail, PhotoUrls(item.PhotosJson), search?.SearchId, search?.Label, Completeness(item),
             RowState(item, priceChanged, returned), priceChanged, returned,
-            IncomingLandTypeClassifier.Classify(item.Title, item.Description), duplicateCandidates, objectGroup);
+            inferredLandTypes, duplicateCandidates, objectGroup, declaredLandTypes,
+            item.SourcePublishedAt, item.Latitude, item.Longitude, contacts,
+            HasLandTypeConflict(declaredLandTypes, inferredLandTypes));
     }
 
     public async Task<IReadOnlyList<IncomingDuplicateLinkTargetView>> SearchDuplicateTargetsAsync(
@@ -412,6 +427,14 @@ public sealed class IncomingCatalogReadService(
             : returned ? IncomingCatalogRowState.ReturnedFromMonitoring
             : priceChanged ? IncomingCatalogRowState.PriceChanged
             : IncomingCatalogRowState.Normal;
+
+    private static IncomingLandType[] DeclaredLandTypes(Listing item) => (item.DeclaredLandTypes ?? [])
+        .Select(value => Enum.TryParse(value, ignoreCase: true, out IncomingLandType type) ? (IncomingLandType?)type : null)
+        .Where(value => value.HasValue).Select(value => value!.Value).Distinct().Order().ToArray();
+
+    private static bool HasLandTypeConflict(IncomingLandType[] declared, IncomingLandType[] inferred) =>
+        declared.Length > 0 && inferred.Length > 0
+        && !declared.ToHashSet().SetEquals(inferred);
 
     private static string[] DuplicateReasons(string json)
     {

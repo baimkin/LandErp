@@ -24,7 +24,8 @@ public sealed record IncomingCatalogRowRead(Guid CatalogItemId, Guid? SearchConf
     bool PriceChanged, bool ReturnedFromMonitoring, string? ThumbnailUrl, int PhotoCount,
     IncomingLandType[] LandTypes, IncomingCatalogMatchField? SearchMatchedField = null,
     string? SearchMatchedValue = null, bool Reviewed = false, bool PossibleDuplicate = false,
-    Guid? ObjectGroupId = null, int ObjectGroupMemberCount = 0);
+    Guid? ObjectGroupId = null, int ObjectGroupMemberCount = 0,
+    IncomingLandType[]? DeclaredLandTypes = null, bool LandTypeConflict = false);
 public sealed record IncomingCatalogReadSummary(int Incoming, int Attention, int Monitoring, int InWork, int Incomplete,
     int PriceChanged, int ReturnedFromMonitoring, int New = 0, int ProcessedToday = 0, int PossibleDuplicate = 0);
 public sealed record IncomingCatalogReadPage(IReadOnlyList<CatalogItemView> Items, int Total,
@@ -54,11 +55,16 @@ public sealed record UpdateDuplicateDetectionSettings(int CandidateThreshold, in
     int AreaTolerancePercent, int PhotoHammingDistance, int StrongPhotoMatches, int CommonPhotoMaxListings,
     long ExpectedVersion);
 
+public sealed record IncomingListingContactView(CatalogContactType Type, string Value, string DisplayValue,
+    CatalogSource Source, bool IsPrimary, DateTimeOffset FirstObservedAt, DateTimeOffset LastObservedAt);
+
 public sealed record IncomingCatalogDetailRead(CatalogItemDetail Detail, IReadOnlyList<string> PhotoUrls,
     Guid? SearchConfigurationId, string? SearchConfigurationLabel, int CompletenessPercent,
     IncomingCatalogRowState RowState, bool PriceChanged, bool ReturnedFromMonitoring,
     IncomingLandType[] LandTypes, IReadOnlyList<IncomingDuplicateCandidateView>? DuplicateCandidates = null,
-    IncomingObjectGroupView? ObjectGroup = null);
+    IncomingObjectGroupView? ObjectGroup = null, IncomingLandType[]? DeclaredLandTypes = null,
+    DateTimeOffset? SourcePublishedAt = null, decimal? Latitude = null, decimal? Longitude = null,
+    IReadOnlyList<IncomingListingContactView>? Contacts = null, bool LandTypeConflict = false);
 
 public sealed record IncomingFilterPresetCriteriaV1(int SchemaVersion, CatalogSource? Source,
     Guid? SearchConfigurationId, CatalogDisposition? Disposition, CatalogAgeRange Age,

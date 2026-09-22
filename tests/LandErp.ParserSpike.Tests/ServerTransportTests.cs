@@ -13,6 +13,34 @@ namespace LandErp.ParserSpike.Tests;
 public sealed class ServerTransportTests
 {
     [TestMethod]
+    public void MapCarriesUniversalEnrichmentWithoutSendingTextInference()
+    {
+        DateTimeOffset observed = new(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+        ListingObservation observation = new()
+        {
+            Source = SourceSite.Cian,
+            ExternalId = "334043735",
+            Url = "https://www.cian.ru/sale/suburban/334043735/",
+            ObservedAtUtc = observed,
+            Title = TextValue.Read("Участок ИЖС"),
+            CadastralNumber = TextValue.Read("50:15:0012345:678"),
+            SourcePublishedAtUtc = observed.AddDays(-2),
+            Latitude = NumberValue.Read("55.758585"),
+            Longitude = NumberValue.Read("37.970089"),
+            DeclaredLandTypes = [LandType.Izhs, LandType.Lph],
+            InferredLandTypes = [LandType.Izhs, LandType.Snt]
+        };
+
+        ListingData mapped = ServerCoordinator.Map(observation);
+
+        Assert.AreEqual("50:15:0012345:678", mapped.CadastralNumber.Raw);
+        Assert.AreEqual(observation.SourcePublishedAtUtc, mapped.SourcePublishedAt);
+        Assert.AreEqual(55.758585m, mapped.Latitude); Assert.AreEqual(37.970089m, mapped.Longitude);
+        CollectionAssert.AreEquivalent((ListingLandType[])[ListingLandType.Izhs, ListingLandType.Lph], mapped.DeclaredLandTypes);
+        Assert.AreEqual(0, mapped.Contacts.Length);
+    }
+
+    [TestMethod]
     public async Task NewActivationCodeExchangesSecretWithoutBearerAndValidatesOrigin()
     {
         Guid id = Guid.CreateVersion7();

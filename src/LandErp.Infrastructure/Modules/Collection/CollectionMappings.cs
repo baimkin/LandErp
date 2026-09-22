@@ -87,6 +87,9 @@ internal static class CollectionMappings
         builder.Entity<Listing>().Property(item => item.Provenance).HasMaxLength(2000);
         builder.Entity<Listing>().Property(item => item.IngressComment).HasMaxLength(4000);
         builder.Entity<Listing>().Property(item => item.CadastralNumber).HasMaxLength(128);
+        builder.Entity<Listing>().Property(item => item.Latitude).HasPrecision(9, 6);
+        builder.Entity<Listing>().Property(item => item.Longitude).HasPrecision(9, 6);
+        builder.Entity<Listing>().Property(item => item.DeclaredLandTypes).HasColumnType("text[]");
         builder.Entity<Listing>().Property(item => item.Price).HasPrecision(19, 4);
         builder.Entity<Listing>().Property(item => item.AreaSquareMeters).HasPrecision(19, 4);
         builder.Entity<Listing>().Property(item => item.TargetTotalPrice).HasPrecision(19, 4);
@@ -95,6 +98,19 @@ internal static class CollectionMappings
         builder.Entity<Listing>().Property(item => item.LastEvaluatedPricePerSotka).HasPrecision(19, 4);
         builder.Entity<Listing>().Property(item => item.Currency).HasMaxLength(3);
         builder.Entity<Listing>().Property(item => item.PhotosJson).HasColumnType("jsonb");
+
+        builder.Entity<ListingContact>().ToTable("listing_contacts", "catalog");
+        builder.Entity<ListingContact>().Property(item => item.Type).HasConversion<string>();
+        builder.Entity<ListingContact>().Property(item => item.Source).HasConversion<string>();
+        builder.Entity<ListingContact>().Property(item => item.Value).HasMaxLength(512);
+        builder.Entity<ListingContact>().Property(item => item.NormalizedValue).HasMaxLength(512);
+        builder.Entity<ListingContact>().Property(item => item.DisplayValue).HasMaxLength(512);
+        builder.Entity<ListingContact>().HasIndex(item => new { item.ListingId, item.Type, item.NormalizedValue }).IsUnique();
+        builder.Entity<ListingContact>().HasIndex(item => new { item.OrganizationId, item.Type, item.NormalizedValue });
+        builder.Entity<ListingContact>().HasOne<Listing>().WithMany().HasForeignKey(item => item.ListingId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingContact>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany()
+            .HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+
         builder.Entity<CatalogObservation>().ToTable("observations", "catalog");
         builder.Entity<CatalogObservation>().Property(item => item.PayloadJson).HasColumnType("jsonb");
         builder.Entity<CatalogObservation>().Property(item => item.ChangesJson).HasColumnType("jsonb");

@@ -43,6 +43,23 @@ public sealed class CollectionSearchFormTests
     }
 
     [TestMethod]
+    public void LegacyWholeMinuteTimesAreNormalizedWhenEditing()
+    {
+        var search = new SearchView(Guid.NewGuid(), "Name", CatalogSource.Avito, "https://www.avito.ru", 10, null, "",
+            "", CollectionScheduleKind.FixedTimes, null, ["16:00:00", "08:00:00.0000000"], true, null, 1, null);
+
+        CollectionSearchForm edited = CollectionSearchForm.From(search);
+
+        Assert.AreEqual("16:00", edited.Times[0].Value);
+        Assert.AreEqual("08:00", edited.Times[1].Value);
+        Assert.AreEqual("08:00,16:00", string.Join(",", edited.Schedule().FixedTimes!));
+
+        edited.Times = [new("08:00:30")];
+        ArgumentException format = Assert.ThrowsExactly<ArgumentException>(() => edited.Schedule());
+        StringAssert.Contains(format.Message, "ЧЧ:ММ");
+    }
+
+    [TestMethod]
     public void IntervalUnitsAreBoundedAndEditingPreservesOddMinuteIntervals()
     {
         CollectionSearchForm form = new() { ScheduleKind = CollectionScheduleKind.Interval, IntervalValue = 2, IntervalUnit = 60 };

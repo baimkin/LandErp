@@ -14,7 +14,7 @@ public sealed record CatalogItemView(Guid Id, CatalogSource Source, string? Exte
     string? Description, string Provenance, CatalogIngestionKind IngestionKind, CatalogDisposition Disposition,
     string QueueReason, bool AttentionRequired, DateTimeOffset ReceivedAt, DateTimeOffset ChangedAt,
     DateTimeOffset? LastObservedAt, Guid? PropertyCaseId, string? BusinessNumber, string? LinkedCaseStage,
-    bool CanResumeCase, long Version, Guid? ObjectGroupId = null, int ObjectGroupMemberCount = 0);
+    bool CanResumeCase, long Version, Guid? ObjectGroupId = null, int ObjectGroupMemberCount = 0, bool IncludeInCalculation = false, string? CalculationIneligibility = null);
 public sealed record IncomingCatalogSummary(int Incoming, int Attention, int Monitoring, int InWork, int Incomplete);
 public sealed record IncomingCatalogPage(IReadOnlyList<CatalogItemView> Items, int Total, IncomingCatalogSummary Summary);
 public sealed record CatalogMonitoringView(decimal? TargetTotalPrice, decimal? TargetPricePerSotka,
@@ -32,7 +32,7 @@ public sealed record SetCatalogMonitoring(Guid CatalogItemId, long ExpectedVersi
 public sealed record ReviewCatalogDuplicateCandidate(Guid CandidateId, long ExpectedVersion, bool Confirmed);
 public sealed record LinkCatalogItemsAsSameObject(Guid CatalogItemId, long ExpectedCatalogVersion,
     Guid OtherCatalogItemId, string Reason);
-public sealed record UnlinkCatalogItemFromObjectGroup(Guid CatalogItemId, long ExpectedCatalogVersion, string Reason);
+public sealed record UnlinkCatalogItemFromObjectGroup(Guid CatalogItemId, long ExpectedCatalogVersion, string Reason, bool IncludeInCalculation = false);
 public sealed record ResumeCatalogItemCase(Guid CatalogItemId, long ExpectedCatalogVersion);
 public sealed record TakeCatalogItemToWork(Guid CatalogItemId, Guid? ExistingCaseId = null);
 public sealed record TransferCatalogItemToProcurement(Guid CatalogItemId, Guid ProcurementEmployeeId);

@@ -3,7 +3,7 @@ namespace LandErp.Application.Modules.Catalog.Domain;
 public enum CatalogSource { Avito, Cian, Telegram, Referral, Agent, DirectOwner, Manual, Other }
 public enum CatalogDisposition { Incoming, Monitoring, InWork, Dismissed, Duplicate, Fake, RemovedAtSource, Sold }
 public enum CatalogIngestionKind { Collector, Employee, Migration, Integration }
-public enum CatalogEventKind { ReviewStarted, SourceChanged, MonitoringStarted, MonitoringTriggered, Classified, CaseResumed }
+public enum CatalogEventKind { ReviewStarted, SourceChanged, MonitoringStarted, MonitoringTriggered, Classified, CaseResumed, CalculationParticipationChanged }
 public enum DuplicateCandidateStatus { Pending, Confirmed, Rejected, Obsolete }
 public enum PhotoFingerprintStatus { Ready, Retry, Unsupported }
 public enum CatalogContactType { Phone, Email, Telegram, WhatsApp, Website, Other }
@@ -50,6 +50,7 @@ public sealed class Listing
     public decimal? LastEvaluatedPrice { get; set; }
     public decimal? LastEvaluatedPricePerSotka { get; set; }
     public DateTimeOffset? LastEvaluatedAt { get; set; }
+    public bool IncludeInCalculation { get; set; }
     public long DataRevision { get; set; } = 1;
     public long Version { get; set; } = 1;
 }

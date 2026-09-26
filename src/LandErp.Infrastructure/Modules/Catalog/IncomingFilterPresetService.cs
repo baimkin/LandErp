@@ -28,6 +28,13 @@ public sealed class IncomingFilterPresetService(
     {
         AccessContext context = await RequireAsync(subject, process: false, cancellationToken);
         await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        return await ReadForOrganizationAsync(connection, context.OrganizationId, cancellationToken);
+    }
+
+    // Internal ingress uses the same compatibility resolver on its existing transaction/connection.
+    internal static async Task<IReadOnlyList<IncomingFilterPresetView>> ReadForOrganizationAsync(
+        NpgsqlConnection connection, Guid organizationId, CancellationToken cancellationToken)
+    {
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText = """
             SELECT id, search_group_id, name, criteria_json::text, sort_order, version
@@ -35,12 +42,12 @@ public sealed class IncomingFilterPresetService(
             WHERE organization_id = @organization_id AND active
             ORDER BY search_group_id NULLS FIRST, sort_order, name, id
             """;
-        command.Parameters.AddWithValue("organization_id", context.OrganizationId);
+        command.Parameters.AddWithValue("organization_id", organizationId);
         List<IncomingFilterPresetView> result = [];
         await using (NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken)) result.Add(ReadView(reader));
         for (int index = 0; index < result.Count; index++)
-            result[index] = await ResolveAsync(connection, context.OrganizationId, result[index], cancellationToken);
+            result[index] = await ResolveAsync(connection, organizationId, result[index], cancellationToken);
         return result;
     }
 
@@ -90,6 +97,7 @@ public sealed class IncomingFilterPresetService(
             insert.Parameters.AddWithValue("criteria_json", criteriaJson);
             insert.Parameters.AddWithValue("sort_order", sortOrder);
             await insert.ExecuteNonQueryAsync(cancellationToken);
+            await AuditAsync(connection, context.OrganizationId, subject.UserId, id, null, command.Criteria, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return new(id, command.SearchGroupId, name, command.Criteria, sortOrder, 1);
         }
@@ -141,6 +149,7 @@ public sealed class IncomingFilterPresetService(
                     throw new DbUpdateConcurrencyException("Сохранённый фильтр изменился. Обновите страницу и повторите действие.");
                 result = ReadView(reader);
             }
+            await AuditAsync(connection, context.OrganizationId, subject.UserId, command.Id, original.Criteria, command.Criteria, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return result;
         }
@@ -264,6 +273,25 @@ public sealed class IncomingFilterPresetService(
             return saved with { CompatibilityIssue = $"Группа фильтра «{saved.Name}» ({groupId}) недоступна. Владелец должен восстановить группу либо явно согласовать замену условия. Применение и изменение заблокированы." };
         return saved with { SearchGroupId = groupId,
             Criteria = saved.Criteria with { SchemaVersion = 2, SearchConfigurationId = null, SearchGroupId = groupId } };
+    }
+
+    private static async Task AuditAsync(NpgsqlConnection connection, Guid organizationId, Guid actorId, Guid id,
+        IncomingFilterPresetCriteriaV1? previous, IncomingFilterPresetCriteriaV1 current, CancellationToken cancellationToken)
+    {
+        await using var audit = connection.CreateCommand();
+        audit.CommandText = """
+            INSERT INTO foundation.audit_events
+                (id, organization_id, actor_id, action, object_type, object_id, changes, correlation_id, recorded_at)
+            VALUES (@audit_id, @org, @actor, 'IncomingFilterSaved', 'IncomingFilterPreset', @id, @changes, @correlation, @now)
+            """;
+        audit.Parameters.AddWithValue("audit_id", Guid.CreateVersion7());
+        audit.Parameters.AddWithValue("org", organizationId);
+        audit.Parameters.AddWithValue("actor", actorId);
+        audit.Parameters.AddWithValue("id", id);
+        audit.Parameters.AddWithValue("changes", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(new { Previous = previous, Current = current }, JsonOptions));
+        audit.Parameters.AddWithValue("correlation", Guid.CreateVersion7().ToString());
+        audit.Parameters.AddWithValue("now", DateTimeOffset.UtcNow);
+        await audit.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static void RequireCurrentCriteria(IncomingFilterPresetCriteriaV1 criteria)

@@ -1,0 +1,62 @@
+@using System.Globalization
+@using LandErp.Application.Modules.Overview.Contracts
+@using Microsoft.EntityFrameworkCore
+@inject IGroupMarketService Markets
+
+<div class="demand-price">
+    @if (editing)
+    {
+        <div class="demand-input">
+            <input type="number" step="0.01" min="0.01" @bind="draft" aria-label="Тест спроса, рублей за сотку" disabled="@saving" @onkeydown="KeyDown" />
+            <button type="button" disabled="@saving" @onclick="SaveAsync" title="Сохранить тест спроса" aria-label="Сохранить тест спроса">✓</button>
+            <button type="button" disabled="@saving" @onclick="Cancel" title="Отмена" aria-label="Отмена">×</button>
+        </div>
+        <small>Пустое поле — убрать ориентир</small>
+    }
+    else
+    {
+        <span title="Ручной ориентир теста спроса; не измеренный спрос и не цена сделки">@Money(Value.DemandTestPricePerSotka)</span>
+        @if (Value.CanEditDemand)
+        {
+            <button type="button" class="edit-demand" @onclick="Edit" title="Изменить тест спроса" aria-label="Изменить тест спроса">✎</button>
+        }
+    }
+    @if (error != null) { <small class="demand-error" role="alert">@error</small> }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public GroupMarketView Value { get; set; } = default!;
+    [Parameter, EditorRequired] public Subject Subject { get; set; } = default!;
+    [Parameter] public EventCallback Saved { get; set; }
+    private Guid groupId;
+    private long version;
+    private decimal? draft;
+    private bool editing, saving;
+    private string? error;
+    public static string Money(decimal? price) => price?.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")) + (price.HasValue ? " ₽" : "—");
+    protected override void OnParametersSet()
+    {
+        if (groupId == Value.SearchGroupId && version == Value.Version) return;
+        groupId = Value.SearchGroupId; version = Value.Version; editing = false; error = null;
+    }
+    private void Edit() { draft = Value.DemandTestPricePerSotka; version = Value.Version; error = null; editing = true; }
+    private void Cancel() { editing = false; error = null; }
+    private async Task KeyDown(KeyboardEventArgs args) { if (saving) return; if (args.Key == "Escape") Cancel(); else if (args.Key == "Enter") await SaveAsync(); }
+    private async Task SaveAsync()
+    {
+        if (saving) return;
+        saving = true; error = null;
+        bool committed = false;
+        try
+        {
+            await Markets.SaveDemandAsync(Subject, new(Value.SearchGroupId, version, draft), Guid.NewGuid().ToString("N"), CancellationToken.None);
+            committed = true; editing = false;
+            await Saved.InvokeAsync();
+        }
+        catch (DbUpdateConcurrencyException) { error = "Цена уже изменена. Обновите экран и повторите."; }
+        catch (AccessDeniedException) { error = "Недостаточно прав или группа недоступна."; }
+        catch (ArgumentException exception) { error = exception.Message; }
+        catch (Exception) { error = committed ? "Сохранено. Обновите экран для актуальных значений." : "Не удалось сохранить. Обновите экран перед повтором."; }
+        finally { saving = false; }
+    }
+}

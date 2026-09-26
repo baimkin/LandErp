@@ -11,7 +11,7 @@ public enum IncomingCatalogSortField { ChangedAt, Price, Area, PricePerSotka }
 public enum IncomingCatalogSortDirection { Descending, Ascending }
 public enum IncomingLandType { Izhs, Snt, Dnp, Lph, Gardening, Kfh, Industrial, Other }
 public enum IncomingCatalogMatchField { SellerName }
-public enum IncomingCatalogMode { SavedFilters, AllListings, Archive }
+public enum IncomingCatalogMode { SavedFilters, AllListings, Archive, Participants }
 public static class IncomingCatalogArchive
 {
     public static IReadOnlyList<CatalogDisposition> States { get; } = Array.AsReadOnly<CatalogDisposition>(
@@ -42,7 +42,7 @@ public sealed record IncomingCatalogReadSummary(int Incoming, int Attention, int
 public sealed record IncomingCatalogReadPage(IReadOnlyList<CatalogItemView> Items, int Total,
     IncomingCatalogReadSummary Summary, IReadOnlyList<IncomingSearchGroupView> SearchGroups,
     IReadOnlyList<IncomingSearchConfigurationView> SearchConfigurations,
-    IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows, IncomingCatalogFilterCounts? FilterCounts = null);
+    IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows, IncomingCatalogFilterCounts? FilterCounts = null, int? ParticipantTotal = null);
 public sealed record IncomingCatalogFilterCounts(IReadOnlyList<IncomingFilterPresetView> Presets,
     IReadOnlyDictionary<Guid, int> PresetCounts, IReadOnlyDictionary<Guid, int> GroupCounts,
     int UngroupedCount, int AllPresetsCount, int ApplicableCount);
@@ -85,7 +85,7 @@ public sealed record IncomingFilterPresetCriteriaV1(int SchemaVersion, CatalogSo
     decimal? MinTotalPrice, decimal? MaxTotalPrice, decimal? MinPricePerSotka, decimal? MaxPricePerSotka,
     decimal? MinAreaSquareMeters, decimal? MaxAreaSquareMeters, IncomingLandType[] LandTypes,
     bool AttentionOnly, IncomingCatalogSortField SortField, IncomingCatalogSortDirection SortDirection,
-    IncomingCatalogPreset? Preset = null, Guid? SearchGroupId = null);
+    IncomingCatalogPreset? Preset = null, Guid? SearchGroupId = null, bool AutoIncludeNewInCalculation = false);
 public sealed record IncomingFilterPresetView(Guid Id, Guid? SearchGroupId, string Name,
     IncomingFilterPresetCriteriaV1 Criteria, int SortOrder, long Version, string? CompatibilityIssue = null);
 public sealed record CreateIncomingFilterPreset(Guid? SearchGroupId, string Name, IncomingFilterPresetCriteriaV1 Criteria);

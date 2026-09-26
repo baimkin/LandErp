@@ -17,7 +17,7 @@ namespace LandErp.Foundation.Tests;
 public sealed class OverviewTests
 {
     [TestMethod]
-    public async Task MarketStatisticsAreServerSideDistinctStatusIndependentAndConfiguredPerGroup()
+    public async Task MarketStatisticsUseMarkedParticipantsAndIgnoreLegacySettings()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(
             includeSecondManager: false, includeTeams: false);
@@ -33,6 +33,7 @@ public sealed class OverviewTests
             Listing avito = await db.Listings.SingleAsync(item => item.Id == marketplace.AvitoId);
             avito.Title = "Участок ИЖС";
             avito.Disposition = CatalogDisposition.Dismissed;
+            avito.IncludeInCalculation = true;
             Listing cian = await db.Listings.SingleAsync(item => item.Id == marketplace.CianId);
             cian.Title = "Участок ИЖС";
             cian.Disposition = CatalogDisposition.Fake;
@@ -45,7 +46,7 @@ public sealed class OverviewTests
         MarketGroupRow primary = initial.Items.Single(item => item.SearchGroupId == primaryGroup);
         Assert.AreEqual(1, primary.IncludedCount, "A listing observed more than once must be counted once.");
         Assert.AreEqual(0, primary.ExcludedCount);
-        Assert.AreEqual(1, primary.FakeExcludedCount, "Fake is a separate invalid-data exclusion.");
+        Assert.AreEqual(0, primary.FakeExcludedCount, "Legacy exclusion counters are no longer part of the market formula.");
         Assert.AreEqual(200_000m, primary.MedianPricePerSotka);
         Assert.AreEqual(200_000m, primary.AveragePricePerSotka);
 
@@ -55,9 +56,10 @@ public sealed class OverviewTests
         MarketGroupPage filtered = await service.ReadMarketGroupsAsync(fixture.Owner, new(Size: 20), CancellationToken.None);
         primary = filtered.Items.Single(item => item.SearchGroupId == primaryGroup);
         MarketGroupRow independent = filtered.Items.Single(item => item.SearchGroupId == independentGroup);
-        Assert.AreEqual(0, primary.IncludedCount);
-        Assert.AreEqual(1, primary.ExcludedCount, "The valid listing is excluded by this group's type filter.");
-        Assert.AreEqual(1, primary.FakeExcludedCount);
+        Assert.AreEqual(1, primary.IncludedCount);
+        Assert.AreEqual(200_000m, primary.MedianPricePerSotka);
+        Assert.AreEqual(0, primary.ExcludedCount);
+        Assert.AreEqual(0, primary.FakeExcludedCount);
         Assert.AreEqual(7, saved.PeriodDays);
         Assert.AreEqual(30, independent.Settings.PeriodDays, "Saving one group must not change another group.");
         Assert.IsTrue(independent.Settings.AllowedPropertyTypes.Contains(IncomingLandType.Izhs));

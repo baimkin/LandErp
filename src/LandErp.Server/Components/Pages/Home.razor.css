@@ -237,3 +237,8 @@
   .market-row .market-price:nth-child(2)::before { content:"Медиана"; }
   .market-row .market-price:nth-child(3)::before { content:"Средняя"; }
 }
+
+.market-table,.groups-scroll{overflow-x:auto}.market-header,.market-row{grid-template-columns:minmax(230px,1.7fr) minmax(120px,.7fr) minmax(120px,.7fr) minmax(170px,.8fr) minmax(110px,.6fr) 0;min-width:860px}.all-groups-header,.all-groups-row{grid-template-columns:minmax(220px,1.4fr) minmax(200px,1.2fr) 125px 125px 170px 110px 0;min-width:1030px}.market-demand small{display:block;font-size:12px;color:var(--text-muted)}
+@media(max-width:760px){.market-header,.all-groups-header{display:grid}.market-row>.market-name,.market-row>.market-sample,.all-groups-row>.market-name,.all-groups-row>.market-sample{grid-column:auto}}
+
+.market-card .market-header,.all-groups-header{display:grid}.market-row>* ,.all-groups-row>*{grid-column:auto!important;grid-row:auto!important}.overview-modal.wide .modal-content{overflow-x:auto}

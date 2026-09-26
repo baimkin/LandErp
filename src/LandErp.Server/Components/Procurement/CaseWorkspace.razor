@@ -1,3 +1,5 @@
+@using LandErp.Application.Modules.Overview.Contracts
+@inject IGroupMarketService Markets
 @using System.ComponentModel.DataAnnotations
 @using LandErp.Application.Foundation.Files
 @using LandErp.Application.Modules.Catalog.Contracts
@@ -76,7 +78,16 @@ else if(card!=null)
                 <div class="case-side-stack">
                     <article class="surface case-pricing">
                         <h3>Цена и торг</h3>
-                        <div class="case-main-price"><span>Рабочая цена</span><strong>@ProcurementLabels.Money(card.Item.Price)</strong></div>
+                        <div class="case-price-top">
+                            <div class="case-main-price"><span>Рабочая цена</span><strong>@ProcurementLabels.Money(card.Item.Price)</strong></div>
+                            <div class="case-group-market">
+                                <GroupMarketPrices Value="SelectedMarket" Subject="CurrentSubject" Saved="ReloadAsync" EmptyText="Группа поиска не указана" />
+                                @if (caseMarkets.Count > 1)
+                                {
+                                    <details><summary>Ещё @(caseMarkets.Count - 1) групп</summary><select value="@SelectedMarket?.SearchGroupId" @onchange="ChangeMarketGroup" aria-label="Группа рынка объекта">@foreach(var group in caseMarkets){<option value="@group.SearchGroupId">@group.Name</option>}</select></details>
+                                }
+                            </div>
+                        </div>
                         <div class="price-grid">
                             <div><small>Продавец</small><strong>@OptionalPrice(card.Negotiations.Select(x=>x.SellerPrice).FirstOrDefault(x=>x!=null))</strong></div>
                             <div><small>Наше предложение</small><strong>@OptionalPrice(card.Negotiations.Select(x=>x.BuyerOffer).FirstOrDefault(x=>x!=null))</strong></div>
@@ -224,7 +235,11 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
     private CaseCard? card; private Guid loaded; private string tab="overview"; private ProcurementAction? dialogAction; private string dialogTitle=""; private bool negotiationOpen; private bool checkOpen; private bool attachmentOpen; private bool documentRequirementOpen; private bool purchaseOpen; private bool correctionOpen; private bool factCorrectionOpen; private bool sourceLinkOpen; private bool sourceLinkLoading;
     private string? sourceLinkLoadError; private IReadOnlyList<CaseLinkTarget> sourceLinkTargets=[];
     private NoteInput note=new(); private NegotiationInput negotiation=new(); private CheckInput check=new(); private CheckTemplateInput checkTemplate=new(); private AttachmentInput attachment=new(); private DocumentRequirementInput documentRequirement=new(); private PurchaseInput purchase=new(); private CorrectionInput correction=new(); private FactCorrectionInput factCorrection=new(); private SourceLinkCorrectionInput sourceLinkCorrection=new(); private IBrowserFile? selectedFile; private Guid? retryAttachmentId; private IBrowserFile? retryFile;
-    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);photoIndex=loaded==CaseId?Math.Clamp(photoIndex,0,Math.Max(0,card.Photos.Length-1)):0;if(loaded!=CaseId){factCorrectionOpen=false;sourceLinkOpen=false;sourceLinkTargets=[];}loaded=CaseId;}
+    private IReadOnlyList<GroupMarketView> caseMarkets = [];
+    private Guid? selectedMarketGroup;
+    private GroupMarketView? SelectedMarket => caseMarkets.FirstOrDefault(item => item.SearchGroupId == selectedMarketGroup) ?? caseMarkets.FirstOrDefault();
+    private void ChangeMarketGroup(ChangeEventArgs args) => selectedMarketGroup = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null;
+    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);caseMarkets=await Markets.ReadCaseAsync(CurrentSubject,CaseId,CancellationToken.None);if(loaded!=CaseId)selectedMarketGroup=null;photoIndex=loaded==CaseId?Math.Clamp(photoIndex,0,Math.Max(0,card.Photos.Length-1)):0;if(loaded!=CaseId){factCorrectionOpen=false;sourceLinkOpen=false;sourceLinkTargets=[];}loaded=CaseId;}
     protected override async Task OnParametersSetAsync(){if(loaded!=CaseId)await ReloadAsync();}
     private string SourceSummary()=>card!.Sources.Count==0?"Нет связанных":string.Join(" + ",card.Sources.Select(x=>ProcurementLabels.Source(x.Source)).Distinct());
     private static string NegotiationTitle(NegotiationView item)=>item.AgreedPrice!=null?"Согласована цена":item.BuyerOffer!=null?"Наше предложение":item.SellerPrice!=null?"Цена продавца":item.Outcome.Length>0?item.Outcome:"Событие коммуникации";

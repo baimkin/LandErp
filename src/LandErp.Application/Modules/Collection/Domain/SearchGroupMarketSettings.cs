@@ -9,5 +9,6 @@ public sealed class SearchGroupMarketSettings
     public string[] AllowedPropertyTypes { get; set; } = [];
     public decimal? MinPricePerSotka { get; set; }
     public decimal? MaxPricePerSotka { get; set; }
+    public decimal? DemandTestPricePerSotka { get; set; }
     public long Version { get; set; } = 1;
 }

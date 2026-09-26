@@ -25,7 +25,8 @@ public sealed record ProcurementQueueV2Filter(
     int Offset = 0,
     int Size = 30,
     bool MineOnly = false,
-    bool PriceChangedOnly = false);
+    bool PriceChangedOnly = false,
+    Guid? SearchGroupId = null);
 
 public sealed record ProcurementQueueV2Summary(
     int InWork,

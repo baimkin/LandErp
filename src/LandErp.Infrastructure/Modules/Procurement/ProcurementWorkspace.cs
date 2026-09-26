@@ -242,6 +242,10 @@ public sealed class ProcurementWorkspace(
         OrganizationWorkspace.AddAudit(db, context, subject, "CatalogItemCreatedManually", "CatalogItem", item.Id,
             new { item.Source, item.ExternalId, HasUrl = item.Url != null, item.CadastralNumber }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
+        // Manual entries have no search-group observations. Only genuinely matching ungrouped criteria apply.
+        await CatalogCalculationAutomation.IncludeNewAsync(db, context.OrganizationId, [item.Id],
+            subject.UserId, correlationId, now, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return item.Id;
     }
@@ -260,6 +264,8 @@ public sealed class ProcurementWorkspace(
         if (item.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException();
         string reason = Required(command.Reason, 3, 4000, "Укажите причину решения.");
         item.Disposition = command.Disposition;
+        if (command.Disposition is CatalogDisposition.Fake or CatalogDisposition.RemovedAtSource)
+            CatalogCalculationService.Change(db, item, false, subject.UserId, "Исключающее состояние", correlationId, time.GetUtcNow());
         item.QueueReason = reason;
         item.AttentionRequired = false;
         item.TargetTotalPrice = null;
@@ -336,6 +342,7 @@ public sealed class ProcurementWorkspace(
                 throw new ArgumentException("Подтвердить совпадение можно только для входящего предложения или уже связанного дубля.");
             objectGroupId = await LinkSameObjectAsync(db, context.OrganizationId, listing, other, now, cancellationToken);
             listing.Disposition = CatalogDisposition.Duplicate;
+            CatalogCalculationService.Change(db, listing, false, subject.UserId, "Подтверждённый дубль", correlationId, time.GetUtcNow());
             listing.QueueReason = $"Тот же объект: {other.Title ?? other.Location ?? other.Id.ToString()}";
             listing.AttentionRequired = false;
             listing.AttentionAt = null;
@@ -411,6 +418,7 @@ public sealed class ProcurementWorkspace(
         if (listing.Disposition == CatalogDisposition.Incoming)
         {
             listing.Disposition = CatalogDisposition.Duplicate;
+            CatalogCalculationService.Change(db, listing, false, subject.UserId, "Подтверждённый дубль", correlationId, time.GetUtcNow());
             listing.AttentionRequired = false;
             listing.AttentionAt = null;
         }
@@ -471,6 +479,11 @@ public sealed class ProcurementWorkspace(
             listing.Disposition = CatalogDisposition.Incoming;
         listing.AttentionRequired = true;
         listing.AttentionAt = now;
+        if (command.IncludeInCalculation)
+        {
+            if (CatalogCalculationEligibility.Reason(listing) is string ineligible) throw new ArgumentException(ineligible);
+            CatalogCalculationService.Change(db, listing, true, subject.UserId, "Возврат после разделения группы", correlationId, now);
+        }
         listing.QueueReason = $"Исключено из группы объекта: {reason}";
         listing.ChangedAt = now;
         db.Entry(listing).Property(value => value.Version).IsModified = true;
@@ -2674,7 +2687,7 @@ public sealed class ProcurementWorkspace(
         item.CadastralNumber, item.Description, item.Provenance, item.IngestionKind, item.Disposition,
         item.QueueReason, item.AttentionRequired, item.ReceivedAt, item.ChangedAt, item.LastObservedAt,
         caseId, businessNumber, caseStage, caseStage is "rejected" or "monitor", item.Version,
-        item.ObjectGroupId, objectGroupMemberCount);
+        item.ObjectGroupId, objectGroupMemberCount, item.IncludeInCalculation, CatalogCalculationEligibility.Reason(item));
     private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
         ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
     private static CatalogEvent CatalogEvent(Listing item, CatalogEventKind kind, string message, DateTimeOffset recordedAt) => new()

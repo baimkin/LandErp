@@ -34,6 +34,8 @@ internal static class CollectionMappings
         builder.Entity<SearchGroupMarketSettings>().Property(item => item.AllowedPropertyTypes).HasColumnType("text[]");
         builder.Entity<SearchGroupMarketSettings>().Property(item => item.MinPricePerSotka).HasPrecision(19, 4);
         builder.Entity<SearchGroupMarketSettings>().Property(item => item.MaxPricePerSotka).HasPrecision(19, 4);
+        builder.Entity<SearchGroupMarketSettings>().Property(item => item.DemandTestPricePerSotka).HasPrecision(19, 4)
+            .HasComment("Ручная цена теста спроса за сотку в RUB; не измеренный спрос и не цена сделки.");
         builder.Entity<SearchGroupMarketSettings>().HasOne<SearchGroup>().WithOne().HasForeignKey<SearchGroupMarketSettings>(item => item.SearchGroupId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<SearchGroupMarketSettings>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<SearchGroupMarketSettings>().HasIndex(item => new { item.OrganizationId, item.SearchGroupId }).IsUnique();
@@ -66,6 +68,8 @@ internal static class CollectionMappings
         builder.Entity<CatalogObjectGroup>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany()
             .HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<Listing>().ToTable("listings", "catalog");
+        builder.Entity<Listing>().Property(item => item.IncludeInCalculation).HasDefaultValue(false)
+            .HasComment("Общая для организации отметка участия в расчёте; существующие объявления не включаются автоматически.");
         builder.Entity<Listing>().Property(item => item.Source).HasConversion<string>();
         builder.Entity<Listing>().Property(item => item.IngestionKind).HasConversion<string>();
         builder.Entity<Listing>().Property(item => item.Disposition).HasConversion<string>();

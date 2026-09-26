@@ -23,7 +23,7 @@ public sealed record SearchGroupMarketSettingsView(int PeriodDays, IncomingLandT
     decimal? MinPricePerSotka, decimal? MaxPricePerSotka, long Version);
 public sealed record MarketGroupRow(Guid SearchGroupId, string Name, int SortOrder,
     decimal? MedianPricePerSotka, decimal? AveragePricePerSotka, int IncludedCount,
-    int ExcludedCount, int FakeExcludedCount, SearchGroupMarketSettingsView Settings, bool CanManage);
+    int ExcludedCount, int FakeExcludedCount, SearchGroupMarketSettingsView Settings, bool CanManage, bool CanReadParticipants = false, GroupMarketView? Market = null);
 public sealed record MarketGroupPage(IReadOnlyList<MarketGroupRow> Items, int Total, int Offset, int Size);
 public sealed record MarketGroupQuery(string Text = "", MarketGroupSort Sort = MarketGroupSort.Name,
     int Offset = 0, int Size = 20);

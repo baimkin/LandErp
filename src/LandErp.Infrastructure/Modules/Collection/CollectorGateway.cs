@@ -309,6 +309,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         // Global ordering of natural identity locks avoids two overlapping search batches deadlocking.
         foreach (string identity in result.Observations.Select(item => $"{agent.OrganizationId}:{item.Data.Source}:{item.Data.ExternalId}").Distinct().Order(StringComparer.Ordinal))
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({identity},0))", cancellationToken);
+        List<Guid> newCalculationIds = [];
         int accepted = 0; int duplicates = 0; int newListings = 0; int changedListings = 0;
         foreach (ObservationEnvelope envelope in result.Observations)
         {
@@ -375,7 +376,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             if (data.ObservedAt < listing.FirstObservedAt) listing.FirstObservedAt = data.ObservedAt;
             if (isNew) db.Listings.Add(listing);
             await IncomingDuplicateDetector.RefreshAsync(db, listing, time.GetUtcNow(), cancellationToken);
-            if (isNew) newListings++;
+            if (isNew) { newListings++; newCalculationIds.Add(listing.Id); }
             else if (changes.Count > 0) changedListings++;
             db.ListingObservations.Add(new()
             {
@@ -439,7 +440,11 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
             ReceiptJson = JsonSerializer.Serialize(receipt, CollectionJson.Options),
             RecordedAt = time.GetUtcNow()
         });
-        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        await CatalogCalculationAutomation.IncludeNewAsync(db, agent.OrganizationId, newCalculationIds,
+            agent.Id, result.ResultId.ToString(), time.GetUtcNow(), cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return receipt;
     }
 

@@ -11,20 +11,24 @@
 @inject ICatalogWorkspace Workspace
 @inject IIncomingCatalogReadService IncomingReads
 @inject IIncomingFilterPresetService FilterPresets
+@inject ICatalogCalculationService Calculation
 @inject IEmployeeAccessService AccessV1
 @inject NavigationManager Navigation
+@using LandErp.Application.Modules.Overview.Contracts
+@inject IGroupMarketService Markets
 
-<PageTitle>@(IsArchive ? "Архив объявлений" : "Входящие предложения") · LandErp</PageTitle>
+<PageTitle>@(IsParticipants ? "Участники расчёта" : IsArchive ? "Архив объявлений" : "Входящие предложения") · LandErp</PageTitle>
 
 <div class="incoming-v2">
     <div class="v2-head">
         <div>
             <div class="v2-eyebrow">Первичный отбор</div>
-            <h1>@(IsArchive ? "Архив объявлений" : "Входящие объявления")</h1>
-            <p class="v2-lead">@(IsArchive ? "Не подходит, подтверждённые дубли, снятые, фейки и проданные. Данные и история доступны в прежнем просмотре." : "Новые и изменившиеся объявления из парсинга. Здесь решаем, что делать с объявлением до создания PropertyCase.")</p>
+            <h1>@(IsParticipants ? "Участники расчёта" : IsArchive ? "Архив объявлений" : "Входящие объявления")</h1>
+            <p class="v2-lead">@(IsParticipants ? "Отмеченные пригодные источники выбранной группы, включая проданные. Один подтверждённый объект — один участник." : IsArchive ? "Не подходит, подтверждённые дубли, снятые, фейки и проданные. Данные и история доступны в прежнем просмотре." : "Новые и изменившиеся объявления из парсинга. Здесь решаем, что делать с объявлением до создания PropertyCase.")</p>
         </div>
         <div class="v2-head-actions">
-            <button type="button" class="v2-btn" disabled="@(Busy || Loading)" @onclick="() => ChangeArchiveAsync(!IsArchive)">@(IsArchive ? "← Во входящие" : "Архив")</button>
+            @if (IsParticipants) { <a class="v2-btn" href="/">← К обзору</a><a class="v2-btn" href="/incoming">Все входящие</a> }
+            else { <button type="button" class="v2-btn" disabled="@(Busy || Loading)" @onclick="() => ChangeArchiveAsync(!IsArchive)">@(IsArchive ? "← Во входящие" : "Архив")</button> }
             @* TODO-BACKEND-INCOMING: page-level decision history read model is not available. *@
             <button type="button" class="v2-btn" data-todo-backend="TODO-BACKEND-INCOMING" @onclick="() => historyDemoOpen = true">История решений</button>
             @if(CanProcessIncoming){<button type="button" class="v2-btn primary" @onclick="() => manualOpen = true">+ Добавить ссылку вручную</button>}
@@ -48,7 +52,7 @@
 
         @if (catalogPage != null)
         {
-            @if (!IsArchive)
+            @if (!IsArchive && !IsParticipants)
             {
             <div class="v2-presets" role="group" aria-label="Режим входящих">
                 <button type="button" class="v2-preset @(incomingMode == IncomingCatalogMode.SavedFilters ? "active" : "")" aria-pressed="@(incomingMode == IncomingCatalogMode.SavedFilters)" @onclick="() => ChangeModeAsync(IncomingCatalogMode.SavedFilters)">По сохранённым фильтрам</button>
@@ -69,10 +73,11 @@
                 <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PriceChanged)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PriceChanged)"><label>Цена изменилась</label><strong>@catalogPage.Summary.PriceChanged</strong><span>реальные изменения цены</span></button>
                 <button type="button" class="v2-stat v2-stat-action warn @(preset == IncomingCatalogPreset.PossibleDuplicate ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PossibleDuplicate)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PossibleDuplicate)"><label>Возможный дубль</label><strong>@catalogPage.Summary.PossibleDuplicate</strong><span>есть совпадающие признаки</span></button>
                 <button type="button" class="v2-stat v2-stat-action risk @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.Incomplete)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.Incomplete)"><label>Не хватает данных</label><strong>@catalogPage.Summary.Incomplete</strong><span>цена / площадь / локация</span></button>
-                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.ProcessedToday ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.ProcessedToday)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.ProcessedToday)"><label>Обработано сегодня</label><strong>@catalogPage.Summary.ProcessedToday</strong><span>решений за рабочий день</span></button>
+                <div class="v2-stat market-stat"><GroupMarketPrices Value="groupMarket" Subject="CurrentSubject" Saved="ReloadAsync" /></div>
             </div>
 
             }
+            @if (!IsArchive && !IsParticipants) { <button type="button" class="v2-btn processed-slice" aria-pressed="@(preset == IncomingCatalogPreset.ProcessedToday)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.ProcessedToday)">Обработано сегодня: @catalogPage.Summary.ProcessedToday</button> }
             <section class="v2-surface">
                 <EditForm Model="filter" FormName="incoming-v2-filter" OnValidSubmit="ApplyFilterAsync">
                     <div class="v2-tools">
@@ -84,7 +89,7 @@
                                 <button type="button" class="v2-search-clear" title="Очистить поиск" aria-label="Очистить поиск" @onclick="ClearSearchAsync">×</button>
                             }
                         </div>
-                        @if (!IsArchive)
+                        @if (!IsArchive && !IsParticipants)
                         {
                         <select value="@(filter.Source?.ToString() ?? "")" @onchange="SourceChangedAsync" aria-label="Источник">
                             <option value="">Все источники</option>
@@ -94,14 +99,14 @@
                             }
                         </select>
                         }
-                        <select value="@searchGroupKey" @onchange="SearchGroupChangedAsync" aria-label="Группа поиска">
+                        <select disabled="@IsParticipants" value="@searchGroupKey" @onchange="SearchGroupChangedAsync" aria-label="Группа поиска">
                             <option value="">Все группы</option>
                             @foreach (IncomingSearchGroupView group in catalogPage.SearchGroups)
                             {
                                 <option value="@group.Id">@group.Name</option>
                             }
                         </select>
-                        @if (!IsArchive)
+                        @if (!IsArchive && !IsParticipants)
                         {
                         <select value="@(selectedSavedPresetId?.ToString() ?? "")" @onchange="SavedPresetChangedAsync" aria-label="Сохранённые фильтры">
                             <option value="">Все сохранённые фильтры (@catalogPage.FilterCounts?.AllPresetsCount)</option>
@@ -152,7 +157,7 @@
                         @if (selectedFilter.CompatibilityIssue != null) { <p role="alert">@selectedFilter.CompatibilityIssue Фильтр не применяется; выдача пуста.</p> }
                         <button class="v2-btn sm quiet" type="button" disabled="@Busy" @onclick="ReloadSelectedPresetAsync">Загрузить сохранённые условия заново</button>
                     }
-                    @if (advancedOpen && !IsArchive)
+                    @if (advancedOpen && !IsArchive && !IsParticipants)
                     {
                         <div class="v2-advanced">
                             <label class="v2-filter-field"><span>Состояние</span><InputSelect @bind-Value="filter.Disposition"><option value="">Все состояния</option>@foreach (CatalogDisposition state in Enum.GetValues<CatalogDisposition>()) { <option value="@state">@DispositionLabel(state)</option> }</InputSelect></label>
@@ -191,7 +196,7 @@
                         }
                     </div>
                 }
-                else
+                else if (!IsParticipants)
                 {
                 <div class="v2-presets">
                     <button type="button" class="v2-preset @(preset == null ? "active" : "")" @onclick="() => SelectPresetAsync(null)">Все @catalogPage.Summary.Incoming</button>
@@ -203,12 +208,27 @@
                 </div>
 
                 }
+                <p class="subtle">Обзор рассчитывает среднюю и медиану по отмеченным пригодным участникам групп при следующем обновлении.</p>
+                @if (CanProcessIncoming)
+                {
+                    <div class="v2-presets" role="group" aria-label="Участие в расчёте">
+                        <label><input type="checkbox" @bind="allCalculationResults" disabled="@Busy" /> Все результаты отбора (@catalogPage.Total), включая другие страницы</label>
+                        <span>Выбрано: @(allCalculationResults ? catalogPage.Total : calculationSelected.Count)</span>
+                        <button class="v2-btn sm" type="button" disabled="@(Busy || calculationPreviewBusy || (!allCalculationResults && calculationSelected.Count == 0))" @onclick="() => PreviewCalculationAsync(true)">Включить в расчёт…</button>
+                        <button class="v2-btn sm" type="button" disabled="@(Busy || calculationPreviewBusy || (!allCalculationResults && calculationSelected.Count == 0))" @onclick="() => PreviewCalculationAsync(false)">Исключить из расчёта…</button>
+                    </div>
+                }
                 <div class="v2-presets" role="group" aria-label="Сортировка объявлений">
                     <span>Сортировка:</span>
                     <button type="button" class="v2-preset @SortClass(IncomingCatalogSortField.PricePerSotka)" aria-label="@($"Цена за сотку: {SortDirectionLabel(IncomingCatalogSortField.PricePerSotka)}")" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.PricePerSotka)">Цена за сотку @SortIndicator(IncomingCatalogSortField.PricePerSotka) · @SortDirectionLabel(IncomingCatalogSortField.PricePerSotka)</button>
                     <button type="button" class="v2-preset @SortClass(IncomingCatalogSortField.Price)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Price)">Цена объекта @SortIndicator(IncomingCatalogSortField.Price)</button>
                 </div>
-                <p class="subtle" role="status">Найдено: @catalogPage.Total</p>
+                @if (IsParticipants)
+                {
+                    <p class="subtle" role="status">Группа: @catalogPage.SearchGroups.FirstOrDefault(g => g.Id == ParticipantsGroupId)?.Name · В расчёте: @catalogPage.ParticipantTotal · Найдено по поиску: @catalogPage.Total</p>
+                    <p class="subtle">Исключение снимает отметку объявления во всех группах. Другой отмеченный пригодный источник того же объекта может стать представителем. Цена проданного объявления — цена источника, не подтверждённая цена сделки.</p>
+                }
+                else { <p class="subtle" role="status">Найдено: @catalogPage.Total</p> }
                 @if (incomingMode == IncomingCatalogMode.SavedFilters && catalogPage.FilterCounts?.ApplicableCount == 0)
                 {
                     <div class="v2-empty">
@@ -227,7 +247,8 @@
                         <table class="v2-table">
                             <thead>
                                 <tr>
-                                    <th>Объявление</th>
+                                    @if (CanProcessIncoming) { <th aria-label="Выбор объявлений">Выбор</th> }
+                                    <th>Объявление</th><th>Учитывать в расчёте</th>
                                     <th><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.Price)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Price)">Цена <span>@SortIndicator(IncomingCatalogSortField.Price)</span></button></th>
                                     <th><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.Area)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Area)">Площадь <span>@SortIndicator(IncomingCatalogSortField.Area)</span></button></th>
                                     <th>Тип участка</th><th>Почему в очереди</th><th>Данные</th><th>Найдено</th><th>Источник</th>
@@ -239,6 +260,10 @@
                                     IncomingCatalogRowRead? row = Row(item.Id);
                                     int completeness = Math.Clamp(row?.CompletenessPercent ?? 0, 0, 100);
                                     <tr class="@RowTone(row)" @onclick="() => OpenDetailAsync(item.Id)">
+                                        @if (CanProcessIncoming)
+                                        {
+                                            <td @onclick:stopPropagation="true"><input type="checkbox" aria-label="@($"Выбрать {item.Title}")" checked="@(allCalculationResults || calculationSelected.ContainsKey(item.Id))" disabled="@(Busy || allCalculationResults)" @onchange="e => SelectCalculationItem(item, e.Value is true)" /></td>
+                                        }
                                         <td>
                                             <div class="v2-object-cell">
                                                 @if (!string.IsNullOrWhiteSpace(row?.ThumbnailUrl))
@@ -274,6 +299,18 @@
                                                     }
                                                 </div>
                                             </div>
+                                        </td>
+                                        <td @onclick:stopPropagation="true">
+                                            <strong>@(item.IncludeInCalculation ? "Отметка включена" : "Отметка выключена")</strong>
+                                            @if (item.CalculationIneligibility != null)
+                                            {
+                                                <div class="v2-sub">@(item.IncludeInCalculation ? "Временно непригодно: " : "Нельзя включить: ")@item.CalculationIneligibility</div>
+                                            }
+                                            else if (item.IncludeInCalculation) { <div class="v2-sub">Данные пригодны для расчёта</div> }
+                                            @if (CanProcessIncoming)
+                                            {
+                                                <button type="button" class="v2-btn sm quiet" disabled="@(Busy || (!item.IncludeInCalculation && item.CalculationIneligibility != null))" @onclick="() => ToggleCalculationAsync(item)">@(item.IncludeInCalculation ? "Исключить" : "Включить")</button>
+                                            }
                                         </td>
                                         <td><div class="v2-price">@ProcurementLabels.Money(item.Price)</div><div class="v2-sub">@(item.PricePerSotka == null ? "— / сот." : ProcurementLabels.Money(item.PricePerSotka) + " / сот.")</div></td>
                                         <td><strong class="v2-area">@AreaSotki(item.AreaSquareMeters)</strong></td>
@@ -734,6 +771,7 @@
 {
     <Modal Title="Исключить объявление из группы" OnClose="CloseUnlinkObjectGroup">
         <p>Объявление снова станет самостоятельным. Если оно было добавлено в PropertyCase через эту группу, связь источника будет снята.</p>
+        <label class="field"><span><InputCheckbox @bind-Value="unlinkIncludeCalculation" /> Учитывать в расчёте медианы</span></label>
         <label class="field"><span>Почему это другой объект</span><InputTextArea @bind-Value="unlinkObjectGroupReason" /></label>
         <div class="form-actions">
             <ActionButton Label="Отмена" Tone="quiet" OnClick="CloseUnlinkObjectGroup" />
@@ -784,6 +822,8 @@
     <Modal Title="Сохранить условия фильтра" OnClose="() => savePresetOpen = false">
         @if (Error != null) { <p role="alert">@Error</p> }
         <p class="subtle">Группа ограничивает выдачу объявлениями всех её поисков, включая добавленные позже. Фильтр общий для организации. Свободный текстовый поиск не сохраняется.</p>
+        <label class="field"><span><InputCheckbox @bind-Value="presetAutoInclude" /> Автоматически добавлять новые объявления в медиану</span></label>
+        <p class="subtle">Только при первом поступлении. Старые объявления добавляются отдельным массовым действием. Выключение не снимает отметки.</p>
         <label class="field"><span>Название фильтра</span><InputText @bind-Value="presetName" /></label>
         <label class="field">
             <span>Группа</span>
@@ -875,7 +915,20 @@
     <div class="v2-toast show" role="status">@Success</div>
 }
 
+@if (calculationPreview != null)
+{
+    <Modal Title="@(calculationInclude ? "Включить в расчёт" : "Исключить из расчёта")" OnClose="() => calculationPreview = null">
+        <p>Действие относится к <strong>@calculationPreview.Total объявлениям</strong>.</p>
+        <p>Будет изменено: @calculationPreview.WouldChange. Уже имеют нужную отметку: @calculationPreview.AlreadySet. Нельзя включить: @calculationPreview.Ineligible.</p>
+        @foreach (var reason in calculationPreview.Reasons) { <p>@reason.Key: @reason.Value</p> }
+        <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => calculationPreview = null" /><ActionButton Label="Применить" Busy="Busy" OnClick="ApplyCalculationAsync" /></div>
+    </Modal>
+}
+
 @code {
+    [Parameter, SupplyParameterFromQuery(Name = "participants")] public Guid? ParticipantsGroupId { get; set; }
+    private Guid? participantRoute;
+    private bool IsParticipants => incomingMode == IncomingCatalogMode.Participants;
     [Parameter, SupplyParameterFromQuery(Name = "manual")] public bool OpenManual { get; set; }
     private const int PageSize = 25;
     private const int SearchDebounceMilliseconds = 400;
@@ -891,6 +944,62 @@
     private bool advancedOpen;
     private bool monitoringOpen;
     private bool openNextAfterDecision = true;
+    private IncomingCatalogReadFilter? renderedCalculationFilter;
+    private readonly Dictionary<Guid, long> calculationSelected = [];
+    private bool allCalculationResults;
+    private bool calculationPreviewBusy;
+    private bool calculationInclude;
+    private CatalogCalculationSelection? calculationSelection;
+    private CatalogCalculationPreview? calculationPreview;
+
+    private void SelectCalculationItem(CatalogItemView item, bool selected)
+    {
+        if (selected) calculationSelected[item.Id] = item.Version;
+        else calculationSelected.Remove(item.Id);
+    }
+
+    private async Task ToggleCalculationAsync(CatalogItemView item)
+    {
+        CatalogCalculationResult? result = null;
+        bool saved = await ExecuteConfirmedAsync(async () => result = await Calculation.SetAsync(CurrentSubject,
+            new(item.Id, item.Version), !item.IncludeInCalculation, Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (saved && result != null) Success = CalculationResultText(result);
+    }
+
+    private async Task PreviewCalculationAsync(bool include)
+    {
+        if (renderedCalculationFilter == null || calculationPreviewBusy || Busy) return;
+        calculationPreviewBusy = true;
+        try
+        {
+            calculationSelection = new(renderedCalculationFilter, allCalculationResults ? null
+                : calculationSelected.Select(item => new CatalogCalculationTarget(item.Key, item.Value)).ToArray());
+            calculationInclude = include;
+            calculationPreview = await Calculation.PreviewAsync(CurrentSubject, calculationSelection, include, CancellationToken.None);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException) { ShowValidationError("Отбор или объявления изменились. Обновите список и выберите строки заново."); }
+        catch (AccessDeniedException) { ShowValidationError("Нет права обработки входящих."); }
+        catch (Exception exception) { ShowValidationError(ReadFailure(exception, "Не удалось проверить количество объявлений.")); }
+        finally { calculationPreviewBusy = false; }
+    }
+
+    private async Task ApplyCalculationAsync()
+    {
+        if (calculationSelection == null || calculationPreview == null) return;
+        CatalogCalculationResult? result = null;
+        bool saved = await ExecuteConfirmedAsync(async () => result = await Calculation.ApplyAsync(CurrentSubject,
+            calculationSelection, calculationInclude, calculationPreview.Stamp, Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (saved && result != null)
+        {
+            calculationPreview = null;
+            Success = CalculationResultText(result);
+        }
+    }
+
+    private static string CalculationResultText(CatalogCalculationResult result) =>
+        $"Всего: {result.Total}. Изменено: {result.Changed}. Уже имели нужную отметку: {result.AlreadySet}. Нельзя включить: {result.Ineligible}. "
+        + string.Join("; ", result.Reasons.Select(reason => $"{reason.Key}: {reason.Value}"));
+
     private IncomingCatalogPreset? preset;
     private IncomingCatalogPreset? criteriaPreset;
     private IncomingCatalogMode incomingMode = IncomingCatalogMode.SavedFilters;
@@ -919,6 +1028,8 @@
     private bool savePresetOpen;
     private IncomingFilterPresetView? deletePreset;
     private string presetName = "";
+    private bool presetAutoInclude;
+    private bool unlinkIncludeCalculation;
     private Guid? presetGroupId;
     private IncomingCatalogDetailRead? duplicateCompareRead;
     private string? duplicateCompareError;
@@ -957,17 +1068,34 @@
         queryInitialized = true;
     }
 
+    protected override async Task OnParametersSetAsync()
+    {
+        if (participantRoute != ParticipantsGroupId) await ReloadAsync();
+    }
+
+    private GroupMarketView? groupMarket;
     protected override async Task ReadAsync()
     {
+        if (participantRoute != ParticipantsGroupId)
+        {
+            participantRoute = ParticipantsGroupId;
+            filter.Reset(); page = 0; preset = criteriaPreset = null;
+            selectedSavedPresetId = null; selectedPresetSnapshot = null;
+            searchGroupKey = ParticipantsGroupId?.ToString() ?? "";
+            incomingMode = ParticipantsGroupId == null ? IncomingCatalogMode.SavedFilters : IncomingCatalogMode.Participants;
+        }
         effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, CancellationToken.None);
         Guid? groupId = Guid.TryParse(searchGroupKey, out Guid parsed) ? parsed : null;
         IncomingCatalogFilter baseFilter = new(filter.Text.Trim(), filter.Source, filter.Disposition, filter.Age,
             filter.MinPrice, filter.MaxPrice, ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki),
             filter.AttentionOnly, page * PageSize, PageSize);
-        catalogPage = await IncomingReads.ReadAsync(CurrentSubject,
-            new(baseFilter, null, criteriaPreset, sortField, sortDirection, groupId,
-                filter.MinPricePerSotka, filter.MaxPricePerSotka, filter.LandTypes.Order().ToArray(),
-                new(incomingMode, selectedSavedPresetId, UseDraft: true, Slice: preset, ArchiveState: archiveState)), CancellationToken.None);
+        renderedCalculationFilter = new(baseFilter, null, criteriaPreset, sortField, sortDirection, groupId,
+            filter.MinPricePerSotka, filter.MaxPricePerSotka, filter.LandTypes.Order().ToArray(),
+            new(incomingMode, selectedSavedPresetId, UseDraft: true, Slice: preset, ArchiveState: archiveState));
+        catalogPage = await IncomingReads.ReadAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
+        groupMarket = await Markets.ReadIncomingAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
+        calculationSelected.Clear();
+        allCalculationResults = false;
         savedPresets = catalogPage.FilterCounts?.Presets ?? [];
     }
 
@@ -981,6 +1109,7 @@
 
     private Task ResetFilterAsync()
     {
+        if (IsParticipants) { filter.Text = ""; page = 0; return ReloadAsync(); }
         bool archive = IsArchive;
         CancelSearchDebounce();
         filter.Reset();
@@ -1168,6 +1297,7 @@
         if (SelectedSavedPreset()?.CompatibilityIssue is string issue) { ShowValidationError(issue); return; }
         presetGroupId = Guid.TryParse(searchGroupKey, out Guid id) ? id : null;
         presetName = SelectedSavedPreset()?.Name ?? BuildPresetName();
+        presetAutoInclude = SelectedSavedPreset()?.Criteria.AutoIncludeNewInCalculation ?? false;
         savePresetOpen = true;
     }
 
@@ -1187,7 +1317,7 @@
         if (SelectedSavedPreset()?.CompatibilityIssue is string issue) { ShowValidationError(issue); return; }
         IncomingFilterPresetView? created = null;
         await ExecuteAsync(async () => created = await FilterPresets.CreateAsync(CurrentSubject,
-            new(presetGroupId, presetName, CurrentPresetCriteria() with { SearchGroupId = presetGroupId }), CancellationToken.None));
+            new(presetGroupId, presetName, CurrentPresetCriteria() with { SearchGroupId = presetGroupId, AutoIncludeNewInCalculation = presetAutoInclude }), CancellationToken.None));
         if (created != null)
         {
             savePresetOpen = false;
@@ -1203,7 +1333,7 @@
         if (selected == null || selected.CompatibilityIssue != null) return;
         IncomingFilterPresetView? updated = null;
         bool committed = await ExecuteConfirmedAsync(async () => updated = await FilterPresets.UpdateAsync(CurrentSubject,
-            new(selected.Id, selected.Version, presetName, CurrentPresetCriteria() with { SearchGroupId = presetGroupId }), CancellationToken.None));
+            new(selected.Id, selected.Version, presetName, CurrentPresetCriteria() with { SearchGroupId = presetGroupId, AutoIncludeNewInCalculation = presetAutoInclude }), CancellationToken.None));
         if (!committed || updated == null) return;
         savePresetOpen = false;
         savedPresets = savedPresets.Select(item => item.Id == updated.Id ? updated : item).ToArray();
@@ -1522,6 +1652,7 @@
     private void OpenUnlinkObjectGroup()
     {
         unlinkObjectGroupReason = "";
+        unlinkIncludeCalculation = false;
         unlinkObjectGroupOpen = true;
     }
 
@@ -1529,6 +1660,7 @@
     {
         unlinkObjectGroupOpen = false;
         unlinkObjectGroupReason = "";
+        unlinkIncludeCalculation = false;
     }
 
     private async Task UnlinkObjectGroupAsync()
@@ -1537,7 +1669,7 @@
         if (detail == null) return;
         Guid id = detail.Item.Id;
         bool saved = await ExecuteConfirmedAsync(() => Workspace.UnlinkCatalogItemFromObjectGroupAsync(CurrentSubject,
-            new(id, detail.Item.Version, unlinkObjectGroupReason),
+            new(id, detail.Item.Version, unlinkObjectGroupReason, unlinkIncludeCalculation),
             Guid.CreateVersion7().ToString(), CancellationToken.None));
         if (!saved) return;
         CloseUnlinkObjectGroup();

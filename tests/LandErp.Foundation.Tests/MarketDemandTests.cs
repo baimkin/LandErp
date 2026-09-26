@@ -1,0 +1,164 @@
+using LandErp.Application.Modules.Catalog.Contracts;
+using LandErp.Application.Modules.Catalog.Domain;
+using LandErp.Application.Modules.IdentityAccess.Contracts;
+using LandErp.Application.Modules.Overview.Contracts;
+using LandErp.Infrastructure.Modules.Catalog;
+using LandErp.Infrastructure.Modules.Collection;
+using LandErp.Infrastructure.Modules.IdentityAccess;
+using LandErp.Infrastructure.Modules.Overview;
+using LandErp.Infrastructure.Modules.Procurement;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Npgsql;
+
+namespace LandErp.Foundation.Tests;
+
+[TestClass]
+[TestCategory("PostgreSQL")]
+public sealed class MarketDemandTests
+{
+    private static readonly CancellationToken Ct = CancellationToken.None;
+    private static IncomingFilterPresetCriteriaV1 Criteria(Guid? group = null) => new(
+        2, null, null, null, CatalogAgeRange.Any, null, 1m, null, null, null, null, [], false,
+        IncomingCatalogSortField.PricePerSotka, IncomingCatalogSortDirection.Ascending, SearchGroupId: group);
+
+    [TestMethod]
+    public async Task DemandRequiresHeadValidatesOrganizationPriceVersionAndAuditsClear()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
+        var access = new EmployeeAccessService(f.Factory);
+        var presets = new IncomingFilterPresetService(source, access);
+        var service = new GroupMarketService(f.Factory, access, presets);
+        var administration = new CollectionAdministration(f.Factory, TimeProvider.System);
+        Guid group = await administration.CreateGroupAsync(f.Owner, "Тест спроса", 0, "m03", Ct);
+        var original = (await service.ReadProcurementAsync(f.Head, group, Ct))!;
+        Assert.IsNull(original.DemandTestPricePerSotka);
+        Assert.IsTrue(original.CanEditDemand);
+        Assert.IsFalse((await service.ReadProcurementAsync(f.Manager, group, Ct))!.CanEditDemand);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.SaveDemandAsync(f.Manager, new(group, original.Version, 100m), "m03", Ct));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.SaveDemandAsync(f.ForeignOwner, new(group, original.Version, 100m), "m03", Ct));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ReadProcurementAsync(f.ForeignOwner, group, Ct));
+        foreach (decimal invalid in new[] { -1m, 0m, .001m, 1000000000000000m })
+            await Assert.ThrowsExactlyAsync<ArgumentException>(() => service.SaveDemandAsync(f.Head, new(group, original.Version, invalid), "m03", Ct));
+        await service.SaveDemandAsync(f.Head, new(group, original.Version, 123.455m), "m03-set", Ct);
+        var changed = (await service.ReadProcurementAsync(f.Owner, group, Ct))!;
+        Assert.AreEqual(123.46m, changed.DemandTestPricePerSotka);
+        Assert.IsTrue(changed.Version > original.Version);
+        Assert.AreEqual(original.MedianPricePerSotka, changed.MedianPricePerSotka);
+        await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => service.SaveDemandAsync(f.Head, new(group, original.Version, 500m), "m03-stale", Ct));
+        await service.SaveDemandAsync(f.Owner, new(group, changed.Version, null), "m03-clear", Ct);
+        Assert.IsNull((await service.ReadProcurementAsync(f.Head, group, Ct))!.DemandTestPricePerSotka);
+        await using (var db = f.Sandbox.Context())
+        {
+            var audit = await db.AuditEvents.Where(item => item.ObjectId == group && item.Action == "DemandTestPriceChanged").ToArrayAsync();
+            Assert.AreEqual(2, audit.Length);
+            CollectionAssert.AreEquivalent(new[] { f.Head.UserId, f.Owner.UserId }, audit.Select(item => item.ActorId).ToArray());
+            Assert.IsFalse(db.Database.HasPendingModelChanges());
+            string comment = await db.Database.SqlQueryRaw<string>("SELECT col_description('collection.search_group_market_settings'::regclass, attnum) AS \"Value\" FROM pg_attribute WHERE attrelid='collection.search_group_market_settings'::regclass AND attname='demand_test_price_per_sotka'").SingleAsync();
+            StringAssert.Contains(comment, "Ручная цена теста спроса");
+        }
+        await f.SetExplicitAccessAsync(f.EmployeeId("head-phase1@test.invalid"), EmployeeAccessRules.NoAccess);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.SaveDemandAsync(f.Head, new(group, changed.Version, 1m), "m03-revoked", Ct));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ReadIncomingAsync(f.Head, new(new(), SearchGroupId: group), Ct));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ReadProcurementGroupsAsync(f.Head, Ct));
+    }
+
+    [TestMethod]
+    public async Task ConcurrentFirstDemandWriteHasOneWinner()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
+        var access = new EmployeeAccessService(f.Factory);
+        var service = new GroupMarketService(f.Factory, access, new IncomingFilterPresetService(source, access));
+        Guid group = Guid.CreateVersion7();
+        await using (var db = f.Sandbox.Context())
+        {
+            db.SearchGroups.Add(new() { Id = group, OrganizationId = f.OrganizationId, Name = "Без настроек", Active = true });
+            await db.SaveChangesAsync();
+        }
+        async Task<bool> Attempt(decimal price)
+        {
+            try { await service.SaveDemandAsync(f.Head, new(group, 0, price), "m03-race", Ct); return true; }
+            catch (DbUpdateConcurrencyException) { return false; }
+        }
+        bool[] results = await Task.WhenAll(Attempt(10m), Attempt(20m));
+        Assert.AreEqual(1, results.Count(item => item));
+        await using var check = f.Sandbox.Context();
+        Assert.AreEqual(1, await check.SearchGroupMarketSettings.CountAsync(item => item.SearchGroupId == group));
+        Assert.AreEqual(1, await check.AuditEvents.CountAsync(item => item.ObjectId == group && item.Action == "DemandTestPriceChanged"));
+    }
+
+    [TestMethod]
+    public async Task ContextsShareWholeGroupPricesAndCasesUseConfirmedVisibleSourceMembership()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(true, true);
+        var pair = await f.IngestMarketplacePairAsync();
+        Guid a = await pair.Administration.CreateGroupAsync(f.Owner, "А группа", 0, "m03", Ct);
+        Guid b = await pair.Administration.CreateGroupAsync(f.Owner, "Б группа", 1, "m03", Ct);
+        await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
+        var access = new EmployeeAccessService(f.Factory);
+        var presets = new IncomingFilterPresetService(source, access);
+        var service = new GroupMarketService(f.Factory, access, presets);
+        await using (var db = f.Sandbox.Context())
+        {
+            foreach (var search in await db.SearchConfigurations.ToArrayAsync()) search.SearchGroupId = search.Source == CatalogSource.Avito ? a : b;
+            foreach (var item in await db.Listings.ToArrayAsync()) item.IncludeInCalculation = true;
+            await db.SaveChangesAsync();
+        }
+        Guid independent = await f.InsertIndependentCaseAsync("Без источника");
+        Assert.AreEqual(0, (await service.ReadCaseAsync(f.Manager, independent, Ct)).Count);
+        Guid caseId = (await f.Workspace.TakeToWorkAsync(f.Manager, new(pair.AvitoId), "m03-take", Ct)).CaseId;
+        var single = await service.ReadCaseAsync(f.Manager, caseId, Ct);
+        Assert.AreEqual(a, single.Single().SearchGroupId);
+        await service.SaveDemandAsync(f.Head, new(a, single[0].Version, 110000m), "m03-demand", Ct);
+        var saved = await presets.CreateAsync(f.Manager, new(a, "Узкий фильтр", Criteria(a)), Ct);
+        var ungrouped = await presets.CreateAsync(f.Manager, new(null, "Без группы", Criteria()), Ct);
+        var request = new IncomingCatalogReadFilter(new("несовпадающий текст", MaxPrice: 1m), SearchGroupId: b,
+            WorkingScope: new(IncomingCatalogMode.SavedFilters, saved.Id));
+        var incoming = (await service.ReadIncomingAsync(f.Manager, request, Ct))!;
+        var queueMarket = (await service.ReadProcurementAsync(f.Manager, a, Ct))!;
+        Assert.AreEqual(queueMarket, incoming);
+        Assert.AreEqual(1, incoming.ParticipantCount);
+        Assert.AreEqual(133333.3333m, incoming.MedianPricePerSotka);
+        Assert.AreEqual(110000m, incoming.DemandTestPricePerSotka);
+        Assert.IsNull(await service.ReadIncomingAsync(f.Manager, new(new()), Ct));
+        Assert.IsNull(await service.ReadIncomingAsync(f.Manager, request with { WorkingScope = new(IncomingCatalogMode.SavedFilters, ungrouped.Id) }, Ct));
+        Assert.AreEqual(b, (await service.ReadIncomingAsync(f.Manager, request with { WorkingScope = new(IncomingCatalogMode.SavedFilters, saved.Id, UseDraft: true) }, Ct))!.SearchGroupId);
+        var overview = new OverviewService(f.Factory, TimeProvider.System);
+        Assert.AreEqual(queueMarket, (await overview.ReadMarketGroupsAsync(f.Manager, new(), Ct)).Items.Single(item => item.SearchGroupId == a).Market);
+        Assert.AreEqual(queueMarket, (await service.ReadCaseAsync(f.Manager, caseId, Ct)).Single());
+        var queues = new ProcurementQueueV2ReadService(f.Factory, TimeProvider.System);
+        Assert.AreEqual(1, (await queues.ReadPageAsync(f.Manager, new(SearchGroupId: a), Ct)).Total);
+        Assert.AreEqual(0, (await queues.ReadPageAsync(f.Manager, new(SearchGroupId: b), Ct)).Total);
+        await using (var db = f.Sandbox.Context())
+        {
+            db.PropertyCaseSourceLinks.Add(new() { Id = Guid.CreateVersion7(), OrganizationId = f.OrganizationId,
+                PropertyCaseId = caseId, CatalogItemId = pair.CianId, Confirmed = false,
+                Provenance = "M03 test", RecordedAt = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        Assert.AreEqual(1, (await service.ReadCaseAsync(f.Manager, caseId, Ct)).Count);
+        Assert.AreEqual(0, (await queues.ReadPageAsync(f.Manager, new(SearchGroupId: b), Ct)).Total);
+        await using (var db = f.Sandbox.Context())
+        {
+            (await db.PropertyCaseSourceLinks.SingleAsync(item => item.CatalogItemId == pair.CianId)).Confirmed = true;
+            var job = await db.CollectionJobs.SingleAsync(item => db.SearchConfigurations.Any(search => search.Id == item.SearchId && search.SearchGroupId == a));
+            for (int i = 0; i < 2; i++) db.ListingObservations.Add(new() { Id = Guid.CreateVersion7(), ListingId = pair.CianId,
+                AgentId = pair.Agent.AgentId, JobId = job.Id, ObservationKey = "m03-" + i, ContentHash = "m03-" + i,
+                PayloadJson = "{}", ChangesJson = "[]", ObservedAt = DateTimeOffset.UtcNow, RecordedAt = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        CollectionAssert.AreEqual(new[] { a, b }, (await service.ReadCaseAsync(f.Manager, caseId, Ct)).Select(item => item.SearchGroupId).ToArray());
+        Assert.AreEqual(1, (await queues.ReadPageAsync(f.Manager, new(SearchGroupId: a), Ct)).Total);
+        Assert.AreEqual(1, (await queues.ReadPageAsync(f.Manager, new(SearchGroupId: b), Ct)).Total);
+        Assert.AreEqual(0, (await queues.ReadPageAsync(f.SecondManager, new(SearchGroupId: a), Ct)).Total);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ReadCaseAsync(f.SecondManager, caseId, Ct));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ReadCaseAsync(f.ForeignOwner, caseId, Ct));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => queues.ReadPageAsync(f.ForeignOwner, new(SearchGroupId: a), Ct));
+        await f.SetExplicitAccessAsync(f.ManagerEmployeeId, ProcurementTestsHelper.ProcurementManagerAccess(AccessScope.Department) with { IncomingAccess = IncomingAccessLevel.None });
+        Assert.IsFalse((await service.ReadCaseAsync(f.Manager, caseId, Ct))[0].CanReadParticipants);
+        Assert.AreEqual(2, (await service.ReadProcurementAsync(f.Manager, a, Ct))!.ParticipantCount);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ReadIncomingAsync(f.Manager, request, Ct));
+    }
+}

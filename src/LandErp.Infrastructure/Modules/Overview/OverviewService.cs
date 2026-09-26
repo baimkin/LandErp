@@ -1,6 +1,5 @@
-using System.Data;
+using LandErp.Infrastructure.Modules.Catalog;
 using System.Globalization;
-using System.Text;
 using LandErp.Application.Foundation;
 using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Catalog.Domain;
@@ -14,8 +13,6 @@ using LandErp.Infrastructure.Modules.Organization;
 using LandErp.Infrastructure.Modules.Procurement;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
-using NpgsqlTypes;
 
 namespace LandErp.Infrastructure.Modules.Overview;
 
@@ -36,7 +33,6 @@ public sealed class OverviewService(
     private sealed record CaseTaskRow(PropertyCase Case, WorkTask Task, Guid AssigneeId,
         bool HasCheckIssue, bool SourceChanged);
     private sealed record GroupDb(Guid Id, string Name, int SortOrder, SearchGroupMarketSettings? Settings);
-    private sealed record MarketAggregate(decimal? Median, decimal? Average, int Included, int Excluded, int FakeExcluded);
 
     public async Task<OverviewView> ReadAsync(Subject subject, CancellationToken cancellationToken)
     {
@@ -157,7 +153,7 @@ public sealed class OverviewService(
                     names.GetValueOrDefault(item.EmployeeId, "Сотрудник"), item.ActiveCases, item.OverdueCases)).ToList();
             }
 
-            market = await ReadMarketGroupsCoreAsync(db, queue.OrganizationId, canManage: effective.CanManageCollection,
+            market = await ReadMarketGroupsCoreAsync(db, effective,
                 new("", MarketGroupSort.Name, 0, CompactMarketSize), now, cancellationToken);
         }
 
@@ -222,7 +218,7 @@ public sealed class OverviewService(
         if (!effective.CanReadProcurement && !effective.CanReadCollection)
             throw new AccessDeniedException();
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        return await ReadMarketGroupsCoreAsync(db, effective.OrganizationId, effective.CanManageCollection,
+        return await ReadMarketGroupsCoreAsync(db, effective,
             query, time.GetUtcNow(), cancellationToken);
     }
 
@@ -259,9 +255,10 @@ public sealed class OverviewService(
         return SettingsView(settings);
     }
 
-    private static async Task<MarketGroupPage> ReadMarketGroupsCoreAsync(LandErpDbContext db, Guid organizationId, bool canManage,
+    private static async Task<MarketGroupPage> ReadMarketGroupsCoreAsync(LandErpDbContext db, EffectiveEmployeeAccess effective,
         MarketGroupQuery query, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        Guid organizationId = effective.OrganizationId;
         int offset = Math.Max(0, query.Offset);
         int size = Math.Clamp(query.Size, 1, 50);
         string text = query.Text.Trim();
@@ -278,13 +275,14 @@ public sealed class OverviewService(
                                   join value in db.SearchGroupMarketSettings.AsNoTracking() on groupItem.Id equals value.SearchGroupId into values
                                   from settings in values.DefaultIfEmpty()
                                   select new GroupDb(groupItem.Id, groupItem.Name, groupItem.SortOrder, settings)).ToArrayAsync(cancellationToken);
-        Dictionary<Guid, MarketAggregate> aggregates = await ReadMarketAggregatesAsync(db, organizationId, groups, now, cancellationToken);
+        var aggregates = (await GroupMarketService.ReadCoreAsync(db, effective, groups.Select(item => item.Id).ToArray(), cancellationToken))
+            .ToDictionary(item => item.SearchGroupId);
         IEnumerable<MarketGroupRow> rows = groups.Select(group =>
         {
-            MarketAggregate aggregate = aggregates.GetValueOrDefault(group.Id, new(null, null, 0, 0, 0));
-            return new MarketGroupRow(group.Id, group.Name, group.SortOrder, aggregate.Median, aggregate.Average,
-                aggregate.Included, aggregate.Excluded, aggregate.FakeExcluded,
-                group.Settings == null ? DefaultSettings() : SettingsView(group.Settings), canManage);
+            GroupMarketView aggregate = aggregates[group.Id];
+            return new MarketGroupRow(group.Id, group.Name, group.SortOrder, aggregate.MedianPricePerSotka, aggregate.AveragePricePerSotka,
+                aggregate.ParticipantCount, 0, 0,
+                group.Settings == null ? DefaultSettings() : SettingsView(group.Settings), false, aggregate.CanReadParticipants, aggregate);
         });
         rows = query.Sort switch
         {
@@ -298,88 +296,6 @@ public sealed class OverviewService(
         MarketGroupRow[] page = pageBeforeAggregate ? rows.ToArray() : rows.Skip(offset).Take(size).ToArray();
         int boundedTotal = pageBeforeAggregate ? total : Math.Min(total, MarketSortCandidateLimit);
         return new(page, boundedTotal, offset, size);
-    }
-
-    private static async Task<Dictionary<Guid, MarketAggregate>> ReadMarketAggregatesAsync(LandErpDbContext db,
-        Guid organizationId, GroupDb[] groups, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        if (groups.Length == 0) return [];
-        StringBuilder values = new();
-        await db.Database.OpenConnectionAsync(cancellationToken);
-        await using NpgsqlCommand command = new();
-        command.Connection = (NpgsqlConnection)db.Database.GetDbConnection();
-        command.Parameters.AddWithValue("organization", NpgsqlDbType.Uuid, organizationId);
-        command.Parameters.AddWithValue("now", NpgsqlDbType.TimestampTz, now);
-        for (int index = 0; index < groups.Length; index++)
-        {
-            if (index > 0) values.Append(',');
-            values.Append(CultureInfo.InvariantCulture, $"(@group{index},@period{index},@types{index},@min{index},@max{index})");
-            SearchGroupMarketSettingsView settings = groups[index].Settings == null ? DefaultSettings() : SettingsView(groups[index].Settings!);
-            command.Parameters.AddWithValue($"group{index}", NpgsqlDbType.Uuid, groups[index].Id);
-            command.Parameters.AddWithValue($"period{index}", NpgsqlDbType.Integer, settings.PeriodDays);
-            command.Parameters.AddWithValue($"types{index}", NpgsqlDbType.Array | NpgsqlDbType.Text,
-                settings.AllowedPropertyTypes.Select(item => item.ToString()).ToArray());
-            command.Parameters.Add(new NpgsqlParameter($"min{index}", NpgsqlDbType.Numeric) { Value = settings.MinPricePerSotka ?? (object)DBNull.Value });
-            command.Parameters.Add(new NpgsqlParameter($"max{index}", NpgsqlDbType.Numeric) { Value = settings.MaxPricePerSotka ?? (object)DBNull.Value });
-        }
-
-        command.CommandText = $$"""
-            WITH settings(group_id, period_days, allowed_types, min_price, max_price) AS (
-                VALUES {{values}}
-            ), candidates AS (
-                SELECT DISTINCT s.group_id, l.id, l.disposition, l.price, l.area_square_meters, l.currency,
-                    lower(replace(coalesce(l.title,'') || ' ' || coalesce(l.description,''), 'ё', 'е')) AS source_text,
-                    s.allowed_types, s.min_price, s.max_price
-                FROM settings s
-                JOIN collection.search_configurations sc ON sc.search_group_id = s.group_id AND sc.organization_id = @organization
-                JOIN collection.jobs j ON j.search_id = sc.id AND j.organization_id = @organization
-                JOIN catalog.observations o ON o.job_id = j.id
-                    AND o.observed_at >= @now - make_interval(days => s.period_days)
-                JOIN catalog.listings l ON l.id = o.listing_id AND l.organization_id = @organization
-            ), classified AS (
-                SELECT c.*,
-                    CASE WHEN c.price IS NOT NULL AND c.price > 0 AND c.area_square_meters IS NOT NULL AND c.area_square_meters > 0
-                        AND c.currency = 'RUB' THEN c.price * 100 / c.area_square_meters END AS price_per_sotka,
-                    CASE
-                        WHEN c.source_text LIKE '%ижс%' OR (c.source_text LIKE '%индивидуальн%' AND c.source_text LIKE '%жил%') THEN 'Izhs'
-                        WHEN c.source_text LIKE '%снт%' OR (c.source_text LIKE '%садов%' AND c.source_text LIKE '%товариществ%') THEN 'Snt'
-                        WHEN c.source_text LIKE '%днп%' OR (c.source_text LIKE '%дачн%' AND c.source_text LIKE '%партнерств%') THEN 'Dnp'
-                        WHEN c.source_text LIKE '%лпх%' OR (c.source_text LIKE '%личн%' AND c.source_text LIKE '%подсобн%' AND c.source_text LIKE '%хозяйств%') THEN 'Lph'
-                        WHEN c.source_text LIKE '%садоводств%' OR c.source_text LIKE '%садовый участок%' THEN 'Gardening'
-                        WHEN c.source_text LIKE '%кфх%' OR (c.source_text LIKE '%фермерск%' AND c.source_text LIKE '%хозяйств%') THEN 'Kfh'
-                        WHEN c.source_text LIKE '%промназнач%' OR c.source_text LIKE '%промышленн%' OR c.source_text LIKE '%производственн%' OR c.source_text LIKE '%складск%' THEN 'Industrial'
-                        ELSE 'Other'
-                    END AS property_type
-                FROM candidates c
-            ), evaluated AS (
-                SELECT c.*, c.property_type = ANY(c.allowed_types) AS type_allowed
-                FROM classified c
-            ), marked AS (
-                SELECT e.*, e.disposition <> 'Fake' AND e.type_allowed AND e.price_per_sotka IS NOT NULL
-                    AND (e.min_price IS NULL OR e.price_per_sotka >= e.min_price)
-                    AND (e.max_price IS NULL OR e.price_per_sotka <= e.max_price) AS included
-                FROM evaluated e
-            ), aggregate AS (
-                SELECT group_id,
-                    percentile_cont(0.5) WITHIN GROUP (ORDER BY price_per_sotka) FILTER (WHERE included)::numeric AS median,
-                    avg(price_per_sotka) FILTER (WHERE included) AS average,
-                    count(*) FILTER (WHERE included)::int AS included_count,
-                    count(*) FILTER (WHERE disposition <> 'Fake' AND NOT included)::int AS excluded_count,
-                    count(*) FILTER (WHERE disposition = 'Fake')::int AS fake_excluded_count
-                FROM marked GROUP BY group_id
-            )
-            SELECT s.group_id, a.median, a.average, coalesce(a.included_count,0), coalesce(a.excluded_count,0), coalesce(a.fake_excluded_count,0)
-            FROM settings s LEFT JOIN aggregate a ON a.group_id = s.group_id
-            """;
-        command.CommandTimeout = 10;
-        Dictionary<Guid, MarketAggregate> result = [];
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            result[reader.GetGuid(0)] = new(reader.IsDBNull(1) ? null : reader.GetFieldValue<decimal>(1),
-                reader.IsDBNull(2) ? null : reader.GetFieldValue<decimal>(2), reader.GetInt32(3), reader.GetInt32(4), reader.GetInt32(5));
-        }
-        return result;
     }
 
     private static async Task<OverviewCollectionSummary> ReadCollectionAsync(LandErpDbContext db, AccessContext context,

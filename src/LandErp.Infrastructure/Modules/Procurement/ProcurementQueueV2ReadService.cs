@@ -5,6 +5,7 @@ using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;
 using LandErp.Infrastructure.Modules.IdentityAccess;
+using LandErp.Infrastructure.Modules.Overview;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -54,6 +55,15 @@ public sealed partial class ProcurementQueueV2ReadService(
         int offset = Math.Max(0, filter.Offset);
         int size = Math.Clamp(filter.Size, 1, 100);
         IQueryable<Row> visible = VisibleReadCases(db, effective);
+        if (filter.SearchGroupId is Guid groupId)
+        {
+            if (!await db.SearchGroups.AsNoTracking().AnyAsync(item => item.Id == groupId
+                && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken))
+                throw new AccessDeniedException();
+            // EXISTS сохраняет одну строку объекта при нескольких источниках/наблюдениях группы.
+            var memberships = GroupMarketService.CaseGroups(db, context.OrganizationId).Where(item => item.GroupId == groupId);
+            visible = visible.Where(row => memberships.Any(item => item.CaseId == row.Case.Id));
+        }
         Guid[] priceChangedCaseIds = await PriceChangedCaseIdsAsync(db, visible, cancellationToken);
         IQueryable<Row> query = string.IsNullOrWhiteSpace(filter.Stage)
             ? visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired")

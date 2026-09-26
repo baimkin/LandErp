@@ -35,112 +35,24 @@ public sealed class IncomingCatalogReadService(
     public async Task<IncomingCatalogReadPage> ReadAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken)
     {
         AccessContext context = await RequireReadAsync(subject, cancellationToken);
-        bool archive = filter.WorkingScope?.Mode == IncomingCatalogMode.Archive;
-        if (archive)
-        {
-            CatalogDisposition? state = filter.WorkingScope!.ArchiveState;
-            if (state != null && !IncomingCatalogArchive.States.Contains(state.Value))
-                throw new ArgumentException("Недопустимое состояние архива.");
-            // Archive is a separate view, not a saved-filter intersection. Only visible text,
-            // group and ordering survive entry; stale copied price/land/state criteria cannot hide it.
-            filter = new(new(filter.Base.Text, Disposition: state, Offset: filter.Base.Offset, Size: filter.Base.Size),
-                SortField: filter.SortField, SortDirection: filter.SortDirection, SearchGroupId: filter.SearchGroupId,
-                WorkingScope: new(IncomingCatalogMode.Archive, ArchiveState: state));
-        }
-        IncomingCatalogFilter baseFilter = filter.Base;
-        Validate(filter);
-
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        if (filter.WorkingScope is not { Mode: IncomingCatalogMode.SavedFilters, SelectedPresetId: not null, UseDraft: false }
-            && filter.SearchGroupId is Guid requestedGroup && !await db.SearchGroups.AsNoTracking()
-            .AnyAsync(group => group.Id == requestedGroup && group.OrganizationId == context.OrganizationId
-                && group.Active, cancellationToken))
-            throw new ArgumentException("Группа поиска не найдена или недоступна.");
-        IQueryable<Listing> organizationItems = db.Listings.AsNoTracking()
-            .Where(item => item.OrganizationId == context.OrganizationId);
-
-        DateTimeOffset now = time.GetUtcNow();
-        (DateTimeOffset businessDayStart, DateTimeOffset businessDayEnd) = BusinessDayUtc(now);
-
-        IQueryable<Guid> priceChangedIds = db.CatalogEvents.AsNoTracking()
-            .Where(item => item.OrganizationId == context.OrganizationId
-                && item.Kind == CatalogEventKind.SourceChanged
-                && ((item.PreviousObservedPrice != null && item.ObservedPrice != null
-                        && item.PreviousObservedPrice != item.ObservedPrice)
-                    || item.Message.Contains("цена")))
-            .Select(item => item.CatalogItemId).Distinct();
-        IQueryable<Guid> returnedFromMonitoringIds = db.CatalogEvents.AsNoTracking()
-            .Where(item => item.OrganizationId == context.OrganizationId && item.Kind == CatalogEventKind.MonitoringTriggered)
-            .Select(item => item.CatalogItemId).Distinct();
-        IQueryable<Guid> reviewedIds = db.CatalogEvents.AsNoTracking()
-            .Where(item => item.OrganizationId == context.OrganizationId
-                && (item.Kind == CatalogEventKind.ReviewStarted
-                    || item.Kind == CatalogEventKind.Classified
-                    || item.Kind == CatalogEventKind.MonitoringStarted
-                    || item.Kind == CatalogEventKind.CaseResumed))
-            .Select(item => item.CatalogItemId)
-            .Union(db.PropertyCaseSourceLinks.AsNoTracking()
-                .Where(item => item.OrganizationId == context.OrganizationId && item.Confirmed)
-                .Select(item => item.CatalogItemId))
-            .Distinct();
-        IQueryable<Guid> pendingDuplicateListingIds = db.CatalogDuplicateCandidates.AsNoTracking()
-            .Where(item => item.OrganizationId == context.OrganizationId && item.Status == DuplicateCandidateStatus.Pending)
-            .Select(item => item.ListingId).Distinct();
-        IQueryable<Guid> processedTodayIds = db.CatalogEvents.AsNoTracking()
-            .Where(item => item.OrganizationId == context.OrganizationId
-                && item.RecordedAt >= businessDayStart && item.RecordedAt < businessDayEnd
-                && (item.Kind == CatalogEventKind.Classified
-                    || item.Kind == CatalogEventKind.MonitoringStarted
-                    || item.Kind == CatalogEventKind.CaseResumed))
-            .Select(item => item.CatalogItemId)
-            .Union(db.PropertyCaseSourceLinks.AsNoTracking()
-                .Where(item => item.OrganizationId == context.OrganizationId && item.Confirmed
-                    && item.RecordedAt >= businessDayStart && item.RecordedAt < businessDayEnd)
-                .Select(item => item.CatalogItemId))
-            .Distinct();
-
-        IncomingCatalogQuery predicates = new(db, context.OrganizationId, now, priceChangedIds,
-            returnedFromMonitoringIds, reviewedIds, pendingDuplicateListingIds, processedTodayIds);
-        IncomingCatalogWorkingScope? scope = filter.WorkingScope;
-        if (scope != null && (!Enum.IsDefined(scope.Mode) || (scope.Slice != null && !Enum.IsDefined(scope.Slice.Value))))
-            throw new ArgumentException("Некорректный режим входящих.");
-        IReadOnlyList<IncomingFilterPresetView> presets = scope == null || archive ? []
+        IReadOnlyList<IncomingFilterPresetView> presets = filter.WorkingScope == null || filter.WorkingScope.Mode is IncomingCatalogMode.Archive or IncomingCatalogMode.Participants ? []
             : await (filterPresets ?? throw new InvalidOperationException("Saved-filter service is required."))
                 .ReadAsync(subject, cancellationToken);
-        var applicable = presets.Where(item => item.CompatibilityIssue == null).ToArray();
-        var savedConditions = applicable.ToDictionary(item => item.Id,
-            item => predicates.Conditions(FromCriteria(item.Criteria)));
-        Expression<Func<Listing, bool>> union = item => false;
-        foreach (var condition in savedConditions.Values) union = Or(union, condition);
-        IncomingFilterPresetView? selected = scope?.Mode == IncomingCatalogMode.SavedFilters && scope.SelectedPresetId != null
-            ? presets.FirstOrDefault(item => item.Id == scope.SelectedPresetId) : null;
-        bool hasSelection = scope?.Mode == IncomingCatalogMode.SavedFilters && scope.SelectedPresetId != null;
-        Expression<Func<Listing, bool>> selection = scope?.Mode == IncomingCatalogMode.SavedFilters ? union : item => true;
-        if (archive)
-        {
-            CatalogDisposition[] archiveStates = IncomingCatalogArchive.States.ToArray();
-            selection = item => archiveStates.Contains(item.Disposition);
-        }
-        IncomingCatalogReadFilter transient = filter;
-        if (hasSelection)
-        {
-            selection = selected?.CompatibilityIssue == null && selected != null
-                ? predicates.Conditions(scope!.UseDraft ? filter : FromCriteria(selected.Criteria))
-                : item => false;
-            // A specific preset replaces the previous preset/group/conditions. Drafts are complete
-            // local replacements, never an intersection with the persisted copy (F-01 editing).
-            transient = new(new(filter.Base.Text, Disposition: null));
-        }
-        Expression<Func<Listing, bool>> ContextFor(IncomingCatalogPreset? slice)
-        {
-            var conditions = slice == null ? transient : transient with
-            {
-                Base = transient.Base with { Disposition = null }, Preset = null
-            };
-            return And(And(selection, predicates.Conditions(conditions)), predicates.Slice(slice));
-        }
-        IncomingCatalogPreset? activeSlice = scope?.Slice;
-        Expression<Func<Listing, bool>> current = scope == null ? predicates.Conditions(filter) : ContextFor(activeSlice);
+        var prepared = await IncomingCatalogSelection.PrepareAsync(db, context.OrganizationId, time.GetUtcNow(), filter, presets, cancellationToken);
+        filter = prepared.Filter;
+        var baseFilter = filter.Base;
+        var scope = filter.WorkingScope;
+        bool archive = scope?.Mode == IncomingCatalogMode.Archive;
+        var predicates = prepared.Predicates;
+        var applicable = prepared.Applicable;
+        var union = prepared.Union;
+        var current = prepared.Current;
+        var ContextFor = prepared.ContextFor;
+        var reviewedIds = prepared.ReviewedIds;
+        var pendingDuplicateListingIds = prepared.PendingDuplicateListingIds;
+        var activeSlice = scope?.Slice;
+        IQueryable<Listing> organizationItems = db.Listings.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId);
         // Each tile replaces only the page slice. Persisted preset criteria still participate in AND.
         List<Expression<Func<Listing, bool>>> countPredicates = [current, ContextFor(null)];
         IncomingCatalogPreset[] slices = Enum.GetValues<IncomingCatalogPreset>();
@@ -178,7 +90,7 @@ public sealed class IncomingCatalogReadService(
         for (int index = 0; index < presetGroups.Length; index++)
             if (presetGroups[index].Key is Guid groupId) filterGroupCounts[groupId] = counts[groupOffset + index];
             else ungroupedCount = counts[groupOffset + index];
-        IncomingCatalogFilterCounts? filterCounts = scope == null || archive ? null
+        IncomingCatalogFilterCounts? filterCounts = scope == null || archive || prepared.ParticipantTotal != null ? null
             : new(presets, presetCounts, filterGroupCounts, ungroupedCount, counts[allPresetsOffset], applicable.Length);
         IQueryable<Listing> query = organizationItems.Where(current);
         string[] searchTerms = SearchTerms(baseFilter.Text);
@@ -283,7 +195,7 @@ public sealed class IncomingCatalogReadService(
             .Select(item => new IncomingSearchConfigurationView(item.Id, item.Label, item.Source, item.SearchGroupId))
             .ToArrayAsync(cancellationToken);
 
-        return new(views, total, summary, groups, searches, rows, filterCounts);
+        return new(views, total, summary, groups, searches, rows, filterCounts, prepared.ParticipantTotal);
     }
 
     public async Task<IncomingCatalogDetailRead> ReadDetailAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken)
@@ -424,7 +336,7 @@ public sealed class IncomingCatalogReadService(
         item.CadastralNumber, item.Description, item.Provenance, item.IngestionKind, item.Disposition,
         item.QueueReason, item.AttentionRequired, item.ReceivedAt, item.ChangedAt, item.LastObservedAt,
         caseId, businessNumber, caseStage, caseStage is "rejected" or "monitor", item.Version,
-        item.ObjectGroupId, objectGroupMemberCount);
+        item.ObjectGroupId, objectGroupMemberCount, item.IncludeInCalculation, CatalogCalculationEligibility.Reason(item));
 
     private static int Completeness(Listing item)
     {
@@ -500,7 +412,7 @@ public sealed class IncomingCatalogReadService(
     private static decimal? PricePerSotka(Listing item) => ReadPricePerSotka(item) is decimal value
         ? decimal.Round(value, 4, MidpointRounding.ToEven) : null;
 
-    private static (DateTimeOffset Start, DateTimeOffset End) BusinessDayUtc(DateTimeOffset instant)
+    internal static (DateTimeOffset Start, DateTimeOffset End) BusinessDayUtc(DateTimeOffset instant)
     {
         TimeZoneInfo zone = TimeZoneInfo.FindSystemTimeZoneById(DataConventions.BusinessTimeZoneId);
         DateTime localDate = TimeZoneInfo.ConvertTime(instant, zone).Date;
@@ -509,7 +421,7 @@ public sealed class IncomingCatalogReadService(
         return (new DateTimeOffset(startUtc), new DateTimeOffset(endUtc));
     }
 
-    private static void Validate(IncomingCatalogReadFilter filter)
+    internal static void Validate(IncomingCatalogReadFilter filter)
     {
         IncomingCatalogFilter baseFilter = filter.Base;
         if (baseFilter.Text.Length > 200 || baseFilter.Offset < 0 || baseFilter.Size is < 1 or > 100 || !Enum.IsDefined(baseFilter.Age)

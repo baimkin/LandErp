@@ -14,16 +14,17 @@
 @inject IEmployeeAccessService AccessV1
 @inject NavigationManager Navigation
 
-<PageTitle>Входящие предложения · LandErp</PageTitle>
+<PageTitle>@(IsArchive ? "Архив объявлений" : "Входящие предложения") · LandErp</PageTitle>
 
 <div class="incoming-v2">
     <div class="v2-head">
         <div>
             <div class="v2-eyebrow">Первичный отбор</div>
-            <h1>Входящие объявления</h1>
-            <p class="v2-lead">Новые и изменившиеся объявления из парсинга. Здесь решаем, что делать с объявлением до создания PropertyCase.</p>
+            <h1>@(IsArchive ? "Архив объявлений" : "Входящие объявления")</h1>
+            <p class="v2-lead">@(IsArchive ? "Не подходит, подтверждённые дубли, снятые, фейки и проданные. Данные и история доступны в прежнем просмотре." : "Новые и изменившиеся объявления из парсинга. Здесь решаем, что делать с объявлением до создания PropertyCase.")</p>
         </div>
         <div class="v2-head-actions">
+            <button type="button" class="v2-btn" disabled="@(Busy || Loading)" @onclick="() => ChangeArchiveAsync(!IsArchive)">@(IsArchive ? "← Во входящие" : "Архив")</button>
             @* TODO-BACKEND-INCOMING: page-level decision history read model is not available. *@
             <button type="button" class="v2-btn" data-todo-backend="TODO-BACKEND-INCOMING" @onclick="() => historyDemoOpen = true">История решений</button>
             @if(CanProcessIncoming){<button type="button" class="v2-btn primary" @onclick="() => manualOpen = true">+ Добавить ссылку вручную</button>}
@@ -47,6 +48,22 @@
 
         @if (catalogPage != null)
         {
+            @if (!IsArchive)
+            {
+            <div class="v2-presets" role="group" aria-label="Режим входящих">
+                <button type="button" class="v2-preset @(incomingMode == IncomingCatalogMode.SavedFilters ? "active" : "")" aria-pressed="@(incomingMode == IncomingCatalogMode.SavedFilters)" @onclick="() => ChangeModeAsync(IncomingCatalogMode.SavedFilters)">По сохранённым фильтрам</button>
+                <button type="button" class="v2-preset @(incomingMode == IncomingCatalogMode.AllListings ? "active" : "")" aria-pressed="@(incomingMode == IncomingCatalogMode.AllListings)" @onclick="() => ChangeModeAsync(IncomingCatalogMode.AllListings)">Все объявления</button>
+            </div>
+            @if (savedPresets.Any(item => item.CompatibilityIssue != null))
+            {
+                <div role="alert" class="subtle">
+                    Рабочий отбор неполон: следующие фильтры требуют исправления и не участвуют в выдаче.
+                    @foreach (var unavailable in savedPresets.Where(item => item.CompatibilityIssue != null))
+                    {
+                        <details><summary>@unavailable.Name — требует исправления</summary><p>@unavailable.CompatibilityIssue</p></details>
+                    }
+                </div>
+            }
             <div class="v2-stats">
                 <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.New ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.New)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.New)"><label>Новые</label><strong>@catalogPage.Summary.New</strong><span>ещё не просматривали</span></button>
                 <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PriceChanged)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PriceChanged)"><label>Цена изменилась</label><strong>@catalogPage.Summary.PriceChanged</strong><span>реальные изменения цены</span></button>
@@ -55,6 +72,7 @@
                 <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.ProcessedToday ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.ProcessedToday)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.ProcessedToday)"><label>Обработано сегодня</label><strong>@catalogPage.Summary.ProcessedToday</strong><span>решений за рабочий день</span></button>
             </div>
 
+            }
             <section class="v2-surface">
                 <EditForm Model="filter" FormName="incoming-v2-filter" OnValidSubmit="ApplyFilterAsync">
                     <div class="v2-tools">
@@ -66,6 +84,8 @@
                                 <button type="button" class="v2-search-clear" title="Очистить поиск" aria-label="Очистить поиск" @onclick="ClearSearchAsync">×</button>
                             }
                         </div>
+                        @if (!IsArchive)
+                        {
                         <select value="@(filter.Source?.ToString() ?? "")" @onchange="SourceChangedAsync" aria-label="Источник">
                             <option value="">Все источники</option>
                             @foreach (CatalogSource source in Enum.GetValues<CatalogSource>())
@@ -73,38 +93,24 @@
                                 <option value="@source">@SourceBadge.Label(source)</option>
                             }
                         </select>
-                        <select value="@searchConfigurationKey" @onchange="SearchConfigurationChangedAsync" aria-label="Поисковая конфигурация">
-                            <option value="">Все поиски</option>
+                        }
+                        <select value="@searchGroupKey" @onchange="SearchGroupChangedAsync" aria-label="Группа поиска">
+                            <option value="">Все группы</option>
                             @foreach (IncomingSearchGroupView group in catalogPage.SearchGroups)
                             {
-                                if (catalogPage.SearchConfigurations.Any(item => item.SearchGroupId == group.Id))
-                                {
-                                    <optgroup label="@group.Name">
-                                        @foreach (IncomingSearchConfigurationView search in catalogPage.SearchConfigurations.Where(item => item.SearchGroupId == group.Id))
-                                        {
-                                            <option value="@search.Id">@search.Label</option>
-                                        }
-                                    </optgroup>
-                                }
-                            }
-                            @if (catalogPage.SearchConfigurations.Any(item => item.SearchGroupId == null))
-                            {
-                                <optgroup label="Без группы">
-                                    @foreach (IncomingSearchConfigurationView search in catalogPage.SearchConfigurations.Where(item => item.SearchGroupId == null))
-                                    {
-                                        <option value="@search.Id">@search.Label</option>
-                                    }
-                                </optgroup>
+                                <option value="@group.Id">@group.Name</option>
                             }
                         </select>
-                        <select value="@(selectedSavedPresetId?.ToString() ?? "")" @onchange="SavedPresetChangedAsync" aria-label="Мои фильтры">
-                            <option value="">Мои фильтры</option>
+                        @if (!IsArchive)
+                        {
+                        <select value="@(selectedSavedPresetId?.ToString() ?? "")" @onchange="SavedPresetChangedAsync" aria-label="Сохранённые фильтры">
+                            <option value="">Все сохранённые фильтры (@catalogPage.FilterCounts?.AllPresetsCount)</option>
                             @if (savedPresets.Any(item => item.SearchGroupId == null))
                             {
-                                <optgroup label="Без группы">
+                                <optgroup label="@($"Без группы ({catalogPage.FilterCounts?.UngroupedCount ?? 0})")">
                                     @foreach (IncomingFilterPresetView saved in savedPresets.Where(item => item.SearchGroupId == null))
                                     {
-                                        <option value="@saved.Id">@saved.Name</option>
+                                        <option value="@saved.Id">@SavedPresetLabel(saved)</option>
                                     }
                                 </optgroup>
                             }
@@ -112,10 +118,10 @@
                             {
                                 if (savedPresets.Any(item => item.SearchGroupId == group.Id))
                                 {
-                                    <optgroup label="@group.Name">
+                                    <optgroup label="@($"{group.Name} ({catalogPage.FilterCounts?.GroupCounts.GetValueOrDefault(group.Id) ?? 0})")">
                                         @foreach (IncomingFilterPresetView saved in savedPresets.Where(item => item.SearchGroupId == group.Id))
                                         {
-                                            <option value="@saved.Id">@saved.Name</option>
+                                            <option value="@saved.Id">@SavedPresetLabel(saved)</option>
                                         }
                                     </optgroup>
                                 }
@@ -125,21 +131,28 @@
                                 <optgroup label="Другие группы">
                                     @foreach (IncomingFilterPresetView saved in savedPresets.Where(item => item.SearchGroupId != null && catalogPage.SearchGroups.All(group => group.Id != item.SearchGroupId)))
                                     {
-                                        <option value="@saved.Id">@saved.Name</option>
+                                        <option value="@saved.Id">@SavedPresetLabel(saved)</option>
                                     }
                                 </optgroup>
                             }
                         </select>
                         @if(CanProcessIncoming)
                         {
-                            <button class="v2-btn sm quiet" type="button" disabled="@(SelectedSavedPreset() == null)" title="Переименовать выбранный фильтр" aria-label="Переименовать выбранный фильтр" @onclick="OpenRenameSelectedPreset">✎</button>
+                            <button class="v2-btn sm quiet" type="button" disabled="@(SelectedSavedPreset() == null)" title="Редактировать выбранный фильтр" aria-label="Редактировать выбранный фильтр" @onclick="OpenEditSelectedPreset">✎</button>
                             <button class="v2-btn sm quiet" type="button" disabled="@(SelectedSavedPreset() == null)" title="Удалить выбранный фильтр" aria-label="Удалить выбранный фильтр" @onclick="OpenDeleteSelectedPreset">×</button>
                         }
                         <button class="v2-btn sm quiet" type="button" aria-expanded="@advancedOpen" @onclick="() => advancedOpen = !advancedOpen">Фильтры</button>
+                        }
                         <button class="v2-btn sm quiet v2-reset" type="button" @onclick="ResetFilterAsync">Сбросить</button>
                     </div>
 
-                    @if (advancedOpen)
+                    @if (SelectedSavedPreset() is { } selectedFilter)
+                    {
+                        <p class="subtle" role="status">Выбран общий фильтр «@selectedFilter.Name». Изменения условий применяются разово, пока вы не нажмёте «Сохранить изменения».</p>
+                        @if (selectedFilter.CompatibilityIssue != null) { <p role="alert">@selectedFilter.CompatibilityIssue Фильтр не применяется; выдача пуста.</p> }
+                        <button class="v2-btn sm quiet" type="button" disabled="@Busy" @onclick="ReloadSelectedPresetAsync">Загрузить сохранённые условия заново</button>
+                    }
+                    @if (advancedOpen && !IsArchive)
                     {
                         <div class="v2-advanced">
                             <label class="v2-filter-field"><span>Состояние</span><InputSelect @bind-Value="filter.Disposition"><option value="">Все состояния</option>@foreach (CatalogDisposition state in Enum.GetValues<CatalogDisposition>()) { <option value="@state">@DispositionLabel(state)</option> }</InputSelect></label>
@@ -168,6 +181,18 @@
                     }
                 </EditForm>
 
+                @if (IsArchive)
+                {
+                    <div class="v2-presets" role="group" aria-label="Состояние архива">
+                        <button type="button" class="v2-preset @(archiveState == null ? "active" : "")" aria-pressed="@(archiveState == null)" @onclick="() => SelectArchiveStateAsync(null)">Все</button>
+                        @foreach (var state in IncomingCatalogArchive.States)
+                        {
+                            <button type="button" class="v2-preset @(archiveState == state ? "active" : "")" aria-pressed="@(archiveState == state)" @onclick="() => SelectArchiveStateAsync(state)">@ArchiveLabel(state)</button>
+                        }
+                    </div>
+                }
+                else
+                {
                 <div class="v2-presets">
                     <button type="button" class="v2-preset @(preset == null ? "active" : "")" @onclick="() => SelectPresetAsync(null)">Все @catalogPage.Summary.Incoming</button>
                     <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.New ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.New)">Новые @catalogPage.Summary.New</button>
@@ -177,7 +202,22 @@
                     <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.ReturnedFromMonitoring ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.ReturnedFromMonitoring)">Вернулись из мониторинга @catalogPage.Summary.ReturnedFromMonitoring</button>
                 </div>
 
-                @if (catalogPage.Items.Count == 0)
+                }
+                <div class="v2-presets" role="group" aria-label="Сортировка объявлений">
+                    <span>Сортировка:</span>
+                    <button type="button" class="v2-preset @SortClass(IncomingCatalogSortField.PricePerSotka)" aria-label="@($"Цена за сотку: {SortDirectionLabel(IncomingCatalogSortField.PricePerSotka)}")" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.PricePerSotka)">Цена за сотку @SortIndicator(IncomingCatalogSortField.PricePerSotka) · @SortDirectionLabel(IncomingCatalogSortField.PricePerSotka)</button>
+                    <button type="button" class="v2-preset @SortClass(IncomingCatalogSortField.Price)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Price)">Цена объекта @SortIndicator(IncomingCatalogSortField.Price)</button>
+                </div>
+                <p class="subtle" role="status">Найдено: @catalogPage.Total</p>
+                @if (incomingMode == IncomingCatalogMode.SavedFilters && catalogPage.FilterCounts?.ApplicableCount == 0)
+                {
+                    <div class="v2-empty">
+                        <strong>@(savedPresets.Count == 0 ? "Создайте фильтр для рабочего отбора" : "Нет применимых фильтров для рабочего отбора")</strong>
+                        <span>Рабочий режим не заменяется всей базой автоматически.</span>
+                        <button type="button" class="v2-btn" @onclick="() => ChangeModeAsync(IncomingCatalogMode.AllListings)">Показать все объявления</button>
+                    </div>
+                }
+                else if (catalogPage.Items.Count == 0)
                 {
                     <div class="v2-empty"><strong>Предложений не найдено</strong><span>Измените фильтр, добавьте предложение вручную или дождитесь результата источника.</span></div>
                 }
@@ -235,7 +275,7 @@
                                                 </div>
                                             </div>
                                         </td>
-                                        <td><div class="v2-price">@ProcurementLabels.Money(item.Price)</div><div class="v2-sub">@(item.PricePerSotka == null ? "за сотку неизвестно" : ProcurementLabels.Money(item.PricePerSotka) + " / сот.")</div></td>
+                                        <td><div class="v2-price">@ProcurementLabels.Money(item.Price)</div><div class="v2-sub">@(item.PricePerSotka == null ? "— / сот." : ProcurementLabels.Money(item.PricePerSotka) + " / сот.")</div></td>
                                         <td><strong class="v2-area">@AreaSotki(item.AreaSquareMeters)</strong></td>
                                         <td>
                                             @if (row != null && RowLandTypes(row).Length > 0)
@@ -741,8 +781,9 @@
 
 @if (CanProcessIncoming && savePresetOpen)
 {
-    <Modal Title="Сохранить текущие фильтры" OnClose="() => savePresetOpen = false">
-        <p class="subtle">Название сформировано автоматически — его можно изменить. Группа нужна только для удобной организации. Свободный текстовый поиск не сохраняется.</p>
+    <Modal Title="Сохранить условия фильтра" OnClose="() => savePresetOpen = false">
+        @if (Error != null) { <p role="alert">@Error</p> }
+        <p class="subtle">Группа ограничивает выдачу объявлениями всех её поисков, включая добавленные позже. Фильтр общий для организации. Свободный текстовый поиск не сохраняется.</p>
         <label class="field"><span>Название фильтра</span><InputText @bind-Value="presetName" /></label>
         <label class="field">
             <span>Группа</span>
@@ -757,15 +798,14 @@
                 }
             </InputSelect>
         </label>
-        <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => savePresetOpen = false" /><ActionButton Label="Сохранить" Busy="Busy" OnClick="SavePresetAsync" /></div>
-    </Modal>
-}
-
-@if (CanProcessIncoming && renamePreset != null)
-{
-    <Modal Title="Переименовать фильтр" OnClose="() => renamePreset = null">
-        <label class="field"><span>Название</span><InputText @bind-Value="presetName" /></label>
-        <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => renamePreset = null" /><ActionButton Label="Сохранить" Busy="Busy" OnClick="RenamePresetAsync" /></div>
+        <div class="form-actions">
+            <ActionButton Label="Отмена" Tone="quiet" OnClick="() => savePresetOpen = false" />
+            @if (SelectedSavedPreset() is { CompatibilityIssue: null })
+            {
+                <ActionButton Label="Сохранить изменения" Busy="Busy" OnClick="UpdatePresetAsync" />
+            }
+            <ActionButton Label="Сохранить как новый" Busy="Busy" OnClick="SavePresetAsync" />
+        </div>
     </Modal>
 }
 
@@ -852,9 +892,14 @@
     private bool monitoringOpen;
     private bool openNextAfterDecision = true;
     private IncomingCatalogPreset? preset;
+    private IncomingCatalogPreset? criteriaPreset;
+    private IncomingCatalogMode incomingMode = IncomingCatalogMode.SavedFilters;
+    private CatalogDisposition? archiveState;
+    private bool IsArchive => incomingMode == IncomingCatalogMode.Archive;
+    private IncomingFilterPresetView? selectedPresetSnapshot;
     private IncomingCatalogSortField sortField = IncomingCatalogSortField.ChangedAt;
     private IncomingCatalogSortDirection sortDirection = IncomingCatalogSortDirection.Descending;
-    private string searchConfigurationKey = "";
+    private string searchGroupKey = "";
     private int searchRevision;
     private ManualInput manual = new();
     private MonitoringInput monitoring = new();
@@ -869,10 +914,9 @@
     private string[] galleryPhotos = [];
     private int galleryIndex;
     private IReadOnlyList<IncomingFilterPresetView> savedPresets = [];
-    private bool savedPresetsLoaded;
+
     private Guid? selectedSavedPresetId;
     private bool savePresetOpen;
-    private IncomingFilterPresetView? renamePreset;
     private IncomingFilterPresetView? deletePreset;
     private string presetName = "";
     private Guid? presetGroupId;
@@ -916,30 +960,35 @@
     protected override async Task ReadAsync()
     {
         effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, CancellationToken.None);
-        Guid? searchId = Guid.TryParse(searchConfigurationKey, out Guid parsed) ? parsed : null;
+        Guid? groupId = Guid.TryParse(searchGroupKey, out Guid parsed) ? parsed : null;
         IncomingCatalogFilter baseFilter = new(filter.Text.Trim(), filter.Source, filter.Disposition, filter.Age,
             filter.MinPrice, filter.MaxPrice, ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki),
             filter.AttentionOnly, page * PageSize, PageSize);
         catalogPage = await IncomingReads.ReadAsync(CurrentSubject,
-            new(baseFilter, searchId, preset, sortField, sortDirection, null,
-                filter.MinPricePerSotka, filter.MaxPricePerSotka, filter.LandTypes.Order().ToArray()), CancellationToken.None);
-        if (!savedPresetsLoaded) await ReloadSavedPresetsAsync();
+            new(baseFilter, null, criteriaPreset, sortField, sortDirection, groupId,
+                filter.MinPricePerSotka, filter.MaxPricePerSotka, filter.LandTypes.Order().ToArray(),
+                new(incomingMode, selectedSavedPresetId, UseDraft: true, Slice: preset, ArchiveState: archiveState)), CancellationToken.None);
+        savedPresets = catalogPage.FilterCounts?.Presets ?? [];
     }
 
     private Task ApplyFilterAsync()
     {
         CancelSearchDebounce();
-        selectedSavedPresetId = null;
+
         page = 0;
         return ReloadAsync();
     }
 
     private Task ResetFilterAsync()
     {
+        bool archive = IsArchive;
         CancelSearchDebounce();
         filter.Reset();
-        searchConfigurationKey = "";
-        preset = null;
+        searchGroupKey = "";
+        preset = criteriaPreset = null;
+        incomingMode = archive ? IncomingCatalogMode.Archive : IncomingCatalogMode.SavedFilters;
+        archiveState = null;
+        selectedPresetSnapshot = null;
         selectedSavedPresetId = null;
         sortField = IncomingCatalogSortField.ChangedAt;
         sortDirection = IncomingCatalogSortDirection.Descending;
@@ -947,33 +996,68 @@
         return ReloadAsync();
     }
 
+    private Task ChangeArchiveAsync(bool open)
+    {
+        CancelSearchDebounce();
+        string text = filter.Text;
+        filter.Reset();
+        filter.Text = text;
+        filter.Disposition = open ? null : CatalogDisposition.Incoming;
+        preset = criteriaPreset = null;
+        selectedSavedPresetId = null;
+        selectedPresetSnapshot = null;
+        archiveState = null;
+        incomingMode = open ? IncomingCatalogMode.Archive : IncomingCatalogMode.SavedFilters;
+        advancedOpen = savePresetOpen = false;
+        page = 0;
+        return ReloadAsync();
+    }
+
+    private Task SelectArchiveStateAsync(CatalogDisposition? state)
+    {
+        CancelSearchDebounce();
+        archiveState = state;
+        page = 0;
+        return ReloadAsync();
+    }
+
+    private static string ArchiveLabel(CatalogDisposition state) => state switch
+    {
+        CatalogDisposition.Duplicate => "Дубли",
+        CatalogDisposition.Fake => "Фейки",
+        _ => DispositionLabel(state)
+    };
+
+    private string SortDirectionLabel(IncomingCatalogSortField field) => sortField != field ? "выбрать"
+        : sortDirection == IncomingCatalogSortDirection.Ascending ? "по возрастанию" : "по убыванию";
     private Task PreviousAsync() { page--; return ReloadAsync(); }
     private Task NextAsync() { page++; return ReloadAsync(); }
 
-    private Task SelectMetricAsync(IncomingCatalogPreset value)
-    {
-        CancelSearchDebounce();
-        filter.Reset();
-        searchConfigurationKey = "";
-        preset = value;
-        selectedSavedPresetId = null;
-        sortField = IncomingCatalogSortField.ChangedAt;
-        sortDirection = IncomingCatalogSortDirection.Descending;
-        filter.Disposition = value == IncomingCatalogPreset.ProcessedToday ? null : CatalogDisposition.Incoming;
-        page = 0;
-        return ReloadAsync();
-    }
+    private Task SelectMetricAsync(IncomingCatalogPreset value) => SelectPresetAsync(value);
 
     private Task SelectPresetAsync(IncomingCatalogPreset? value)
     {
         CancelSearchDebounce();
         preset = value;
-        selectedSavedPresetId = null;
-        filter.Disposition = value == IncomingCatalogPreset.ProcessedToday ? null : CatalogDisposition.Incoming;
         page = 0;
         return ReloadAsync();
     }
 
+    private Task ChangeModeAsync(IncomingCatalogMode mode)
+    {
+        CancelSearchDebounce();
+        string text = filter.Text;
+        CatalogDisposition? state = filter.Disposition;
+        filter.Reset();
+        filter.Text = text;
+        filter.Disposition = state;
+        criteriaPreset = null;
+        selectedSavedPresetId = null;
+        selectedPresetSnapshot = null;
+        incomingMode = mode;
+        page = 0;
+        return ReloadAsync();
+    }
     private Task SearchTextChanged(ChangeEventArgs args)
     {
         filter.Text = args.Value?.ToString() ?? "";
@@ -1003,16 +1087,16 @@
         CancelSearchDebounce();
         string value = args.Value?.ToString() ?? "";
         filter.Source = Enum.TryParse(value, true, out CatalogSource source) ? source : null;
-        selectedSavedPresetId = null;
+
         page = 0;
         return ReloadAsync();
     }
 
-    private Task SearchConfigurationChangedAsync(ChangeEventArgs args)
+    private Task SearchGroupChangedAsync(ChangeEventArgs args)
     {
         CancelSearchDebounce();
-        searchConfigurationKey = args.Value?.ToString() ?? "";
-        selectedSavedPresetId = null;
+        searchGroupKey = args.Value?.ToString() ?? "";
+
         page = 0;
         return ReloadAsync();
     }
@@ -1022,8 +1106,10 @@
         string value = args.Value?.ToString() ?? "";
         if (!Guid.TryParse(value, out Guid id))
         {
-            selectedSavedPresetId = null;
-            return Task.CompletedTask;
+            string text = filter.Text;
+            filter.Reset();
+            filter.Text = text;
+            return ChangeModeAsync(IncomingCatalogMode.SavedFilters);
         }
         IncomingFilterPresetView? saved = savedPresets.FirstOrDefault(item => item.Id == id);
         return saved == null ? Task.CompletedTask : ApplySavedPresetAsync(saved);
@@ -1039,7 +1125,7 @@
             sortField = field;
             sortDirection = IncomingCatalogSortDirection.Descending;
         }
-        selectedSavedPresetId = null;
+
         page = 0;
         return ReloadAsync();
     }
@@ -1047,7 +1133,7 @@
     private void ToggleLandType(IncomingLandType type)
     {
         if (!filter.LandTypes.Add(type)) filter.LandTypes.Remove(type);
-        selectedSavedPresetId = null;
+
     }
 
     private string SortIndicator(IncomingCatalogSortField field) => sortField != field ? "↕"
@@ -1059,27 +1145,36 @@
     private async Task ReloadSavedPresetsAsync()
     {
         savedPresets = await FilterPresets.ReadAsync(CurrentSubject, CancellationToken.None);
-        savedPresetsLoaded = true;
+
         if (selectedSavedPresetId != null && savedPresets.All(item => item.Id != selectedSavedPresetId.Value)) selectedSavedPresetId = null;
+    }
+
+    private async Task ReloadSelectedPresetAsync()
+    {
+        try
+        {
+            await ReloadSavedPresetsAsync();
+            if (savedPresets.FirstOrDefault(item => item.Id == selectedSavedPresetId) is { } selected) await ApplySavedPresetAsync(selected);
+            else ShowValidationError("Сохранённый фильтр больше недоступен. Текущие условия оставлены без изменений.");
+        }
+        catch (Exception exception)
+        {
+            ShowValidationError(ReadFailure(exception, "Не удалось обновить сохранённые фильтры."));
+        }
     }
 
     private void OpenSavePreset()
     {
-        presetGroupId = null;
-        presetName = BuildPresetName();
+        if (SelectedSavedPreset()?.CompatibilityIssue is string issue) { ShowValidationError(issue); return; }
+        presetGroupId = Guid.TryParse(searchGroupKey, out Guid id) ? id : null;
+        presetName = SelectedSavedPreset()?.Name ?? BuildPresetName();
         savePresetOpen = true;
     }
 
-    private void OpenRenamePreset(IncomingFilterPresetView value)
+    private void OpenEditSelectedPreset()
     {
-        renamePreset = value;
-        presetName = value.Name;
-    }
-
-    private void OpenRenameSelectedPreset()
-    {
-        IncomingFilterPresetView? selected = SelectedSavedPreset();
-        if (selected != null) OpenRenamePreset(selected);
+        advancedOpen = true;
+        // Existing controls edit only the draft. Selection and its version survive ordinary changes.
     }
 
     private void OpenDeleteSelectedPreset()
@@ -1089,28 +1184,30 @@
 
     private async Task SavePresetAsync()
     {
+        if (SelectedSavedPreset()?.CompatibilityIssue is string issue) { ShowValidationError(issue); return; }
         IncomingFilterPresetView? created = null;
         await ExecuteAsync(async () => created = await FilterPresets.CreateAsync(CurrentSubject,
-            new(presetGroupId, presetName, CurrentPresetCriteria()), CancellationToken.None));
+            new(presetGroupId, presetName, CurrentPresetCriteria() with { SearchGroupId = presetGroupId }), CancellationToken.None));
         if (created != null)
         {
             savePresetOpen = false;
             selectedSavedPresetId = created.Id;
             await ReloadSavedPresetsAsync();
+            await ApplySavedPresetAsync(created);
         }
     }
 
-    private async Task RenamePresetAsync()
+    private async Task UpdatePresetAsync()
     {
-        if (renamePreset == null) return;
+        IncomingFilterPresetView? selected = SelectedSavedPreset();
+        if (selected == null || selected.CompatibilityIssue != null) return;
         IncomingFilterPresetView? updated = null;
-        await ExecuteAsync(async () => updated = await FilterPresets.RenameAsync(CurrentSubject,
-            new(renamePreset.Id, renamePreset.Version, presetName), CancellationToken.None));
-        if (updated != null)
-        {
-            renamePreset = null;
-            await ReloadSavedPresetsAsync();
-        }
+        bool committed = await ExecuteConfirmedAsync(async () => updated = await FilterPresets.UpdateAsync(CurrentSubject,
+            new(selected.Id, selected.Version, presetName, CurrentPresetCriteria() with { SearchGroupId = presetGroupId }), CancellationToken.None));
+        if (!committed || updated == null) return;
+        savePresetOpen = false;
+        savedPresets = savedPresets.Select(item => item.Id == updated.Id ? updated : item).ToArray();
+        await ApplySavedPresetAsync(updated);
     }
 
     private async Task DeletePresetAsync()
@@ -1124,14 +1221,21 @@
             deletePreset = null;
             if (selectedSavedPresetId == deletedId) selectedSavedPresetId = null;
             await ReloadSavedPresetsAsync();
+            await ReloadAsync();
         }
     }
 
     private Task ApplySavedPresetAsync(IncomingFilterPresetView saved)
     {
+        selectedSavedPresetId = saved.Id;
+        if (saved.CompatibilityIssue != null)
+        {
+            ShowValidationError(saved.CompatibilityIssue);
+            return Task.CompletedTask;
+        }
         IncomingFilterPresetCriteriaV1 criteria = saved.Criteria;
         CancelSearchDebounce();
-        preset = criteria.Preset;
+        criteriaPreset = criteria.Preset;
         filter.Source = criteria.Source;
         filter.Disposition = criteria.Disposition;
         filter.Age = criteria.Age;
@@ -1144,7 +1248,7 @@
         filter.AttentionOnly = criteria.AttentionOnly;
         filter.LandTypes.Clear();
         foreach (IncomingLandType type in criteria.LandTypes ?? []) filter.LandTypes.Add(type);
-        searchConfigurationKey = criteria.SearchConfigurationId?.ToString() ?? "";
+        searchGroupKey = criteria.SearchGroupId?.ToString() ?? "";
         sortField = criteria.SortField;
         sortDirection = criteria.SortDirection;
         selectedSavedPresetId = saved.Id;
@@ -1152,22 +1256,28 @@
         return ReloadAsync();
     }
 
-    private IncomingFilterPresetCriteriaV1 CurrentPresetCriteria() => new(1, filter.Source,
-        Guid.TryParse(searchConfigurationKey, out Guid searchId) ? searchId : null, filter.Disposition, filter.Age,
+    private IncomingFilterPresetCriteriaV1 CurrentPresetCriteria() => new(2, filter.Source,
+        null, filter.Disposition, filter.Age,
         filter.MinPrice, filter.MaxPrice, filter.MinPricePerSotka, filter.MaxPricePerSotka,
         ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki), filter.LandTypes.Order().ToArray(),
-        filter.AttentionOnly, sortField, sortDirection, preset);
+        filter.AttentionOnly, sortField, sortDirection, criteriaPreset,
+        Guid.TryParse(searchGroupKey, out Guid groupId) ? groupId : null);
 
     private IncomingFilterPresetView? SelectedSavedPreset() => selectedSavedPresetId == null
-        ? null : savedPresets.FirstOrDefault(item => item.Id == selectedSavedPresetId.Value);
+        ? null : selectedPresetSnapshot?.Id == selectedSavedPresetId ? selectedPresetSnapshot
+        : savedPresets.FirstOrDefault(item => item.Id == selectedSavedPresetId.Value);
+
+    private string SavedPresetLabel(IncomingFilterPresetView saved) => saved.CompatibilityIssue != null
+        ? $"{saved.Name} — требует исправления"
+        : $"{saved.Name} ({catalogPage?.FilterCounts?.PresetCounts.GetValueOrDefault(saved.Id) ?? 0})";
 
     private string BuildPresetName()
     {
         List<string> parts = [];
-        if (catalogPage != null && Guid.TryParse(searchConfigurationKey, out Guid searchId))
+        if (catalogPage != null && Guid.TryParse(searchGroupKey, out Guid searchId))
         {
-            IncomingSearchConfigurationView? search = catalogPage.SearchConfigurations.FirstOrDefault(item => item.Id == searchId);
-            if (search != null) parts.Add(ShortPresetPart(search.Label));
+            IncomingSearchGroupView? search = catalogPage.SearchGroups.FirstOrDefault(item => item.Id == searchId);
+            if (search != null) parts.Add(ShortPresetPart(search.Name));
         }
         if (parts.Count < 3 && filter.LandTypes.Count == 1) parts.Add(LandTypeFilterLabel(filter.LandTypes.Single()));
         if (parts.Count < 3 && (filter.MinAreaSotki != null || filter.MaxAreaSotki != null))
@@ -1181,7 +1291,7 @@
         if (parts.Count < 3 && filter.Disposition is { } disposition && disposition != CatalogDisposition.Incoming)
             parts.Add(DispositionLabel(disposition));
         if (parts.Count < 3 && filter.Source != null) parts.Add(SourceBadge.Label(filter.Source.Value));
-        return parts.Count == 0 ? "Мой фильтр" : string.Join(" · ", parts.Take(3));
+        return parts.Count == 0 ? "Сохранённый фильтр" : string.Join(" · ", parts.Take(3));
     }
 
     private static string ShortPresetPart(string value)

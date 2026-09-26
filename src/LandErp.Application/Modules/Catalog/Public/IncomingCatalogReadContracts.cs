@@ -7,16 +7,27 @@ using Domain;
 /// <summary>Server-backed working views for Incoming. Source-derived land types are convenience classifications, not legal VRI/category facts.</summary>
 public enum IncomingCatalogPreset { New, PriceChanged, PossibleDuplicate, Incomplete, ReturnedFromMonitoring, ProcessedToday }
 public enum IncomingCatalogRowState { Normal, PriceChanged, ReturnedFromMonitoring, Incomplete }
-public enum IncomingCatalogSortField { ChangedAt, Price, Area }
+public enum IncomingCatalogSortField { ChangedAt, Price, Area, PricePerSotka }
 public enum IncomingCatalogSortDirection { Descending, Ascending }
 public enum IncomingLandType { Izhs, Snt, Dnp, Lph, Gardening, Kfh, Industrial, Other }
 public enum IncomingCatalogMatchField { SellerName }
+public enum IncomingCatalogMode { SavedFilters, AllListings, Archive }
+public static class IncomingCatalogArchive
+{
+    public static IReadOnlyList<CatalogDisposition> States { get; } = Array.AsReadOnly<CatalogDisposition>(
+        [CatalogDisposition.Dismissed, CatalogDisposition.Duplicate, CatalogDisposition.RemovedAtSource,
+            CatalogDisposition.Fake, CatalogDisposition.Sold]);
+}
+// A selected filter may be edited as a local draft without intersecting it with its persisted version.
+public sealed record IncomingCatalogWorkingScope(IncomingCatalogMode Mode = IncomingCatalogMode.SavedFilters,
+    Guid? SelectedPresetId = null, bool UseDraft = false, IncomingCatalogPreset? Slice = null,
+    CatalogDisposition? ArchiveState = null);
 
 public sealed record IncomingCatalogReadFilter(IncomingCatalogFilter Base, Guid? SearchConfigurationId = null,
     IncomingCatalogPreset? Preset = null, IncomingCatalogSortField SortField = IncomingCatalogSortField.ChangedAt,
     IncomingCatalogSortDirection SortDirection = IncomingCatalogSortDirection.Descending,
     Guid? SearchGroupId = null, decimal? MinPricePerSotka = null, decimal? MaxPricePerSotka = null,
-    IReadOnlyList<IncomingLandType>? LandTypes = null);
+    IReadOnlyList<IncomingLandType>? LandTypes = null, IncomingCatalogWorkingScope? WorkingScope = null);
 public sealed record IncomingSearchGroupView(Guid Id, string Name, int SortOrder);
 public sealed record IncomingSearchConfigurationView(Guid Id, string Label, CatalogSource Source, Guid? SearchGroupId);
 public sealed record IncomingCatalogRowRead(Guid CatalogItemId, Guid? SearchConfigurationId,
@@ -31,7 +42,10 @@ public sealed record IncomingCatalogReadSummary(int Incoming, int Attention, int
 public sealed record IncomingCatalogReadPage(IReadOnlyList<CatalogItemView> Items, int Total,
     IncomingCatalogReadSummary Summary, IReadOnlyList<IncomingSearchGroupView> SearchGroups,
     IReadOnlyList<IncomingSearchConfigurationView> SearchConfigurations,
-    IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows);
+    IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows, IncomingCatalogFilterCounts? FilterCounts = null);
+public sealed record IncomingCatalogFilterCounts(IReadOnlyList<IncomingFilterPresetView> Presets,
+    IReadOnlyDictionary<Guid, int> PresetCounts, IReadOnlyDictionary<Guid, int> GroupCounts,
+    int UngroupedCount, int AllPresetsCount, int ApplicableCount);
 public sealed record IncomingDuplicateCandidateView(Guid Id, long Version, Guid CandidateListingId,
     CatalogSource Source, string Title, string? Location, decimal? Price, decimal? AreaSquareMeters,
     string? CadastralNumber, string? Url, IReadOnlyList<string> Reasons, DateTimeOffset RecordedAt,
@@ -71,10 +85,12 @@ public sealed record IncomingFilterPresetCriteriaV1(int SchemaVersion, CatalogSo
     decimal? MinTotalPrice, decimal? MaxTotalPrice, decimal? MinPricePerSotka, decimal? MaxPricePerSotka,
     decimal? MinAreaSquareMeters, decimal? MaxAreaSquareMeters, IncomingLandType[] LandTypes,
     bool AttentionOnly, IncomingCatalogSortField SortField, IncomingCatalogSortDirection SortDirection,
-    IncomingCatalogPreset? Preset = null);
+    IncomingCatalogPreset? Preset = null, Guid? SearchGroupId = null);
 public sealed record IncomingFilterPresetView(Guid Id, Guid? SearchGroupId, string Name,
-    IncomingFilterPresetCriteriaV1 Criteria, int SortOrder, long Version);
+    IncomingFilterPresetCriteriaV1 Criteria, int SortOrder, long Version, string? CompatibilityIssue = null);
 public sealed record CreateIncomingFilterPreset(Guid? SearchGroupId, string Name, IncomingFilterPresetCriteriaV1 Criteria);
+public sealed record UpdateIncomingFilterPreset(Guid Id, long ExpectedVersion, string Name,
+    IncomingFilterPresetCriteriaV1 Criteria);
 public sealed record RenameIncomingFilterPreset(Guid Id, long ExpectedVersion, string Name);
 public sealed record DeleteIncomingFilterPreset(Guid Id, long ExpectedVersion);
 
@@ -90,6 +106,7 @@ public interface IIncomingFilterPresetService
 {
     Task<IReadOnlyList<IncomingFilterPresetView>> ReadAsync(Subject subject, CancellationToken cancellationToken);
     Task<IncomingFilterPresetView> CreateAsync(Subject subject, CreateIncomingFilterPreset command, CancellationToken cancellationToken);
+    Task<IncomingFilterPresetView> UpdateAsync(Subject subject, UpdateIncomingFilterPreset command, CancellationToken cancellationToken);
     Task<IncomingFilterPresetView> RenameAsync(Subject subject, RenameIncomingFilterPreset command, CancellationToken cancellationToken);
     Task DeleteAsync(Subject subject, DeleteIncomingFilterPreset command, CancellationToken cancellationToken);
 }

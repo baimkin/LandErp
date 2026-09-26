@@ -6,6 +6,8 @@ using LandErp.Infrastructure.Modules.IdentityAccess;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using System.Linq.Expressions;
+using static LandErp.Infrastructure.Modules.Catalog.IncomingCatalogQuery;
 
 namespace LandErp.Infrastructure.Modules.Catalog;
 
@@ -17,7 +19,8 @@ public sealed class IncomingCatalogReadService(
     IDbContextFactory<LandErpDbContext> factory,
     IEmployeeAccessService employeeAccess,
     ICatalogWorkspace catalogWorkspace,
-    TimeProvider time) : IIncomingCatalogReadService
+    TimeProvider time,
+    IIncomingFilterPresetService? filterPresets = null) : IIncomingCatalogReadService
 {
     public IncomingCatalogReadService(IDbContextFactory<LandErpDbContext> factory,
         ICatalogWorkspace catalogWorkspace, TimeProvider time)
@@ -32,13 +35,30 @@ public sealed class IncomingCatalogReadService(
     public async Task<IncomingCatalogReadPage> ReadAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken)
     {
         AccessContext context = await RequireReadAsync(subject, cancellationToken);
+        bool archive = filter.WorkingScope?.Mode == IncomingCatalogMode.Archive;
+        if (archive)
+        {
+            CatalogDisposition? state = filter.WorkingScope!.ArchiveState;
+            if (state != null && !IncomingCatalogArchive.States.Contains(state.Value))
+                throw new ArgumentException("Недопустимое состояние архива.");
+            // Archive is a separate view, not a saved-filter intersection. Only visible text,
+            // group and ordering survive entry; stale copied price/land/state criteria cannot hide it.
+            filter = new(new(filter.Base.Text, Disposition: state, Offset: filter.Base.Offset, Size: filter.Base.Size),
+                SortField: filter.SortField, SortDirection: filter.SortDirection, SearchGroupId: filter.SearchGroupId,
+                WorkingScope: new(IncomingCatalogMode.Archive, ArchiveState: state));
+        }
         IncomingCatalogFilter baseFilter = filter.Base;
         Validate(filter);
 
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        if (filter.WorkingScope is not { Mode: IncomingCatalogMode.SavedFilters, SelectedPresetId: not null, UseDraft: false }
+            && filter.SearchGroupId is Guid requestedGroup && !await db.SearchGroups.AsNoTracking()
+            .AnyAsync(group => group.Id == requestedGroup && group.OrganizationId == context.OrganizationId
+                && group.Active, cancellationToken))
+            throw new ArgumentException("Группа поиска не найдена или недоступна.");
         IQueryable<Listing> organizationItems = db.Listings.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId);
-        IQueryable<Listing> incomingItems = organizationItems.Where(item => item.Disposition == CatalogDisposition.Incoming);
+
         DateTimeOffset now = time.GetUtcNow();
         (DateTimeOffset businessDayStart, DateTimeOffset businessDayEnd) = BusinessDayUtc(now);
 
@@ -79,100 +99,96 @@ public sealed class IncomingCatalogReadService(
                 .Select(item => item.CatalogItemId))
             .Distinct();
 
-        IncomingCatalogReadSummary summary = new(
-            await incomingItems.CountAsync(cancellationToken),
-            await organizationItems.CountAsync(item => item.AttentionRequired, cancellationToken),
-            await organizationItems.CountAsync(item => item.Disposition == CatalogDisposition.Monitoring, cancellationToken),
-            await organizationItems.CountAsync(item => item.Disposition == CatalogDisposition.InWork, cancellationToken),
-            await incomingItems.CountAsync(item => item.Price == null || item.AreaSquareMeters == null || item.Location == null, cancellationToken),
-            await incomingItems.CountAsync(item => priceChangedIds.Contains(item.Id), cancellationToken),
-            await incomingItems.CountAsync(item => returnedFromMonitoringIds.Contains(item.Id), cancellationToken),
-            New: await incomingItems.CountAsync(item => !reviewedIds.Contains(item.Id), cancellationToken),
-            ProcessedToday: await processedTodayIds.CountAsync(cancellationToken),
-            PossibleDuplicate: await organizationItems.CountAsync(item =>
-                (item.Disposition == CatalogDisposition.Incoming || item.Disposition == CatalogDisposition.Duplicate)
-                && pendingDuplicateListingIds.Contains(item.Id), cancellationToken));
-
-        IQueryable<Listing> query = organizationItems;
+        IncomingCatalogQuery predicates = new(db, context.OrganizationId, now, priceChangedIds,
+            returnedFromMonitoringIds, reviewedIds, pendingDuplicateListingIds, processedTodayIds);
+        IncomingCatalogWorkingScope? scope = filter.WorkingScope;
+        if (scope != null && (!Enum.IsDefined(scope.Mode) || (scope.Slice != null && !Enum.IsDefined(scope.Slice.Value))))
+            throw new ArgumentException("Некорректный режим входящих.");
+        IReadOnlyList<IncomingFilterPresetView> presets = scope == null || archive ? []
+            : await (filterPresets ?? throw new InvalidOperationException("Saved-filter service is required."))
+                .ReadAsync(subject, cancellationToken);
+        var applicable = presets.Where(item => item.CompatibilityIssue == null).ToArray();
+        var savedConditions = applicable.ToDictionary(item => item.Id,
+            item => predicates.Conditions(FromCriteria(item.Criteria)));
+        Expression<Func<Listing, bool>> union = item => false;
+        foreach (var condition in savedConditions.Values) union = Or(union, condition);
+        IncomingFilterPresetView? selected = scope?.Mode == IncomingCatalogMode.SavedFilters && scope.SelectedPresetId != null
+            ? presets.FirstOrDefault(item => item.Id == scope.SelectedPresetId) : null;
+        bool hasSelection = scope?.Mode == IncomingCatalogMode.SavedFilters && scope.SelectedPresetId != null;
+        Expression<Func<Listing, bool>> selection = scope?.Mode == IncomingCatalogMode.SavedFilters ? union : item => true;
+        if (archive)
+        {
+            CatalogDisposition[] archiveStates = IncomingCatalogArchive.States.ToArray();
+            selection = item => archiveStates.Contains(item.Disposition);
+        }
+        IncomingCatalogReadFilter transient = filter;
+        if (hasSelection)
+        {
+            selection = selected?.CompatibilityIssue == null && selected != null
+                ? predicates.Conditions(scope!.UseDraft ? filter : FromCriteria(selected.Criteria))
+                : item => false;
+            // A specific preset replaces the previous preset/group/conditions. Drafts are complete
+            // local replacements, never an intersection with the persisted copy (F-01 editing).
+            transient = new(new(filter.Base.Text, Disposition: null));
+        }
+        Expression<Func<Listing, bool>> ContextFor(IncomingCatalogPreset? slice)
+        {
+            var conditions = slice == null ? transient : transient with
+            {
+                Base = transient.Base with { Disposition = null }, Preset = null
+            };
+            return And(And(selection, predicates.Conditions(conditions)), predicates.Slice(slice));
+        }
+        IncomingCatalogPreset? activeSlice = scope?.Slice;
+        Expression<Func<Listing, bool>> current = scope == null ? predicates.Conditions(filter) : ContextFor(activeSlice);
+        // Each tile replaces only the page slice. Persisted preset criteria still participate in AND.
+        List<Expression<Func<Listing, bool>>> countPredicates = [current, ContextFor(null)];
+        IncomingCatalogPreset[] slices = Enum.GetValues<IncomingCatalogPreset>();
+        countPredicates.AddRange(slices.Select(slice => ContextFor(slice)));
+        Expression<Func<Listing, bool>> contextWithoutSlice = ContextFor(null);
+        countPredicates.Add(And(contextWithoutSlice, item => item.AttentionRequired));
+        countPredicates.Add(And(contextWithoutSlice, item => item.Disposition == CatalogDisposition.Monitoring));
+        countPredicates.Add(And(contextWithoutSlice, item => item.Disposition == CatalogDisposition.InWork));
+        int presetOffset = countPredicates.Count;
+        var alternativeConditions = applicable.ToDictionary(item => item.Id, item =>
+            And(predicates.Conditions(FromCriteria(item.Criteria, filter.Base.Text)), predicates.Slice(activeSlice)));
+        countPredicates.AddRange(applicable.Select(item => alternativeConditions[item.Id]));
+        var presetGroups = applicable.GroupBy(item => item.Criteria.SearchGroupId).ToArray();
+        int groupOffset = countPredicates.Count;
+        foreach (var group in presetGroups)
+        {
+            Expression<Func<Listing, bool>> groupUnion = item => false;
+            foreach (var saved in group) groupUnion = Or(groupUnion, alternativeConditions[saved.Id]);
+            countPredicates.Add(groupUnion);
+        }
+        int allPresetsOffset = countPredicates.Count;
+        countPredicates.Add(And(And(union, predicates.Conditions(new(new(filter.Base.Text,
+            Disposition: activeSlice == null ? CatalogDisposition.Incoming : null), SearchGroupId: filter.SearchGroupId))),
+            predicates.Slice(activeSlice)));
+        int[] counts = await IncomingCatalogQuery.CountAsync(organizationItems, countPredicates, cancellationToken);
+        int SliceCount(IncomingCatalogPreset slice) => counts[2 + Array.IndexOf(slices, slice)];
+        IncomingCatalogReadSummary summary = new(counts[1], counts[8], counts[9], counts[10],
+            SliceCount(IncomingCatalogPreset.Incomplete), SliceCount(IncomingCatalogPreset.PriceChanged),
+            SliceCount(IncomingCatalogPreset.ReturnedFromMonitoring), SliceCount(IncomingCatalogPreset.New),
+            SliceCount(IncomingCatalogPreset.ProcessedToday), SliceCount(IncomingCatalogPreset.PossibleDuplicate));
+        Dictionary<Guid, int> presetCounts = [];
+        for (int index = 0; index < applicable.Length; index++) presetCounts[applicable[index].Id] = counts[presetOffset + index];
+        Dictionary<Guid, int> filterGroupCounts = [];
+        int ungroupedCount = 0;
+        for (int index = 0; index < presetGroups.Length; index++)
+            if (presetGroups[index].Key is Guid groupId) filterGroupCounts[groupId] = counts[groupOffset + index];
+            else ungroupedCount = counts[groupOffset + index];
+        IncomingCatalogFilterCounts? filterCounts = scope == null || archive ? null
+            : new(presets, presetCounts, filterGroupCounts, ungroupedCount, counts[allPresetsOffset], applicable.Length);
+        IQueryable<Listing> query = organizationItems.Where(current);
         string[] searchTerms = SearchTerms(baseFilter.Text);
-        foreach (string term in searchTerms)
-        {
-            string pattern = $"%{term}%";
-            query = query.Where(item =>
-                EF.Functions.ILike(item.Title ?? "", pattern)
-                || EF.Functions.ILike(item.Location ?? "", pattern)
-                || EF.Functions.ILike(item.ExternalId ?? "", pattern)
-                || EF.Functions.ILike(item.CadastralNumber ?? "", pattern)
-                || EF.Functions.ILike(item.SellerName ?? "", pattern));
-        }
-        if (baseFilter.Source != null) query = query.Where(item => item.Source == baseFilter.Source);
-        if (baseFilter.Disposition != null && filter.Preset != IncomingCatalogPreset.PossibleDuplicate)
-            query = query.Where(item => item.Disposition == baseFilter.Disposition);
-        if (baseFilter.AttentionOnly) query = query.Where(item => item.AttentionRequired);
-        if (baseFilter.MinPrice != null) query = query.Where(item => item.Price >= baseFilter.MinPrice);
-        if (baseFilter.MaxPrice != null) query = query.Where(item => item.Price <= baseFilter.MaxPrice);
-        if (baseFilter.MinAreaSquareMeters != null) query = query.Where(item => item.AreaSquareMeters >= baseFilter.MinAreaSquareMeters);
-        if (baseFilter.MaxAreaSquareMeters != null) query = query.Where(item => item.AreaSquareMeters <= baseFilter.MaxAreaSquareMeters);
-        if (filter.MinPricePerSotka != null)
-            query = query.Where(item => item.Price != null && item.AreaSquareMeters > 0
-                && item.Price.Value * 100m / item.AreaSquareMeters.Value >= filter.MinPricePerSotka.Value);
-        if (filter.MaxPricePerSotka != null)
-            query = query.Where(item => item.Price != null && item.AreaSquareMeters > 0
-                && item.Price.Value * 100m / item.AreaSquareMeters.Value <= filter.MaxPricePerSotka.Value);
-        query = IncomingLandTypeClassifier.ApplyFilter(query, filter.LandTypes);
-
-        query = baseFilter.Age switch
-        {
-            CatalogAgeRange.Today => query.Where(item => item.ReceivedAt >= now.AddDays(-1)),
-            CatalogAgeRange.ThreeDays => query.Where(item => item.ReceivedAt >= now.AddDays(-3)),
-            CatalogAgeRange.Week => query.Where(item => item.ReceivedAt >= now.AddDays(-7)),
-            CatalogAgeRange.OlderThanWeek => query.Where(item => item.ReceivedAt < now.AddDays(-7)),
-            _ => query
-        };
-
-        if (filter.SearchGroupId != null)
-        {
-            Guid groupId = filter.SearchGroupId.Value;
-            IQueryable<Guid> groupListingIds =
-                from observation in db.ListingObservations.AsNoTracking()
-                join job in db.CollectionJobs.AsNoTracking() on observation.JobId equals job.Id
-                join search in db.SearchConfigurations.AsNoTracking() on job.SearchId equals search.Id
-                join searchGroup in db.SearchGroups.AsNoTracking() on search.SearchGroupId equals searchGroup.Id
-                where job.OrganizationId == context.OrganizationId && search.OrganizationId == context.OrganizationId
-                    && searchGroup.OrganizationId == context.OrganizationId && searchGroup.Active && searchGroup.Id == groupId
-                select observation.ListingId;
-            query = query.Where(item => groupListingIds.Contains(item.Id));
-        }
-
-        if (filter.SearchConfigurationId != null)
-        {
-            Guid searchId = filter.SearchConfigurationId.Value;
-            IQueryable<Guid> searchListingIds =
-                from observation in db.ListingObservations.AsNoTracking()
-                join job in db.CollectionJobs.AsNoTracking() on observation.JobId equals job.Id
-                join search in db.SearchConfigurations.AsNoTracking() on job.SearchId equals search.Id
-                where job.OrganizationId == context.OrganizationId && search.OrganizationId == context.OrganizationId
-                    && search.Id == searchId
-                select observation.ListingId;
-            query = query.Where(item => searchListingIds.Contains(item.Id));
-        }
-
-        query = filter.Preset switch
-        {
-            IncomingCatalogPreset.New => query.Where(item => !reviewedIds.Contains(item.Id)),
-            IncomingCatalogPreset.PriceChanged => query.Where(item => priceChangedIds.Contains(item.Id)),
-            IncomingCatalogPreset.PossibleDuplicate => query.Where(item =>
-                (item.Disposition == CatalogDisposition.Incoming || item.Disposition == CatalogDisposition.Duplicate)
-                && pendingDuplicateListingIds.Contains(item.Id)),
-            IncomingCatalogPreset.Incomplete => query.Where(item => item.Price == null || item.AreaSquareMeters == null || item.Location == null),
-            IncomingCatalogPreset.ReturnedFromMonitoring => query.Where(item => returnedFromMonitoringIds.Contains(item.Id)),
-            IncomingCatalogPreset.ProcessedToday => query.Where(item => processedTodayIds.Contains(item.Id)),
-            _ => query
-        };
-
-        int total = await query.CountAsync(cancellationToken);
+        int total = counts[0];
         IOrderedQueryable<Listing> ordered = (filter.SortField, filter.SortDirection) switch
         {
+            (IncomingCatalogSortField.PricePerSotka, IncomingCatalogSortDirection.Ascending) => query
+                .OrderBy(UnknownPricePerSotka).ThenBy(PricePerSotkaKey).ThenBy(item => item.Id),
+            (IncomingCatalogSortField.PricePerSotka, _) => query
+                .OrderBy(UnknownPricePerSotka).ThenByDescending(PricePerSotkaKey).ThenBy(item => item.Id),
             (IncomingCatalogSortField.Price, IncomingCatalogSortDirection.Ascending) => query
                 .OrderBy(item => item.Price == null).ThenBy(item => item.Price).ThenBy(item => item.Id),
             (IncomingCatalogSortField.Price, _) => query
@@ -267,7 +283,7 @@ public sealed class IncomingCatalogReadService(
             .Select(item => new IncomingSearchConfigurationView(item.Id, item.Label, item.Source, item.SearchGroupId))
             .ToArrayAsync(cancellationToken);
 
-        return new(views, total, summary, groups, searches, rows);
+        return new(views, total, summary, groups, searches, rows, filterCounts);
     }
 
     public async Task<IncomingCatalogDetailRead> ReadDetailAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken)
@@ -331,7 +347,7 @@ public sealed class IncomingCatalogReadService(
             {
                 groupLinksByItem.TryGetValue(value.Id, out var link);
                 return new IncomingObjectGroupMemberView(value.Id, value.Source, value.Title ?? "Название неизвестно",
-                    value.Location, value.Price, PricePerSotka(value.Price, value.AreaSquareMeters), value.AreaSquareMeters,
+                    value.Location, value.Price, PricePerSotka(value), value.AreaSquareMeters,
                     value.CadastralNumber, value.Url, value.Disposition, link?.Id, link?.BusinessNumber);
             }).ToArray();
             objectGroup = new(objectGroupId, memberViews.Length, memberViews);
@@ -396,7 +412,7 @@ public sealed class IncomingCatalogReadService(
             linksByItem.TryGetValue(value.Id, out var link);
             int groupCount = value.ObjectGroupId is Guid groupId && groupCounts.TryGetValue(groupId, out int count) ? count : 0;
             return new IncomingDuplicateLinkTargetView(value.Id, value.Source, value.Title ?? "Название неизвестно",
-                value.Location, value.Price, PricePerSotka(value.Price, value.AreaSquareMeters), value.AreaSquareMeters,
+                value.Location, value.Price, PricePerSotka(value), value.AreaSquareMeters,
                 value.CadastralNumber, value.ObjectGroupId, groupCount, link?.Id, link?.BusinessNumber);
         }).ToArray();
     }
@@ -404,7 +420,7 @@ public sealed class IncomingCatalogReadService(
     private static CatalogItemView CatalogView(Listing item, Guid? caseId, string? businessNumber, string? caseStage,
         int objectGroupMemberCount = 0) => new(
         item.Id, item.Source, item.ExternalId, item.Url, item.Title ?? "Название неизвестно", item.Price,
-        PricePerSotka(item.Price, item.AreaSquareMeters), item.Currency, item.AreaSquareMeters, item.Location,
+        PricePerSotka(item), item.Currency, item.AreaSquareMeters, item.Location,
         item.CadastralNumber, item.Description, item.Provenance, item.IngestionKind, item.Disposition,
         item.QueueReason, item.AttentionRequired, item.ReceivedAt, item.ChangedAt, item.LastObservedAt,
         caseId, businessNumber, caseStage, caseStage is "rejected" or "monitor", item.Version,
@@ -455,7 +471,7 @@ public sealed class IncomingCatalogReadService(
         }
     }
 
-    private static string[] SearchTerms(string text) => text.Trim()
+    internal static string[] SearchTerms(string text) => text.Trim()
         .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToArray();
 
@@ -474,8 +490,15 @@ public sealed class IncomingCatalogReadService(
 
     private static bool Contains(string? value, string term) => value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
 
-    private static decimal? PricePerSotka(decimal? price, decimal? areaSquareMeters) => price is > 0 && areaSquareMeters is > 0
-        ? decimal.Round(price.Value * 100m / areaSquareMeters.Value, 4, MidpointRounding.ToEven) : null;
+    // One safe value expression serves SQL ordering and the existing displayed price semantics.
+    // CASE guards division; rounding remains presentation-only as before, not a sorting tie-breaker.
+    private static readonly Expression<Func<Listing, decimal?>> PricePerSotkaKey = item =>
+        item.Price > 0 && item.AreaSquareMeters > 0 ? item.Price.Value * 100m / item.AreaSquareMeters.Value : null;
+    private static readonly Expression<Func<Listing, bool>> UnknownPricePerSotka = Expression.Lambda<Func<Listing, bool>>(
+        Expression.Equal(PricePerSotkaKey.Body, Expression.Constant(null, typeof(decimal?))), PricePerSotkaKey.Parameters);
+    private static readonly Func<Listing, decimal?> ReadPricePerSotka = PricePerSotkaKey.Compile();
+    private static decimal? PricePerSotka(Listing item) => ReadPricePerSotka(item) is decimal value
+        ? decimal.Round(value, 4, MidpointRounding.ToEven) : null;
 
     private static (DateTimeOffset Start, DateTimeOffset End) BusinessDayUtc(DateTimeOffset instant)
     {

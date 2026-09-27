@@ -52,6 +52,7 @@ public sealed partial class ProcurementQueueV2ReadService(
         AccessContext context = effective.ProcurementReadContext;
         await using LandErpDbContext db = await _factory.CreateDbContextAsync(cancellationToken);
         (DateTimeOffset todayStart, DateTimeOffset tomorrowStart) = TodayBounds();
+        DateTimeOffset now = _clock.GetUtcNow();
         int offset = Math.Max(0, filter.Offset);
         int size = Math.Clamp(filter.Size, 1, 100);
         IQueryable<Row> visible = VisibleReadCases(db, effective);
@@ -88,14 +89,18 @@ public sealed partial class ProcurementQueueV2ReadService(
                             || (source.SellerName != null && EF.Functions.ILike(source.SellerName, pattern))
                             || (exactId.HasValue && source.Id == exactId.Value)))));
         }
-        if (filter.AssigneeId is Guid assigneeId) query = query.Where(row => row.Task.EmployeeId == assigneeId);
+        if (filter.AssigneeId is Guid assigneeId) query = query.Where(row => db.WorkTasks.Any(t => t.OrganizationId == row.Case.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == row.Case.Id && !t.Completed && !t.Deleted && t.EmployeeId == assigneeId));
         if (filter.Source is CatalogSource source)
             query = query.Where(row => db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id && link.Confirmed
                 && db.Listings.Any(item => item.Id == link.CatalogItemId && item.Source == source)));
         if (filter.SourceChangedOnly) query = WhereSourceChanged(query, db);
         if (filter.PriceChangedOnly) query = query.Where(row => priceChangedCaseIds.Contains(row.Case.Id));
-        if (filter.DueTodayOnly) query = query.Where(row => !row.Task.Completed && row.Task.DueAt >= todayStart && row.Task.DueAt < tomorrowStart);
-        if (filter.OverdueOnly) query = query.Where(row => !row.Task.Completed && row.Task.DueAt < todayStart);
+        // Даже явно выбранный архивный этап не возвращает сохранённые задачи
+        // закрытого объекта в рабочие срезы сроков.
+        if (filter.DueTodayOnly || filter.OverdueOnly)
+            query = query.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired");
+        if (filter.DueTodayOnly) query = query.Where(row => db.WorkTasks.Any(t => t.OrganizationId == row.Case.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == row.Case.Id && !t.Completed && !t.Deleted && t.DueAt >= todayStart && t.DueAt < tomorrowStart));
+        if (filter.OverdueOnly) query = query.Where(row => db.WorkTasks.Any(t => t.OrganizationId == row.Case.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == row.Case.Id && !t.Completed && !t.Deleted && t.DueAt < (t.DueHasTime ? now : todayStart)));
         query = ApplyCheckFilter(query, filter.Checks, db);
 
         int total = await query.CountAsync(cancellationToken);
@@ -107,14 +112,17 @@ public sealed partial class ProcurementQueueV2ReadService(
             .Select(item => new CheckDb(item.PropertyCaseId, item.Level, item.Status, item.Blocker, item.ResponsibleEmployeeId)).ToArrayAsync(cancellationToken);
         ContactDb[] contacts = pageIds.Length == 0 ? [] : await LatestContacts(db, pageIds).ToArrayAsync(cancellationToken);
 
-        Guid[] assigneeIds = await visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired")
-            .Select(row => row.Task.EmployeeId).Distinct().ToArrayAsync(cancellationToken);
+        Guid[] assigneeIds = await (from task in db.WorkTasks.AsNoTracking()
+            join row in visible on task.ObjectId equals row.Case.Id
+            where task.OrganizationId == context.OrganizationId && task.ObjectType == "PropertyCase"
+                && !task.Completed && !task.Deleted && row.Case.StageId != "rejected" && row.Case.StageId != "acquired"
+            select task.EmployeeId).Distinct().ToArrayAsync(cancellationToken);
         ProcurementQueueV2Assignee[] assignees = await db.Employees.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId && assigneeIds.Contains(item.Id))
             .OrderBy(item => item.DisplayName).Select(item => new ProcurementQueueV2Assignee(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);
         Dictionary<Guid, string> names = assignees.ToDictionary(item => item.Id, item => item.Name);
         string[] stages = await visible.Select(row => row.Case.StageId).Distinct().OrderBy(item => item).ToArrayAsync(cancellationToken);
-        ProcurementQueueV2Summary summary = await ReadSummaryAsync(db, visible, priceChangedCaseIds, todayStart, tomorrowStart, cancellationToken);
+        ProcurementQueueV2Summary summary = await ReadSummaryAsync(db, visible, priceChangedCaseIds, todayStart, tomorrowStart, now, cancellationToken);
         Dictionary<Guid, SourceDb[]> sourcesByCase = sourceRows.GroupBy(item => item.CaseId).ToDictionary(group => group.Key, group => group.ToArray());
         Dictionary<Guid, CheckDb[]> checksByCase = checkRows.GroupBy(item => item.CaseId).ToDictionary(group => group.Key, group => group.ToArray());
         Dictionary<Guid, ContactDb> contactsByCase = contacts.Where(item => item.EffectiveAt != null).ToDictionary(item => item.CaseId);
@@ -135,6 +143,7 @@ public sealed partial class ProcurementQueueV2ReadService(
         Row? row = await visible.SingleOrDefaultAsync(item => item.Case.Id == caseId, cancellationToken);
         if (row == null) throw new AccessDeniedException();
         (DateTimeOffset todayStart, DateTimeOffset tomorrowStart) = TodayBounds();
+        DateTimeOffset now = _clock.GetUtcNow();
         SourceDb[] sourceRows = (await SourceRows(db, context.OrganizationId, [caseId]).ToArrayAsync(cancellationToken))
             .OrderByDescending(item => item.LastObservedAt ?? item.ChangedAt).ToArray();
         bool sourceChanged = sourceRows.Any(item => item.DataRevision > item.ReviewedDataRevision);
@@ -200,12 +209,13 @@ public sealed partial class ProcurementQueueV2ReadService(
         return new(row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle, row.Case.WorkingLocation, row.Case.CadastralNumber,
             row.Case.WorkingAreaSquareMeters, row.Case.WorkingPrice, row.Case.Currency, row.Case.StageId, row.Task.EmployeeId,
             people.GetValueOrDefault(row.Task.EmployeeId, "Сотрудник"), FirstPhoto(sourceRows), askSource?.Price,
-            askSource == null ? null : SourceLabel(askSource), sellerOffer, buyerOffer, agreedPrice, row.Task.Type, row.Task.Title, row.Task.Description, row.Task.DueAt,
+            askSource == null ? null : SourceLabel(askSource), sellerOffer, buyerOffer, agreedPrice, row.Task.Type, (row.Task.Completed || row.Task.Deleted ? "Нет задач" : row.Task.Title), (row.Task.Completed || row.Task.Deleted ? "" : row.Task.Description), (row.Task.Completed || row.Task.Deleted ? null : row.Task.DueAt),
             DueState(row.Task, todayStart, tomorrowStart), negotiations, quick, deep, inspection, timeline, sources, sourceChanged,
             sourceRows.Length == 0 ? 0 : sourceRows.Max(item => item.DataRevision), row.Case.Version, canManagerDecide, canHeadDecide,
             managerPermission || headPermission, row.Task.Version, availableAssignees,
             startPrice, priceDelta, priceDeltaPercent, priceChanged)
         {
+            DueHasTime = row.Task.DueHasTime,
             CanAssignInspections = canAssignInspections,
             CanPerformInspections = canPerformInspections
         };

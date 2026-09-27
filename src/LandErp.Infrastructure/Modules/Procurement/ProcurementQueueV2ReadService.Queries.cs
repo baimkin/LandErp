@@ -1,3 +1,4 @@
+using LandErp.Application.Modules.Workflow.Domain;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
@@ -19,13 +20,20 @@ public sealed partial class ProcurementQueueV2ReadService
         return rows;
     }
 
-    private static IQueryable<Row> VisibleReadCases(LandErpDbContext db, EffectiveEmployeeAccess access)
+    private IQueryable<Row> VisibleReadCases(LandErpDbContext db, EffectiveEmployeeAccess access)
     {
+        DateTimeOffset now = _clock.GetUtcNow();
+        DateTimeOffset day = WorkTaskDeadline.DayStart(now);
         IQueryable<PropertyCase> cases = ProcurementVisibility.ApplyRead(
             db.PropertyCases.AsNoTracking(), db, access);
         IQueryable<Row> rows = from item in cases
                                join assignment in db.WorkAssignments.AsNoTracking() on item.AssignmentId equals assignment.Id
-                               join task in db.WorkTasks.AsNoTracking() on item.WorkTaskId equals task.Id
+                               from task in db.WorkTasks.AsNoTracking()
+                   .Where(t => t.OrganizationId == item.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == item.Id
+                       && ((!t.Completed && !t.Deleted) || t.Id == item.WorkTaskId))
+                   .OrderBy(t => t.Completed || t.Deleted)
+                   .ThenByDescending(t => t.DueAt < (t.DueHasTime ? now : day))
+                   .ThenBy(t => t.DueAt == null).ThenBy(t => t.DueAt).ThenBy(t => t.RecordedAt).ThenBy(t => t.Id).Take(1)
                                select new Row { Case = item, Assignment = assignment, Task = task };
         return rows;
     }
@@ -49,8 +57,8 @@ public sealed partial class ProcurementQueueV2ReadService
 
     private static IQueryable<Row> ApplySort(IQueryable<Row> query, ProcurementQueueV2Filter filter, LandErpDbContext db) => (filter.Sort, filter.Descending) switch
     {
-        (ProcurementQueueV2Sort.DueAt, false) => query.OrderBy(row => row.Task.DueAt).ThenBy(row => row.Case.BusinessNumber),
-        (ProcurementQueueV2Sort.DueAt, true) => query.OrderByDescending(row => row.Task.DueAt).ThenBy(row => row.Case.BusinessNumber),
+        (ProcurementQueueV2Sort.DueAt, false) => query.OrderBy(row => row.Task.Completed || row.Task.Deleted || row.Task.DueAt == null).ThenBy(row => row.Task.DueAt).ThenBy(row => row.Case.BusinessNumber),
+        (ProcurementQueueV2Sort.DueAt, true) => query.OrderBy(row => row.Task.Completed || row.Task.Deleted || row.Task.DueAt == null).ThenByDescending(row => row.Task.DueAt).ThenBy(row => row.Case.BusinessNumber),
         (ProcurementQueueV2Sort.WorkingPrice, false) => query.OrderBy(row => row.Case.WorkingPrice).ThenBy(row => row.Case.BusinessNumber),
         (ProcurementQueueV2Sort.WorkingPrice, true) => query.OrderByDescending(row => row.Case.WorkingPrice).ThenBy(row => row.Case.BusinessNumber),
         (ProcurementQueueV2Sort.Area, false) => query.OrderBy(row => row.Case.WorkingAreaSquareMeters).ThenBy(row => row.Case.BusinessNumber),
@@ -116,12 +124,12 @@ public sealed partial class ProcurementQueueV2ReadService
     }
 
     private static async Task<ProcurementQueueV2Summary> ReadSummaryAsync(LandErpDbContext db, IQueryable<Row> visible,
-        Guid[] priceChangedCaseIds, DateTimeOffset todayStart, DateTimeOffset tomorrowStart, CancellationToken cancellationToken)
+        Guid[] priceChangedCaseIds, DateTimeOffset todayStart, DateTimeOffset tomorrowStart, DateTimeOffset now, CancellationToken cancellationToken)
     {
         IQueryable<Row> active = visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired");
         int inWork = await active.CountAsync(cancellationToken);
-        int dueToday = await active.CountAsync(row => !row.Task.Completed && row.Task.DueAt >= todayStart && row.Task.DueAt < tomorrowStart, cancellationToken);
-        int overdue = await active.CountAsync(row => !row.Task.Completed && row.Task.DueAt < todayStart, cancellationToken);
+        int dueToday = await active.CountAsync(row => db.WorkTasks.Any(t => t.OrganizationId == row.Case.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == row.Case.Id && !t.Completed && !t.Deleted && t.DueAt >= todayStart && t.DueAt < tomorrowStart), cancellationToken);
+        int overdue = await active.CountAsync(row => db.WorkTasks.Any(t => t.OrganizationId == row.Case.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == row.Case.Id && !t.Completed && !t.Deleted && t.DueAt < (t.DueHasTime ? now : todayStart)), cancellationToken);
         int changed = await WhereSourceChanged(active, db).CountAsync(cancellationToken);
         int returned = await active.CountAsync(row => row.Case.StageId == "returned", cancellationToken);
         int checking = await active.CountAsync(row => row.Case.StageId == "analysis", cancellationToken);

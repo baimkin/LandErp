@@ -1,27 +1,68 @@
 @using LandErp.Application.Modules.Procurement.Contracts
 @using LandErp.Application.Modules.Workflow.Domain
+@using System.Globalization
 @inherits CaseWorkspaceComponent
-@inject IProcurementQueueV2ReadService Reader
 @inject IProcurementWorkspace Workspace
-<CaseModal Title="Следующее действие" Subtitle="Актуальная задача объекта и её исполнитель" Error="@Error" Busy="Busy" OnClose="OnClose">
-@if(Loading){<p>Загружаем задачу…</p>}
-else if(detail is not null && detail.CanManageDossier){
-    <EditForm Model="draft" OnValidSubmit="SaveAsync"><DataAnnotationsValidator/><ValidationSummary/><div class="form-grid">
-        <label class="field dossier-wide"><span>Что сделать *</span><InputText @bind-Value="draft.Title"/><ValidationMessage For="()=>draft.Title"/></label>
-        <label class="field"><span>Тип</span><InputSelect @bind-Value="draft.Type"><option value="General">Другое</option><option value="Call">Звонок</option><option value="Meeting">Встреча / осмотр</option><option value="Check">Проверка</option><option value="Documents">Документы</option><option value="Decision">Решение</option></InputSelect></label>
-        <label class="field"><span>Срок (МСК)</span><input type="datetime-local" value="@draft.Due" @oninput="e=>draft.Due=e.Value?.ToString()??string.Empty"/></label>
-        <label class="field dossier-wide"><span>Ответственный</span><InputSelect @bind-Value="draft.Assignee">@foreach(var item in detail.AvailableAssignees){<option value="@item.Id">@item.Name</option>}</InputSelect></label>
-        <label class="field dossier-wide"><span>Подробности</span><InputTextArea @bind-Value="draft.Description"/></label>
-        <div class="form-actions"><ActionButton Label="Сохранить действие" Type="submit" Busy="Busy"/></div>
-    </div></EditForm>
-}else{<p>Действие недоступно.</p>}
-</CaseModal>
-@code{
-    [Parameter]public Guid CaseId{get;set;}
-    [Parameter]public EventCallback OnClose{get;set;}
-    [Parameter]public EventCallback OnSaved{get;set;}
-    private ProcurementQueueV2Detail? detail;private Draft draft=new();
-    protected override async Task ReadAsync(){detail=await Reader.ReadDetailAsync(CurrentSubject,CaseId,CancellationToken.None);draft=new(){Title=detail.NextActionTitle,Description=detail.NextActionDescription,Type=detail.NextActionType,Due=ProcurementLabels.LocalInput(detail.DueAt),Assignee=detail.AssigneeId};}
-    private async Task SaveAsync(){await ExecuteAsync(()=>Workspace.SaveNextActionAsync(CurrentSubject,new(CaseId,detail!.CaseVersion,detail.TaskVersion,draft.Type,draft.Title,draft.Description,CaseFormValues.ParseLocal(draft.Due),draft.Assignee),Guid.CreateVersion7().ToString(),CancellationToken.None));if(Success!=null)await OnSaved.InvokeAsync();}
-    private sealed class Draft{[System.ComponentModel.DataAnnotations.Required(ErrorMessage="Укажите действие.")]public string Title{get;set;}="";public string Description{get;set;}="";public string Due{get;set;}="";public WorkTaskType Type{get;set;}public Guid Assignee{get;set;}}
+<div class="case-tasks">
+    <div class="section-heading"><h3>Задачи</h3>@if(data?.CanEdit == true && draft == null){<button class="btn quiet" @onclick="Add">＋ Задача</button>}</div>
+    @if(Error != null){<p role="alert">@Error</p>}
+    @if(WriteOutcome==WorkspaceWriteOutcome.Unknown && pending != null){<button class="btn quiet" @onclick="Retry">Проверить сохранение</button>}
+    @if(LastWriteWasConflict){<button class="btn quiet" @onclick="ReloadAsync">Обновить данные; черновик сохранится до отмены</button>}
+    @if(NeedsRefresh){<p role="status">@RefreshWarning</p><button class="btn quiet" @onclick="ReloadAsync">Обновить</button>}
+    @if(data != null){
+        @foreach(var item in data.Tasks.Where(x => !x.Completed)){
+            @if(draft?.Id == item.Id){ @Editor() }
+            else {<div class="task-row @(item.Overdue ? "overdue" : "")" @key="item.Id">
+                <div><strong>@item.Title</strong><small>@WorkTaskDeadline.Format(item.DueAt,item.DueHasTime) · @item.EmployeeName</small></div>
+                @if(data.CanEdit){<div class="task-actions"><button class="btn quiet" disabled="@Busy" title="Выполнено" @onclick="()=>Change(item,CaseTaskAction.Complete)">✓</button><button class="btn quiet" disabled="@Busy" @onclick="()=>Edit(item)">Изменить</button><button class="btn quiet" disabled="@Busy" title="Удалить задачу" @onclick="()=>Change(item,CaseTaskAction.Delete)">Удалить</button></div>}
+            </div>}
+        }
+        @if(draft != null && draft.Id == null){@Editor()}
+        @if(!data.Tasks.Any(x=>!x.Completed)&&draft==null){<p class="subtle">Нет задач</p>}
+        @if(data.Tasks.Any(x=>x.Completed)){<details><summary>Выполненные (@data.Tasks.Count(x=>x.Completed))</summary>@foreach(var item in data.Tasks.Where(x=>x.Completed)){<div class="task-row"><div><span>@item.Title</span><small>@WorkTaskDeadline.Format(item.DueAt,item.DueHasTime) · @item.EmployeeName</small></div></div>}</details>}
+    }
+</div>
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+    private CaseTasksView? data;
+    private Draft? draft;
+    private ChangeCaseTask? pending;
+    protected override async Task ReadAsync() => data = await Workspace.ReadTasksAsync(CurrentSubject,CaseId,CancellationToken.None);
+    private void Add(){if(WriteOutcome==WorkspaceWriteOutcome.Unknown)return;ClearFeedback();pending=null;draft=new(){Employee=data!.DefaultEmployeeId,CaseVersion=data.CaseVersion};}
+    private void Edit(CaseTaskView item){if(WriteOutcome==WorkspaceWriteOutcome.Unknown)return;ClearFeedback();pending=null;var local=item.DueAt==null?(DateTimeOffset?)null:TimeZoneInfo.ConvertTime(item.DueAt.Value,WorkTaskDeadline.Moscow);draft=new(){Id=item.Id,Version=item.Version,CaseVersion=data!.CaseVersion,Title=item.Title,Description=item.Description,Type=item.Type,OriginalDue=item.DueAt,OriginalHasTime=item.DueHasTime,Employee=item.EmployeeId,Date=local?.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)??"",Time=item.DueHasTime?local?.ToString("HH:mm",CultureInfo.InvariantCulture)??"":""};}
+    private void QuickDate(int days){draft!.Date=TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,WorkTaskDeadline.Moscow).AddDays(days).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture);}
+    private async Task Save(){
+        if(draft==null || Busy)return;
+        DateTimeOffset? due=null;
+        if(draft.Date.Length==0 && draft.Time.Length>0){ShowValidationError("Сначала выберите дату.");return;}
+        if(draft.Date.Length>0){
+            if(!DateOnly.TryParseExact(draft.Date,"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out var date)){ShowValidationError("Проверьте дату.");return;}
+            TimeOnly at=default;
+            if(draft.Time.Length>0&&!TimeOnly.TryParseExact(draft.Time,"HH:mm",CultureInfo.InvariantCulture,DateTimeStyles.None,out at)){ShowValidationError("Время в формате HH:mm, например 14:30.");return;}
+            due=new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(date.ToDateTime(at),WorkTaskDeadline.Moscow));
+        }
+        if(draft.OriginalDue is DateTimeOffset oldDue){var oldLocal=TimeZoneInfo.ConvertTime(oldDue,WorkTaskDeadline.Moscow);
+            if(draft.Date==oldLocal.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture)&&draft.Time==(draft.OriginalHasTime?oldLocal.ToString("HH:mm",CultureInfo.InvariantCulture):""))due=oldDue;}
+        var command=new ChangeCaseTask(CaseId,draft.CaseVersion,draft.Id,draft.Version,CaseTaskAction.Save,draft.Title,draft.Description,draft.Type,draft.Employee,due,draft.Time.Length>0,Guid.Empty);
+        await Send(command);
+    }
+    private async Task Change(CaseTaskView item,CaseTaskAction action){if(Busy || WriteOutcome==WorkspaceWriteOutcome.Unknown)return;await Send(new(CaseId,data!.CaseVersion,item.Id,item.Version,action,item.Title,item.Description,item.Type,item.EmployeeId,item.DueAt,item.DueHasTime,Guid.Empty));}
+    private async Task Retry(){if(pending!=null)await Send(pending with {CommandId=Guid.Empty});}
+    private async Task Send(ChangeCaseTask command){
+        // Неизвестный результат повторяется с тем же ключом и исходным payload.
+        if(pending==null || pending with {CommandId=Guid.Empty} != command)pending=command with {CommandId=Guid.CreateVersion7()};
+        await ExecuteAsync(async()=>{await Workspace.ChangeTaskAsync(CurrentSubject,pending,pending.CommandId.ToString(),CancellationToken.None);});
+        if(WriteOutcome==WorkspaceWriteOutcome.Committed){draft=null;pending=null;await OnSaved.InvokeAsync();}
+    }
+    private RenderFragment Editor()=>@<EditForm Model="draft!" OnSubmit="Save"><fieldset disabled="@(Busy || WriteOutcome==WorkspaceWriteOutcome.Unknown)" class="task-editor">
+        <label class="field"><span>Что сделать</span><input @bind="draft!.Title" @bind:event="oninput" maxlength="512" autofocus /></label>
+        <div class="task-types">@foreach(var type in Enum.GetValues<WorkTaskType>().OrderBy(x=>x==WorkTaskType.General)){<button type="button" class="btn @(draft!.Type==type?"secondary":"quiet")" aria-pressed="@(draft.Type==type)" @onclick="()=>draft.Type=type">@TypeLabel(type)</button>}</div>
+        <div class="task-due"><button type="button" class="btn quiet" @onclick="()=>QuickDate(0)">Сегодня</button><button type="button" class="btn quiet" @onclick="()=>QuickDate(1)">Завтра</button><label>Дата <input type="date" value="@draft!.Date" @onchange='e=>draft!.Date=e.Value?.ToString()??""' /></label><label>Время МСК <input type="text" inputmode="numeric" placeholder="HH:mm" maxlength="5" @bind="draft!.Time" /></label><button type="button" class="btn quiet" @onclick='()=>{draft!.Date="";draft.Time="";}'>Без срока</button></div>
+        <label class="field"><span>Ответственный</span><select @bind="draft!.Employee">@if(!data!.Assignees.Any(x=>x.EmployeeId==draft.Employee)){<option value="@draft.Employee">Выберите допустимого сотрудника</option>}@foreach(var person in data.Assignees){<option value="@person.EmployeeId">@person.Name</option>}</select></label>
+        <details><summary>Подробности</summary><textarea @bind="draft!.Description" maxlength="4000"></textarea></details>
+        <div class="task-actions"><button type="submit" class="btn primary">@(draft!.Id==null?"Добавить":"Сохранить")</button><button type="button" class="btn quiet" @onclick="()=>{draft=null;pending=null;}">Отмена</button></div>
+    </fieldset></EditForm>;
+    private static string TypeLabel(WorkTaskType type)=>type switch{WorkTaskType.Call=>"Звонок",WorkTaskType.Meeting=>"Встреча",WorkTaskType.Check=>"Проверка",WorkTaskType.Documents=>"Документы",WorkTaskType.Decision=>"Решение",_=>"Другое"};
+    private sealed class Draft{public DateTimeOffset? OriginalDue{get;set;}public bool OriginalHasTime{get;set;}public Guid? Id{get;set;} public long Version{get;set;} public long CaseVersion{get;set;} public string Title{get;set;}="";public string Description{get;set;}="";public string Date{get;set;}="";public string Time{get;set;}="";public WorkTaskType Type{get;set;}public Guid Employee{get;set;}}
 }

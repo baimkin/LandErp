@@ -11,7 +11,7 @@ namespace LandErp.Infrastructure.Modules.Procurement;
 
 public sealed partial class ProcurementQueueV2ReadService
 {
-    private static ProcurementQueueV2Row ProjectRow(Row row, Dictionary<Guid, string> names, SourceDb[] sources, CheckDb[] checks,
+    private ProcurementQueueV2Row ProjectRow(Row row, Dictionary<Guid, string> names, SourceDb[] sources, CheckDb[] checks,
         ContactDb? contact, DateTimeOffset todayStart, DateTimeOffset tomorrowStart)
     {
         ProcurementQuickCheckSummary quick = QuickSummary(checks);
@@ -22,9 +22,9 @@ public sealed partial class ProcurementQueueV2ReadService
         ProcurementSourceTypeSummary[] sourceTypes = sources.GroupBy(item => item.Source).OrderBy(group => group.Key)
             .Select(group => new ProcurementSourceTypeSummary(group.Key, group.Count())).ToArray();
         return new(row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle, row.Case.WorkingLocation, row.Case.CadastralNumber, FirstPhoto(sources),
-            row.Case.StageId, row.Case.WorkingPrice, row.Case.Currency, row.Case.WorkingAreaSquareMeters, row.Task.Type, row.Task.Title,
-            row.Task.Description, row.Task.DueAt, due, row.Task.EmployeeId, names.GetValueOrDefault(row.Task.EmployeeId, "Сотрудник"), quick, latest, sourceTypes, sources.Length, changed,
-            RowState(due, quick, changed), row.Case.Version, sources.Length == 0 ? 0 : sources.Max(item => item.DataRevision));
+            row.Case.StageId, row.Case.WorkingPrice, row.Case.Currency, row.Case.WorkingAreaSquareMeters, row.Task.Type, (row.Task.Completed || row.Task.Deleted ? "Нет задач" : row.Task.Title),
+            (row.Task.Completed || row.Task.Deleted ? "" : row.Task.Description), (row.Task.Completed || row.Task.Deleted ? null : row.Task.DueAt), due, row.Task.EmployeeId, names.GetValueOrDefault(row.Task.EmployeeId, "Сотрудник"), quick, latest, sourceTypes, sources.Length, changed,
+            RowState(due, quick, changed), row.Case.Version, sources.Length == 0 ? 0 : sources.Max(item => item.DataRevision)) { DueHasTime = row.Task.DueHasTime };
     }
 
     private static async Task<decimal?> LatestPrice(IQueryable<CaseNegotiation> query, int field, CancellationToken cancellationToken)
@@ -103,10 +103,10 @@ public sealed partial class ProcurementQueueV2ReadService
         return fields.ToArray();
     }
 
-    private static ProcurementDueState DueState(WorkTask task, DateTimeOffset todayStart, DateTimeOffset tomorrowStart)
+    private ProcurementDueState DueState(WorkTask task, DateTimeOffset todayStart, DateTimeOffset tomorrowStart)
     {
-        if (task.Completed || task.DueAt == null) return ProcurementDueState.None;
-        if (task.DueAt < todayStart) return ProcurementDueState.Overdue;
+        if (task.Completed || task.Deleted || task.DueAt == null) return ProcurementDueState.None;
+        if (WorkTaskDeadline.Overdue(task, _clock.GetUtcNow())) return ProcurementDueState.Overdue;
         return task.DueAt < tomorrowStart ? ProcurementDueState.Today : ProcurementDueState.Normal;
     }
 

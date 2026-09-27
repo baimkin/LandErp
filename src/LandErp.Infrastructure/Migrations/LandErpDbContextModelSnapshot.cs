@@ -3519,11 +3519,29 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("version")
                         .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
 
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("deleted")
+                        .HasComment("Задача убрана из рабочих списков; история и сама запись сохраняются.");
+
+                    b.Property<bool>("IsUserTask")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_user_task")
+                        .HasComment("Пользовательская или сохранённая прежняя задача; системные переходы не перезаписывают её.");
+
+                    b.Property<bool>("DueHasTime")
+                        .HasColumnType("boolean")
+                        .HasColumnName("due_has_time")
+                        .HasComment("True: точный срок UTC. False: due_at хранит начало даты Europe/Moscow; просрочка со следующего дня, время не показывается.");
+
                     b.HasKey("Id")
                         .HasName("pk_work_tasks");
 
                     b.HasIndex("EmployeeId", "Completed", "DueAt")
                         .HasDatabaseName("ix_work_tasks_employee_id_completed_due_at");
+
+                    b.HasIndex("OrganizationId", "ObjectType", "ObjectId")
+                        .HasDatabaseName("ix_work_tasks_organization_id_object_type_object_id");
 
                     b.ToTable("work_tasks", "workflow", t =>
                         {

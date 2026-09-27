@@ -67,7 +67,7 @@ public sealed record ProcurementQueueV2Row(
     bool SourceChanged,
     ProcurementQueueV2RowState RowState,
     long CaseVersion,
-    long SourceRevision);
+    long SourceRevision) { public bool DueHasTime { get; init; } = true; };
 
 public sealed record ProcurementQueueV2Page(
     IReadOnlyList<ProcurementQueueV2Row> Items,
@@ -237,6 +237,7 @@ public sealed record ProcurementQueueV2Detail(
     decimal? PriceDeltaFromStartPercent = null,
     bool PriceChanged = false)
 {
+    public bool DueHasTime { get; init; } = true;
     public bool CanAssignInspections { get; init; }
     public bool CanPerformInspections { get; init; }
 }

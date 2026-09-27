@@ -25,6 +25,10 @@ public sealed class WorkTask
     public string Description { get; set; } = "";
     public Guid EmployeeId { get; set; }
     public bool Completed { get; set; }
+    public bool Deleted { get; set; }
+    // Пользовательскую задачу нельзя перезаписать системным переходом case.
+    public bool IsUserTask { get; set; }
+    public bool DueHasTime { get; set; } = true;
     public DateTimeOffset? DueAt { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
     public long Version { get; set; } = 1;

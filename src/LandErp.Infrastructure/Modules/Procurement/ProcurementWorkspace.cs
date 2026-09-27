@@ -34,7 +34,7 @@ public sealed partial class ProcurementWorkspace(
     {
         public PropertyCase Case { get; init; } = default!;
         public Assignment Assignment { get; init; } = default!;
-        public WorkTask Task { get; init; } = default!;
+        public WorkTask Task { get; set; } = default!;
     }
 
     private async Task<EffectiveEmployeeAccess> RequireIncomingAsync(
@@ -78,12 +78,19 @@ public sealed partial class ProcurementWorkspace(
                    select new Row { Case = item, Assignment = assignment, Task = task };
     }
 
-    private static IQueryable<Row> VisibleReadCases(LandErpDbContext db, EffectiveEmployeeAccess access)
+    private IQueryable<Row> VisibleReadCases(LandErpDbContext db, EffectiveEmployeeAccess access)
     {
+        DateTimeOffset now = time.GetUtcNow();
+        DateTimeOffset day = WorkTaskDeadline.DayStart(now);
         IQueryable<PropertyCase> cases = ProcurementVisibility.ApplyRead(db.PropertyCases, db, access);
         return from item in cases
                join assignment in db.WorkAssignments on item.AssignmentId equals assignment.Id
-               join task in db.WorkTasks on item.WorkTaskId equals task.Id
+               from task in db.WorkTasks.AsNoTracking()
+                   .Where(t => t.OrganizationId == item.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == item.Id
+                       && ((!t.Completed && !t.Deleted) || t.Id == item.WorkTaskId))
+                   .OrderBy(t => t.Completed || t.Deleted)
+                   .ThenByDescending(t => t.DueAt < (t.DueHasTime ? now : day))
+                   .ThenBy(t => t.DueAt == null).ThenBy(t => t.DueAt).ThenBy(t => t.RecordedAt).ThenBy(t => t.Id).Take(1)
                select new Row { Case = item, Assignment = assignment, Task = task };
     }
 
@@ -878,6 +885,7 @@ public sealed partial class ProcurementWorkspace(
         row.Case.StageId = "analysis";
         row.Case.ManagerEmployeeId = context.EmployeeId;
         row.Assignment.EmployeeId = context.EmployeeId;
+        EnsureSystemTask(db, row, time.GetUtcNow());
         row.Task.EmployeeId = context.EmployeeId;
         row.Task.Completed = false;
         row.Task.DueAt = null;
@@ -1119,6 +1127,9 @@ public sealed partial class ProcurementWorkspace(
         propertyCase.StageId = stage; propertyCase.ReviewedDataRevision = sourceRevision;
         foreach (var source in sources) source.Link.ReviewedDataRevision = source.Item.DataRevision;
         db.Entry(propertyCase).Property(value => value.Version).IsModified = true;
+        // В том числе при отказе завершается только системная задача перехода.
+        // Пользовательские задачи сохраняются для возможного возобновления объекта.
+        EnsureSystemTask(db, row, time.GetUtcNow());
         row.Assignment.EmployeeId = target; row.Task.EmployeeId = target; row.Task.DueAt = command.DueAt;
         row.Task.Completed = stage == "rejected";
         row.Task.Title = stage switch { "pending_head" => "Рассмотреть первичный анализ", "returned" => "Исправить / уточнить первичный анализ", "clarify" => "Уточнить данные объекта", "monitor" => "Наблюдать за объектом", "negotiation" => "Переговоры и проверки", "rejected" => "Объект отклонён", _ => "Первичный анализ" };
@@ -1209,7 +1220,19 @@ public sealed partial class ProcurementWorkspace(
     public async Task AddNegotiationAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken)
         => await AddNegotiationWithIdAsync(subject, command, correlationId, cancellationToken);
 
-    public async Task<Guid> AddNegotiationWithIdAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken)
+    public Task<Guid> AddNegotiationWithIdAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken)
+        => AddNegotiationCoreAsync(subject, command, null, correlationId, cancellationToken);
+
+    public Task<Guid> RecordCommunicationAsync(Subject subject, RecordCaseCommunication command, string correlationId, CancellationToken cancellationToken)
+    {
+        if (command.Communication.CommandId == null || command.Communication.CommandId == Guid.Empty)
+            throw new ArgumentException("Укажите идентификатор записи общения.");
+        _ = Required(command.Communication.Outcome, 3, 1000, "Запишите, что обсудили (от 3 до 1000 символов).");
+        return AddNegotiationCoreAsync(subject, command.Communication, command, correlationId, cancellationToken);
+    }
+
+    private async Task<Guid> AddNegotiationCoreAsync(Subject subject, AddNegotiation command,
+        RecordCaseCommunication? communication, string correlationId, CancellationToken cancellationToken)
     {
         EffectiveEmployeeAccess effective = await RequireProcurementAsync(subject, ProcurementAccessLevel.Manager, cancellationToken);
         AccessContext context = effective.ProcurementWorkContext;
@@ -1226,8 +1249,13 @@ public sealed partial class ProcurementWorkspace(
             throw new ArgumentException("Зафиксируйте хотя бы результат, комментарий, следующий шаг или цену.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
+        await EnsureActiveEmployeeAsync(db, context.EmployeeId, cancellationToken);
+        // Старый контракт сериализуется без новых полей: опубликованные receipt остаются совместимыми.
+        object payload = communication == null ? command with { CommandId = null, ExpectedCaseVersion = 0 }
+            : communication with { Communication = command with { CommandId = null, ExpectedCaseVersion = 0 } };
         ProcurementCommandReplay replay = await ProcurementCommandReplay.BeginAsync(db, context, subject,
-            command.CommandId, "CaseNegotiationAdded", command with { CommandId = null, ExpectedCaseVersion = 0 }, cancellationToken);
+            command.CommandId, communication == null ? "CaseNegotiationAdded" : "CaseCommunicationRecorded", payload, cancellationToken);
         await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
         Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
         if (replay.ExistingResultId is Guid existingId)
@@ -1236,7 +1264,8 @@ public sealed partial class ProcurementWorkspace(
             await transaction.CommitAsync(cancellationToken);
             return existingId;
         }
-        if (row.Case.StageId is "rejected" or "monitor") throw new ArgumentException("Сначала возобновите PropertyCase.");
+        if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
+        if (row.Case.StageId is "rejected" or "monitor" or "acquired") throw new ArgumentException("Сначала возобновите PropertyCase.");
         CaseNegotiation negotiation = new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, PropertyCaseId = row.Case.Id,
@@ -1245,6 +1274,21 @@ public sealed partial class ProcurementWorkspace(
             NextStep = nextStep, NextStepDueAt = command.NextStepDueAt, AuthorEmployeeId = context.EmployeeId,
             EffectiveAt = command.EffectiveAt, RecordedAt = time.GetUtcNow()
         };
+        WorkTask? nextTask = null;
+        if (communication?.NextTask is { } requested && !string.IsNullOrWhiteSpace(requested.Title))
+        {
+            nextTask = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
+                ObjectType = "PropertyCase", ObjectId = row.Case.Id, RecordedAt = negotiation.RecordedAt };
+            await ApplyTaskDetailsAsync(db, row, nextTask, new(row.Case.Id, row.Case.Version, null, 0,
+                CaseTaskAction.Save, requested.Title, "", WorkTaskType.General, requested.EmployeeId,
+                requested.DueAt, requested.DueHasTime, command.CommandId!.Value), cancellationToken);
+            db.WorkTasks.Add(nextTask);
+            db.BusinessTimeline.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
+                ObjectType = "PropertyCase", ObjectId = row.Case.Id, ActorEmployeeId = context.EmployeeId,
+                Kind = "CaseTaskSave", Title = "Задача добавлена после общения",
+                Body = nextTask.Title + "\n" + WorkTaskDeadline.Format(nextTask.DueAt, nextTask.DueHasTime),
+                TargetEmployeeId = nextTask.EmployeeId, RecordedAt = negotiation.RecordedAt });
+        }
         db.CaseNegotiations.Add(negotiation);
         db.Entry(row.Case).Property(item => item.Version).IsModified = true;
         db.BusinessTimeline.Add(new()
@@ -1253,8 +1297,13 @@ public sealed partial class ProcurementWorkspace(
             ActorEmployeeId = context.EmployeeId, Kind = "Negotiation", Title = NegotiationLabel(negotiation),
             Body = NegotiationBody(negotiation), EffectiveAt = negotiation.EffectiveAt, DueAt = negotiation.NextStepDueAt, RecordedAt = negotiation.RecordedAt
         });
-        replay.Record(db, context, subject, row.Case.Id, negotiation.Id,
-            new { negotiation.SellerPrice, negotiation.BuyerOffer, negotiation.AgreedPrice, negotiation.EffectiveAt }, correlationId, negotiation.RecordedAt);
+        object changes = communication == null
+            ? new { negotiation.SellerPrice, negotiation.BuyerOffer, negotiation.AgreedPrice, negotiation.EffectiveAt }
+            : new { NegotiationId = negotiation.Id, negotiation.Channel, negotiation.Contact, negotiation.Outcome,
+                negotiation.Conditions, negotiation.Comment, negotiation.SellerPrice, negotiation.BuyerOffer,
+                negotiation.AgreedPrice, negotiation.EffectiveAt,
+                Task = nextTask == null ? null : new { nextTask.Id, nextTask.Title, nextTask.EmployeeId, nextTask.DueAt, nextTask.DueHasTime } };
+        replay.Record(db, context, subject, row.Case.Id, negotiation.Id, changes, correlationId, negotiation.RecordedAt);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return negotiation.Id;
@@ -1730,7 +1779,11 @@ public sealed partial class ProcurementWorkspace(
         string from = row.Case.StageId; DateTimeOffset now = time.GetUtcNow();
         row.Case.StageId = "acquired"; row.Case.AcquisitionPrice = price; row.Case.AcquisitionDate = command.AcquisitionDate;
         row.Case.AcquisitionComment = comment; row.Case.AcquiredByEmployeeId = context.EmployeeId; row.Case.AcquiredAt = now;
-        db.Entry(row.Case).Property(item => item.Version).IsModified = true; row.Task.Completed = true;
+        db.Entry(row.Case).Property(item => item.Version).IsModified = true;
+        // Закрытие объекта исключает его задачи из рабочих списков, но не выполняет
+        // пользовательские задачи, даже если старая WorkTaskId ещё указывает на одну из них.
+        EnsureSystemTask(db, row, now);
+        row.Task.Completed = true;
         db.WorkflowTransitions.Add(new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
@@ -2108,64 +2161,11 @@ public sealed partial class ProcurementWorkspace(
 
     public async Task SaveNextActionAsync(Subject subject, SaveNextAction command, string correlationId, CancellationToken cancellationToken)
     {
-        if (!Enum.IsDefined(command.Type)) throw new ArgumentException("Выберите поддерживаемый тип следующего действия.");
-        string title = Required(command.Title, 3, 512, "Укажите название следующего действия от 3 до 512 символов.");
-        string description = Required(command.Description, 3, 4000, "Укажите цель следующего действия от 3 до 4000 символов.");
-        DateTimeOffset now = time.GetUtcNow();
-        if (command.DueAt is DateTimeOffset due && (due.Offset != TimeSpan.Zero || due < now || due > now.AddYears(2)))
-            throw new ArgumentException("Укажите будущий срок в UTC.");
-
-        EffectiveEmployeeAccess effective = await RequireProcurementAsync(subject, ProcurementAccessLevel.Manager, cancellationToken);
-        AccessContext context = effective.ProcurementWorkContext;
-        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await EmployeeWorkInvariant.LockOrganizationAsync(db, context.OrganizationId, cancellationToken);
-        await EnsureActiveEmployeeAsync(db, context.EmployeeId, cancellationToken);
-        await db.PropertyCases.FromSqlInterpolated(
-            $"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE")
-            .LoadAsync(cancellationToken);
-        Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken)
-            ?? throw new AccessDeniedException();
-        if (row.Case.Version != command.ExpectedCaseVersion || row.Task.Version != command.ExpectedTaskVersion)
-            throw new DbUpdateConcurrencyException();
-        if (row.Case.StageId == "acquired")
-            throw new ArgumentException("Закупка уже завершена. Следующее действие для купленного объекта изменить нельзя.");
-
-        DecisionTarget[] assignees = await TargetsAsync(db, row.Case, row.Assignment.EmployeeId,
-            ProcurementAccessLevel.Manager, ProcurementRecipientAccess.CurrentVisibility, cancellationToken);
-        if (!assignees.Any(item => item.EmployeeId == command.AssigneeEmployeeId))
-            throw new AccessDeniedException();
-
-        var before = new { row.Task.Type, row.Task.Title, row.Task.Description, row.Task.DueAt, row.Task.EmployeeId };
-        row.Task.Type = command.Type;
-        row.Task.Title = title;
-        row.Task.Description = description;
-        row.Task.DueAt = command.DueAt;
-        row.Task.EmployeeId = command.AssigneeEmployeeId;
-        row.Task.Completed = false;
-        db.Entry(row.Case).Property(item => item.Version).IsModified = true;
-
-        string assigneeName = assignees.First(item => item.EmployeeId == command.AssigneeEmployeeId).Name;
-        db.BusinessTimeline.Add(new()
-        {
-            Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
-            ActorEmployeeId = context.EmployeeId, Kind = "NextActionChanged", Title = "Следующее действие обновлено",
-            Body = $"{NextActionTypeLabel(command.Type)}: {title}\nЦель: {description}", TargetEmployeeId = command.AssigneeEmployeeId,
-            DueAt = command.DueAt, RecordedAt = now
-        });
-        if (command.AssigneeEmployeeId != context.EmployeeId && command.AssigneeEmployeeId != before.EmployeeId)
-        {
-            db.Notifications.Add(new()
-            {
-                Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, EmployeeId = command.AssigneeEmployeeId,
-                ObjectType = "PropertyCase", ObjectId = row.Case.Id,
-                Title = $"{row.Case.BusinessNumber}: назначено действие «{title}»", RecordedAt = now
-            });
-        }
-        OrganizationWorkspace.AddAudit(db, context, subject, "ProcurementNextActionChanged", "PropertyCase", row.Case.Id,
-            new { Before = before, After = new { command.Type, Title = title, Description = description, command.DueAt, command.AssigneeEmployeeId, Assignee = assigneeName } }, correlationId);
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        CaseTasksView current = await ReadTasksAsync(subject, command.CaseId, cancellationToken);
+        CaseTaskView? task = current.Tasks.FirstOrDefault(x => !x.Completed);
+        await ChangeTaskAsync(subject, new(command.CaseId, command.ExpectedCaseVersion, task?.Id,
+            command.ExpectedTaskVersion, CaseTaskAction.Save, command.Title, command.Description,
+            command.Type, command.AssigneeEmployeeId, command.DueAt, true, Guid.CreateVersion7()), correlationId, cancellationToken);
     }
 
     public async Task<IReadOnlyList<NotificationView>> ReadNotificationsAsync(Subject subject, CancellationToken cancellationToken)
@@ -2478,7 +2478,7 @@ public sealed partial class ProcurementWorkspace(
         WorkTask task = new()
         {
             Id = DataConventions.NewId(), OrganizationId = actorContext.OrganizationId, ObjectType = "PropertyCase",
-            ObjectId = caseId, EmployeeId = responsibilityContext.EmployeeId, Title = "Первичный анализ", RecordedAt = now
+            ObjectId = caseId, EmployeeId = responsibilityContext.EmployeeId, Title = "", Completed = true, RecordedAt = now
         };
         PropertyCase propertyCase = new()
         {
@@ -2591,11 +2591,11 @@ public sealed partial class ProcurementWorkspace(
     private static QueueItem Item(Row row, Dictionary<Guid, string> names, List<(PropertyCaseSourceLink Link, Listing Item)> sources) => new(
         row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle, sources.Select(item => item.Item.Source).Distinct().ToArray(),
         row.Case.WorkingPrice, row.Case.Currency, row.Case.WorkingAreaSquareMeters, row.Case.WorkingLocation, row.Case.StageId,
-        names.GetValueOrDefault(row.Assignment.EmployeeId, "Сотрудник"), row.Task.DueAt,
+        names.GetValueOrDefault(row.Assignment.EmployeeId, "Сотрудник"), (row.Task.Completed || row.Task.Deleted ? null : row.Task.DueAt),
         row.Case.StageId == "returned" ? "Руководитель вернул: требуются исправления" : SourcesChanged(sources) ? "Источник изменился" : "Рабочий объект закупки",
         new[] { row.Case.WorkingPrice == null ? "цена" : null, row.Case.WorkingAreaSquareMeters == null ? "площадь" : null, row.Case.WorkingLocation == null ? "местоположение" : null }.OfType<string>().ToArray(),
         SourcesChanged(sources), SourceRevision(sources), row.Case.Version,
-        row.Task.Title, row.Task.Description, row.Task.Version);
+        (row.Task.Completed || row.Task.Deleted ? "Нет задач" : row.Task.Title), (row.Task.Completed || row.Task.Deleted ? "" : row.Task.Description), row.Task.Version) { DueHasTime = row.Task.DueHasTime };
 
     private static bool SourcesChanged(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Any(value => value.Item.DataRevision > value.Link.ReviewedDataRevision);
     private static long SourceRevision(IEnumerable<(PropertyCaseSourceLink Link, Listing Item)> sources) => sources.Sum(value => value.Item.DataRevision);

@@ -31,6 +31,10 @@ internal static class ProcurementMappings
         builder.Entity<Assignment>().HasIndex(item => new { item.ObjectType, item.ObjectId }).IsUnique();
         builder.Entity<Assignment>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<WorkTask>().ToTable("work_tasks", "workflow");
+        builder.Entity<WorkTask>().Property(item => item.Deleted).HasComment("Задача убрана из рабочих списков; история и сама запись сохраняются.");
+        builder.Entity<WorkTask>().Property(item => item.IsUserTask).HasComment("Пользовательская или сохранённая прежняя задача; системные переходы не перезаписывают её.");
+        builder.Entity<WorkTask>().Property(item => item.DueHasTime).HasComment("True: точный срок UTC. False: due_at хранит начало даты Europe/Moscow; просрочка со следующего дня, время не показывается.");
+        builder.Entity<WorkTask>().HasIndex(item => new { item.OrganizationId, item.ObjectType, item.ObjectId });
         builder.Entity<WorkTask>().Property(item => item.Type).HasConversion<string>().HasMaxLength(64);
         builder.Entity<WorkTask>().Property(item => item.Title).HasMaxLength(512);
         builder.Entity<WorkTask>().Property(item => item.Description).HasMaxLength(4000);

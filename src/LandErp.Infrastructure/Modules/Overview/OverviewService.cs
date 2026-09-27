@@ -66,7 +66,11 @@ public sealed class OverviewService(
                 db.PropertyCases.AsNoTracking(), db, effective);
             IQueryable<PropertyCase> active = visible.Where(item => item.StageId != "rejected" && item.StageId != "acquired");
             var caseTasks = from item in active
-                            join task in db.WorkTasks.AsNoTracking() on item.WorkTaskId equals task.Id
+                            from task in db.WorkTasks.AsNoTracking()
+                                .Where(t => t.OrganizationId == item.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == item.Id
+                                    && ((!t.Completed && !t.Deleted) || t.Id == item.WorkTaskId))
+                                .OrderBy(t => t.Completed || t.Deleted).ThenByDescending(t => t.DueAt < (t.DueHasTime ? now : todayStart))
+                                .ThenBy(t => t.DueAt == null).ThenBy(t => t.DueAt).ThenBy(t => t.RecordedAt).ThenBy(t => t.Id).Take(1)
                             join assignment in db.WorkAssignments.AsNoTracking() on item.AssignmentId equals assignment.Id
                             select new
                             {
@@ -89,16 +93,16 @@ public sealed class OverviewService(
             }
             activeCount = await active.CountAsync(cancellationToken);
             waitingCount = await active.CountAsync(item => item.StageId == "pending_head", cancellationToken);
-            overdueCount = await caseTasks.CountAsync(row => !row.Task.Completed && row.Task.DueAt < todayStart, cancellationToken);
+            overdueCount = await caseTasks.CountAsync(row => !row.Task.Completed && !row.Task.Deleted && row.Task.DueAt < (row.Task.DueHasTime ? now : todayStart), cancellationToken);
             deepCount = await active.CountAsync(item => db.CaseChecks.Any(check => check.PropertyCaseId == item.Id
                 && check.Level == CaseCheckLevel.Deep), cancellationToken);
             acquiredCount = await visible.CountAsync(item => item.StageId == "acquired" && item.AcquiredAt >= now.AddDays(-30), cancellationToken);
 
             DateTimeOffset stalledBefore = now.AddDays(-3);
             var attentionCases = caseTasks.Where(row =>
-                !row.Task.Completed && row.Task.DueAt < todayStart
+                !row.Task.Completed && !row.Task.Deleted && row.Task.DueAt < (row.Task.DueHasTime ? now : todayStart)
                 || row.Case.StageId == "returned"
-                || !row.Task.Completed && row.Task.DueAt == null && row.Task.RecordedAt < stalledBefore
+                || !row.Task.Completed && !row.Task.Deleted && row.Task.DueAt == null && row.Task.RecordedAt < stalledBefore
                 || row.HasCheckIssue
                 || row.SourceChanged);
             procurementAttentionCount = await attentionCases.CountAsync(cancellationToken);
@@ -112,13 +116,13 @@ public sealed class OverviewService(
             var taskRows = await (from task in db.WorkTasks.AsNoTracking()
                                   join item in active on task.ObjectId equals item.Id
                                   where task.OrganizationId == queue.OrganizationId && task.ObjectType == "PropertyCase"
-                                      && task.EmployeeId == identity.EmployeeId && !task.Completed
-                                  orderby task.DueAt == null, task.DueAt, task.RecordedAt descending
+                                      && task.EmployeeId == identity.EmployeeId && !task.Completed && !task.Deleted
+                                  orderby (task.DueAt < (task.DueHasTime ? now : todayStart)) descending, task.DueAt == null, task.DueAt, task.RecordedAt, task.Id
                                   select new { Item = item, Task = task }).Take(10).ToArrayAsync(cancellationToken);
             int taskTotal = await (from task in db.WorkTasks.AsNoTracking()
                                    join item in active on task.ObjectId equals item.Id
                                    where task.OrganizationId == queue.OrganizationId && task.ObjectType == "PropertyCase"
-                                       && task.EmployeeId == identity.EmployeeId && !task.Completed
+                                       && task.EmployeeId == identity.EmployeeId && !task.Completed && !task.Deleted
                                    select task.Id).CountAsync(cancellationToken);
             var notifications = await db.Notifications.AsNoTracking()
                 .Where(item => item.OrganizationId == queue.OrganizationId && item.EmployeeId == identity.EmployeeId
@@ -133,13 +137,17 @@ public sealed class OverviewService(
             {
                 var workload = await (from item in active
                                       join assignment in db.WorkAssignments.AsNoTracking() on item.AssignmentId equals assignment.Id
-                                      join task in db.WorkTasks.AsNoTracking() on item.WorkTaskId equals task.Id
+                                      from task in db.WorkTasks.AsNoTracking()
+                                .Where(t => t.OrganizationId == item.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == item.Id
+                                    && ((!t.Completed && !t.Deleted) || t.Id == item.WorkTaskId))
+                                .OrderBy(t => t.Completed || t.Deleted).ThenByDescending(t => t.DueAt < (t.DueHasTime ? now : todayStart))
+                                .ThenBy(t => t.DueAt == null).ThenBy(t => t.DueAt).ThenBy(t => t.RecordedAt).ThenBy(t => t.Id).Take(1)
                                       group new { task } by assignment.EmployeeId into grouped
                                       select new
                                       {
                                           EmployeeId = grouped.Key,
                                           ActiveCases = grouped.Count(),
-                                          OverdueCases = grouped.Count(value => !value.task.Completed && value.task.DueAt < todayStart)
+                                          OverdueCases = grouped.Count(value => !value.task.Completed && !value.task.Deleted && value.task.DueAt < (value.task.DueHasTime ? now : todayStart))
                                       })
                     .OrderByDescending(item => item.OverdueCases).ThenByDescending(item => item.ActiveCases).Take(8).ToArrayAsync(cancellationToken);
                 teamTotal = await (from item in active
@@ -329,7 +337,7 @@ public sealed class OverviewService(
 
     private static OverviewAttentionItem ProjectAttention(CaseTaskRow row, DateTimeOffset now, DateTimeOffset todayStart)
     {
-        if (!row.Task.Completed && row.Task.DueAt < todayStart)
+        if (!row.Task.Completed && !row.Task.Deleted && row.Task.DueAt < (row.Task.DueHasTime ? now : todayStart))
             return new(row.Case.Id.ToString(), OverviewSeverity.Critical, CaseTitle(row.Case), row.Task.Title,
                 Age(row.Task.DueAt, now), "выполнить следующий шаг", $"/procurement/{row.Case.Id}");
         if (row.Case.StageId == "returned")
@@ -354,13 +362,13 @@ public sealed class OverviewService(
             OverviewDueState state = task.DueAt switch
             {
                 null => OverviewDueState.None,
-                DateTimeOffset value when value < todayStart => OverviewDueState.Overdue,
+                DateTimeOffset value when value < (task.DueHasTime ? now : todayStart) => OverviewDueState.Overdue,
                 DateTimeOffset value when value < tomorrowStart => OverviewDueState.Today,
                 _ => OverviewDueState.Upcoming
             };
             result.Add((task.DueAt ?? DateTimeOffset.MaxValue, new(task.Id.ToString(), CaseTitle(item), StageLabel(item.StageId),
                 task.Title, state == OverviewDueState.Overdue ? "Срок действия прошёл" : "Следующее действие по объекту",
-                Deadline(task.DueAt, state), state, $"/procurement/{item.Id}")));
+                WorkTaskDeadline.Format(task.DueAt, task.DueHasTime), state, $"/procurement/{item.Id}")));
         }
         foreach (InternalNotification notification in notifications)
             result.Add((notification.RecordedAt, new(notification.Id.ToString(), notification.Title, "Новое уведомление",

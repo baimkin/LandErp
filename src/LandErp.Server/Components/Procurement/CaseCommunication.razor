@@ -1,0 +1,193 @@
+@using System.Globalization
+@using LandErp.Application.Modules.Procurement.Contracts
+@using LandErp.Application.Modules.Procurement.Domain
+@using LandErp.Application.Modules.Workflow.Domain
+@inherits CaseWorkspaceComponent
+@inject IProcurementWorkspace Workspace
+
+<CaseModal Title="Записать общение" Error="@Error" Busy="@(Busy || uploading)" OnClose="Close">
+    @if (Loading) { <p>Загружаем данные…</p> }
+    else if (saved)
+    {
+        <p role="status">@savedMessage</p>
+        <button class="btn secondary" @onclick="Finish">Закрыть</button>
+    }
+    else if (data != null)
+    {
+        @if (LastWriteWasConflict) { <p>Запись не сохранена: объект изменился. Черновик сохранён.</p><button class="btn quiet" @onclick="RefreshVersion">Обновить данные</button> }
+        @if (WriteOutcome == WorkspaceWriteOutcome.Unknown) { <button class="btn secondary" @onclick="Persist">Проверить сохранение</button> }
+        <EditForm Model="draft" OnSubmit="Save">
+            <fieldset disabled="@(Busy || uploading || WriteOutcome == WorkspaceWriteOutcome.Unknown)" class="communication-form">
+                <div class="channels" role="group" aria-label="Способ связи">
+                    @foreach (var option in Channels)
+                    { <button type="button" class="btn @(draft.Channel == option.Value ? "secondary" : "quiet")" aria-pressed="@(draft.Channel == option.Value)" @onclick="()=>draft.Channel=option.Value">@option.Label</button> }
+                </div>
+                <div class="communication-row when">
+                    <label>Когда, МСК<input type="date" value="@draft.Date" @onchange='e=>draft.Date=e.Value?.ToString()??""' />@FieldError("When")</label>
+                    <label>Время<input type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" @bind="draft.Time" /></label>
+                    <label>С кем<input type="text" maxlength="512" @bind="draft.Contact" /></label>
+                </div>
+                <label>Что обсудили<textarea rows="3" maxlength="1000" @bind="draft.Text" @bind:event="oninput" placeholder="Результат разговора и договорённости"></textarea>@FieldError("Text")</label>
+                <div class="communication-row prices">
+                    <label>Продавец, ₽<input type="text" inputmode="decimal" @bind="draft.Seller" @onblur='()=>FormatMoney("Seller")' />@FieldError("Seller")</label>
+                    <label>Наше предложение, ₽<input type="text" inputmode="decimal" @bind="draft.Buyer" @onblur='()=>FormatMoney("Buyer")' />@FieldError("Buyer")</label>
+                    <label>Согласовали, ₽<input type="text" inputmode="decimal" @bind="draft.Agreed" @onblur='()=>FormatMoney("Agreed")' />@FieldError("Agreed")</label>
+                </div>
+                <div class="next-task">
+                    <label>Следующая задача <small>необязательно</small><input type="text" maxlength="512" @bind="draft.TaskTitle" placeholder="Что сделать" />@FieldError("TaskTitle")</label>
+                    <div class="communication-row task-date">
+                        <label>Дата<input type="date" value="@draft.TaskDate" @onchange='e=>draft.TaskDate=e.Value?.ToString()??""' />@FieldError("TaskDue")</label>
+                        <label>Время МСК<input type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" @bind="draft.TaskTime" /></label>
+                        <label>Ответственный<select @bind="draft.EmployeeId">
+                            @if (!data.Assignees.Any(x=>x.EmployeeId==draft.EmployeeId)) { <option value="@draft.EmployeeId">Выберите сотрудника</option> }
+                            @foreach (var employee in data.Assignees) { <option value="@employee.EmployeeId">@employee.Name</option> }
+                        </select>@FieldError("Employee")</label>
+                    </div>
+                    <div class="quick-dates"><button type="button" class="btn quiet" @onclick="()=>QuickDate(0)">Сегодня</button><button type="button" class="btn quiet" @onclick="()=>QuickDate(1)">Завтра</button><button type="button" class="btn quiet" @onclick='()=>{draft.TaskDate="";draft.TaskTime="";}'>Без срока</button></div>
+                </div>
+                @if (AllowAttachments)
+                { <label>Материалы <small>необязательно, до 6 файлов по 8 МБ</small><InputFile OnChange="SelectFiles" multiple accept="image/*,audio/*,.pdf,.txt,.csv,.docx,.xlsx" />@FieldError("Files")</label> }
+                <div class="form-actions"><button type="submit" class="btn primary">Сохранить</button><button type="button" class="btn secondary" @onclick="Close">Отмена</button></div>
+            </fieldset>
+        </EditForm>
+    }
+</CaseModal>
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public bool AllowAttachments { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+    private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru-RU");
+    // Новые подписи используют существующие значения; сохранённые записи не преобразуются.
+    private static readonly (string Label, string Value)[] Channels = [("Звонок", "Звонок"), ("Переписка", "Мессенджер"), ("Встреча", "Встреча"), ("Эл. почта", "Электронная почта"), ("Другое", "Другое")];
+    private CaseTasksView? data;
+    private readonly Draft draft = new();
+    private readonly Dictionary<string,string> errors = [];
+    private RecordCaseCommunication? pending;
+    private IReadOnlyList<IBrowserFile> files = [];
+    private List<Material> materials = [];
+    private bool initialized, saved, uploading;
+    private string savedMessage = "";
+    protected override async Task ReadAsync()
+    {
+        data = await Workspace.ReadTasksAsync(CurrentSubject, CaseId, CancellationToken.None);
+        if (!initialized) { draft.EmployeeId = data.DefaultEmployeeId; draft.Version = data.CaseVersion; initialized = true; }
+    }
+    private async Task RefreshVersion() { await ReloadAsync(); if (Error == null && data != null) { draft.Version = data.CaseVersion; pending = null; } }
+    private RenderFragment FieldError(string key) => @<text>@if(errors.TryGetValue(key,out var message)){<span class="input-error" role="alert">@message</span>}</text>;
+    private void QuickDate(int days) => draft.TaskDate = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, WorkTaskDeadline.Moscow).AddDays(days).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture);
+    private static bool Money(string input, out decimal? value)
+    {
+        value = null;
+        if (string.IsNullOrWhiteSpace(input)) return true;
+        string normalized = input.Replace(" ", "", StringComparison.Ordinal).Replace("\u00a0", "", StringComparison.Ordinal).Replace("\u202f", "", StringComparison.Ordinal).Replace(',', '.');
+        if (!decimal.TryParse(normalized, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal amount) || amount <= 0 || amount > 999_999_999_999_999m) return false;
+        value = amount; return true;
+    }
+    private void FormatMoney(string key)
+    {
+        string input = key == "Seller" ? draft.Seller : key == "Buyer" ? draft.Buyer : draft.Agreed;
+        if (!Money(input, out var value)) return;
+        string formatted = value?.ToString(value == decimal.Truncate(value.Value) ? "N0" : "N2", Russian) ?? "";
+        if (key == "Seller") draft.Seller = formatted; else if (key == "Buyer") draft.Buyer = formatted; else draft.Agreed = formatted;
+    }
+    private static bool LocalTime(string date, string time, bool required, out DateTimeOffset? result)
+    {
+        result = null;
+        if (date.Length == 0) return !required && time.Length == 0;
+        if (!DateOnly.TryParseExact(date,"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out var day)) return false;
+        TimeOnly at = default;
+        if (time.Length == 0 ? required : !TimeOnly.TryParseExact(time,"HH:mm",CultureInfo.InvariantCulture,DateTimeStyles.None,out at)) return false;
+        try { result = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(day.ToDateTime(at),WorkTaskDeadline.Moscow)); return true; }
+        catch (ArgumentException) { return false; }
+    }
+    private void SelectFiles(InputFileChangeEventArgs args)
+    {
+        files = args.GetMultipleFiles(int.MaxValue); errors.Remove("Files");
+        if (files.Count > 6 || files.Any(x=>x.Size>8*1024*1024)) errors["Files"]="Выберите до 6 файлов размером не больше 8 МБ каждый.";
+    }
+    private async Task Save()
+    {
+        if (Busy || uploading || saved || data == null) return;
+        errors.Clear();
+        if (draft.Text.Trim().Length < 3) errors["Text"]="Запишите содержательный результат общения.";
+        if (!LocalTime(draft.Date,draft.Time,true,out var effective) || effective > DateTimeOffset.UtcNow.AddMinutes(5)) errors["When"]="Укажите дату и время HH:mm по МСК, не в будущем.";
+        if (!Money(draft.Seller,out var seller)) errors["Seller"]="Укажите положительную сумму или оставьте пустым.";
+        if (!Money(draft.Buyer,out var buyer)) errors["Buyer"]="Укажите положительную сумму или оставьте пустым.";
+        if (!Money(draft.Agreed,out var agreed)) errors["Agreed"]="Укажите положительную сумму или оставьте пустым.";
+        CommunicationTask? task = null;
+        if (!string.IsNullOrWhiteSpace(draft.TaskTitle))
+        {
+            if (!LocalTime(draft.TaskDate,draft.TaskTime,false,out var due) || due > DateTimeOffset.UtcNow.AddYears(2)) errors["TaskDue"]="Проверьте дату и время HH:mm по МСК (до двух лет вперёд).";
+            if (!data.Assignees.Any(x=>x.EmployeeId==draft.EmployeeId)) errors["Employee"]="Выберите допустимого сотрудника.";
+            task = new(draft.TaskTitle.Trim(),due,draft.TaskTime.Length>0,draft.EmployeeId);
+        }
+        if (files.Count > 6 || files.Any(x=>x.Size>8*1024*1024)) errors["Files"]="Выберите до 6 файлов размером не больше 8 МБ каждый.";
+        if (errors.Count > 0) return;
+        materials = [];
+        // Ошибка чтения выбранных файлов не должна отправить бизнес-команду.
+        try
+        {
+            uploading = true;
+            foreach (var file in files)
+            {
+                await using var input = file.OpenReadStream(8*1024*1024); using MemoryStream buffer = new();
+                await input.CopyToAsync(buffer);
+                var kind = file.ContentType.StartsWith("image/",StringComparison.OrdinalIgnoreCase) ? CaseAttachmentKind.Photo
+                    : file.ContentType.StartsWith("audio/",StringComparison.OrdinalIgnoreCase) ? CaseAttachmentKind.Audio : CaseAttachmentKind.Document;
+                materials.Add(new(file.Name,file.ContentType,kind,buffer.ToArray()));
+            }
+        }
+        catch (Exception exception) { errors["Files"]=ReadFailure(exception,"Не удалось прочитать материалы. Запись не отправлена."); return; }
+        finally { uploading = false; }
+        pending = new(new(CaseId,draft.Version,seller,buyer,agreed,draft.Channel,draft.Contact,draft.Text.Trim(),"","","",null,effective!.Value,Guid.CreateVersion7()),task);
+        await Persist();
+    }
+    private async Task Persist()
+    {
+        if (pending == null || Busy || saved) return;
+        Guid id = Guid.Empty;
+        bool committed = await ExecuteConfirmedAsync(async()=>id=await Workspace.RecordCommunicationAsync(CurrentSubject,pending,OperationId,CancellationToken.None));
+        if (!committed) return;
+        // После подтверждения нельзя снова отправлять общение из-за ошибки отдельного вложения.
+        saved = true; savedMessage = "Общение и следующая задача сохранены.";
+        if (pending.NextTask == null) savedMessage = "Общение сохранено.";
+        int uploaded = 0;
+        try
+        {
+            uploading = true;
+            foreach (var material in materials)
+            {
+                await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,CaseAttachmentOwner.Negotiation,id,material.Kind,
+                    material.Name,"Материал к общению",material.Name,material.ContentType,material.Content,null),OperationId,CancellationToken.None);
+                uploaded++;
+            }
+        }
+        catch (Exception exception) { savedMessage += $" Подтверждено материалов: {uploaded} из {materials.Count}. " + ReadFailure(exception,"Проверьте вложения в карточке; повторять общение не нужно."); return; }
+        finally { uploading = false; }
+        if (NeedsRefresh) { savedMessage += " Экран не обновлён; обновите карточку."; return; }
+        await Finish();
+    }
+    private async Task Close() { if (!Busy && !uploading) { if (saved) await Finish(); else await OnClose.InvokeAsync(); } }
+    private async Task Finish() => await OnSaved.InvokeAsync();
+    private sealed record Material(string Name,string ContentType,CaseAttachmentKind Kind,byte[] Content);
+    private sealed class Draft
+    {
+        public Draft()
+        {
+            var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,WorkTaskDeadline.Moscow);
+            Date = now.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture);
+            Time = now.ToString("HH:mm",CultureInfo.InvariantCulture);
+        }
+        public long Version { get; set; }
+        public string Channel { get; set; }="Звонок";
+        public string Contact { get; set; }="Продавец";
+        public string Date { get; set; }
+        public string Time { get; set; }
+        public string Text { get; set; }="";
+        public string Seller { get; set; }=""; public string Buyer { get; set; }=""; public string Agreed { get; set; }="";
+        public string TaskTitle { get; set; }=""; public string TaskDate { get; set; }=""; public string TaskTime { get; set; }="";
+        public Guid EmployeeId { get; set; }
+    }
+}

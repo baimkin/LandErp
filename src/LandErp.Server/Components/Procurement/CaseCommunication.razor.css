@@ -1,0 +1,13 @@
+.communication-form{border:0;padding:0;margin:0;display:grid;gap:12px;min-width:0}
+.communication-form label{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:14px}
+.communication-row{display:grid;gap:10px;align-items:start;min-width:0}
+.when,.task-date{grid-template-columns:minmax(130px,1fr) 90px minmax(150px,1.25fr)}
+.prices{grid-template-columns:repeat(3,minmax(0,1fr))}
+.channels,.quick-dates,.form-actions{display:flex;flex-wrap:wrap;gap:6px}
+.next-task{display:grid;gap:8px;border-top:1px solid var(--border);padding-top:12px}
+.communication-form textarea{field-sizing:content;min-height:80px;resize:vertical}
+.communication-form input,.communication-form select{min-width:0;max-width:100%}
+.communication-form small{color:var(--text-muted);font-weight:normal}
+.input-error{color:var(--danger,#b42318);font-size:12px}
+@media(max-width:560px){.prices{grid-template-columns:repeat(2,minmax(0,1fr))}.when,.task-date{grid-template-columns:minmax(0,1fr) 90px}.when label:last-child,.task-date label:last-child{grid-column:1/-1}}
+@media(max-width:360px){.prices{grid-template-columns:minmax(0,1fr)}}

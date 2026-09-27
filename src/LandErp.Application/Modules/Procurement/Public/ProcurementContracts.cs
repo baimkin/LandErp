@@ -12,7 +12,7 @@ public sealed record QueueFilter(string Text = "", string Stage = "", CatalogSou
 public sealed record QueueItem(Guid CaseId, string BusinessNumber, string Title, CatalogSource[] Sources,
     decimal? Price, string Currency, decimal? Area, string? Location, string Stage, string? Assignee, DateTimeOffset? DueAt,
     string Reason, string[] UnknownFields, bool Changed, long SourceRevision, long CaseVersion,
-    string NextActionTitle, string NextActionDescription, long NextActionVersion);
+    string NextActionTitle, string NextActionDescription, long NextActionVersion) { public bool DueHasTime { get; init; } = true; };
 public sealed record ProcurementQueuePage(IReadOnlyList<QueueItem> Items, int Total);
 public sealed record TimelineItem(Guid Id, string Kind, string Title, string Body, string Actor, string? Target,
     DateTimeOffset RecordedAt, DateTimeOffset? EffectiveAt, DateTimeOffset? DueAt);
@@ -78,6 +78,8 @@ public sealed record AddCaseNote(Guid CaseId, long ExpectedCaseVersion, string T
 public sealed record AddNegotiation(Guid CaseId, long ExpectedCaseVersion, decimal? SellerPrice, decimal? BuyerOffer,
     decimal? AgreedPrice, string Channel, string Contact, string Outcome, string Conditions, string Comment,
     string NextStep, DateTimeOffset? NextStepDueAt, DateTimeOffset EffectiveAt, Guid? CommandId = null);
+public sealed record CommunicationTask(string Title, DateTimeOffset? DueAt, bool DueHasTime, Guid EmployeeId);
+public sealed record RecordCaseCommunication(AddNegotiation Communication, CommunicationTask? NextTask = null);
 public sealed record SaveCaseCheck(Guid CaseId, Guid? CheckId, long ExpectedCaseVersion, long? ExpectedCheckVersion,
     CaseCheckLevel Level, string Title, CaseCheckStatus Status, Guid? ResponsibleEmployeeId, bool UpdateResponsible,
     DateTimeOffset? DueAt, decimal? Cost, string Result, bool Blocker, Guid? TemplateItemId = null, string? ResultDocumentJson = null);
@@ -120,6 +122,7 @@ public interface IProcurementWorkspace
     Task AddNoteAsync(Subject subject, AddCaseNote command, string correlationId, CancellationToken cancellationToken);
     Task AddNegotiationAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken);
     Task<Guid> AddNegotiationWithIdAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken);
+    Task<Guid> RecordCommunicationAsync(Subject subject, RecordCaseCommunication command, string correlationId, CancellationToken cancellationToken);
     Task<Guid> SaveCheckWithIdAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken);
     Task SaveCheckAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken);
     Task SaveCheckTemplateAsync(Subject subject, SaveCheckTemplate command, string correlationId, CancellationToken cancellationToken);
@@ -137,6 +140,8 @@ public interface IProcurementWorkspace
     Task ApplySourceFactAsync(Subject subject, ApplySourceFact command, string correlationId, CancellationToken cancellationToken);
     Task CorrectCaseFactAsync(Subject subject, CorrectPropertyCaseFact command, string correlationId, CancellationToken cancellationToken);
     Task SaveNextActionAsync(Subject subject, SaveNextAction command, string correlationId, CancellationToken cancellationToken);
+    Task<CaseTasksView> ReadTasksAsync(Subject subject, Guid caseId, CancellationToken cancellationToken);
+    Task<Guid> ChangeTaskAsync(Subject subject, ChangeCaseTask command, string correlationId, CancellationToken cancellationToken);
     Task<ManualPropertyCaseResult> CreateManualCaseAsync(Subject subject, CreateManualPropertyCase command, string correlationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<NotificationView>> ReadNotificationsAsync(Subject subject, CancellationToken cancellationToken);
     Task MarkNotificationReadAsync(Subject subject, Guid id, CancellationToken cancellationToken);

@@ -62,12 +62,17 @@ public sealed partial class ProcurementQueueV2ReadService
     {
         BusinessTimelineEntry[] entries = await db.BusinessTimeline.AsNoTracking()
             .Where(item => item.OrganizationId == organizationId && item.ObjectType == "PropertyCase" && item.ObjectId == caseId)
-            .OrderByDescending(item => item.RecordedAt).Take(6).ToArrayAsync(cancellationToken);
+            .OrderByDescending(item => item.RecordedAt).ThenByDescending(item => item.Id).Take(6).ToArrayAsync(cancellationToken);
         Guid[] actorIds = entries.Select(item => item.ActorEmployeeId).Distinct().ToArray();
         Dictionary<Guid, string> actors = await db.Employees.AsNoTracking().Where(item => item.OrganizationId == organizationId && actorIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
+        var times = entries.Where(item => item.Kind == "Negotiation").Select(item => item.RecordedAt).Distinct().ToArray();
+        CaseNegotiation[] negotiations = times.Length == 0 ? [] : await db.CaseNegotiations.AsNoTracking()
+            .Where(item => item.OrganizationId == organizationId && item.PropertyCaseId == caseId && times.Contains(item.RecordedAt))
+            .ToArrayAsync(cancellationToken);
         return entries.Select(item => new ProcurementTimelineSummary(item.Id, item.Kind, item.Title, item.Body,
-            actors.GetValueOrDefault(item.ActorEmployeeId, "Сотрудник"), item.RecordedAt, item.EffectiveAt, item.DueAt)).ToArray();
+            actors.GetValueOrDefault(item.ActorEmployeeId, "Сотрудник"), item.RecordedAt, item.EffectiveAt, item.DueAt)
+            { Communication = CaseTimelineCommunication.Find(item, negotiations, id => actors.GetValueOrDefault(id, "Сотрудник")) }).ToArray();
     }
 
     private static ProcurementQuickCheckSummary QuickSummary(CheckDb[] rows)

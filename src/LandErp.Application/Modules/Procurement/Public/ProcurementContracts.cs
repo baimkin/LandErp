@@ -15,7 +15,10 @@ public sealed record QueueItem(Guid CaseId, string BusinessNumber, string Title,
     string NextActionTitle, string NextActionDescription, long NextActionVersion) { public bool DueHasTime { get; init; } = true; };
 public sealed record ProcurementQueuePage(IReadOnlyList<QueueItem> Items, int Total);
 public sealed record TimelineItem(Guid Id, string Kind, string Title, string Body, string Actor, string? Target,
-    DateTimeOffset RecordedAt, DateTimeOffset? EffectiveAt, DateTimeOffset? DueAt);
+    DateTimeOffset RecordedAt, DateTimeOffset? EffectiveAt, DateTimeOffset? DueAt)
+{
+    public NegotiationView? Communication { get; init; }
+}
 public sealed record ObservationView(Guid Id, Guid CatalogItemId, DateTimeOffset ObservedAt, DateTimeOffset RecordedAt, ListingData Data, string[] Changes);
 public sealed record CaseSourceView(Guid CatalogItemId, CatalogSource Source, string? ExternalId, string? Url, string Title,
     decimal? Price, decimal? AreaSquareMeters, string? Location, string Provenance, DateTimeOffset? LastObservedAt);

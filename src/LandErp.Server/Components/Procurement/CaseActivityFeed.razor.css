@@ -1,0 +1,12 @@
+.case-feed{container-type:inline-size;width:100%}
+.feed-row{display:grid;grid-template-columns:6.5rem minmax(0,1fr) 12rem;gap:12px;align-items:start;padding:12px 0;border-bottom:1px solid var(--border,#e2e8f0);font-size:14px;line-height:1.5}
+.feed-row:last-child{border-bottom:0}
+time,.feed-meta{color:var(--text-muted,#64748b);font-size:12px;line-height:21px;white-space:nowrap}
+.feed-meta{overflow:hidden;text-overflow:ellipsis}
+.feed-content{min-width:0;overflow-wrap:anywhere}
+.feed-text,.feed-detail{white-space:pre-wrap}
+.feed-text{color:var(--text-strong,#172b4d)}
+.feed-detail{margin-top:3px;font-size:13px;color:var(--text-muted,#64748b)}
+.feed-materials{display:flex;flex-wrap:wrap;gap:8px;font-size:13px;margin-top:4px}
+@container(max-width:620px){.feed-row{grid-template-columns:6rem minmax(0,1fr);gap:3px 10px}.feed-meta{grid-column:2;white-space:normal;overflow-wrap:anywhere}.feed-content{grid-column:2;grid-row:1}}
+@media(max-width:420px){.feed-row{grid-template-columns:5.5rem minmax(0,1fr);gap:3px 8px}.feed-meta{grid-column:2;white-space:normal;overflow-wrap:anywhere}.feed-content{grid-column:2;grid-row:1}}

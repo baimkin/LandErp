@@ -149,10 +149,16 @@ public sealed partial class ProcurementQueueV2ReadService(
         bool sourceChanged = sourceRows.Any(item => item.DataRevision > item.ReviewedDataRevision);
         bool priceChanged = (await PriceChangedCaseIdsAsync(db, visible.Where(item => item.Case.Id == caseId), cancellationToken)).Contains(caseId);
 
-        ProcurementQueueV2Negotiation[] negotiations = await db.CaseNegotiations.AsNoTracking().Where(item => item.PropertyCaseId == caseId)
-            .OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.RecordedAt).Take(3)
-            .Select(item => new ProcurementQueueV2Negotiation(item.Id, item.EffectiveAt, item.Channel, item.Outcome, item.Comment,
-                item.SellerPrice, item.BuyerOffer, item.AgreedPrice, item.Currency)).ToArrayAsync(cancellationToken);
+        CaseNegotiation[] negotiationRows = await db.CaseNegotiations.AsNoTracking()
+            .Where(item => item.OrganizationId == context.OrganizationId && item.PropertyCaseId == caseId)
+            .OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.RecordedAt).ThenByDescending(item => item.Id)
+            .Take(3).ToArrayAsync(cancellationToken);
+        Guid[] negotiationAuthors = negotiationRows.Select(item => item.AuthorEmployeeId).Distinct().ToArray();
+        var authorNames = await db.Employees.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId && negotiationAuthors.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
+        ProcurementQueueV2Negotiation[] negotiations = negotiationRows.Select(item => new ProcurementQueueV2Negotiation(
+            item.Id, item.EffectiveAt, item.Channel, item.Outcome, item.Comment, item.SellerPrice, item.BuyerOffer, item.AgreedPrice, item.Currency)
+            { Communication = CaseTimelineCommunication.View(item, authorNames.GetValueOrDefault(item.AuthorEmployeeId, "Сотрудник")) }).ToArray();
         decimal? sellerOffer = await LatestPrice(db.CaseNegotiations.Where(item => item.PropertyCaseId == caseId && item.SellerPrice != null), 0, cancellationToken);
         decimal? buyerOffer = await LatestPrice(db.CaseNegotiations.Where(item => item.PropertyCaseId == caseId && item.BuyerOffer != null), 1, cancellationToken);
         decimal? agreedPrice = await LatestPrice(db.CaseNegotiations.Where(item => item.PropertyCaseId == caseId && item.AgreedPrice != null), 2, cancellationToken);

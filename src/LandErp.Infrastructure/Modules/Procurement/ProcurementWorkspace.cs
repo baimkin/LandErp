@@ -1008,7 +1008,8 @@ public sealed partial class ProcurementWorkspace(
                 value.Item.Title ?? "Источник без названия", value.Item.Price, value.Item.AreaSquareMeters, value.Item.Location,
                 value.Item.Provenance, value.Item.LastObservedAt)).ToArray(),
             timeline.Select(item => new TimelineItem(item.Id, item.Kind, item.Title, item.Body, names.GetValueOrDefault(item.ActorEmployeeId, "Сотрудник"),
-                item.TargetEmployeeId == null ? null : names.GetValueOrDefault(item.TargetEmployeeId.Value, "Сотрудник"), item.RecordedAt, item.EffectiveAt, item.DueAt)).ToArray(),
+                item.TargetEmployeeId == null ? null : names.GetValueOrDefault(item.TargetEmployeeId.Value, "Сотрудник"), item.RecordedAt, item.EffectiveAt, item.DueAt)
+                { Communication = CaseTimelineCommunication.Find(item, negotiations, id => names.GetValueOrDefault(id, "Сотрудник")) }).ToArray(),
             observations.Select(item => new ObservationView(item.Id, item.ListingId, item.ObservedAt, item.RecordedAt,
                 JsonSerializer.Deserialize<ListingData>(item.PayloadJson, CollectionJson.Options)!, JsonSerializer.Deserialize<string[]>(item.ChangesJson)!)).ToArray(),
             heads.Where(item => item.EmployeeId != context.EmployeeId).ToArray(), managers, assignees,

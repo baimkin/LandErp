@@ -1,0 +1,20 @@
+@using LandErp.Application.Modules.Catalog.Domain
+<div class="source-links">
+@foreach(var group in Items.GroupBy(x=>x.Source))
+{
+    var sources=group.ToArray();
+    @if(sources.Length==1 && SafeUrl(sources[0].Url) is string url)
+    {<a class="source-link" href="@url" target="_blank" rel="noopener noreferrer" title="@sources[0].Title"><SourceBadge Source="group.Key"/> ↗</a>}
+    else if(sources.Length>1 && sources.Any(x=>SafeUrl(x.Url)!=null))
+    {<details><summary><SourceBadge Source="group.Key"/> (@sources.Length) ▾</summary><ul>@foreach(var source in sources){<li>
+        @if(SafeUrl(source.Url) is string link){<a href="@link" target="_blank" rel="noopener noreferrer">@source.Title ↗</a>}
+        else{<span>@source.Title — нет ссылки</span>}
+    </li>}</ul></details>}
+    else{<SourceBadge Source="group.Key"/>}
+}
+</div>
+@code {
+    [Parameter] public IReadOnlyList<CaseSourceLinkItem> Items{get;set;}=[];
+    public static string? SafeUrl(string? value) => Uri.TryCreate(value,UriKind.Absolute,out var uri)
+        && (uri.Scheme==Uri.UriSchemeHttps || uri.Scheme==Uri.UriSchemeHttp) && uri.UserInfo.Length==0 ? uri.AbsoluteUri : null;
+}

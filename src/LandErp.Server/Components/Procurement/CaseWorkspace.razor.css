@@ -116,3 +116,8 @@
 
 /* Hidden panels keep rich-text drafts alive while changing tabs. */
 .case-workspace > [hidden]{display:none}
+
+button.control-row{width:100%;text-align:left;border-top:0;border-left:0;border-right:0;border-radius:6px;background:transparent;color:inherit;font:inherit;cursor:pointer;padding:14px 8px}
+button.control-row:hover{background:var(--surface-subtle,#f1f5f9)}
+button.control-row:focus-visible{outline:2px solid var(--primary,#2563eb);outline-offset:2px}
+.control-count{white-space:nowrap;color:var(--primary,#2563eb);font-size:var(--text-sm)}

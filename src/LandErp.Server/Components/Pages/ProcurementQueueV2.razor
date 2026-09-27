@@ -240,50 +240,12 @@
 
                 <div class="card">
                     <div class="ct"><b>Переговоры</b><div><span class="badge info">Последние @detail.Negotiations.Count</span><button class="btn" type="button" @onclick="OpenNegotiationsAsync">Все переговоры</button> @if (detail.CanManageDossier && detail.Stage != "acquired") { <button class="btn primary" type="button" @onclick="OpenNegotiation">Записать общение</button> }</div></div>
-                    <div class="neg-summary">
-                        <div class="neg-summary-main">
-                            @if (detail.Negotiations.Count == 0)
-                            {
-                                <b>Переговоры ещё не начаты</b>
-                                <p>Зафиксируйте первый контакт с владельцем.</p>
-                            }
-                            else
-                            {
-                                <b>@NegotiationTitle(detail.Negotiations[0])</b>
-                                @if (!string.IsNullOrWhiteSpace(detail.Negotiations[0].Comment))
-                                {
-                                    <p>@detail.Negotiations[0].Comment</p>
-                                }
-                                else
-                                {
-                                    <p>Последний контакт · @ShortDateTime(detail.Negotiations[0].EffectiveAt)</p>
-                                }
-                            }
-                        </div>
-                    </div>
-                    @if (detail.Negotiations.Count > 0)
-                    {
-                        <div class="neg">
-                            @foreach (ProcurementQueueV2Negotiation item in detail.Negotiations)
-                            {
-                                <div class="negrow">
-                                    <b>@NegotiationTitle(item)</b>
-                                    @if (!string.IsNullOrWhiteSpace(item.Comment)) { <p>@item.Comment</p> }
-                                    <div class="meta">
-                                        @if (!string.IsNullOrWhiteSpace(item.Channel)) { <span class="tag">@item.Channel</span> }
-                                        @if (item.SellerPrice != null) { <span class="tag ok">Продавец @MoneyCompact(item.SellerPrice)</span> }
-                                        @if (item.BuyerOffer != null) { <span class="tag info">Мы @MoneyCompact(item.BuyerOffer)</span> }
-                                        @if (item.AgreedPrice != null) { <span class="tag ok">Согласовано @MoneyCompact(item.AgreedPrice)</span> }
-                                        <span class="tag">@ShortDateTime(item.EffectiveAt)</span>
-                                    </div>
-                                </div>
-                            }
-                        </div>
-                    }
+                    @if(detail.Negotiations.Count==0){<p class="muted">Переговоры ещё не начаты.</p>}
+                    <CaseActivityFeed Items="detail.Negotiations.Select(CaseFeedFormat.From).ToArray()"/>
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Проверки</b><button class="btn" type="button" @onclick="OpenFullCase">Открыть проверки</button></div>
+                    <div class="ct"><b>Проверки</b><button class="btn" type="button" @onclick='()=>OpenCaseSection("checks")'>Открыть проверки</button></div>
                     <div class="checks">
                         <div class="check"><div class="check-line"><b>Базовые проверки</b><span class="badge @CheckBadge(detail.QuickChecks)">@CheckRatio(detail.QuickChecks)</span></div><p>@CheckLevelDescription(detail.QuickChecks)</p></div>
                         <div class="check"><div class="check-line"><b>Глубокая проверка / DD</b><span class="badge @CheckBadge(detail.DeepChecks)">@CheckRatio(detail.DeepChecks)</span></div><p>@CheckLevelDescription(detail.DeepChecks)</p></div>
@@ -317,19 +279,14 @@
                 </div>
 
                 <div class="card">
-                    <div class="ct"><b>Последние события</b><button class="btn" type="button" @onclick="OpenFullCase">Вся история</button></div>
+                    <div class="ct"><b>Последние события</b><button class="btn" type="button" @onclick='()=>OpenCaseSection("history")'>Вся история</button></div>
                     @if (detail.Timeline.Count == 0)
                     {
                         <div class="muted">Событий пока нет.</div>
                     }
                     else
                     {
-                        <div class="timeline-list">
-                            @foreach (ProcurementTimelineSummary item in detail.Timeline)
-                            {
-                                <div class="timeline-row"><b>@item.Title</b>@if (!string.IsNullOrWhiteSpace(item.Body)) { <p>@item.Body</p> }<span>@ShortDateTime(item.RecordedAt) · @item.Actor</span></div>
-                            }
-                        </div>
+                        <CaseActivityFeed Items="detail.Timeline.Select(CaseFeedFormat.From).ToArray()"/>
                     }
                 </div>
 
@@ -341,15 +298,8 @@
                     }
                     else
                     {
-                        <div class="source-list">
-                            @foreach (ProcurementSourceDetail source in detail.Sources)
-                            {
-                                <div class="source-row">
-                                    <div><b>@ProcurementLabels.Source(source.Source)</b><span>@ValueOrDash(source.ExternalId)</span></div>
-                                    @if (!string.IsNullOrWhiteSpace(source.Url)) { <a href="@source.Url" target="_blank" rel="noopener noreferrer">Открыть ↗</a> }
-                                </div>
-                            }
-                        </div>
+                        <CaseSourceLinks Items="detail.Sources.Select(x=>new CaseSourceLinkItem(x.Source,x.Title??x.ExternalId??ProcurementLabels.Source(x.Source),x.Url)).ToArray()"/>
+
                     }
                 </div>
             </div>
@@ -430,35 +380,7 @@
                 }
                 else if (negotiationHistory != null)
                 {
-                    <div class="history-list">
-                        @foreach (ProcurementNegotiationHistoryItem item in negotiationHistory.Items)
-                        {
-                            <article class="history-item">
-                                <div class="history-head"><div><b>@NegotiationTitle(item)</b><span>@ShortDateTime(item.EffectiveAt) · @item.Author</span></div><span class="badge neutral">@ValueOrDash(item.Channel)</span></div>
-                                <div class="history-prices">
-                                    <span>Продавец <b>@MoneyCompact(item.SellerPrice)</b></span><span>Мы <b>@MoneyCompact(item.BuyerOffer)</b></span><span>Согласовано <b>@MoneyCompact(item.AgreedPrice)</b></span>
-                                </div>
-                                @if (!string.IsNullOrWhiteSpace(item.Contact)) { <p><strong>Контакт:</strong> @item.Contact</p> }
-                                @if (!string.IsNullOrWhiteSpace(item.Outcome)) { <p><strong>Результат:</strong> @item.Outcome</p> }
-                                @if (!string.IsNullOrWhiteSpace(item.Conditions)) { <p><strong>Условия:</strong> @item.Conditions</p> }
-                                @if (!string.IsNullOrWhiteSpace(item.Comment)) { <p>@item.Comment</p> }
-                                @if (!string.IsNullOrWhiteSpace(item.NextStep)) { <p><strong>Следующий шаг:</strong> @item.NextStep · @ProcurementLabels.Time(item.NextStepDueAt)</p> }
-                                <div class="material-list">
-                                    @foreach (ProcurementQueueV2Attachment attachment in item.Attachments)
-                                    {
-                                        @if (attachment.Status == StoredFileStatus.Available)
-                                        {
-                                            <a href="/api/procurement/attachments/@attachment.Id" target="_blank" rel="noopener">@MaterialIcon(attachment.Kind) @attachment.Label ↗</a>
-                                        }
-                                        else
-                                        {
-                                            <span>@MaterialIcon(attachment.Kind) @attachment.Label · @ProcurementLabels.FileStatus(attachment.Status)</span>
-                                        }
-                                    }
-                                </div>
-                            </article>
-                        }
-                    </div>
+                    <CaseActivityFeed Items="negotiationHistory.Items.Select(CaseFeedFormat.From).ToArray()"/>
                 }
             </div>
             <div class="mf modal-pager"><span>@NegotiationHistoryCaption</span><div><button class="btn" type="button" disabled="@(negotiationHistory == null || negotiationHistory.Offset == 0 || negotiationsLoading)" @onclick="PreviousNegotiationsAsync">‹</button><button class="btn" type="button" disabled="@(negotiationHistory == null || negotiationHistory.Offset + negotiationHistory.Size >= negotiationHistory.Total || negotiationsLoading)" @onclick="NextNegotiationsAsync">›</button></div></div>
@@ -632,6 +554,7 @@
 
     private void CloseDrawer() { if (Busy) return; selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = negotiationsOpen = inspectionReportOpen = false; }
     private void OpenFullCase() { if (!Busy && detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}"); }
+    private void OpenCaseSection(string section) { if (!Busy && detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}?tab={section}"); }
     private void OpenInspectionEditor() { if (!Busy && detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}/inspection"); }
 
     private async Task OpenNegotiationsAsync()

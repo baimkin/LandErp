@@ -24,7 +24,7 @@ else if(card!=null && loaded == CaseId)
                 @if(FullPage){<h1>@card.Item.Title</h1>}else{<h2>@card.Item.Title</h2>}
                 <p>@(card.Item.Location??"Местоположение уточняется")</p>
             </div>
-            <div class="case-title-actions">@foreach(var source in card.Item.Sources) { <SourceBadge Source="source" /> }<StatusBadge Label="@ProcurementLabels.Stage(card.Item.Stage)" Tone="@(card.Item.Stage=="acquired" ? "success" : card.Item.Stage=="returned" ? "warning" : "info")" />@if(card.CanManageDossier){<button class="btn secondary" @onclick="()=>{ClearFeedback();noteOpen=true;}">＋ Заметка</button>}@if(card.CanManagerDecide||card.CanHeadDecide){<button class="btn secondary" @onclick="()=>{ClearFeedback();decisionsOpen=true;}">Решение по объекту</button>}</div>
+            <div class="case-title-actions"><CaseSourceLinks Items="card.Sources.Select(x=>new CaseSourceLinkItem(x.Source,x.Title,x.Url)).ToArray()"/><StatusBadge Label="@ProcurementLabels.Stage(card.Item.Stage)" Tone="@(card.Item.Stage=="acquired" ? "success" : card.Item.Stage=="returned" ? "warning" : "info")" />@if(card.CanManageDossier){<button class="btn secondary" @onclick="()=>{ClearFeedback();noteOpen=true;}">＋ Заметка</button>}@if(card.CanManagerDecide||card.CanHeadDecide){<button class="btn secondary" @onclick="()=>{ClearFeedback();decisionsOpen=true;}">Решение по объекту</button>}</div>
         </section>
 
         @if(card.Item.Stage=="acquired")
@@ -114,22 +114,22 @@ else if(card!=null && loaded == CaseId)
         <section class="case-dashboard" hidden="@(tab != "overview")">
                 <div class="stack">
                 <article class="surface"><CaseRichNoteBlock @key="(CaseId, CaseNoteSection.Working)" CaseId="CaseId" Section="CaseNoteSection.Working" Title="Рабочие заметки и расчёты" Subject="CurrentSubject" Attachments="card.Attachments" CanEdit="card.CanManageDossier" Value="@RichNote(CaseNoteSection.Working)" Saved="ReloadAsync" /></article>
-                <article class="surface"><div class="section-heading"><h2>Ход работы</h2><div class="form-actions">@if(card.CanManageDossier){<button class="btn quiet" @onclick="()=>{ClearFeedback();noteOpen=true;}">Заметка</button>}@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<button class="btn secondary" @onclick="OpenNegotiation">＋ Контакт</button>}</div></div>
-                    @if(card.Timeline.Count==0){<div class="case-empty"><strong>История работы начинается здесь</strong><p>Запишите контакт или добавьте заметку об объекте.</p></div>}
-                    <BusinessTimeline Items="card.Timeline.Take(6).ToArray()" />
+                <article class="surface"><div class="section-heading"><h2>Ход работы</h2><div class="form-actions">@if(card.CanManageDossier){<button class="btn quiet" @onclick="()=>{ClearFeedback();noteOpen=true;}">Заметка</button>}@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<button class="btn secondary" @onclick="OpenNegotiation">Записать общение</button>}</div></div>
+                    @if(card.Timeline.Count==0){<div class="case-empty"><strong>История работы начинается здесь</strong><p>Запишите общение или добавьте заметку об объекте.</p></div>}
+                    <CaseActivityFeed Items="card.Timeline.Take(6).Select(CaseFeedFormat.From).ToArray()" />
                     <button class="btn quiet" @onclick='()=>tab="history"'>Вся история →</button>
                 </article>
                 </div>
                 <div class="stack"><article class="surface"><h2>Контроль объекта</h2>
-                    <div class="control-row"><div><strong>Проверки</strong><small>@(card.Checks.Count==0?"Ещё не назначены":"Результаты и открытые вопросы")</small></div><button class="btn quiet" @onclick='()=>tab="checks"'>@CompletedChecks() / @card.Checks.Count →</button></div>
-                    <div class="control-row"><div><strong>Документы</strong><small>Получено из необходимых</small></div><button class="btn quiet" @onclick='()=>tab="documents"'>@ReadyDocuments() / @card.DocumentRequirements.Count →</button></div>
-                    <div class="control-row"><div><strong>Осмотр</strong><small>@(card.Inspection==null?"Не назначен":card.Inspection.Status==InspectionStatus.Completed?"Завершён":card.Inspection.StartedAt==null?"Назначен":"В работе")</small></div><button class="btn quiet" @onclick='()=>tab="inspection"'>Открыть →</button></div>
+                    <button type="button" class="control-row" @onclick='()=>tab="checks"'><span><strong>Проверки</strong><small>@(card.Checks.Count==0?"Ещё не назначены":"Результаты и открытые вопросы")</small></span><span class="control-count">@CompletedChecks() / @card.Checks.Count →</span></button>
+                    <button type="button" class="control-row" @onclick='()=>tab="documents"'><span><strong>Документы</strong><small>Получено из необходимых</small></span><span class="control-count">@ReadyDocuments() / @card.DocumentRequirements.Count →</span></button>
+                    <button type="button" class="control-row" @onclick='()=>tab="inspection"'><span><strong>Осмотр</strong><small>@(card.Inspection==null?"Не назначен":card.Inspection.Status==InspectionStatus.Completed?"Завершён":card.Inspection.StartedAt==null?"Назначен":"В работе")</small></span><span class="control-count">Открыть →</span></button>
                     @if(OpenRisks()>0){<p class="case-problem">Открытых блокирующих вопросов: @OpenRisks()</p>}
                 </article><article class="surface"><h3>Решение по объекту</h3><p class="subtle">Проверьте результаты и открытые вопросы перед следующим этапом.</p>@if(card.CanManagerDecide||card.CanHeadDecide){<button class="btn primary" @onclick="()=>{ClearFeedback();decisionsOpen=true;}">Выбрать решение</button>}else{<p class="subtle">Режим просмотра: рабочее решение недоступно.</p>}@if(card.CanConfirmPurchase){<button class="btn quiet" @onclick="@(card.Item.Stage=="acquired"?OpenCorrection:OpenPurchase)">@(card.Item.Stage=="acquired"?"Данные покупки":"Оформить покупку")</button>}</article></div>
             </section>
         @if(tab=="negotiations")
         {
-            <section class="stack"><article class="surface"><div class="section-heading"><div><h3>Переговоры</h3><p class="subtle">Контакты, предложения по цене и договорённости по объекту.</p></div>@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<button class="btn primary" @onclick="OpenNegotiation">Записать общение</button>}</div>@if(card.Negotiations.Count==0){<PageState Kind="empty" Title="Переговоров пока нет" />}@foreach(var item in card.Negotiations){<div class="dossier-row"><div><strong>@NegotiationTitle(item)</strong><small>@Meta(item.Channel,item.Contact,item.Author,ProcurementLabels.Time(item.EffectiveAt))</small><p>@item.Outcome</p>@if(item.SellerPrice!=null||item.BuyerOffer!=null||item.AgreedPrice!=null){<p class="subtle">Продавец: @ProcurementLabels.Money(item.SellerPrice) · Мы: @ProcurementLabels.Money(item.BuyerOffer) · Согласовано: @ProcurementLabels.Money(item.AgreedPrice)</p>}@if(item.Conditions.Length>0){<p class="subtle">Условия: @item.Conditions</p>}@if(item.Comment.Length>0){<p>@item.Comment</p>}@if(item.NextStep.Length>0){<p class="subtle">Следующий шаг: @item.NextStep · @ProcurementLabels.Time(item.NextStepDueAt)</p>}</div></div>}</article>
+            <section class="stack"><article class="surface"><div class="section-heading"><div><h3>Переговоры</h3><p class="subtle">Контакты, предложения по цене и договорённости по объекту.</p></div>@if(card.CanManageDossier&&card.Item.Stage!="acquired"){<button class="btn primary" @onclick="OpenNegotiation">Записать общение</button>}</div>@if(card.Negotiations.Count==0){<PageState Kind="empty" Title="Переговоров пока нет" />}<CaseActivityFeed Items="card.Negotiations.Select(CaseFeedFormat.From).ToArray()"/></article>
             </section>
         }
         <section class="stack" hidden="@(tab != "checks")">
@@ -178,7 +178,7 @@ else if(card!=null && loaded == CaseId)
         else if(tab=="history") { <article class="surface"><h3>История объекта</h3><p class="subtle">Контакты, документы и решения по объекту.</p><BusinessTimeline Items="card.Timeline" /></article> }
         else if(tab=="sources")
         {
-            <section class="stack"><article class="surface"><h3>Источники</h3>@if(card.Sources.Count==0){<p class="subtle">PropertyCase существует без внешних источников.</p>}@foreach(var source in card.Sources){<div class="dossier-row"><div><SourceBadge Source="source.Source" /><strong>@source.Title</strong><small>@source.Provenance · @(source.ExternalId??"без внешнего ID") · @ProcurementLabels.Money(source.Price)</small></div><div class="form-actions">@if(source.Url!=null){<a class="btn secondary" href="@source.Url" target="_blank" rel="noopener noreferrer">Открыть источник ↗</a>}@if(card.CanCorrectSourceLinks){<button class="btn quiet" disabled="@Busy" @onclick="()=>OpenSourceLinkCorrectionAsync(source)">Исправить связь</button>}</div></div>}</article>
+            <section class="stack"><article class="surface"><h3>Источники</h3>@if(card.Sources.Count==0){<p class="subtle">PropertyCase существует без внешних источников.</p>}@foreach(var source in card.Sources){<div class="dossier-row"><div><SourceBadge Source="source.Source" /><strong>@source.Title</strong><small>@source.Provenance · @(source.ExternalId??"без внешнего ID") · @ProcurementLabels.Money(source.Price)</small></div><div class="form-actions">@if(CaseSourceLinks.SafeUrl(source.Url) is string sourceUrl){<a class="btn secondary" href="@sourceUrl" target="_blank" rel="noopener noreferrer">Открыть источник ↗</a>}@if(card.CanCorrectSourceLinks){<button class="btn quiet" disabled="@Busy" @onclick="()=>OpenSourceLinkCorrectionAsync(source)">Исправить связь</button>}</div></div>}</article>
             <article class="surface"><h3>Изменения в источниках</h3>@if(card.Observations.Count==0){<p class="subtle">Наблюдений пока нет.</p>}@foreach(var item in card.Observations.Take(20)){<div class="dossier-row"><div><strong>@ProcurementLabels.Time(item.ObservedAt)</strong><small>@(item.Changes.Length==0?"Первое наблюдение":string.Join(" · ",item.Changes))</small><p>@(item.Data.Title.Raw??"Без названия") · @ProcurementLabels.Money(item.Data.Price.Parsed)</p></div></div>}</article>
             <article class="surface"><h3>Расхождения с рабочими фактами</h3><p class="subtle">Источник никогда не перезаписывает подтверждённое значение автоматически.</p>@foreach(var item in card.Discrepancies.Where(x=>x.Different)){<div class="dossier-row"><div><strong>@ProcurementLabels.Fact(item.Field) · @item.Source</strong><small>Рабочее: @item.WorkingValue · источник: @item.SourceValue</small></div>@if(card.CanManageDossier){<button class="btn secondary" @onclick="()=>{ClearFeedback();pendingFact=item;}">Применить явно</button>}</div>}@if(!card.Discrepancies.Any(x=>x.Different)){<p class="subtle">Расхождений нет.</p>}</article></section>
         }
@@ -203,6 +203,9 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
 @code {
     [Parameter] public Guid CaseId { get; set; }
     [Parameter] public bool FullPage { get; set; }
+    [Parameter] public string? InitialTab { get; set; }
+    private string? appliedTab;
+    private Guid tabCase;
     private SourceDiscrepancyView? pendingFact;
     private async Task NextActionSaved(){await ReloadAsync();Success="Задачи обновлены";}
     private int photoIndex; private bool galleryOpen, descriptionExpanded, noteOpen, decisionsOpen, templatesOpen;
@@ -225,7 +228,16 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
     private GroupMarketView? SelectedMarket => caseMarkets.FirstOrDefault(item => item.SearchGroupId == selectedMarketGroup) ?? caseMarkets.FirstOrDefault();
     private void ChangeMarketGroup(ChangeEventArgs args) => selectedMarketGroup = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null;
     protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);caseMarkets=await Markets.ReadCaseAsync(CurrentSubject,CaseId,CancellationToken.None);if(loaded!=CaseId)selectedMarketGroup=null;photoIndex=loaded==CaseId?Math.Clamp(photoIndex,0,Math.Max(0,card.Photos.Length-1)):0;if(loaded!=CaseId){newChecks.Clear();factCorrectionOpen=false;sourceLinkOpen=false;sourceLinkTargets=[];}loaded=CaseId;}
-    protected override async Task OnParametersSetAsync(){if(loaded!=CaseId)await ReloadAsync();}
+    protected override async Task OnParametersSetAsync()
+    {
+        if(loaded!=CaseId)await ReloadAsync();
+        if(tabCase!=CaseId || appliedTab!=InitialTab)
+        {
+            // Переход открывает только существующую вкладку, не меняя её доступность.
+            tab=Tabs.Any(x=>x.Id==InitialTab)?InitialTab!:"overview";
+            tabCase=CaseId;appliedTab=InitialTab;
+        }
+    }
     private string SourceSummary()=>card!.Sources.Count==0?"Нет связанных":string.Join(" + ",card.Sources.Select(x=>ProcurementLabels.Source(x.Source)).Distinct());
     private static string NegotiationTitle(NegotiationView item)=>item.AgreedPrice!=null?"Согласована цена":item.BuyerOffer!=null?"Наше предложение":item.SellerPrice!=null?"Цена продавца":item.Outcome.Length>0?item.Outcome:"Событие коммуникации";
     private static string Meta(params string?[] values)=>string.Join(" · ",values.Where(x=>!string.IsNullOrWhiteSpace(x)));

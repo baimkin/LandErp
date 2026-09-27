@@ -26,7 +26,7 @@ public sealed partial class ProcurementQueueV2ReadService
         size = Math.Clamp(size, 1, 100);
         IQueryable<CaseNegotiation> query = db.CaseNegotiations.AsNoTracking().Where(item => item.PropertyCaseId == caseId);
         int total = await query.CountAsync(cancellationToken);
-        CaseNegotiation[] rows = await query.OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.RecordedAt)
+        CaseNegotiation[] rows = await query.OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.RecordedAt).ThenByDescending(item => item.Id)
             .Skip(offset).Take(size).ToArrayAsync(cancellationToken);
         Guid[] authorIds = rows.Select(item => item.AuthorEmployeeId).Distinct().ToArray();
         Dictionary<Guid, string> authors = await db.Employees.AsNoTracking()

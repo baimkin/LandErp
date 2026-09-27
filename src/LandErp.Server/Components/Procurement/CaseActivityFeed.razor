@@ -1,0 +1,20 @@
+@using System.Globalization
+@using LandErp.Application.Foundation.Files
+<div class="case-feed">
+    @foreach (var row in Items)
+    {
+        <article class="feed-row" @key="row.Id">
+            <time datetime="@row.Date.ToString("O",CultureInfo.InvariantCulture)" title="@row.DateHint">@row.DateLabel</time>
+            <div class="feed-content">
+                <div class="feed-text">@row.Text</div>
+                @foreach(var detail in row.Details){<div class="feed-detail">@detail</div>}
+                @if(row.Attachments.Count>0){<div class="feed-materials">@foreach(var material in row.Attachments){
+                    @if(material.Status==StoredFileStatus.Available){<a href="/api/procurement/attachments/@material.Id" target="_blank" rel="noopener noreferrer">@material.Label ↗</a>}
+                    else{<span>@material.Label · @ProcurementLabels.FileStatus(material.Status)</span>}
+                }</div>}
+            </div>
+            <div class="feed-meta" title="@(row.Type+" · "+row.FullAuthor)">@row.Type@if(!string.IsNullOrWhiteSpace(row.Author)){<text> · @row.Author</text>}</div>
+        </article>
+    }
+</div>
+@code { [Parameter] public IReadOnlyList<CaseFeedRow> Items { get; set; }=[]; }

@@ -88,7 +88,10 @@ public sealed record ProcurementQueueV2Negotiation(
     decimal? SellerPrice,
     decimal? BuyerOffer,
     decimal? AgreedPrice,
-    string Currency);
+    string Currency)
+{
+    public NegotiationView? Communication { get; init; }
+}
 
 public sealed record ProcurementCheckLevelSummary(
     CaseCheckLevel Level,
@@ -177,7 +180,10 @@ public sealed record ProcurementTimelineSummary(
     string Actor,
     DateTimeOffset RecordedAt,
     DateTimeOffset? EffectiveAt,
-    DateTimeOffset? DueAt);
+    DateTimeOffset? DueAt)
+{
+    public NegotiationView? Communication { get; init; }
+}
 
 public sealed record ProcurementSourceDetail(
     Guid CatalogItemId,

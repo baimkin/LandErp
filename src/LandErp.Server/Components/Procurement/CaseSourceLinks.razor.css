@@ -1,0 +1,8 @@
+.source-links{display:inline-flex;gap:6px;align-items:start;flex-wrap:wrap;max-width:100%}
+.source-link{display:inline-flex;align-items:center;gap:3px;text-decoration:none;border-radius:6px}
+a:hover,summary:hover{background:var(--surface-subtle,#f1f5f9)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--primary,#2563eb);outline-offset:3px}
+details{position:relative;max-width:100%;font-size:13px}
+summary{cursor:pointer;list-style:none;border-radius:6px}
+ul{list-style:none;padding:8px;margin:6px 0 0;border:1px solid var(--border,#e2e8f0);border-radius:8px;background:white;max-width:320px}
+li{padding:5px;overflow-wrap:anywhere}

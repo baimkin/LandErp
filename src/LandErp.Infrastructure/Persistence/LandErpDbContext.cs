@@ -52,6 +52,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CaseCheckTemplateItem> CaseCheckTemplateItems => Set<CaseCheckTemplateItem>();
     public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
     public DbSet<CaseAttachment> CaseAttachments => Set<CaseAttachment>();
+    public DbSet<CaseRichNote> CaseRichNotes => Set<CaseRichNote>();
     public DbSet<CaseDocumentRequirement> CaseDocumentRequirements => Set<CaseDocumentRequirement>();
     public DbSet<PropertyCaseFactRevision> PropertyCaseFactRevisions => Set<PropertyCaseFactRevision>();
     public DbSet<InspectionTemplateItem> InspectionTemplateItems => Set<InspectionTemplateItem>();
@@ -137,6 +138,8 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
         CollectionMappings.Apply(builder);
         ProcurementMappings.Apply(builder);
         ModelConventions.Apply(builder);
+        builder.Entity<CaseRichNote>().Property(item => item.PropertyCaseId)
+            .HasComment("Объект закупки, которому принадлежит текст секции; описание внешнего источника не изменяется.");
         builder.Entity<PropertyCase>().Property(item => item.ManagerEmployeeId)
             .HasComment("Менеджер, ответственный за первичный анализ объекта; получатель возврата руководителя по умолчанию.");
     }

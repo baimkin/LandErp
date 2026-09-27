@@ -113,3 +113,6 @@
 @container property-card (max-width:760px){.correction-preview{grid-template-columns:1fr}}
 
 .case-price-top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}.case-group-market{flex:1 1 220px;min-width:0;max-width:320px}.case-group-market details{font-size:var(--text-sm);margin-top:6px}.case-group-market select{max-width:100%}
+
+/* Hidden panels keep rich-text drafts alive while changing tabs. */
+.case-workspace > [hidden]{display:none}

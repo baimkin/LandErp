@@ -61,7 +61,7 @@ public static partial class ProductionDatabaseInitializer
             GRANT SELECT,INSERT,UPDATE,DELETE ON catalog.photo_fingerprints TO {role};
             GRANT SELECT,INSERT ON collection.deliveries,catalog.observations,catalog.events TO {role};
             GRANT SELECT ON workflow.stages TO {role};
-            GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,procurement.case_checks,procurement.case_check_template_items,procurement.case_document_requirements,procurement.inspection_template_items,procurement.site_inspections,procurement.site_inspection_items,foundation.notifications,foundation.stored_files TO {role};
+            GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,procurement.case_checks,procurement.case_check_template_items,procurement.case_document_requirements,procurement.case_rich_notes,procurement.inspection_template_items,procurement.site_inspections,procurement.site_inspection_items,foundation.notifications,foundation.stored_files TO {role};
             GRANT SELECT,INSERT ON workflow.transitions,workflow.approvals,foundation.business_timeline,procurement.negotiations,procurement.case_attachments,procurement.case_fact_revisions TO {role};
             GRANT USAGE ON ALL SEQUENCES IN SCHEMA procurement,identity,organization TO {role};
             """;

@@ -38,3 +38,6 @@ screenshots/
 # OS
 Thumbs.db
 .DS_Store
+
+# Local editor build dependencies
+node_modules/

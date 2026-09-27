@@ -49,6 +49,7 @@ public sealed class CaseCheck
     public decimal? Cost { get; set; }
     public string Currency { get; set; } = "RUB";
     public string Result { get; set; } = "";
+    public string? ResultDocumentJson { get; set; }
     public bool Blocker { get; set; }
     public Guid AuthorEmployeeId { get; set; }
     public DateTimeOffset RecordedAt { get; set; }

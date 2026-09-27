@@ -20,7 +20,7 @@ using System.Text.Json;
 namespace LandErp.Infrastructure.Modules.Procurement;
 
 /// <summary>Catalog is organization-shared; procurement access is derived only from case responsibility.</summary>
-public sealed class ProcurementWorkspace(
+public sealed partial class ProcurementWorkspace(
     IDbContextFactory<LandErpDbContext> factory,
     IEmployeeAccessService employeeAccess,
     TimeProvider time,
@@ -992,6 +992,7 @@ public sealed class ProcurementWorkspace(
                                  where link.PropertyCaseId == caseId
                                  orderby link.RecordedAt descending
                                  select new { Link = link, File = file }).ToArrayAsync(cancellationToken);
+        CaseRichNote[] richNotes = await db.CaseRichNotes.AsNoTracking().Where(item => item.PropertyCaseId == caseId && item.OrganizationId == context.OrganizationId).ToArrayAsync(cancellationToken);
         Listing? primary = sources.OrderBy(item => item.Link.RecordedAt).Select(item => item.Item).FirstOrDefault();
         string[] photos = sources.SelectMany(item => JsonSerializer.Deserialize<string[]>(item.Item.PhotosJson) ?? []).Distinct().ToArray();
         return new(Item(row, names, sources), primary?.Description, primary?.SellerName, photos,
@@ -1011,7 +1012,7 @@ public sealed class ProcurementWorkspace(
                 item.ResponsibleEmployeeId,
                 item.ResponsibleEmployeeId == null ? null : names.GetValueOrDefault(item.ResponsibleEmployeeId.Value, "Сотрудник"),
                 item.DueAt, item.Cost, item.Currency, item.Result, item.Blocker, item.Version, item.DescriptionSnapshot,
-                item.TemplateItemId, item.TemplateItemVersion)).ToArray(),
+                item.TemplateItemId, item.TemplateItemVersion) { ResultDocumentJson = item.ResultDocumentJson }).ToArray(),
             attachments.Select(item => new AttachmentView(item.Link.Id, item.Link.OwnerType,
                 AttachmentOwnerId(item.Link), item.Link.Kind, item.Link.Label, item.Link.Description,
                 AttachmentOwnerLabel(item.Link, negotiations, checks, inspectionItems), item.File.OriginalName, item.File.ContentType, item.File.SizeBytes,
@@ -1031,6 +1032,7 @@ public sealed class ProcurementWorkspace(
             row.Case.CadastralNumber, row.Case.AcquisitionPrice, row.Case.AcquisitionDate, row.Case.AcquisitionComment,
             canManageDossier, canManageTemplates, canManageBlockers, canConfirmPurchase, canCorrectSourceLinks)
         {
+            RichNotes = richNotes.Select(item => NoteView(item, names.GetValueOrDefault(item.UpdatedByEmployeeId, "Сотрудник"))).ToArray(),
             CanAssignInspections = canAssignInspections,
             CanPerformInspections = canPerformInspections
         };
@@ -1259,6 +1261,9 @@ public sealed class ProcurementWorkspace(
     }
 
     public async Task SaveCheckAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken)
+        => await SaveCheckWithIdAsync(subject, command, correlationId, cancellationToken);
+
+    public async Task<Guid> SaveCheckWithIdAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(command.Level) || !Enum.IsDefined(command.Status)) throw new ArgumentException("Некорректный тип или статус проверки.");
         EffectiveEmployeeAccess effective = await RequireProcurementAsync(subject, ProcurementAccessLevel.Manager, cancellationToken);
@@ -1270,6 +1275,7 @@ public sealed class ProcurementWorkspace(
         await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
         Row row = await VisibleCases(db, context).SingleOrDefaultAsync(item => item.Case.Id == command.CaseId, cancellationToken) ?? throw new AccessDeniedException();
         if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
+        if (row.Case.StageId == "acquired") throw new ArgumentException("Проверки купленного объекта доступны только для чтения.");
         if (row.Case.StageId is "rejected" or "monitor") throw new ArgumentException("Сначала возобновите PropertyCase.");
         if (command.Level == CaseCheckLevel.Deep && row.Case.StageId is not ("negotiation" or "approved"))
             throw new ArgumentException("Глубокая проверка доступна после решения руководителя продолжить работу.");
@@ -1295,9 +1301,19 @@ public sealed class ProcurementWorkspace(
         CaseCheckTemplateItem? template = command.TemplateItemId == null ? null : await db.CaseCheckTemplateItems.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == command.TemplateItemId && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken)
             ?? throw new AccessDeniedException();
+        if (template != null && template.Level != command.Level)
+            throw new ArgumentException("Выберите типовую проверку из этой же секции.");
+        if (check != null && check.Level != command.Level)
+            throw new ArgumentException("Изменение результата не перемещает проверку в другую секцию.");
+        ValidatedCaseNote? document = command.ResultDocumentJson == null ? null : CaseNoteDocument.Validate(command.ResultDocumentJson);
+        if (document != null) await ValidateNoteImagesAsync(db, context.OrganizationId, command.CaseId, document, command.CheckId, cancellationToken);
+        string submittedResult = document == null ? command.Result : CaseNoteDocument.PlainText(document.Json);
+        if (document != null && submittedResult.Length > 4000) submittedResult = submittedResult[..4000];
+        string? previousDocument = check?.ResultDocumentJson;
+        var before = check == null ? null : new { check.Title, check.Status, check.Blocker, check.Result };
         string title = Required(template?.Title ?? command.Title, 3, 512, "Укажите название проверки.");
-        string result = command.Status == CaseCheckStatus.Planned ? Optional(command.Result, 4000) ?? ""
-            : Required(command.Result, 3, 4000, "Укажите результат проверки.");
+        string result = command.Status == CaseCheckStatus.Planned ? Optional(submittedResult, 4000) ?? ""
+            : Required(submittedResult, 3, 4000, "Укажите результат проверки.");
         if (check == null)
         {
             check = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, PropertyCaseId = row.Case.Id,
@@ -1314,6 +1330,8 @@ public sealed class ProcurementWorkspace(
         else if (check.TemplateItemId == null) check.DescriptionSnapshot = Optional(check.DescriptionSnapshot, 4000) ?? "";
         check.DueAt = command.DueAt;
         check.Cost = command.Cost == null ? null : DataConventions.RoundRubles(command.Cost.Value);
+        // Old callers may still send plain text. Unchanged plain projection preserves the full rich result.
+        check.ResultDocumentJson = document?.Json ?? (result == check.Result ? check.ResultDocumentJson : null);
         check.Result = result; check.Blocker = command.Blocker;
         db.BusinessTimeline.Add(new()
         {
@@ -1322,9 +1340,12 @@ public sealed class ProcurementWorkspace(
             Body = result + (command.Blocker ? "\nБлокирует дальнейшее решение." : ""), DueAt = command.DueAt, RecordedAt = time.GetUtcNow()
         });
         OrganizationWorkspace.AddAudit(db, context, subject, "CaseCheckSaved", "PropertyCase", row.Case.Id,
-            new { check.Id, check.Level, check.Status, check.Blocker }, correlationId);
+            new { check.Id, check.Level, check.Status, check.Blocker, Before = before,
+                After = new { check.Title, check.Status, check.Blocker, check.Result },
+                PreviousDocument = previousDocument, CurrentDocument = check.ResultDocumentJson }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        return check.Id;
     }
 
     public async Task SaveCheckTemplateAsync(Subject subject, SaveCheckTemplate command, string correlationId, CancellationToken cancellationToken)

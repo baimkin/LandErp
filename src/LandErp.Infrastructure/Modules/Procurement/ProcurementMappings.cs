@@ -11,6 +11,14 @@ internal static class ProcurementMappings
 {
     public static void Apply(ModelBuilder builder)
     {
+        builder.Entity<CaseRichNote>().ToTable("case_rich_notes", "procurement");
+        builder.Entity<CaseRichNote>().Property(item => item.Section).HasConversion<string>().HasMaxLength(32)
+            .HasComment("Независимая секция: рабочие заметки, базовые или глубокие проверки; не результат структурированной проверки.");
+        builder.Entity<CaseRichNote>().Property(item => item.DocumentJson).HasColumnType("jsonb")
+            .HasComment("Очищенный сервером JSON документа C-01; изображения только по проверенным ID CaseAttachment, без HTML и base64.");
+        builder.Entity<CaseRichNote>().HasIndex(item => new { item.PropertyCaseId, item.Section }).IsUnique();
+        builder.Entity<CaseRichNote>().HasOne<PropertyCase>().WithMany().HasForeignKey(item => item.PropertyCaseId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<CaseRichNote>().HasOne<Employee>().WithMany().HasForeignKey(item => item.UpdatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.HasSequence<long>("property_case_numbers", "procurement").StartsAt(1);
         builder.Entity<WorkflowStage>().ToTable("stages", "workflow");
         builder.Entity<WorkflowStage>().HasData(
@@ -91,6 +99,8 @@ internal static class ProcurementMappings
         builder.Entity<CaseCheck>().Property(item => item.Title).HasMaxLength(512);
         builder.Entity<CaseCheck>().Property(item => item.DescriptionSnapshot).HasMaxLength(4000);
         builder.Entity<CaseCheck>().Property(item => item.Result).HasMaxLength(4000);
+        builder.Entity<CaseCheck>().Property(item => item.ResultDocumentJson).HasColumnType("jsonb")
+            .HasComment("Безопасный форматированный результат проверки по схеме C-01. Null означает прежний plain text в result; исходные записи массово не преобразуются.");
         builder.Entity<CaseCheck>().Property(item => item.Cost).HasPrecision(19, 4);
         builder.Entity<CaseCheck>().Property(item => item.Currency).HasMaxLength(3);
         builder.Entity<CaseCheck>().HasIndex(item => new { item.PropertyCaseId, item.Level, item.Status });

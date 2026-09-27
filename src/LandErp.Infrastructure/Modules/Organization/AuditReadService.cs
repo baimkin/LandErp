@@ -44,7 +44,7 @@ public sealed class AuditReadService : IAuditReadService
         "CollectionSearchCreated", "CollectionSearchUpdated", "CollectionSearchGroupCreated", "CollectionSearchGroupArchived",
         "CatalogItemCreatedManually", "CatalogDispositionChanged", "CatalogMonitoringStarted", "CatalogItemTakenToWork",
         "CatalogItemLinkedToCase", "CatalogDuplicateConfirmed", "CatalogDuplicateRejected", "CatalogDuplicateSettingsChanged",
-        "PropertyCaseResumedFromCatalog", "SellerContactRecorded", "CaseNoteAdded",
+        "PropertyCaseResumedFromCatalog", "SellerContactRecorded", "CaseNoteAdded", "CaseRichNoteChanged",
         "CaseNegotiationAdded", "CaseCheckSaved", "CaseCheckTemplateSaved", "InspectionTemplateSaved",
         "SiteInspectionStarted", "SiteInspectionDraftSaved", "SiteInspectionCompleted", "PropertyCaseAcquired",
         "CaseAttachmentAdded", "CaseAttachmentUploadRetried", "CaseFactAppliedFromSource"
@@ -226,6 +226,8 @@ public sealed class AuditReadService : IAuditReadService
             using JsonDocument document = JsonDocument.Parse(json);
             JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return [new("Результат", "—", "Действие выполнено")];
+            if (action == "CaseRichNoteChanged")
+                return [new(root.GetProperty("Section").GetString() ?? "Текст секции", NoteText(root.GetProperty("Previous").GetString()!), NoteText(root.GetProperty("Current").GetString()!))];
             JsonElement before = root.TryGetProperty("Before", out JsonElement beforeValue) ? beforeValue : default;
             JsonElement after = root.TryGetProperty("After", out JsonElement afterValue) ? afterValue : default;
             List<AuditChangeView> result = [];
@@ -254,6 +256,21 @@ public sealed class AuditReadService : IAuditReadService
         catch (JsonException)
         {
             return [new("Результат", "—", "Действие зафиксировано")];
+        }
+    }
+
+    private static string NoteText(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        List<string> parts = [];
+        Collect(document.RootElement);
+        string result = string.Join(" ", parts);
+        return result.Length == 0 ? "Пусто" : result.Length <= 2000 ? result : result[..2000] + "…";
+        void Collect(JsonElement node)
+        {
+            if (node.TryGetProperty("text", out var text)) parts.Add(text.GetString() ?? "");
+            if (node.TryGetProperty("type", out var type) && type.GetString() == "image") parts.Add("[Изображение]");
+            if (node.TryGetProperty("content", out var children)) foreach (var child in children.EnumerateArray()) Collect(child);
         }
     }
 
@@ -374,6 +391,7 @@ public sealed class AuditReadService : IAuditReadService
                 "CatalogDuplicateSettingsChanged" => Procurement("Изменены настройки определения дублей", summary),
                 "PropertyCaseResumedFromCatalog" => Procurement("Работа по объекту возобновлена", summary, "success"),
                 "SellerContactRecorded" => Procurement("Зафиксирован контакт с продавцом", summary), "CaseNoteAdded" => Procurement("Добавлена заметка", summary),
+                "CaseRichNoteChanged" => Procurement("Изменён текст секции объекта", summary),
                 "CaseNegotiationAdded" => Procurement("Добавлены переговоры", summary), "CaseCheckSaved" => Procurement("Сохранена проверка", summary),
                 "CaseCheckTemplateSaved" => Procurement("Изменён шаблон проверки", summary), "InspectionTemplateSaved" => Procurement("Изменён шаблон осмотра", summary),
                 "SiteInspectionStarted" => Procurement("Начат осмотр объекта", summary), "SiteInspectionDraftSaved" => Procurement("Сохранён черновик осмотра", summary),

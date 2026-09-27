@@ -35,6 +35,15 @@ internal static class ProcurementEndpoints
             Results.Ok(new { id = await workspace.AddAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token) })).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/documents/requirements", async (SaveDocumentRequirement command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.SaveDocumentRequirementAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/attachments/retry", async (RetryCaseAttachment command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.RetryAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapGet("/attachments/{id:guid}/image", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
+        {
+            // Reuse the same visibility and integrity boundary as downloads; never redirect inline images.
+            AttachmentContent attachment = await workspace.ReadAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), id, token);
+            if (attachment.ExternalUrl != null || !CaseNoteDocument.IsImageType(attachment.ContentType)) return Results.NotFound();
+            http.Response.Headers.XContentTypeOptions = "nosniff";
+            http.Response.Headers.CacheControl = "no-store";
+            return Results.File(attachment.Content!, attachment.ContentType);
+        });
         group.MapGet("/attachments/{id:guid}", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
         {
             AttachmentContent attachment = await workspace.ReadAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), id, token);

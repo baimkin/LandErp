@@ -1,0 +1,160 @@
+@using LandErp.Application.Foundation.Files
+@using LandErp.Application.Modules.IdentityAccess.Contracts
+@using LandErp.Application.Modules.Procurement.Contracts
+@using LandErp.Application.Modules.Procurement.Domain
+@inject IProcurementWorkspace Workspace
+
+<div class="check-entry @(current?.Blocker == true ? "has-blocker" : "")">
+    @if (!editing && current != null)
+    {
+        <div class="check-heading"><strong>@current.Title</strong><span>@StatusLabel(current.Status)</span></div>
+        @if (current.Blocker) { <small class="case-problem">Блокирующий вопрос · отдельный признак</small> }
+        @if (current.Responsible != null || current.DueAt != null || current.Cost != null)
+        {
+            <small class="subtle">@ExtraValues(current)</small>
+        }
+    }
+    <CaseRichNoteBlock @ref="editor" CaseId="CaseId" Subject="Subject" Title="@(current == null ? "Новая проверка" : "")"
+        CanEdit="CanEdit" Value="@DocumentView(current)" ShowMetadata="false" EditLabel="Изменить"
+        StartEditing="@(Value == null)" Attachments="Card.Attachments" AttachmentCheckId="current?.Id"
+        SaveDocument="SaveResult" LoadDocument="LoadCurrent" EditingChanged="EditingChanged"
+        Saved="AfterSaveOrUpload" Cancelled="Cancelled">
+        <EditorFields Context="busy">
+            <fieldset disabled="@busy" class="check-fields">
+                <label class="field"><span>Название проверки</span>
+                    <input value="@title" @oninput="TitleChanged" list="@listId" maxlength="512" placeholder="Выберите типовой пункт или напишите своё" />
+                </label>
+                <datalist id="@listId">@foreach (var item in Templates) { <option value="@item.Title"></option> }</datalist>
+                @if (Hint.Length > 0) { <small class="subtle">@Hint</small> }
+                <div class="check-heading">
+                    <label class="field"><span>Состояние</span><select value="@status" @onchange="StatusChanged">
+                        <option value="Planned">Не проверено</option><option value="Passed">В порядке</option><option value="Issue">Есть вопросы</option>
+                        @if (current?.Status is CaseCheckStatus.InProgress or CaseCheckStatus.Blocked)
+                        { <option value="@current.Status">@StatusLabel(current.Status) — прежнее состояние</option> }
+                    </select></label>
+                    @if (Card.CanManageBlockers)
+                    { <label class="check-field"><input type="checkbox" checked="@blocker" @onchange="BlockerChanged" /> Блокирующий вопрос</label> }
+                    else if (blocker) { <small class="case-problem">Блокирующий вопрос · изменить может руководитель</small> }
+                </div>
+                @if (blocker || Card.CanManageBlockers) { <small class="subtle">«Есть вопросы» не включает блокер автоматически. Изменение текста не снимает этот признак.</small> }
+                @if (current != null && (current.Responsible != null || current.DueAt != null || current.Cost != null))
+                { <small class="subtle">Сохраняются: @ExtraValues(current)</small> }
+                <span class="check-result-label">Результат</span>
+            </fieldset>
+        </EditorFields>
+    </CaseRichNoteBlock>
+    @foreach (var file in Card.Attachments.Where(item => item.OwnerType == CaseAttachmentOwner.Check && item.OwnerId == current?.Id))
+    {
+        <div class="check-material"><small>@file.Label</small>
+            @if (file.Status == StoredFileStatus.Available) { <a href="/api/procurement/attachments/@file.Id" target="_blank" rel="noopener">Открыть материал ↗</a> }
+            else { <small>@ProcurementLabels.FileStatus(file.Status) · восстановление в «Документах»</small> }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public CaseCheckLevel Level { get; set; }
+    [Parameter] public CheckView? Value { get; set; }
+    [Parameter] public CaseCard Card { get; set; } = default!;
+    [Parameter] public Subject Subject { get; set; } = default!;
+    [Parameter] public bool CanEdit { get; set; }
+    [Parameter] public EventCallback Refresh { get; set; }
+    [Parameter] public EventCallback<Guid> Committed { get; set; }
+    [Parameter] public EventCallback Cancelled { get; set; }
+    private readonly string listId = "check-templates-" + Guid.NewGuid().ToString("N");
+    private CaseRichNoteBlock? editor;
+    private CheckView? current;
+    private CaseCard data = default!;
+    private bool editing, blocker, committed;
+    private string title = "";
+    private CaseCheckStatus status;
+    private long caseVersion;
+    private Guid? templateId;
+    private IEnumerable<CheckTemplateView> Templates => Card.CheckTemplates.Where(item => item.Active && item.Level == Level);
+    private string Hint => Templates.FirstOrDefault(item => item.Id == templateId)?.Description ?? current?.DescriptionSnapshot ?? "";
+
+    protected override void OnParametersSet()
+    {
+        if (!editing)
+        {
+            data = Card;
+            if (current == null || Value != null && Value.Version >= current.Version) current = Value;
+        }
+    }
+
+    private Task EditingChanged(bool value)
+    {
+        editing = value;
+        if (value)
+        {
+            title = current?.Title ?? ""; status = current?.Status ?? CaseCheckStatus.Planned;
+            blocker = current?.Blocker ?? false; templateId = null;
+            caseVersion = data.Item.CaseVersion;
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task TitleChanged(ChangeEventArgs args)
+    {
+        title = args.Value?.ToString() ?? "";
+        templateId = current == null ? Templates.FirstOrDefault(item => item.Title == title.Trim())?.Id : null;
+        if (editor != null) await editor.MarkDirtyAsync();
+    }
+    private async Task StatusChanged(ChangeEventArgs args)
+    {
+        if (Enum.TryParse<CaseCheckStatus>(args.Value?.ToString(), out var value)) status = value;
+        if (editor != null) await editor.MarkDirtyAsync();
+    }
+    private async Task BlockerChanged(ChangeEventArgs args)
+    {
+        blocker = args.Value is true;
+        if (editor != null) await editor.MarkDirtyAsync();
+    }
+
+    private async Task<CaseRichNoteView> SaveResult(string json)
+    {
+        ValidatedCaseNote document = CaseNoteDocument.Validate(json);
+        Guid id = await Workspace.SaveCheckWithIdAsync(Subject, new(CaseId, current?.Id, caseVersion, current?.Version,
+            current?.Level ?? Level, title, status, null, false, current?.DueAt, current?.Cost, "", blocker, templateId, document.Json),
+            Guid.CreateVersion7().ToString(), CancellationToken.None);
+        string plain = CaseNoteDocument.PlainText(document.Json);
+        if (plain.Length > 4000) plain = plain[..4000];
+        current = new(id, current?.Level ?? Level, title.Trim(), status, current?.ResponsibleEmployeeId,
+            current?.Responsible, current?.DueAt, current?.Cost, current?.Currency ?? "RUB", plain, blocker,
+            (current?.Version ?? 0) + 1, Hint, current?.TemplateItemId ?? templateId, current?.TemplateItemVersion)
+            { ResultDocumentJson = document.Json };
+        committed = true;
+        return DocumentView(current)!;
+    }
+
+    private async Task AfterSaveOrUpload()
+    {
+        await Refresh.InvokeAsync();
+        if (committed && current != null) { committed = false; await Committed.InvokeAsync(current.Id); }
+    }
+
+    private async Task<CaseRichNoteView?> LoadCurrent()
+    {
+        var refreshed = await Workspace.ReadCardAsync(Subject, CaseId, CancellationToken.None);
+        var check = current == null ? null : refreshed.Checks.Single(item => item.Id == current.Id);
+        data = refreshed; current = check;
+        return DocumentView(current);
+    }
+
+    private static CaseRichNoteView? DocumentView(CheckView? check)
+    {
+        if (check == null) return null;
+        string json = check.ResultDocumentJson ?? CaseNoteDocument.FromPlainText(check.Result);
+        var document = CaseNoteDocument.Validate(json);
+        return new(CaseNoteSection.Working, document.Json, document.Html, check.Version, "", DateTimeOffset.MinValue);
+    }
+
+    private static string ExtraValues(CheckView check) => string.Join(" · ", new[] {
+        check.Responsible, check.DueAt == null ? null : ProcurementLabels.Time(check.DueAt),
+        check.Cost == null ? null : ProcurementLabels.Money(check.Cost) }.Where(item => item != null));
+
+    private static string StatusLabel(CaseCheckStatus value) => value switch {
+        CaseCheckStatus.Planned => "Не проверено", CaseCheckStatus.Passed => "В порядке", CaseCheckStatus.Issue => "Есть вопросы",
+        CaseCheckStatus.InProgress => "В работе", CaseCheckStatus.Blocked => "Заблокирована", _ => value.ToString() };
+}

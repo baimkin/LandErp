@@ -25,7 +25,10 @@ public sealed record NegotiationView(Guid Id, decimal? SellerPrice, decimal? Buy
     string Author, DateTimeOffset EffectiveAt, DateTimeOffset RecordedAt);
 public sealed record CheckView(Guid Id, CaseCheckLevel Level, string Title, CaseCheckStatus Status,
     Guid? ResponsibleEmployeeId, string? Responsible, DateTimeOffset? DueAt, decimal? Cost, string Currency, string Result,
-    bool Blocker, long Version, string DescriptionSnapshot, Guid? TemplateItemId, long? TemplateItemVersion);
+    bool Blocker, long Version, string DescriptionSnapshot, Guid? TemplateItemId, long? TemplateItemVersion)
+{
+    public string? ResultDocumentJson { get; init; }
+}
 public sealed record AttachmentView(Guid Id, CaseAttachmentOwner OwnerType, Guid? OwnerId, CaseAttachmentKind Kind,
     string Label, string Description, string OwnerLabel, string OriginalName, string ContentType, long SizeBytes, StoredFileStatus Status,
     bool External, DateTimeOffset RecordedAt, Guid? DocumentRequirementId);
@@ -62,6 +65,7 @@ public sealed record CaseCard(QueueItem Item, string? Description, string? Selle
     bool CanManageDossier, bool CanManageTemplates, bool CanManageBlockers, bool CanConfirmPurchase,
     bool CanCorrectSourceLinks)
 {
+    public IReadOnlyList<CaseRichNoteView> RichNotes { get; init; } = [];
     public bool CanAssignInspections { get; init; }
     public bool CanPerformInspections { get; init; }
 }
@@ -76,7 +80,7 @@ public sealed record AddNegotiation(Guid CaseId, long ExpectedCaseVersion, decim
     string NextStep, DateTimeOffset? NextStepDueAt, DateTimeOffset EffectiveAt, Guid? CommandId = null);
 public sealed record SaveCaseCheck(Guid CaseId, Guid? CheckId, long ExpectedCaseVersion, long? ExpectedCheckVersion,
     CaseCheckLevel Level, string Title, CaseCheckStatus Status, Guid? ResponsibleEmployeeId, bool UpdateResponsible,
-    DateTimeOffset? DueAt, decimal? Cost, string Result, bool Blocker, Guid? TemplateItemId = null);
+    DateTimeOffset? DueAt, decimal? Cost, string Result, bool Blocker, Guid? TemplateItemId = null, string? ResultDocumentJson = null);
 public sealed record SaveCheckTemplate(Guid? Id, long? ExpectedVersion, string Title, CaseCheckLevel Level,
     string Description, int SortOrder, bool Active);
 public sealed record AddCaseAttachment(Guid CaseId, CaseAttachmentOwner OwnerType, Guid? OwnerId,
@@ -109,12 +113,14 @@ public sealed record NotificationView(Guid Id, Guid CaseId, string Title, DateTi
 public interface IProcurementWorkspace
 {
     Task<ProcurementQueuePage> ReadQueueAsync(Subject subject, QueueFilter filter, CancellationToken cancellationToken);
+    Task<CaseRichNoteView> SaveRichNoteAsync(Subject subject, SaveCaseRichNote command, string correlationId, CancellationToken cancellationToken);
     Task<CaseCard> ReadCardAsync(Subject subject, Guid caseId, CancellationToken cancellationToken);
     Task<Guid?> ResolveLegacyListingAsync(Subject subject, Guid listingId, CancellationToken cancellationToken);
     Task DecideAsync(Subject subject, DecisionCommand command, string correlationId, CancellationToken cancellationToken);
     Task AddNoteAsync(Subject subject, AddCaseNote command, string correlationId, CancellationToken cancellationToken);
     Task AddNegotiationAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken);
     Task<Guid> AddNegotiationWithIdAsync(Subject subject, AddNegotiation command, string correlationId, CancellationToken cancellationToken);
+    Task<Guid> SaveCheckWithIdAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken);
     Task SaveCheckAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken);
     Task SaveCheckTemplateAsync(Subject subject, SaveCheckTemplate command, string correlationId, CancellationToken cancellationToken);
     Task<Guid> AddAttachmentAsync(Subject subject, AddCaseAttachment command, string correlationId, CancellationToken cancellationToken);

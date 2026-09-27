@@ -81,7 +81,7 @@ else if(card!=null && loaded == CaseId)
                         <div class="case-price-top">
                             <div class="case-main-price"><span>Рабочая цена</span><strong>@ProcurementLabels.Money(card.Item.Price)</strong></div>
                             <div class="case-group-market">
-                                <GroupMarketPrices Value="SelectedMarket" Subject="CurrentSubject" Saved="ReloadAsync" EmptyText="Группа поиска не указана" />
+                                <GroupMarketPrices Value="SelectedMarket" Subject="CurrentSubject" Saved="ReloadAsync" EmptyText="Для сравнения выберите группу поиска во входящих" />
                                 @if (caseMarkets.Count > 1)
                                 {
                                     <details><summary>Ещё @(caseMarkets.Count - 1) групп</summary><select value="@SelectedMarket?.SearchGroupId" @onchange="ChangeMarketGroup" aria-label="Группа рынка объекта">@foreach(var group in caseMarkets){<option value="@group.SearchGroupId">@group.Name</option>}</select></details>
@@ -134,27 +134,7 @@ else if(card!=null && loaded == CaseId)
         }
         <section class="stack" hidden="@(tab != "checks")">
             <div class="section-heading"><div><h2>Проверки объекта</h2><p class="subtle">Запишите, что проверили, результат и открытые вопросы.</p></div></div>
-            <div class="check-columns">
-                @foreach(var level in Enum.GetValues<CaseCheckLevel>())
-                {
-                    <article class="surface">
-                        <div class="section-heading"><h3>@ProcurementLabels.CheckLevel(level)</h3>
-                            @if(CanEditCheck(level)){<button class="btn quiet" disabled="@newChecks.Contains(level)" @onclick="()=>newChecks.Add(level)">＋ Проверка</button>}
-                        </div>
-                        @if(!CanEditCheck(level) && card.CanManageDossier){<p class="subtle">@(card.Item.Stage is "acquired" or "rejected" or "monitor" ? "Проверки доступны только для чтения в текущем состоянии объекта." : "Глубокая проверка доступна после решения руководителя продолжить работу.")</p>}
-                        @foreach(var item in card.Checks.Where(x=>x.Level==level))
-                        {
-                            <CaseCheckEntry @key="item.Id" CaseId="CaseId" Level="level" Value="item" Card="card" Subject="CurrentSubject" CanEdit="CanEditCheck(level)" Refresh="ReloadAsync" />
-                        }
-                        @if(newChecks.Contains(level))
-                        {
-                            <CaseCheckEntry @key="level" CaseId="CaseId" Level="level" Card="card" Subject="CurrentSubject" CanEdit="CanEditCheck(level)" Refresh="ReloadAsync" Committed="id=>FinishNewCheck(level,id)" Cancelled="()=>newChecks.Remove(level)" />
-                        }
-                        else if(!card.Checks.Any(x=>x.Level==level)){<p class="subtle">Записей пока нет.</p>}
-                        <CaseRichNoteBlock @key="(CaseId, level)" CaseId="CaseId" Section="@(level == CaseCheckLevel.Quick ? CaseNoteSection.QuickChecks : CaseNoteSection.DeepChecks)" Title="Свободный текст" Subject="CurrentSubject" Attachments="card.Attachments" CanEdit="card.CanManageDossier" Value="@RichNote(level == CaseCheckLevel.Quick ? CaseNoteSection.QuickChecks : CaseNoteSection.DeepChecks)" Saved="ReloadAsync" />
-                    </article>
-                }
-            </div>
+            <CaseChecks @key="CaseId" CaseId="CaseId" Card="card" Subject="CurrentSubject" Refresh="ReloadAsync" />
             @if(card.CanManageTemplates){<button class="btn quiet" @onclick="()=>{ClearFeedback();templatesOpen=true;}">Настроить типовые проверки</button>}
         </section>
         @if(tab=="inspection")
@@ -215,10 +195,6 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
     private static string OptionalPrice(decimal? price) => price is null ? "Не указано" : ProcurementLabels.Money(price);
     [Parameter] public EventCallback OnChanged { get; set; }
     private static readonly (string Id,string Label)[] Tabs=[("overview","Основное"),("negotiations","Переговоры"),("checks","Проверки"),("inspection","Осмотр"),("documents","Документы"),("history","История"),("sources","Источники")];
-    private readonly HashSet<CaseCheckLevel> newChecks = [];
-    private bool CanEditCheck(CaseCheckLevel level) => card!.CanManageDossier && card.Item.Stage is not ("acquired" or "rejected" or "monitor")
-        && (level == CaseCheckLevel.Quick || card.Item.Stage is "negotiation" or "approved");
-    private void FinishNewCheck(CaseCheckLevel level, Guid id) { if(card!.Checks.Any(item=>item.Id==id))newChecks.Remove(level); }
     private CaseRichNoteView? RichNote(CaseNoteSection section) => card?.RichNotes.SingleOrDefault(item => item.Section == section);
     private CaseCard? card; private Guid loaded; private string tab="overview"; private ProcurementAction? dialogAction; private string dialogTitle=""; private bool negotiationOpen; private bool attachmentOpen; private bool documentRequirementOpen; private bool purchaseOpen; private bool correctionOpen; private bool factCorrectionOpen; private bool sourceLinkOpen; private bool sourceLinkLoading;
     private string? sourceLinkLoadError; private IReadOnlyList<CaseLinkTarget> sourceLinkTargets=[];
@@ -227,7 +203,7 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
     private Guid? selectedMarketGroup;
     private GroupMarketView? SelectedMarket => caseMarkets.FirstOrDefault(item => item.SearchGroupId == selectedMarketGroup) ?? caseMarkets.FirstOrDefault();
     private void ChangeMarketGroup(ChangeEventArgs args) => selectedMarketGroup = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null;
-    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);caseMarkets=await Markets.ReadCaseAsync(CurrentSubject,CaseId,CancellationToken.None);if(loaded!=CaseId)selectedMarketGroup=null;photoIndex=loaded==CaseId?Math.Clamp(photoIndex,0,Math.Max(0,card.Photos.Length-1)):0;if(loaded!=CaseId){newChecks.Clear();factCorrectionOpen=false;sourceLinkOpen=false;sourceLinkTargets=[];}loaded=CaseId;}
+    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);caseMarkets=await Markets.ReadCaseAsync(CurrentSubject,CaseId,CancellationToken.None);if(loaded!=CaseId)selectedMarketGroup=null;photoIndex=loaded==CaseId?Math.Clamp(photoIndex,0,Math.Max(0,card.Photos.Length-1)):0;if(loaded!=CaseId){factCorrectionOpen=false;sourceLinkOpen=false;sourceLinkTargets=[];}loaded=CaseId;}
     protected override async Task OnParametersSetAsync()
     {
         if(loaded!=CaseId)await ReloadAsync();
@@ -267,7 +243,7 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
     private void Open(ProcurementAction action,string title){ClearFeedback();decisionsOpen=false;dialogAction=action;dialogTitle=title;} private void CloseDialog()=>dialogAction=null;
     private async Task ConfirmAsync(DecisionDraft draft){await ExecuteAsync(()=>Workspace.DecideAsync(CurrentSubject,new(CaseId,card!.Item.CaseVersion,card.Item.SourceRevision,dialogAction!.Value,draft.Reason,draft.Clarification,draft.Target,CaseFormValues.ParseLocal(draft.Due)),OperationId,CancellationToken.None),"Решение сохранено");if(Success!=null)dialogAction=null;await OnChanged.InvokeAsync();}
     private async Task SaveNoteAsync(){await ExecuteAsync(()=>Workspace.AddNoteAsync(CurrentSubject,new(CaseId,card!.Item.CaseVersion,note.Text,false,"",null,note.CommandId),OperationId,CancellationToken.None),"Заметка добавлена");if(Success!=null){note=new();noteOpen=false;}}
-    private async Task CommunicationSaved(){negotiationOpen=false;await ReloadAsync();Success="Общение сохранено";}
+    private async Task CommunicationSaved(string message){negotiationOpen=false;await ReloadAsync();Success=message;}
     private void EditCheckTemplate(CheckTemplateView item)=>checkTemplate=new(){Id=item.Id,Version=item.Version,Title=item.Title,Level=item.Level,Description=item.Description,SortOrder=item.SortOrder,Active=item.Active};
     private async Task SaveCheckTemplateAsync(){await ExecuteAsync(()=>Workspace.SaveCheckTemplateAsync(CurrentSubject,new(checkTemplate.Id,checkTemplate.Version,checkTemplate.Title,checkTemplate.Level,checkTemplate.Description,checkTemplate.SortOrder,checkTemplate.Active),OperationId,CancellationToken.None),"Шаблон проверки сохранён");if(Success!=null)checkTemplate=new();}
     private void SelectFile(InputFileChangeEventArgs args){selectedFile=args.File;if(string.IsNullOrWhiteSpace(attachment.Label))attachment.Label=Path.GetFileNameWithoutExtension(selectedFile.Name);}

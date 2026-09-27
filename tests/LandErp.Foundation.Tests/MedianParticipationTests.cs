@@ -24,7 +24,41 @@ public sealed class MedianParticipationTests
 
     private static Task<Guid> Manual(ProcurementTests.Phase1Fixture f, string title = "Аналог M01",
         decimal? price = 1000m, decimal? area = 100m) => f.Workspace.CreateManualAsync(f.Manager,
-        new(CatalogSource.Manual, title, "Химки", price, area, null, null, null, null, "M01 ручной ввод"), "m01", CancellationToken.None);
+            new(CatalogSource.Manual, title, "Химки", price, area, null, null, null, null, "M01 ручной ввод"), "m01", CancellationToken.None);
+
+    [TestMethod]
+    public async Task AllResultsMinusExclusionsAcrossPagesUsesSamePreviewAndApplyCohort()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
+        var access = new EmployeeAccessService(f.Factory);
+        var presets = new IncomingFilterPresetService(source, access);
+        var service = new CatalogCalculationService(f.Factory, access, presets, TimeProvider.System);
+        var reads = new IncomingCatalogReadService(f.Factory, access, f.Workspace, TimeProvider.System, presets);
+        for (int i = 0; i < 5; i++) await Manual(f, "UX аналог " + i, 1000m + i);
+        var request = new IncomingCatalogReadFilter(new("UX аналог", Size: 2), SortField: IncomingCatalogSortField.Price,
+            WorkingScope: new(IncomingCatalogMode.AllListings));
+        var first = await reads.ReadAsync(f.Manager, request, CancellationToken.None);
+        var second = await reads.ReadAsync(f.Manager, request with { Base = request.Base with { Offset = 2 } }, CancellationToken.None);
+        Guid[] excluded = [first.Items[0].Id, second.Items[0].Id];
+        var selection = new CatalogCalculationSelection(request, ExcludedIds: excluded);
+        var preview = await service.PreviewAsync(f.Manager, selection, true, CancellationToken.None);
+        Assert.AreEqual(3, preview.Total);
+        var otherPage = await service.PreviewAsync(f.Manager, selection with { Filter = request with { Base = request.Base with { Offset = 4 } } }, true, CancellationToken.None);
+        Assert.AreEqual(preview.Stamp, otherPage.Stamp);
+        await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => service.ApplyAsync(f.Manager,
+            selection with { ExcludedIds = [first.Items[1].Id, second.Items[1].Id] }, true, preview.Stamp, "wrong-cohort", CancellationToken.None));
+        Assert.AreEqual(3, (await service.ApplyAsync(f.Manager, selection, true, preview.Stamp, "ux", CancellationToken.None)).Changed);
+        await using var db = f.Sandbox.Context();
+        Assert.AreEqual(0, await db.Listings.CountAsync(x => excluded.Contains(x.Id) && x.IncludeInCalculation));
+        Assert.AreEqual(3, await db.Listings.CountAsync(x => x.IncludeInCalculation));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => service.PreviewAsync(f.Manager,
+            new(request, [new(first.Items[0].Id, first.Items[0].Version)], excluded), true, CancellationToken.None));
+        var stale = await service.PreviewAsync(f.Manager, selection, false, CancellationToken.None);
+        await Manual(f, "UX аналог новый", 1009m);
+        await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => service.ApplyAsync(f.Manager, selection, false, stale.Stamp, "changed", CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.PreviewAsync(new(Guid.NewGuid(), false), selection, true, CancellationToken.None));
+    }
 
     [TestMethod]
     public async Task SavedChoiceSurvivesInvalidDataAndRecoveryButManualExclusionStaysOff()

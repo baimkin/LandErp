@@ -1,4 +1,5 @@
 @using System.Globalization
+@using Microsoft.JSInterop
 @using LandErp.Application.Modules.Procurement.Contracts
 @using LandErp.Application.Modules.Procurement.Domain
 @using LandErp.Application.Modules.Workflow.Domain
@@ -11,6 +12,7 @@
     {
         <p role="status">@savedMessage</p>
         <button class="btn secondary" @onclick="Finish">Закрыть</button>
+        @if (uploadedMaterials.Count < materials.Count) { <button class="btn primary" disabled="@uploading" @onclick="RetryMaterials">Повторить загрузку материалов</button> }
     }
     else if (data != null)
     {
@@ -27,14 +29,14 @@
                     <label>Время<input type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" @bind="draft.Time" /></label>
                     <label>С кем<input type="text" maxlength="512" @bind="draft.Contact" /></label>
                 </div>
-                <label>Что обсудили<textarea rows="3" maxlength="1000" @bind="draft.Text" @bind:event="oninput" placeholder="Результат разговора и договорённости"></textarea>@FieldError("Text")</label>
+                <div><label>Что обсудили</label><CaseTextInput @ref="textInput" Label="Что обсудили" MaxLength="1000" Upload="StageFile" />@FieldError("Text")@FieldError("Files")</div>
                 <div class="communication-row prices">
                     <label>Продавец, ₽<input type="text" inputmode="decimal" @bind="draft.Seller" @onblur='()=>FormatMoney("Seller")' />@FieldError("Seller")</label>
                     <label>Наше предложение, ₽<input type="text" inputmode="decimal" @bind="draft.Buyer" @onblur='()=>FormatMoney("Buyer")' />@FieldError("Buyer")</label>
                     <label>Согласовали, ₽<input type="text" inputmode="decimal" @bind="draft.Agreed" @onblur='()=>FormatMoney("Agreed")' />@FieldError("Agreed")</label>
                 </div>
                 <div class="next-task">
-                    <label>Следующая задача <small>необязательно</small><input type="text" maxlength="512" @bind="draft.TaskTitle" placeholder="Что сделать" />@FieldError("TaskTitle")</label>
+                    <label>Следующая задача <small>необязательно</small><input type="text" maxlength="512" @bind="draft.TaskTitle" @bind:event="oninput" placeholder="Что сделать" />@FieldError("TaskTitle")</label>
                     <div class="communication-row task-date">
                         <label>Дата<input type="date" value="@draft.TaskDate" @onchange='e=>draft.TaskDate=e.Value?.ToString()??""' />@FieldError("TaskDue")</label>
                         <label>Время МСК<input type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" @bind="draft.TaskTime" /></label>
@@ -45,9 +47,7 @@
                     </div>
                     <div class="quick-dates"><button type="button" class="btn quiet" @onclick="()=>QuickDate(0)">Сегодня</button><button type="button" class="btn quiet" @onclick="()=>QuickDate(1)">Завтра</button><button type="button" class="btn quiet" @onclick='()=>{draft.TaskDate="";draft.TaskTime="";}'>Без срока</button></div>
                 </div>
-                @if (AllowAttachments)
-                { <label>Материалы <small>необязательно, до 6 файлов по 8 МБ</small><InputFile OnChange="SelectFiles" multiple accept="image/*,audio/*,.pdf,.txt,.csv,.docx,.xlsx" />@FieldError("Files")</label> }
-                <div class="form-actions"><button type="submit" class="btn primary">Сохранить</button><button type="button" class="btn secondary" @onclick="Close">Отмена</button></div>
+                <div class="form-actions"><button type="submit" class="btn primary">@(string.IsNullOrWhiteSpace(draft.TaskTitle) ? "Сохранить общение" : "Сохранить общение и задачу")</button><button type="button" class="btn secondary" @onclick="Close">Отмена</button></div>
             </fieldset>
         </EditForm>
     }
@@ -55,9 +55,9 @@
 
 @code {
     [Parameter] public Guid CaseId { get; set; }
-    [Parameter] public bool AllowAttachments { get; set; }
+
     [Parameter] public EventCallback OnClose { get; set; }
-    [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public EventCallback<string> OnSaved { get; set; }
     private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru-RU");
     // Новые подписи используют существующие значения; сохранённые записи не преобразуются.
     private static readonly (string Label, string Value)[] Channels = [("Звонок", "Звонок"), ("Переписка", "Мессенджер"), ("Встреча", "Встреча"), ("Эл. почта", "Электронная почта"), ("Другое", "Другое")];
@@ -65,10 +65,11 @@
     private readonly Draft draft = new();
     private readonly Dictionary<string,string> errors = [];
     private RecordCaseCommunication? pending;
-    private IReadOnlyList<IBrowserFile> files = [];
+    private CaseTextInput? textInput;
     private List<Material> materials = [];
     private bool initialized, saved, uploading;
     private string savedMessage = "";
+    private Guid savedNegotiationId;
     protected override async Task ReadAsync()
     {
         data = await Workspace.ReadTasksAsync(CurrentSubject, CaseId, CancellationToken.None);
@@ -102,15 +103,27 @@
         try { result = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(day.ToDateTime(at),WorkTaskDeadline.Moscow)); return true; }
         catch (ArgumentException) { return false; }
     }
-    private void SelectFiles(InputFileChangeEventArgs args)
+    private async Task<string?> StageFile(IJSStreamReference stream, string name, string contentType)
     {
-        files = args.GetMultipleFiles(int.MaxValue); errors.Remove("Files");
-        if (files.Count > 6 || files.Any(x=>x.Size>8*1024*1024)) errors["Files"]="Выберите до 6 файлов размером не больше 8 МБ каждый.";
+        try
+        {
+            if (stream.Length > 8 * 1024 * 1024) throw new ArgumentException("До 6 файлов по 8 МБ.");
+            await using var input = await stream.OpenReadStreamAsync(8 * 1024 * 1024);
+            using MemoryStream buffer = new(); await input.CopyToAsync(buffer);
+            var kind = contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? CaseAttachmentKind.Photo
+                : contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) ? CaseAttachmentKind.Audio : CaseAttachmentKind.Document;
+            Guid draftId = Guid.CreateVersion7();
+            materials.Add(new(draftId, name, contentType, kind, buffer.ToArray()));
+            return draftId.ToString();
+        }
+        finally { await stream.DisposeAsync(); }
     }
     private async Task Save()
     {
         if (Busy || uploading || saved || data == null) return;
         errors.Clear();
+        if (textInput?.Ready != true) return;
+        draft.Text = await textInput.TextAsync();
         if (draft.Text.Trim().Length < 3) errors["Text"]="Запишите содержательный результат общения.";
         if (!LocalTime(draft.Date,draft.Time,true,out var effective) || effective > DateTimeOffset.UtcNow.AddMinutes(5)) errors["When"]="Укажите дату и время HH:mm по МСК, не в будущем.";
         if (!Money(draft.Seller,out var seller)) errors["Seller"]="Укажите положительную сумму или оставьте пустым.";
@@ -123,24 +136,16 @@
             if (!data.Assignees.Any(x=>x.EmployeeId==draft.EmployeeId)) errors["Employee"]="Выберите допустимого сотрудника.";
             task = new(draft.TaskTitle.Trim(),due,draft.TaskTime.Length>0,draft.EmployeeId);
         }
-        if (files.Count > 6 || files.Any(x=>x.Size>8*1024*1024)) errors["Files"]="Выберите до 6 файлов размером не больше 8 МБ каждый.";
         if (errors.Count > 0) return;
-        materials = [];
-        // Ошибка чтения выбранных файлов не должна отправить бизнес-команду.
         try
         {
             uploading = true;
-            foreach (var file in files)
-            {
-                await using var input = file.OpenReadStream(8*1024*1024); using MemoryStream buffer = new();
-                await input.CopyToAsync(buffer);
-                var kind = file.ContentType.StartsWith("image/",StringComparison.OrdinalIgnoreCase) ? CaseAttachmentKind.Photo
-                    : file.ContentType.StartsWith("audio/",StringComparison.OrdinalIgnoreCase) ? CaseAttachmentKind.Audio : CaseAttachmentKind.Document;
-                materials.Add(new(file.Name,file.ContentType,kind,buffer.ToArray()));
-            }
+            string[] active = await textInput.CollectFilesAsync();
+            materials = materials.Where(x => active.Contains(x.Id.ToString())).ToList();
+            if (materials.Count > 6) throw new ArgumentException("До 6 файлов по 8 МБ.");
         }
-        catch (Exception exception) { errors["Files"]=ReadFailure(exception,"Не удалось прочитать материалы. Запись не отправлена."); return; }
-        finally { uploading = false; }
+        catch (Exception exception) { errors["Files"] = ReadFailure(exception, "Не удалось подготовить материалы. Запись не отправлена."); return; }
+        finally { uploading = false; await textInput.ResumeAsync(); }
         pending = new(new(CaseId,draft.Version,seller,buyer,agreed,draft.Channel,draft.Contact,draft.Text.Trim(),"","","",null,effective!.Value,Guid.CreateVersion7()),task);
         await Persist();
     }
@@ -151,27 +156,34 @@
         bool committed = await ExecuteConfirmedAsync(async()=>id=await Workspace.RecordCommunicationAsync(CurrentSubject,pending,OperationId,CancellationToken.None));
         if (!committed) return;
         // После подтверждения нельзя снова отправлять общение из-за ошибки отдельного вложения.
+        savedNegotiationId = id;
         saved = true; savedMessage = "Общение и следующая задача сохранены.";
         if (pending.NextTask == null) savedMessage = "Общение сохранено.";
-        int uploaded = 0;
+        await RetryMaterials();
+    }
+    private async Task RetryMaterials()
+    {
+        if (uploading) return;
+        savedMessage = pending?.NextTask == null ? "Общение сохранено." : "Общение и следующая задача сохранены.";
         try
         {
             uploading = true;
-            foreach (var material in materials)
+            foreach (var material in materials.Where(x => !uploadedMaterials.Contains(x.Id)))
             {
-                await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,CaseAttachmentOwner.Negotiation,id,material.Kind,
+                await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,CaseAttachmentOwner.Negotiation,savedNegotiationId,material.Kind,
                     material.Name,"Материал к общению",material.Name,material.ContentType,material.Content,null),OperationId,CancellationToken.None);
-                uploaded++;
+                uploadedMaterials.Add(material.Id);
             }
         }
-        catch (Exception exception) { savedMessage += $" Подтверждено материалов: {uploaded} из {materials.Count}. " + ReadFailure(exception,"Проверьте вложения в карточке; повторять общение не нужно."); return; }
+        catch (Exception exception) { savedMessage += $" Подтверждено материалов: {uploadedMaterials.Count} из {materials.Count}. " + ReadFailure(exception,"Проверьте вложения в карточке; повторять общение не нужно."); return; }
         finally { uploading = false; }
         if (NeedsRefresh) { savedMessage += " Экран не обновлён; обновите карточку."; return; }
         await Finish();
     }
-    private async Task Close() { if (!Busy && !uploading) { if (saved) await Finish(); else await OnClose.InvokeAsync(); } }
-    private async Task Finish() => await OnSaved.InvokeAsync();
-    private sealed record Material(string Name,string ContentType,CaseAttachmentKind Kind,byte[] Content);
+    private async Task Close() { if (!Busy && !uploading) { if (saved) await Finish(); else if (textInput == null || await textInput.ConfirmDiscardAsync()) await OnClose.InvokeAsync(); } }
+    private async Task Finish() => await OnSaved.InvokeAsync(savedMessage);
+    private readonly HashSet<Guid> uploadedMaterials = [];
+    private sealed record Material(Guid Id, string Name,string ContentType,CaseAttachmentKind Kind,byte[] Content);
     private sealed class Draft
     {
         public Draft()

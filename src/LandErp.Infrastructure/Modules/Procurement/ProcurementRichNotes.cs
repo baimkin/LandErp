@@ -54,18 +54,20 @@ public sealed partial class ProcurementWorkspace
         ValidatedCaseNote document, Guid? checkId, CancellationToken cancellationToken)
     {
         Guid[] ids = document.AttachmentIds.ToArray();
+        Guid[] imageIds = document.ImageIds.ToArray();
         if (ids.Length > 0)
         {
             int available = await (from link in db.CaseAttachments
                                    join file in db.StoredFiles on link.StoredFileId equals file.Id
                                    where ids.Contains(link.Id) && link.OrganizationId == organizationId
                                        && file.OrganizationId == organizationId && link.PropertyCaseId == caseId
-                                       && (link.OwnerType == CaseAttachmentOwner.Case || (checkId != null && link.OwnerType == CaseAttachmentOwner.Check && link.CheckId == checkId)) && link.Kind == CaseAttachmentKind.Photo
+                                       && (link.OwnerType == CaseAttachmentOwner.Case || (checkId != null && link.OwnerType == CaseAttachmentOwner.Check && link.CheckId == checkId))
                                        && file.Status == StoredFileStatus.Available && file.ExternalUrl == null && file.StorageKey != null
-                                       && (file.ContentType == "image/png" || file.ContentType == "image/jpeg"
-                                           || file.ContentType == "image/webp" || file.ContentType == "image/gif")
+                                       && (!imageIds.Contains(link.Id) || link.Kind == CaseAttachmentKind.Photo &&
+                                           (file.ContentType == "image/png" || file.ContentType == "image/jpeg"
+                                           || file.ContentType == "image/webp" || file.ContentType == "image/gif"))
                                    select link.Id).CountAsync(cancellationToken);
-            if (available != ids.Length) throw new ArgumentException("Изображение недоступно или не принадлежит вложениям этого объекта.");
+            if (available != ids.Length) throw new ArgumentException("Файл недоступен или не принадлежит вложениям этого объекта.");
         }
     }
 

@@ -39,17 +39,17 @@
             </div>
 
             <section class="overview-card market-card">
-                <div class="overview-card-head market-card-head"><div><h2>Рынок по группам поиска</h2><p>Медианная и средняя цена за сотку отмеченных пригодных участников. Один подтверждённый участок — один участник.</p></div><button class="overview-btn small" type="button" @onclick="OpenAllGroupsAsync">Посмотреть все группы</button></div>
+                <div class="overview-card-head market-card-head"><div><h2>Рынок по группам поиска</h2><p>Медианная и средняя цена за сотку участников групп. Один подтверждённый участок — один участник.</p></div><button class="overview-btn small" type="button" @onclick="OpenAllGroupsAsync">Посмотреть все группы</button></div>
                 <div class="market-table">
                     <div class="market-header"><div>Группа поиска</div><div>Медиана</div><div>Средняя</div><div>Тест спроса</div><div>Выборка</div><div></div></div>
                     @if (view.Market.Items.Count == 0) { <div class="overview-empty">Активных групп поиска пока нет.</div> }
                     @foreach (MarketGroupRow row in view.Market.Items)
                     {
                         <div class="market-row" @key="row.SearchGroupId">
-                            <div class="market-name"><b>@row.Name</b><small>Отмеченные пригодные источники</small></div>
+                            <div class="market-name"><b>@row.Name</b><small>Участники группы</small></div>
                             <div class="market-price">@Price(row.MedianPricePerSotka)<small>за сотку</small></div>
                             <div class="market-price">@Price(row.AveragePricePerSotka)<small>за сотку</small></div><div class="market-demand">@if(row.Market != null){<DemandTestPrice Value="row.Market" Subject="CurrentSubject" Saved="MarketSavedAsync" />}<small>за сотку · ручной ориентир</small></div>
-                            <div class="market-sample">@if (row.CanReadParticipants) { <a href="@($"/incoming?participants={row.SearchGroupId}")">В расчёте: @row.IncludedCount</a> } else { <b>В расчёте: @row.IncludedCount</b> }<small>@row.IncludedCount участников</small></div>
+                            <div class="market-sample">@if (row.CanReadParticipants) { <a href="@($"/incoming?participants={row.SearchGroupId}")">В расчёте: @row.IncludedCount</a> } else { <b>В расчёте: @row.IncludedCount</b> }</div>
                             <span></span>
                         </div>
                     }
@@ -111,7 +111,7 @@
 {
     <div class="overview-modal-shade" role="presentation" @onclick="CloseAllGroups">
         <section class="overview-modal wide" role="dialog" aria-modal="true" aria-labelledby="all-groups-title" @onclick:stopPropagation="true">
-            <header><div><h3 id="all-groups-title">Все группы поиска</h3><p>Тот же состав отмеченных пригодных участников; без ограничений старой формулы.</p></div><button type="button" class="modal-close" aria-label="Закрыть" @onclick="CloseAllGroups">×</button></header>
+            <header><div><h3 id="all-groups-title">Все группы поиска</h3><p>Цены и участники по каждой группе.</p></div><button type="button" class="modal-close" aria-label="Закрыть" @onclick="CloseAllGroups">×</button></header>
             <div class="modal-content flush">
                 <div class="groups-toolbar"><input value="@marketText" @oninput="e => marketText = e.Value?.ToString() ?? string.Empty" @onkeydown="SearchKeyDown" placeholder="Поиск по названию группы…" aria-label="Поиск по группам" /><select value="@marketSort" @onchange="MarketSortChanged"><option value="Name">По названию</option><option value="MedianDescending">Медиана: по убыванию</option><option value="MedianAscending">Медиана: по возрастанию</option><option value="SampleDescending">По размеру выборки</option></select><button class="overview-btn small" type="button" @onclick="ReloadAllGroupsAsync">Найти</button></div>
                 @if (allGroupsLoading) { <div class="overview-empty">Загружаем группы…</div> }
@@ -120,7 +120,7 @@
                     <div class="all-groups-header"><div>Группа поиска</div><div>Состав</div><div>Медиана</div><div>Средняя</div><div>Тест спроса</div><div>Выборка</div><div></div></div>
                     @if (allGroups.Items.Count == 0) { <div class="overview-empty">Группы по заданному поиску не найдены.</div> }
                     @foreach (MarketGroupRow row in allGroups.Items)
-                    { <div class="all-groups-row" @key="row.SearchGroupId"><div class="market-name"><b>@row.Name</b></div><div class="config-text">Отмеченные пригодные источники</div><div class="market-price">@Price(row.MedianPricePerSotka)<small>за сотку</small></div><div class="market-price">@Price(row.AveragePricePerSotka)<small>за сотку</small></div><div class="market-demand">@if(row.Market != null){<DemandTestPrice Value="row.Market" Subject="CurrentSubject" Saved="MarketSavedAsync" />}<small>за сотку · ручной ориентир</small></div><div class="market-sample">@if (row.CanReadParticipants) { <a href="@($"/incoming?participants={row.SearchGroupId}")">В расчёте: @row.IncludedCount</a> } else { <b>В расчёте: @row.IncludedCount</b> }<small>@row.IncludedCount участников</small></div><span></span></div> }
+                    { <div class="all-groups-row" @key="row.SearchGroupId"><div class="market-name"><b>@row.Name</b></div><div class="config-text">Участники группы</div><div class="market-price">@Price(row.MedianPricePerSotka)<small>за сотку</small></div><div class="market-price">@Price(row.AveragePricePerSotka)<small>за сотку</small></div><div class="market-demand">@if(row.Market != null){<DemandTestPrice Value="row.Market" Subject="CurrentSubject" Saved="MarketSavedAsync" />}<small>за сотку · ручной ориентир</small></div><div class="market-sample">@if (row.CanReadParticipants) { <a href="@($"/incoming?participants={row.SearchGroupId}")">В расчёте: @row.IncludedCount</a> } else { <b>В расчёте: @row.IncludedCount</b> }</div><span></span></div> }
                     <footer class="groups-pager"><span>Показано @allGroups.Items.Count из @allGroups.Total групп</span><div><button class="overview-btn small" type="button" disabled="@(allGroups.Offset == 0)" @onclick="PreviousGroupsAsync">‹</button><button class="overview-btn small" type="button" disabled="@(allGroups.Offset + allGroups.Size >= allGroups.Total)" @onclick="NextGroupsAsync">›</button></div></footer>
                 }
             </div>

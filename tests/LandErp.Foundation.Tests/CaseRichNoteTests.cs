@@ -19,6 +19,25 @@ public sealed class CaseRichNoteTests
     private static string Image(Guid id) => JsonSerializer.Serialize(new { type = "doc", content = new[] { new { type = "image", attrs = new { attachmentId = id } } } });
 
     [TestMethod]
+    public async Task PlainNoteFileReferencePreservesProtectionAndRejectsNonImageInImageNode()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(true, true);
+        Guid id = await f.InsertIndependentCaseAsync("UX файлы");
+        Guid other = await f.InsertIndependentCaseAsync("UX другой объект");
+        Guid file = await f.Workspace.AddAttachmentAsync(f.Manager, new(id, CaseAttachmentOwner.Case, null,
+            CaseAttachmentKind.Document, "Расчёт", "", "notes.txt", "text/plain", "Результат"u8.ToArray(), null), "ux-file", Ct);
+        string json = JsonSerializer.Serialize(new { type = "doc", content = new[] { new { type = "attachment", attrs = new { attachmentId = file, name = "<Расчёт>.txt" } } } });
+        var saved = await f.Workspace.SaveRichNoteAsync(f.Manager, new(id, CaseNoteSection.Working, 0, json), "ux-save", Ct);
+        StringAssert.Contains(saved.SafeHtml, "&lt;Расчёт&gt;.txt");
+        StringAssert.Contains(saved.SafeHtml, $"/api/procurement/attachments/{file}");
+        Assert.IsTrue(CaseNoteDocument.IsPlain(saved.DocumentJson));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => f.Workspace.SaveRichNoteAsync(f.Manager, new(other, CaseNoteSection.Working, 0, json), "wrong-case", Ct));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => f.Workspace.SaveRichNoteAsync(f.Manager, new(id, CaseNoteSection.Working, 1, Image(file)), "not-image", Ct));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => f.Workspace.ReadAttachmentAsync(f.ForeignOwner, file, Ct));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => f.Workspace.SaveRichNoteAsync(f.SecondManager, new(id, CaseNoteSection.Working, 1, json), "wrong-scope", Ct));
+    }
+
+    [TestMethod]
     public async Task SectionsSaveIndependentlyWithVersionAuditAndRuntimeSchema()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
@@ -158,7 +177,12 @@ public sealed class CaseRichNoteTests
         StringAssert.Contains(clean.Html, "&lt;script&gt;");
         StringAssert.Contains(clean.Html, "<table><tbody><tr><td>");
         StringAssert.Contains(clean.Html, "<em><strong>");
-        Assert.AreEqual(clean, CaseNoteDocument.Validate(clean.Json) with { AttachmentIds = clean.AttachmentIds });
+        var roundTrip = CaseNoteDocument.Validate(clean.Json);
+        Assert.AreEqual(clean.Json, roundTrip.Json);
+        Assert.AreEqual(clean.Html, roundTrip.Html);
+        CollectionAssert.AreEquivalent(clean.AttachmentIds.ToArray(), roundTrip.AttachmentIds.ToArray());
+        CollectionAssert.AreEquivalent(clean.ImageIds.ToArray(), roundTrip.ImageIds.ToArray());
+        Assert.IsFalse(CaseNoteDocument.IsPlain(clean.Json));
     }
 
     [TestMethod]

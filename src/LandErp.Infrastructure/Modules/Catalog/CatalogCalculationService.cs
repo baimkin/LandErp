@@ -78,6 +78,7 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
         var query = db.Listings.AsNoTracking().Where(item => item.OrganizationId == organizationId).Where(prepared.Current);
         if (selection.Selected is { } targets)
         {
+            if (selection.ExcludedIds is { Count: > 0 }) throw new ArgumentException("Исключения доступны только при выборе всех результатов.");
             Guid[] ids = targets.Select(item => item.Id).Distinct().ToArray();
             if (ids.Length != targets.Count) throw new ArgumentException("Объявление выбрано несколько раз.");
             var items = await query.Where(item => ids.Contains(item.Id)).ToArrayAsync(cancellationToken);
@@ -86,6 +87,9 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
             if (items.Any(item => item.Version != versions[item.Id])) throw Conflict();
             return items;
         }
+        // Both preview and apply use this same server-side cohort, independent of pagination.
+        if (selection.ExcludedIds is { Count: > 0 } excluded)
+            query = query.Where(item => !excluded.Contains(item.Id));
         return await query.ToArrayAsync(cancellationToken);
     }
 

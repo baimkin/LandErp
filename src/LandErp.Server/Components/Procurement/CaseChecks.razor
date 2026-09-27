@@ -1,0 +1,35 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+@using LandErp.Application.Modules.Procurement.Domain
+@using LandErp.Application.Modules.IdentityAccess.Contracts
+            <div class="check-columns">
+                @foreach(var level in Enum.GetValues<CaseCheckLevel>())
+                {
+                    <article class="surface">
+                        <div class="section-heading"><h3>@ProcurementLabels.CheckLevel(level)</h3>
+                            @if(CanEditCheck(level)){<button class="btn quiet" disabled="@newChecks.Contains(level)" @onclick="()=>newChecks.Add(level)">＋ Проверка</button>}
+                        </div>
+                        @if(!CanEditCheck(level) && Card.CanManageDossier){<p class="subtle">@(Card.Item.Stage is "acquired" or "rejected" or "monitor" ? "Проверки доступны только для чтения в текущем состоянии объекта." : "Глубокая проверка доступна после решения руководителя продолжить работу.")</p>}
+                        @foreach(var item in Card.Checks.Where(x=>x.Level==level))
+                        {
+                            <CaseCheckEntry @key="item.Id" CaseId="CaseId" Level="level" Value="item" Card="Card" Subject="Subject" CanEdit="CanEditCheck(level)" Refresh="Refresh" />
+                        }
+                        @if(newChecks.Contains(level))
+                        {
+                            <CaseCheckEntry @key="level" CaseId="CaseId" Level="level" Card="Card" Subject="Subject" CanEdit="CanEditCheck(level)" Refresh="Refresh" Committed="_=>newChecks.Remove(level)" Cancelled="()=>newChecks.Remove(level)" />
+                        }
+                        else if(!Card.Checks.Any(x=>x.Level==level)){<p class="subtle">Записей пока нет.</p>}
+                        <CaseRichNoteBlock @key="(CaseId, level)" CaseId="CaseId" Section="@(level == CaseCheckLevel.Quick ? CaseNoteSection.QuickChecks : CaseNoteSection.DeepChecks)" Title="Общие заметки" Subject="Subject" Attachments="Card.Attachments" CanEdit="Card.CanManageDossier" Value="@RichNote(level == CaseCheckLevel.Quick ? CaseNoteSection.QuickChecks : CaseNoteSection.DeepChecks)" Saved="Refresh" />
+                    </article>
+                }
+            </div>
+
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public CaseCard Card { get; set; } = default!;
+    [Parameter] public Subject Subject { get; set; } = default!;
+    [Parameter] public EventCallback Refresh { get; set; }
+    private readonly HashSet<CaseCheckLevel> newChecks = [];
+    private bool CanEditCheck(CaseCheckLevel level) => Card.CanManageDossier && Card.Item.Stage is not ("acquired" or "rejected" or "monitor")
+        && (level == CaseCheckLevel.Quick || Card.Item.Stage is "negotiation" or "approved");
+    private CaseRichNoteView? RichNote(CaseNoteSection section) => Card.RichNotes.SingleOrDefault(item=>item.Section==section);
+}

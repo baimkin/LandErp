@@ -1,117 +1,85 @@
-import { Editor, mergeAttributes } from '@tiptap/core';
-import StarterKit from '@tiptap/starter-kit';
-import Image from '@tiptap/extension-image';
-import { TableKit } from '@tiptap/extension-table';
 
-const imageUrl = id => `/api/procurement/attachments/${id}/image`;
-const validId = id => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-const CaseImage = Image.extend({
-  addAttributes() { return { attachmentId:{default:null} }; },
-  // Pasted HTML images never load external URLs; images enter only after protected upload.
-  parseHTML() { return []; },
-  renderHTML({node}) {
-    const id=node.attrs.attachmentId;
-    return ['img', mergeAttributes({src:validId(id)?imageUrl(id):'', alt:'Изображение заметки'})];
+const imageTypes = ['image/png','image/jpeg','image/webp','image/gif'];
+export const isPlainDocument = doc => (doc.content || []).every(n =>
+  n.type === 'image' || n.type === 'attachment' || n.type === 'paragraph' &&
+  (n.content || []).every(c => c.type === 'hardBreak' || c.type === 'text' && !(c.marks?.length)));
+export const plainParagraphs = text => text.split('\n').map(line =>
+  line ? {type:'paragraph',content:[{type:'text',text:line}]} : {type:'paragraph'});
+
+// Legacy formatted documents remain intact. New input appends plain paragraphs to them.
+export function create(host, json, dotnet, label = 'Текст', maxLength = 64000) {
+  const original = JSON.parse(json), plain = isPlainDocument(original);
+  const preserved = plain ? [] : structuredClone(original.content || []);
+  const textarea = document.createElement('textarea');
+  textarea.setAttribute('aria-label',label); textarea.maxLength = maxLength;
+  textarea.placeholder = plain ? 'Текст, изображения и файлы' : 'Дополнение к сохранённому тексту';
+  textarea.value = plain ? (original.content || []).filter(n=>n.type==='paragraph')
+    .map(n=>(n.content||[]).map(c=>c.type==='hardBreak'?'\n':c.text||'').join('')).join('\n') : '';
+  const files = plain ? (original.content || []).filter(n=>n.type==='image'||n.type==='attachment')
+    .map(n=>({node:n,name:n.attrs.name || 'Изображение', id:n.attrs.attachmentId})) : [];
+  const list=document.createElement('div'); list.className='draft-files';
+  const status=document.createElement('div'); status.className='draft-status'; status.setAttribute('role','status');
+  const picker=document.createElement('input'); picker.type='file'; picker.multiple=true; picker.hidden=true;
+  picker.accept='image/png,image/jpeg,image/webp,image/gif,audio/*,.pdf,.txt,.csv,.docx,.xlsx';
+  const attach=document.createElement('button'); attach.type='button';attach.textContent='📎 Прикрепить фото или файл';attach.onclick=()=>picker.click();
+  host.replaceChildren(textarea, list, attach, picker, status);
+  let dirty=false, frozen=false, destroyed=false;
+  const changed=()=>{dirty=true;void dotnet.invokeMethodAsync('OnChanged').catch(()=>{});};
+  textarea.oninput=changed;
+  function render(){
+    list.replaceChildren();
+    for (const file of files) {
+      const row=document.createElement('div');row.className='draft-file';
+      if(file.preview || file.node?.type==='image'){
+        const img=document.createElement('img');img.alt='';img.src=file.preview || '/api/procurement/attachments/'+file.id+'/image';row.append(img);
+      }
+      const name=document.createElement('span');name.textContent=file.name;row.append(name);
+      const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Убрать '+file.name+' из черновика');
+      remove.disabled=frozen;remove.onclick=()=>{if(frozen)return;files.splice(files.indexOf(file),1);if(file.preview)URL.revokeObjectURL(file.preview);changed();render();};row.append(remove);list.append(row);
+    }
   }
-});
-
-export function create(host, json, dotnet) {
-  const toolbar=document.createElement('div'); toolbar.className='note-toolbar'; toolbar.setAttribute('role','toolbar'); toolbar.setAttribute('aria-label','Форматирование текста');
-  const content=document.createElement('div');
-  const status=document.createElement('div'); status.className='note-upload-status'; status.setAttribute('role','status');
-  host.replaceChildren(toolbar,content,status);
-  let dirty=false, pending=0, destroyed=false, frozen=false;
-  const root=host.closest('.rich-note');
-  const markDirty=()=>{if(!dirty){dirty=true;void dotnet.invokeMethodAsync('Changed').catch(()=>{});}};
-  // Check title/state fields share the synchronous browser-side leave guard with the document.
-  const fieldChanged=event=>{if(event.target?.type!=='file')markDirty();};
-  root?.addEventListener('input',fieldChanged);
-  root?.addEventListener('change',fieldChanged);
-  const buttons=[];
-  const beforeUnload=e=>{if(dirty||pending){e.preventDefault();e.returnValue='';}};
+  function add(incoming) {
+    if(frozen)return;
+    for(const file of incoming){
+      if(!file.size || file.size>8*1024*1024 || files.filter(f=>f.file).length>=6){status.textContent='До 6 новых файлов по 8 МБ.';continue;}
+      files.push({file,name:file.name,preview:imageTypes.includes(file.type)?URL.createObjectURL(file):null});changed();
+    }
+    render();
+  }
+  picker.onchange=()=>{add([...picker.files]);picker.value='';};
+  textarea.onpaste=e=>{const images=[...(e.clipboardData?.files||[])].filter(f=>imageTypes.includes(f.type));if(images.length){e.preventDefault();add(images);}};
+  function freeze(value){frozen=value;textarea.disabled=value;attach.disabled=value;render();}
+  async function collectFiles(){
+    freeze(true);
+    try {
+      for(const file of files){
+        if(file.id || !file.file)continue;
+        status.textContent='Подготовка: '+file.name;
+        const id=await dotnet.invokeMethodAsync('UploadFile',DotNet.createJSStreamReference(new Uint8Array(await file.file.arrayBuffer())),file.name,file.file.type || 'application/octet-stream');
+        if(!id)throw Error('Не удалось загрузить файл. Черновик сохранён.');
+        file.id=id;
+        file.node={type:imageTypes.includes(file.file.type)?'image':'attachment',attrs:{attachmentId:id,name:file.name}};
+      }
+      status.textContent='';
+      return files.map(f=>f.id);
+    } catch(error) { status.textContent=error.message;freeze(false);throw error; }
+  }
+  const beforeUnload=e=>{if(dirty||frozen){e.preventDefault();e.returnValue='';}};
   window.addEventListener('beforeunload',beforeUnload);
-  const editor=new Editor({
-    element:content, content:JSON.parse(json),
-    extensions:[StarterKit.configure({
-      blockquote:false,code:false,codeBlock:false,horizontalRule:false,strike:false,underline:false,trailingNode:false,
-      heading:{levels:[1,2,3]},link:{openOnClick:false,autolink:false,linkOnPaste:false,protocols:['http','https']}
-    }),CaseImage,TableKit.configure({table:{resizable:false}})],
-    editorProps:{attributes:{'aria-label':'Текст секции','role':'textbox','aria-multiline':'true'},
-      handlePaste(_view,event){
-        const files=[...(event.clipboardData?.files||[])];
-        if(files.length){event.preventDefault();void upload(files);return true;}return false;
-      },
-      handleDrop(_view,event){
-        if(event.dataTransfer?.files.length){event.preventDefault();void upload([...event.dataTransfer.files]);return true;}return false;
-      }
-    },
-    onUpdate(){ markDirty(); updateToolbar(); },
-    onSelectionUpdate(){updateToolbar();}
-  });
-  function updateToolbar(){
-    for(const {button,active} of buttons) if(active)button.setAttribute('aria-pressed',String(active()));
-    styles.value=editor.isActive('heading')?String(editor.getAttributes('heading').level):'0';
-  }
-  function button(label,title,action,active){
-    const b=document.createElement('button');b.type='button';b.textContent=label;b.title=title;b.setAttribute('aria-label',title);
-    b.onmousedown=e=>e.preventDefault();b.onclick=()=>{if(!frozen){action();updateToolbar();}};
-    toolbar.append(b);buttons.push({button:b,active});return b;
-  }
-  const styles=document.createElement('select');styles.setAttribute('aria-label','Стиль абзаца');
-  for(const [value,label] of [['0','Текст'],['1','Заголовок 1'],['2','Заголовок 2'],['3','Заголовок 3']]){
-    const option=document.createElement('option');option.value=value;option.textContent=label;styles.append(option);
-  }
-  styles.onchange=()=>{if(styles.value==='0')editor.chain().focus().setParagraph().run();else editor.chain().focus().setHeading({level:Number(styles.value)}).run();};toolbar.append(styles);
-  button('Ж','Жирный (Ctrl+B)',()=>editor.chain().focus().toggleBold().run(),()=>editor.isActive('bold'));
-  button('К','Курсив (Ctrl+I)',()=>editor.chain().focus().toggleItalic().run(),()=>editor.isActive('italic'));
-  button('• Список','Маркированный список',()=>editor.chain().focus().toggleBulletList().run(),()=>editor.isActive('bulletList'));
-  button('1. Список','Нумерованный список',()=>editor.chain().focus().toggleOrderedList().run(),()=>editor.isActive('orderedList'));
-  button('Ссылка','Добавить или изменить ссылку',()=>{
-    const href=window.prompt('Ссылка http:// или https:// (пусто — убрать)',editor.getAttributes('link').href||'');
-    if(href===null)return;if(!href){editor.chain().focus().extendMarkRange('link').unsetLink().run();return;}
-    try{const u=new URL(href);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw Error();
-      editor.chain().focus().extendMarkRange('link').setLink({href:u.href}).run();status.textContent='';
-    }catch{status.textContent='Введите обычную http/https-ссылку без пароля.';}
-  });
-  button('Таблица','Вставить простую таблицу 3 × 3',()=>editor.chain().focus().insertTable({rows:3,cols:3,withHeaderRow:true}).run());
-  button('+ Строка','Добавить строку ниже',()=>editor.chain().focus().addRowAfter().run());
-  button('− Строка','Удалить строку',()=>editor.chain().focus().deleteRow().run());
-  button('+ Столбец','Добавить столбец справа',()=>editor.chain().focus().addColumnAfter().run());
-  button('− Столбец','Удалить столбец',()=>editor.chain().focus().deleteColumn().run());
-  button('× Таблица','Удалить таблицу',()=>editor.chain().focus().deleteTable().run());
-  button('↶','Отменить ввод (Ctrl+Z)',()=>editor.chain().focus().undo().run());
-  button('↷','Повторить ввод',()=>editor.chain().focus().redo().run());
-  const file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/gif';file.hidden=true;
-  file.onchange=()=>{void upload([...file.files]);file.value='';};host.append(file);
-  button('Изображение','Загрузить изображение (также Ctrl+V)',()=>file.click());
-  async function upload(files){
-    if(pending||frozen)return;
-    pending++;
-    try{
-      for(const f of files){
-        if(!['image/png','image/jpeg','image/webp','image/gif'].includes(f.type)||!f.size||f.size>8*1024*1024){status.textContent='PNG, JPEG, WebP или GIF, до 8 МБ.';continue;}
-        status.textContent='Загрузка изображения…';
-        const bytes=new Uint8Array(await f.arrayBuffer());
-        const id=await dotnet.invokeMethodAsync('UploadImage',DotNet.createJSStreamReference(bytes),f.name,f.type);
-        if(id&&!destroyed){editor.chain().focus().insertContent({type:'image',attrs:{attachmentId:id}}).run();status.textContent='Изображение загружено; сохраните текст.';}
-        else status.textContent='Изображение не вставлено. Текущий текст сохранён в редакторе.';
-      }
-    }catch{status.textContent='Не удалось загрузить изображение. Текущий текст сохранён в редакторе.';}
-    finally{pending--;}
-  }
-  updateToolbar();editor.commands.focus('end');
+  render();
   return DotNet.createJSObjectReference({
-    markDirty(){dirty=true;},
-    document(){
-      if(pending)throw Error('Дождитесь загрузки изображения.');
-      const text=JSON.stringify(editor.getJSON());const blob=new Blob([text],{type:'application/json'});
-      if(blob.size>128*1024)throw Error('Документ превышает 128 КБ.');
-      frozen=true;editor.setEditable(false);for(const b of toolbar.querySelectorAll('button,select'))b.disabled=true;
+    text(){return textarea.value;},
+    collectFiles,
+    async document(){
+      await collectFiles();
+      const content=[...preserved,...plainParagraphs(textarea.value),...files.map(f=>f.node)];
+      const blob=new Blob([JSON.stringify({type:'doc',content})],{type:'application/json'});
+      if(blob.size>128*1024){freeze(false);throw Error('Текст превышает 128 КБ.');}
       return DotNet.createJSStreamReference(blob);
     },
-    resume(){frozen=false;editor.setEditable(true);for(const b of toolbar.querySelectorAll('button,select'))b.disabled=false;},
-    insertImage(id){if(!frozen&&validId(id))editor.chain().focus().insertContent({type:'image',attrs:{attachmentId:id}}).run();},
-    confirmDiscard(){return !pending&&(!dirty||window.confirm('Есть несохранённый текст. Отбросить изменения? Загруженные файлы останутся во вложениях объекта.'));},
-    destroy(){destroyed=true;window.removeEventListener('beforeunload',beforeUnload);root?.removeEventListener('input',fieldChanged);root?.removeEventListener('change',fieldChanged);editor.destroy();host.replaceChildren();}
+    markDirty(){dirty=true;},
+    resume(){if(!destroyed)freeze(false);},
+    confirmDiscard(){return !frozen && (!dirty||window.confirm('Отбросить несохранённые изменения?'));},
+    destroy(){destroyed=true;window.removeEventListener('beforeunload',beforeUnload);for(const f of files)if(f.preview)URL.revokeObjectURL(f.preview);host.replaceChildren();}
   });
 }

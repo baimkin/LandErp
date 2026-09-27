@@ -6,7 +6,10 @@ using System.Text.Encodings.Web;
 
 namespace LandErp.Application.Modules.Procurement.Contracts;
 
-public sealed record ValidatedCaseNote(string Json, string Html, IReadOnlyCollection<Guid> AttachmentIds);
+public sealed record ValidatedCaseNote(string Json, string Html, IReadOnlyCollection<Guid> AttachmentIds)
+{
+    public IReadOnlyCollection<Guid> ImageIds { get; init; } = [];
+}
 
 /// <summary>A bounded document schema, not an HTML sanitizer/editor. Never render client HTML or attributes.</summary>
 public static class CaseNoteDocument
@@ -24,17 +27,18 @@ public static class CaseNoteDocument
         {
             using JsonDocument source = JsonDocument.Parse(json, new() { MaxDepth = 48 });
             HashSet<Guid> images = [];
+            HashSet<Guid> imageOnly = [];
             int count = 0;
             (JsonObject node, string html) = Visit(source.RootElement, "", 0);
             string canonical = node.ToJsonString(StorageOptions);
             if (Encoding.UTF8.GetByteCount(canonical) > MaxBytes) throw Invalid();
-            return new(canonical, html, images);
+            return new(canonical, html, images) { ImageIds = imageOnly };
 
             (JsonObject Node, string Html) Visit(JsonElement input, string parent, int depth)
             {
                 if (depth > 16 || ++count > 4000 || input.ValueKind != JsonValueKind.Object) throw Invalid();
                 string type = input.GetProperty("type").GetString() ?? "";
-                bool block = type is "paragraph" or "heading" or "bulletList" or "orderedList" or "table" or "image";
+                bool block = type is "paragraph" or "heading" or "bulletList" or "orderedList" or "table" or "image" or "attachment";
                 bool allowed = parent switch
                 {
                     "" => type == "doc",
@@ -84,13 +88,21 @@ public static class CaseNoteDocument
                     return (output, encoded);
                 }
                 if (type == "hardBreak") return (output, "<br>");
-                if (type == "image")
+                if (type is "image" or "attachment")
                 {
                     // Only a CaseAttachment ID is stored. URL, style, handlers and base64 are discarded.
                     string idText = input.GetProperty("attrs").GetProperty("attachmentId").GetString() ?? "";
                     if (!Guid.TryParse(idText, out Guid id) || id == Guid.Empty || images.Count >= 100) throw Invalid();
                     images.Add(id);
                     output["attrs"] = new JsonObject { ["attachmentId"] = id.ToString() };
+                    if (type == "attachment")
+                    {
+                        string name = input.GetProperty("attrs").GetProperty("name").GetString() ?? "Файл";
+                        if (name.Length is < 1 or > 512) throw Invalid();
+                        output["attrs"]!["name"] = name;
+                        return (output, $"<p><a href=\"/api/procurement/attachments/{id}\" target=\"_blank\" rel=\"noopener noreferrer\">{WebUtility.HtmlEncode(name)}</a></p>");
+                    }
+                    imageOnly.Add(id);
                     return (output, $"<img src=\"/api/procurement/attachments/{id}/image\" alt=\"Изображение заметки\" loading=\"lazy\">");
                 }
                 string tagName = type switch
@@ -141,6 +153,17 @@ public static class CaseNoteDocument
 
     public static bool IsImageType(string contentType) => contentType is "image/png" or "image/jpeg" or "image/webp" or "image/gif";
 
+    public static bool IsPlain(string json)
+    {
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("content").EnumerateArray().All(node =>
+            node.GetProperty("type").GetString() is "image" or "attachment" ||
+            node.GetProperty("type").GetString() == "paragraph" &&
+            (!node.TryGetProperty("content", out var children) || children.EnumerateArray().All(child =>
+                child.GetProperty("type").GetString() == "hardBreak" || child.GetProperty("type").GetString() == "text" &&
+                (!child.TryGetProperty("marks", out var marks) || marks.GetArrayLength() == 0))));
+    }
+
     // Legacy values are text, including strings that look like HTML; never parse them as markup.
     public static string FromPlainText(string text)
     {
@@ -160,6 +183,7 @@ public static class CaseNoteDocument
             string? type = node.GetProperty("type").GetString();
             if (type == "text") result.Append(node.GetProperty("text").GetString());
             if (type == "image") result.Append("[Изображение]");
+            if (type == "attachment") result.Append("[Файл: ").Append(node.GetProperty("attrs").GetProperty("name").GetString()).Append(']');
             if (type == "hardBreak") result.AppendLine();
             if (node.TryGetProperty("content", out var content)) foreach (var child in content.EnumerateArray()) Append(child);
             if (type is "paragraph" or "heading" or "tableRow" or "image") result.AppendLine();

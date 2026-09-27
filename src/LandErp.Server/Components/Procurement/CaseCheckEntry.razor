@@ -8,7 +8,7 @@
     @if (!editing && current != null)
     {
         <div class="check-heading"><strong>@current.Title</strong><span>@StatusLabel(current.Status)</span></div>
-        @if (current.Blocker) { <small class="case-problem">Блокирующий вопрос · отдельный признак</small> }
+        @if (current.Blocker) { <small class="case-problem">Блокирующий вопрос</small> }
         @if (current.Responsible != null || current.DueAt != null || current.Cost != null)
         {
             <small class="subtle">@ExtraValues(current)</small>
@@ -30,20 +30,19 @@
                     <label class="field"><span>Состояние</span><select value="@status" @onchange="StatusChanged">
                         <option value="Planned">Не проверено</option><option value="Passed">В порядке</option><option value="Issue">Есть вопросы</option>
                         @if (current?.Status is CaseCheckStatus.InProgress or CaseCheckStatus.Blocked)
-                        { <option value="@current.Status">@StatusLabel(current.Status) — прежнее состояние</option> }
+                        { <option value="@current.Status">@StatusLabel(current.Status)</option> }
                     </select></label>
                     @if (Card.CanManageBlockers)
                     { <label class="check-field"><input type="checkbox" checked="@blocker" @onchange="BlockerChanged" /> Блокирующий вопрос</label> }
                     else if (blocker) { <small class="case-problem">Блокирующий вопрос · изменить может руководитель</small> }
                 </div>
-                @if (blocker || Card.CanManageBlockers) { <small class="subtle">«Есть вопросы» не включает блокер автоматически. Изменение текста не снимает этот признак.</small> }
                 @if (current != null && (current.Responsible != null || current.DueAt != null || current.Cost != null))
-                { <small class="subtle">Сохраняются: @ExtraValues(current)</small> }
+                { <small class="subtle">@ExtraValues(current)</small> }
                 <span class="check-result-label">Результат</span>
             </fieldset>
         </EditorFields>
     </CaseRichNoteBlock>
-    @foreach (var file in Card.Attachments.Where(item => item.OwnerType == CaseAttachmentOwner.Check && item.OwnerId == current?.Id))
+    @foreach (var file in Card.Attachments.Where(item => item.OwnerType == CaseAttachmentOwner.Check && item.OwnerId == current?.Id && !DocumentAttachments.Contains(item.Id)))
     {
         <div class="check-material"><small>@file.Label</small>
             @if (file.Status == StoredFileStatus.Available) { <a href="/api/procurement/attachments/@file.Id" target="_blank" rel="noopener">Открыть материал ↗</a> }
@@ -62,6 +61,7 @@
     [Parameter] public EventCallback Refresh { get; set; }
     [Parameter] public EventCallback<Guid> Committed { get; set; }
     [Parameter] public EventCallback Cancelled { get; set; }
+    private IReadOnlyCollection<Guid> DocumentAttachments => current?.ResultDocumentJson is string json ? CaseNoteDocument.Validate(json).AttachmentIds : [];
     private readonly string listId = "check-templates-" + Guid.NewGuid().ToString("N");
     private CaseRichNoteBlock? editor;
     private CheckView? current;

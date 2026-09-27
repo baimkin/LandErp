@@ -238,6 +238,13 @@
                     <CaseNextAction @key="(detail.CaseId,detail.CaseVersion)" CaseId="detail.CaseId" OnSaved="ReloadAsync" />
                 </div>
 
+                @if (drawerCard != null)
+                {
+                    <div class="card"><CaseRichNoteBlock @key="(detail.CaseId, CaseNoteSection.Working)" CaseId="detail.CaseId" Section="CaseNoteSection.Working"
+                        Title="Рабочие заметки" Subject="CurrentSubject" Attachments="drawerCard.Attachments" CanEdit="drawerCard.CanManageDossier"
+                        Value="@drawerCard.RichNotes.SingleOrDefault(x=>x.Section==CaseNoteSection.Working)" Saved="ReloadAsync" /></div>
+                }
+
                 <div class="card">
                     <div class="ct"><b>Переговоры</b><div><span class="badge info">Последние @detail.Negotiations.Count</span><button class="btn" type="button" @onclick="OpenNegotiationsAsync">Все переговоры</button> @if (detail.CanManageDossier && detail.Stage != "acquired") { <button class="btn primary" type="button" @onclick="OpenNegotiation">Записать общение</button> }</div></div>
                     @if(detail.Negotiations.Count==0){<p class="muted">Переговоры ещё не начаты.</p>}
@@ -246,10 +253,7 @@
 
                 <div class="card">
                     <div class="ct"><b>Проверки</b><button class="btn" type="button" @onclick='()=>OpenCaseSection("checks")'>Открыть проверки</button></div>
-                    <div class="checks">
-                        <div class="check"><div class="check-line"><b>Базовые проверки</b><span class="badge @CheckBadge(detail.QuickChecks)">@CheckRatio(detail.QuickChecks)</span></div><p>@CheckLevelDescription(detail.QuickChecks)</p></div>
-                        <div class="check"><div class="check-line"><b>Глубокая проверка / DD</b><span class="badge @CheckBadge(detail.DeepChecks)">@CheckRatio(detail.DeepChecks)</span></div><p>@CheckLevelDescription(detail.DeepChecks)</p></div>
-                    </div>
+                    @if (drawerCard != null) { <div class="drawer-checks"><CaseChecks @key="detail.CaseId" CaseId="detail.CaseId" Card="drawerCard" Subject="CurrentSubject" Refresh="ReloadAsync" /></div> }
                 </div>
 
                 <div class="card">
@@ -357,7 +361,7 @@
 
 @if (negotiationOpen && detail != null)
 {
-    <CaseCommunication CaseId="detail.CaseId" AllowAttachments="true" OnClose="CloseNegotiation" OnSaved="CommunicationSaved" />
+    <CaseCommunication CaseId="detail.CaseId" OnClose="CloseNegotiation" OnSaved="CommunicationSaved" />
 }
 
 @if (negotiationsOpen && detail != null)
@@ -451,6 +455,7 @@
     private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
     private ProcurementQueueV2Page? queuePage;
     private ProcurementQueueV2Detail? detail;
+    private CaseCard? drawerCard;
     private Guid? selectedCaseId;
     private bool drawerLoading;
     private string? drawerError;
@@ -499,7 +504,10 @@
         marketGroups = await Markets.ReadProcurementGroupsAsync(CurrentSubject, CancellationToken.None);
         groupMarket = await Markets.ReadProcurementAsync(CurrentSubject, marketGroupId, CancellationToken.None);
         if (selectedCaseId is Guid caseId)
+        {
             detail = await ReadModel.ReadDetailAsync(CurrentSubject, caseId, CancellationToken.None);
+            drawerCard = await Workspace.ReadCardAsync(CurrentSubject, caseId, CancellationToken.None);
+        }
     }
 
     private ProcurementQueueV2Filter BuildFilter()
@@ -545,8 +553,8 @@
     private async Task OpenDrawerAsync(Guid caseId)
     {
         if (Busy) return;
-        selectedCaseId = caseId; detail = null; drawerError = null; drawerLoading = true;
-        try { detail = await ReadModel.ReadDetailAsync(CurrentSubject, caseId, CancellationToken.None); }
+        selectedCaseId = caseId; detail = null; drawerCard = null; drawerError = null; drawerLoading = true;
+        try { detail = await ReadModel.ReadDetailAsync(CurrentSubject, caseId, CancellationToken.None); drawerCard = await Workspace.ReadCardAsync(CurrentSubject, caseId, CancellationToken.None); }
         catch (AccessDeniedException exception) { drawerError = ReadFailure(exception, "Нет доступа к этому объекту."); }
         catch (Exception exception) { drawerError = ReadFailure(exception, "Не удалось загрузить объект. Повторите после восстановления соединения."); }
         finally { drawerLoading = false; }
@@ -645,11 +653,11 @@
         negotiationOpen = true;
     }
     private void CloseNegotiation() { if (!Busy) negotiationOpen = false; }
-    private async Task CommunicationSaved()
+    private async Task CommunicationSaved(string message)
     {
         negotiationOpen = false;
         await ReloadAsync();
-        Success = "Общение сохранено";
+        Success = message;
     }
 
     private static string DecisionTitle(ProcurementAction action) => action switch

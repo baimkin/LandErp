@@ -5,11 +5,6 @@
 .rich-note-attachment{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0;font-size:var(--text-sm)}
 .rich-note-attachment select{max-width:100%;font:inherit}
 .rich-note-editor{border:1px solid var(--border);border-radius:var(--radius,8px);margin-bottom:var(--space-2,8px)}
-.rich-note ::deep .note-toolbar{display:flex;flex-wrap:wrap;gap:4px;padding:8px;border-bottom:1px solid var(--border);background:var(--surface-subtle)}
-.rich-note ::deep .note-toolbar button,.rich-note ::deep .note-toolbar select{font:inherit;font-size:var(--text-ui);min-height:32px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface,#fff);color:var(--text-strong)}
-.rich-note ::deep .note-toolbar button[aria-pressed=true]{background:var(--accent);color:white}
-.rich-note ::deep .tiptap{min-height:150px;padding:12px;outline-offset:2px}
-.rich-note ::deep .tiptap,.rich-note-document{font-size:var(--text-body);line-height:1.6;overflow-x:auto}
 .rich-note ::deep p{margin:0 0 0.6em;white-space:pre-wrap}
 .rich-note ::deep h1{font-size:var(--text-title)}
 .rich-note ::deep h2,.rich-note ::deep h3{font-size:var(--text-section)}
@@ -18,7 +13,8 @@
 .rich-note ::deep table{border-collapse:collapse;table-layout:fixed;width:100%;min-width:240px;margin:8px 0}
 .rich-note ::deep td,.rich-note ::deep th{border:1px solid var(--border);padding:8px;min-width:60px;vertical-align:top;position:relative}
 .rich-note ::deep th{background:var(--surface-subtle)}
-.rich-note ::deep .selectedCell{background:var(--surface-subtle)}
 .rich-note ::deep ul,.rich-note ::deep ol{padding-left:1.5em}
 .rich-note ::deep a{color:var(--accent);text-decoration:underline}
 .rich-note ::deep .note-upload-status{padding:4px 8px;font-size:var(--text-sm);color:var(--text-muted)}
+
+.rich-note-document{font-size:var(--text-body);line-height:var(--leading-body);overflow-x:auto}

@@ -18,19 +18,15 @@
     </div>
     @if (editing)
     {
-        @if (EditorFields != null) { @EditorFields(busy || editor == null) }
-        <div @ref="host" class="rich-note-editor"></div>
-        @if (ExistingImages.Any())
+        @if (EditorFields != null) { @EditorFields(busy || editor?.Ready != true) }
+        @if (saved != null && !CaseNoteDocument.IsPlain(saved.DocumentJson))
         {
-            <label class="rich-note-attachment"><span>Из вложений объекта</span>
-                <select value="" disabled="@busy" @onchange="InsertExisting" aria-label="Вставить уже загруженное изображение">
-                    <option value="">Выберите изображение…</option>
-                    @foreach (var file in ExistingImages) { <option value="@file.Id">@file.OriginalName · @ProcurementLabels.Time(file.RecordedAt)</option> }
-                </select>
-            </label>
+            <div class="rich-note-document">@((MarkupString)saved.SafeHtml)</div>
+            <p class="subtle">Сохранённый текст и таблицы остаются без изменений. Дополните их ниже.</p>
         }
+        <CaseTextInput @key="editorGeneration" @ref="editor" DocumentJson="@(saved?.DocumentJson ?? CaseNoteDocument.Empty)" Changed="Changed" ReadyChanged="EditorReady" Upload="UploadFile" />
         <div class="form-actions">
-            <button class="btn primary" disabled="@(busy || !CanEdit || editor == null)" @onclick="Save">Сохранить</button>
+            <button class="btn primary" disabled="@(busy || !CanEdit || editor?.Ready != true)" @onclick="Save">Сохранить</button>
             <button class="btn quiet" disabled="@busy" @onclick="Cancel">Отмена</button>
             <small role="status">@(busy ? "Загрузка / сохранение…" : dirty ? "Есть несохранённые изменения" : "Без изменений")</small>
         </div>
@@ -65,22 +61,11 @@
     [Parameter] public EventCallback<bool> EditingChanged { get; set; }
     [Parameter] public EventCallback Cancelled { get; set; }
     private CaseRichNoteView? saved;
-    private ElementReference host;
-    private IJSObjectReference? module, editor;
-    private DotNetObjectReference<CaseRichNoteBlock>? self;
-    private bool editing, dirty, busy, conflict, initialize;
+    private CaseTextInput? editor;
+    private int editorGeneration;
+    private Task EditorReady() => InvokeAsync(StateHasChanged);
+    private bool editing, dirty, busy, conflict;
     private string? error;
-    private IEnumerable<AttachmentView> ExistingImages => Attachments.Where(item => (item.OwnerType == CaseAttachmentOwner.Case
-        || AttachmentCheckId != null && item.OwnerType == CaseAttachmentOwner.Check && item.OwnerId == AttachmentCheckId)
-        && item.Kind == CaseAttachmentKind.Photo && item.Status == StoredFileStatus.Available && !item.External
-        && CaseNoteDocument.IsImageType(item.ContentType));
-
-    private async Task InsertExisting(ChangeEventArgs args)
-    {
-        if (editor != null && !busy && Guid.TryParse(args.Value?.ToString(), out var id) && ExistingImages.Any(item => item.Id == id))
-            await editor.InvokeVoidAsync("insertImage", id.ToString());
-    }
-
     protected override void OnParametersSet()
     {
         // Parent refresh may update other dossier data; never replace an active editor or its base version.
@@ -91,7 +76,7 @@
 
     private async Task Begin()
     {
-        editing = true; initialize = true; dirty = false; error = null; conflict = false;
+        editorGeneration++; editing = true; dirty = false; error = null; conflict = false;
         await EditingChanged.InvokeAsync(true);
     }
 
@@ -99,41 +84,25 @@
     public async Task MarkDirtyAsync()
     {
         dirty = true;
-        if (editor != null) await editor.InvokeVoidAsync("markDirty");
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!initialize) return;
-        initialize = false;
-        try
-        {
-            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/case-notes.js");
-            self ??= DotNetObjectReference.Create(this);
-            editor = await module.InvokeAsync<IJSObjectReference>("create", host, saved?.DocumentJson ?? CaseNoteDocument.Empty, self);
-            if (dirty) await editor.InvokeVoidAsync("markDirty");
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (JSException) { error = "Не удалось открыть редактор. Обновите страницу и повторите."; await InvokeAsync(StateHasChanged); }
+        if (editor != null) await editor.MarkDirtyAsync();
     }
 
     [JSInvokable]
     public Task Changed() { dirty = true; return InvokeAsync(StateHasChanged); }
 
     [JSInvokable]
-    public async Task<string?> UploadImage(IJSStreamReference stream, string name, string contentType)
+    public async Task<string?> UploadFile(IJSStreamReference stream, string name, string contentType)
     {
         busy = true; error = null; await InvokeAsync(StateHasChanged);
         try
         {
             if (!CanEdit) throw new AccessDeniedException();
-            if (!CaseNoteDocument.IsImageType(contentType)) throw new ArgumentException("Поддерживаются PNG, JPEG, WebP и GIF.");
             FileUploadLimits.EnsureRawFileSize(stream.Length);
             await using Stream input = await stream.OpenReadStreamAsync(FileUploadLimits.MaxRawFileBytes);
             using MemoryStream buffer = new(); await input.CopyToAsync(buffer);
             Guid id = await Workspace.AddAttachmentAsync(Subject, new(CaseId,
                 AttachmentCheckId == null ? CaseAttachmentOwner.Case : CaseAttachmentOwner.Check, AttachmentCheckId,
-                CaseAttachmentKind.Photo, "Изображение заметки", "", name, contentType, buffer.ToArray(), null),
+                CaseNoteDocument.IsImageType(contentType) ? CaseAttachmentKind.Photo : contentType.StartsWith("audio/", StringComparison.Ordinal) ? CaseAttachmentKind.Audio : CaseAttachmentKind.Document, name, "", name, contentType, buffer.ToArray(), null),
                 Guid.CreateVersion7().ToString(), CancellationToken.None);
             return id.ToString();
         }
@@ -142,24 +111,18 @@
         catch (Exception) { error = "Изображение не загружено. Текст сохранён в редакторе. Проверьте незавершённые вложения на вкладке «Документы»; повтор продолжит существующее вложение."; return null; }
         finally
         {
-            await stream.DisposeAsync(); busy = false;
-            // Refresh available/recoverable attachments without recreating the active editor.
-            try { await Saved.InvokeAsync(); } catch (Exception) { }
+            await stream.DisposeAsync();
             await InvokeAsync(StateHasChanged);
         }
     }
 
     private async Task Save()
     {
-        if (editor == null || busy) return;
+        if (editor?.Ready != true || busy) return;
         busy = true; error = null;
         try
         {
-            // Stream avoids the default SignalR message-size limit; the server still bounds and validates JSON.
-            await using var reference = await editor.InvokeAsync<IJSStreamReference>("document");
-            await using Stream stream = await reference.OpenReadStreamAsync(CaseNoteDocument.MaxBytes);
-            using StreamReader reader = new(stream);
-            string json = await reader.ReadToEndAsync();
+            string json = await editor.DocumentAsync();
             saved = SaveDocument == null
                 ? await Workspace.SaveRichNoteAsync(Subject, new(CaseId, Section, saved?.Version ?? 0, json),
                     Guid.CreateVersion7().ToString(), CancellationToken.None)
@@ -172,19 +135,19 @@
         catch (ArgumentException exception) { error = exception.Message; }
         catch (AccessDeniedException) { error = "Нет права изменить текст этого объекта. Черновик остаётся в редакторе."; }
         catch (Exception) { error = "Не удалось подтвердить сохранение. Черновик остаётся в редакторе; повтор учитывает версию и не перезапишет чужой текст."; }
-        finally { busy = false; if (editor != null) await editor.InvokeVoidAsync("resume"); }
+        finally { busy = false; if (editor != null) await editor.ResumeAsync(); }
     }
 
     private async Task Cancel()
     {
-        if (editor != null && !await editor.InvokeAsync<bool>("confirmDiscard")) return;
+        if (editor != null && !await editor.ConfirmDiscardAsync()) return;
         await CloseEditor(); error = null; conflict = false;
         await Cancelled.InvokeAsync();
     }
 
     private async Task LoadCurrent()
     {
-        if (editor == null || !await editor.InvokeAsync<bool>("confirmDiscard")) return;
+        if (editor == null || !await editor.ConfirmDiscardAsync()) return;
         try
         {
             if (LoadDocument != null) saved = await LoadDocument();
@@ -200,21 +163,20 @@
 
     private async Task BeforeNavigation(LocationChangingContext context)
     {
-        if (busy || editor != null && !await editor.InvokeAsync<bool>("confirmDiscard")) context.PreventNavigation();
+        if (busy || editor != null && !await editor.ConfirmDiscardAsync()) context.PreventNavigation();
     }
 
     private async Task CloseEditor(bool notify = true)
     {
-        if (editor != null) { await editor.InvokeVoidAsync("destroy"); await editor.DisposeAsync(); editor = null; }
+        editor = null;
         editing = false; dirty = false;
         if (notify) await EditingChanged.InvokeAsync(false);
     }
 
     public async ValueTask DisposeAsync()
     {
-        try { await CloseEditor(false); if (module != null) await module.DisposeAsync(); }
+        try { await CloseEditor(false); }
         catch (JSDisconnectedException) { }
-        self?.Dispose();
         GC.SuppressFinalize(this);
     }
 }

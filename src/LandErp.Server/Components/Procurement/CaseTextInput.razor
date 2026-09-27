@@ -1,0 +1,54 @@
+@using Microsoft.JSInterop
+@using LandErp.Application.Modules.Procurement.Contracts
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="case-text-input" @ref="host"></div>
+@if (error != null) { <p class="case-problem" role="alert">@error</p> }
+
+@code {
+    [Parameter] public string DocumentJson { get; set; } = CaseNoteDocument.Empty;
+    [Parameter] public string Label { get; set; } = "Текст";
+    [Parameter] public int MaxLength { get; set; } = 64000;
+    [Parameter] public EventCallback ReadyChanged { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+    [Parameter] public Func<IJSStreamReference, string, string, Task<string?>>? Upload { get; set; }
+    private ElementReference host;
+    private IJSObjectReference? module, editor;
+    private DotNetObjectReference<CaseTextInput>? self;
+    private string? error;
+    public bool Ready => editor != null;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/case-notes.js");
+            self = DotNetObjectReference.Create(this);
+            editor = await module.InvokeAsync<IJSObjectReference>("create", host, DocumentJson, self, Label, MaxLength);
+        }
+        catch (JSException) { error = "Не удалось открыть поле ввода. Обновите страницу и повторите."; StateHasChanged(); }
+        await ReadyChanged.InvokeAsync();
+    }
+    [JSInvokable] public Task OnChanged() => Changed.InvokeAsync();
+    [JSInvokable] public Task<string?> UploadFile(IJSStreamReference stream, string name, string type) =>
+        Upload?.Invoke(stream, name, type) ?? Task.FromResult<string?>(null);
+    public async Task<string> DocumentAsync()
+    {
+        await using var reference = await editor!.InvokeAsync<IJSStreamReference>("document");
+        await using var stream = await reference.OpenReadStreamAsync(CaseNoteDocument.MaxBytes);
+        using StreamReader reader = new(stream);
+        return await reader.ReadToEndAsync();
+    }
+    public ValueTask<string> TextAsync() => editor!.InvokeAsync<string>("text");
+    public ValueTask<string[]> CollectFilesAsync() => editor!.InvokeAsync<string[]>("collectFiles");
+    public ValueTask ResumeAsync() => editor!.InvokeVoidAsync("resume");
+    public ValueTask MarkDirtyAsync() => editor!.InvokeVoidAsync("markDirty");
+    public async Task<bool> ConfirmDiscardAsync() => editor == null || await editor.InvokeAsync<bool>("confirmDiscard");
+    public async ValueTask DisposeAsync()
+    {
+        try { if (editor != null) { await editor.InvokeVoidAsync("destroy"); await editor.DisposeAsync(); } if (module != null) await module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+        self?.Dispose();
+    }
+}

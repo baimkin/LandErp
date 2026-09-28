@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using LandErp.Application.Modules.Catalog.Contracts;
-using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -308,41 +307,16 @@ internal static partial class IncomingDuplicateDetector
         return score >= settings.CandidateThreshold && corroborated ? new(Math.Min(score, 100), reasons) : null;
     }
 
-    private static List<(int Distance, int Left, int Right)> MatchingPhotoPairs(
+    private static IReadOnlyList<PhotoFingerprintPair> MatchingPhotoPairs(
         long[] left,
         long[] right,
         IReadOnlyDictionary<long, int> commonCounts,
-        DuplicateDetectionSettingsValues settings)
-    {
-        if (left.Length == 0 || right.Length == 0) return [];
-        List<(int Distance, int Left, int Right)> pairs = [];
-        for (int leftIndex = 0; leftIndex < left.Length; leftIndex++)
-        {
-            long hash = left[leftIndex];
-            if (commonCounts.GetValueOrDefault(hash) > settings.CommonPhotoMaxListings) continue;
-            for (int rightIndex = 0; rightIndex < right.Length; rightIndex++)
-            {
-                int distance = HammingDistance(hash, right[rightIndex]);
-                if (distance <= settings.PhotoHammingDistance)
-                    pairs.Add((distance, leftIndex, rightIndex));
-            }
-        }
-
-        bool[] usedLeft = new bool[left.Length];
-        bool[] usedRight = new bool[right.Length];
-        List<(int Distance, int Left, int Right)> selected = [];
-        foreach (var pair in pairs.OrderBy(item => item.Distance))
-        {
-            if (usedLeft[pair.Left] || usedRight[pair.Right]) continue;
-            usedLeft[pair.Left] = true;
-            usedRight[pair.Right] = true;
-            selected.Add(pair);
-        }
-        return selected;
-    }
+        DuplicateDetectionSettingsValues settings) =>
+        PhotoFingerprintMatching.Match(left, right, settings.PhotoHammingDistance,
+            commonCounts, settings.CommonPhotoMaxListings);
 
     internal static int HammingDistance(long left, long right) =>
-        BitOperations.PopCount(unchecked((ulong)(left ^ right)));
+        PhotoFingerprintMatching.HammingDistance(left, right);
 
     private static async Task<Dictionary<Guid, CatalogPhotoFingerprint[]>> CurrentHashesAsync(
         LandErpDbContext db, Listing subject, IReadOnlyList<Listing> others, CancellationToken cancellationToken)

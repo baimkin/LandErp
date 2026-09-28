@@ -1,4 +1,6 @@
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
@@ -6,6 +8,7 @@ using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Collector.Contracts.V1;
 using Microsoft.EntityFrameworkCore;
+using LandErp.Infrastructure.Modules.Catalog;
 using LandErp.Infrastructure.Persistence;
 
 namespace LandErp.Infrastructure.Modules.Procurement;
@@ -74,7 +77,28 @@ public sealed partial class ProcurementWorkspace
         }
         bool complete = observations.Length > 0 && revisions == source.DataRevision
             && observations[0].ObservedAt == source.FirstObservedAt && latest == source.LastObservedAt;
-        var changes = SourceObservationComparison.Build(observations, complete);
+
+        CatalogPhotoFingerprint[] fingerprints = await db.CatalogPhotoFingerprints.AsNoTracking()
+            .Where(x => x.OrganizationId == link.OrganizationId && x.ListingId == catalogItemId
+                && x.Status == PhotoFingerprintStatus.Ready && x.PerceptualHash != null)
+            .ToArrayAsync(cancellationToken);
+        Dictionary<string, long> photoFingerprints = new(StringComparer.Ordinal);
+        if (fingerprints.Length > 0)
+        {
+            Dictionary<string, long> byUrlHash = fingerprints.ToDictionary(
+                x => x.UrlHash, x => x.PerceptualHash!.Value, StringComparer.Ordinal);
+            foreach (string url in observations.SelectMany(x => x.Data.PhotoUrls)
+                         .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal))
+            {
+                if (byUrlHash.TryGetValue(SourceChangePhotoUrlHash(url), out long fingerprint))
+                    photoFingerprints[url] = fingerprint;
+            }
+        }
+
+        DuplicateDetectionSettingsValues duplicateSettings =
+            await DuplicateDetectionSettingsService.ReadValuesAsync(db, link.OrganizationId, cancellationToken);
+        var changes = SourceObservationComparison.Build(
+            observations, complete, photoFingerprints, duplicateSettings.PhotoHammingDistance);
         if (observations.Length == 0)
         {
             // Legacy price events are independently stored before/after evidence; never substitute working facts.
@@ -88,6 +112,9 @@ public sealed partial class ProcurementWorkspace
         await transaction.CommitAsync(cancellationToken);
         return new(caseId, link.Id, source.Id, source.Source, source.Title ?? "Объявление", source.Url,
             source.DataRevision, source.LastObservedAt, complete, changes)
-            { CanAcknowledge = observations.Length > 0 && latest == source.LastObservedAt && changes.Count > 0 };
+            { CanAcknowledge = observations.Length > 0 && latest == source.LastObservedAt };
     }
+
+    private static string SourceChangePhotoUrlHash(string url) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
 }

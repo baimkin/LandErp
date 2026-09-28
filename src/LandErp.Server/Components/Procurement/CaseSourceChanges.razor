@@ -12,7 +12,7 @@
             @if(!data.CanAcknowledge){<p class="source-history-gap">Актуальное сравнение не сохранено полностью. Уведомление остаётся непросмотренным.</p>}
             <p class="subtle">Наблюдение: @ProcurementLabels.Time(data.ObservedAt). Рабочие данные объекта сохраняются без изменений.</p>
             @if(!data.CompleteHistory){<p class="source-history-gap">История сохранена не полностью. Там, где прежнее значение неизвестно, сравнение не восстанавливается предположением.</p>}
-            @if(data.Observations.Count==0){<p>Сохранённого сравнения для этого источника нет. Предыдущее значение не сохранено.</p>}
+            @if(data.Observations.Count==0){<p>@(data.CanAcknowledge ? "Содержательных изменений не обнаружено. Смена ссылок или порядка одинаковых фотографий не считается изменением." : "Сохранённого сравнения для этого источника нет. Предыдущее значение не сохранено.")</p>}
             @foreach(var item in data.Observations)
             {
                 <section class="source-observation" @key="item.Id">
@@ -50,6 +50,6 @@
     }
     private void RetryAcknowledgement(){ackError=null;attempted=false;}
     public void Dispose(){disposed=true;GC.SuppressFinalize(this);}
-    private static string[] Added(SourceChangeField value)=>value.Before?.Photos is {} before&&value.After?.Photos is {} after?after.Except(before,StringComparer.Ordinal).ToArray():[];
-    private static string[] Removed(SourceChangeField value)=>value.Before?.Photos is {} before&&value.After?.Photos is {} after?before.Except(after,StringComparer.Ordinal).ToArray():[];
+    private static string[] Added(SourceChangeField value)=>value.AddedPhotos??(value.Before?.Photos is {} before&&value.After?.Photos is {} after?after.Except(before,StringComparer.Ordinal).ToArray():[]);
+    private static string[] Removed(SourceChangeField value)=>value.RemovedPhotos??(value.Before?.Photos is {} before&&value.After?.Photos is {} after?before.Except(after,StringComparer.Ordinal).ToArray():[]);
 }

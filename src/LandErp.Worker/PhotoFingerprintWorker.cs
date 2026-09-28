@@ -47,12 +47,14 @@ public sealed class PhotoFingerprintWorker(
                     scope.ServiceProvider.GetRequiredService<IIncomingDuplicateMatchingMaintenance>();
 
                 await using LandErpDbContext read = await factory.CreateDbContextAsync(stoppingToken);
-                Guid[] recent = await read.Listings.AsNoTracking()
-                    .Where(item => item.Disposition == CatalogDisposition.Incoming)
+                IQueryable<Listing> eligible = read.Listings.AsNoTracking().Where(item =>
+                    item.Disposition == CatalogDisposition.Incoming
+                    || read.PropertyCaseSourceLinks.Any(link =>
+                        link.OrganizationId == item.OrganizationId && link.CatalogItemId == item.Id && link.Confirmed));
+                Guid[] recent = await eligible
                     .OrderByDescending(item => item.ChangedAt).ThenByDescending(item => item.Id)
                     .Take(RecentBatchSize).Select(item => item.Id).ToArrayAsync(stoppingToken);
-                Guid[] backfill = await read.Listings.AsNoTracking()
-                    .Where(item => item.Disposition == CatalogDisposition.Incoming)
+                Guid[] backfill = await eligible
                     .OrderBy(item => item.ReceivedAt).ThenBy(item => item.Id)
                     .Skip(backfillOffset).Take(BackfillBatchSize)
                     .Select(item => item.Id).ToArrayAsync(stoppingToken);
@@ -81,7 +83,12 @@ public sealed class PhotoFingerprintWorker(
     {
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         Listing? listing = await db.Listings.SingleOrDefaultAsync(item => item.Id == listingId, cancellationToken);
-        if (listing == null || listing.Disposition != CatalogDisposition.Incoming) return false;
+        if (listing == null) return false;
+        bool trackedSource = listing.Disposition == CatalogDisposition.Incoming
+            || await db.PropertyCaseSourceLinks.AsNoTracking().AnyAsync(link =>
+                link.OrganizationId == listing.OrganizationId && link.CatalogItemId == listing.Id && link.Confirmed,
+                cancellationToken);
+        if (!trackedSource) return false;
 
         string[] urls = PhotoUrls(listing.PhotosJson).Take(MaximumPhotosPerListing).ToArray();
         DateTimeOffset now = time.GetUtcNow();
@@ -89,25 +96,22 @@ public sealed class PhotoFingerprintWorker(
             .Where(item => item.ListingId == listing.Id)
             .ToArrayAsync(cancellationToken);
 
-        if (urls.Length == 0)
-        {
-            if (allRows.Length == 0) return false;
-            bool hadReady = allRows.Any(item => item.Status == PhotoFingerprintStatus.Ready);
-            db.CatalogPhotoFingerprints.RemoveRange(allRows);
-            await db.SaveChangesAsync(cancellationToken);
-            return hadReady;
-        }
+        // Keep ready fingerprints for URLs that disappeared from the current source snapshot.
+        // Source-change history needs them to recognize the same image after a CDN/URL rotation.
+        if (urls.Length == 0) return false;
 
         string[] urlHashes = urls.Select(HashUrl).ToArray();
         HashSet<string> currentHashes = urlHashes.ToHashSet(StringComparer.Ordinal);
-        CatalogPhotoFingerprint[] staleRows = allRows.Where(item => !currentHashes.Contains(item.UrlHash)).ToArray();
-        if (staleRows.Length > 0) db.CatalogPhotoFingerprints.RemoveRange(staleRows);
+        CatalogPhotoFingerprint[] staleNonReady = allRows
+            .Where(item => !currentHashes.Contains(item.UrlHash) && item.Status != PhotoFingerprintStatus.Ready)
+            .ToArray();
+        if (staleNonReady.Length > 0) db.CatalogPhotoFingerprints.RemoveRange(staleNonReady);
         Dictionary<string, CatalogPhotoFingerprint> byHash = allRows
             .Where(item => currentHashes.Contains(item.UrlHash))
             .ToDictionary(item => item.UrlHash, StringComparer.Ordinal);
 
-        bool changed = staleRows.Length > 0;
-        bool matchingChanged = staleRows.Any(item => item.Status == PhotoFingerprintStatus.Ready);
+        bool changed = staleNonReady.Length > 0;
+        bool matchingChanged = false;
         for (int index = 0; index < urls.Length; index++)
         {
             string url = urls[index];

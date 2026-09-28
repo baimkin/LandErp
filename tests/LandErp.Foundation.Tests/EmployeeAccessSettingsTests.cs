@@ -161,16 +161,20 @@ public sealed class EmployeeAccessSettingsTests
     public async Task CutoverMigrationBackfillsRoleMatrixPreservesExplicitSettingsAndExcludesOwner()
     {
         await using PostgresSandbox sandbox = await PostgresSandbox.CreateAsync();
+        await using (LandErpDbContext current = sandbox.Context())
+            await current.Database.MigrateAsync();
+        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
+        Guid ownerUserId = await IdentityOrganizationTests.BootstrapAsync(
+            bootstrap, "access-v1-cutover-owner", "Access V1 cutover organization");
+        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerUserId);
+
+        // Bootstrap uses the current schema (including Kanban); only the access
+        // backfill under test is exercised against the historical schema below.
         await using (LandErpDbContext preCutover = sandbox.Context())
         {
             IMigrator migrator = preCutover.Database.GetService<IMigrator>();
             await migrator.MigrateAsync("20260921183000_EmployeeAccessSettings");
         }
-
-        await using ServiceProvider bootstrap = IdentityOrganizationTests.Services(sandbox.MigratorConnection);
-        Guid ownerUserId = await IdentityOrganizationTests.BootstrapAsync(
-            bootstrap, "access-v1-cutover-owner", "Access V1 cutover organization");
-        await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerUserId);
 
         Guid managerEmployeeId;
         Guid headEmployeeId;

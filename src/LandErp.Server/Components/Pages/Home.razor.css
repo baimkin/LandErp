@@ -242,3 +242,12 @@
 @media(max-width:760px){.market-header,.all-groups-header{display:grid}.market-row>.market-name,.market-row>.market-sample,.all-groups-row>.market-name,.all-groups-row>.market-sample{grid-column:auto}}
 
 .market-card .market-header,.all-groups-header{display:grid}.market-row>* ,.all-groups-row>*{grid-column:auto!important;grid-row:auto!important}.overview-modal.wide .modal-content{overflow-x:auto}
+.overview-stat{text-decoration:none;color:inherit;transition:box-shadow .15s,border-color .15s}
+.overview-stat:hover{border-color:var(--accent);box-shadow:var(--shadow-sm)}
+.overview-stat:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.overview-stat .stat-label{font-size:var(--text-ui);font-weight:var(--weight-semibold);color:var(--text-strong)}
+.attention-breakdown{margin:var(--space-5) 0;scroll-margin-top:var(--space-5)}
+.attention-breakdown .attention-row{grid-template-columns:1fr auto}
+#overview-collection-signals{padding:var(--panel-pad);scroll-margin-top:var(--space-5)}
+
+button.overview-stat{font:inherit;text-align:left;cursor:pointer;color:inherit}

@@ -14,13 +14,14 @@
     [Parameter] public string? Error{get;set;}
     [Parameter] public bool Busy{get;set;}
     [Parameter] public EventCallback OnClose{get;set;}
+    [Parameter] public EventCallback OnOpened{get;set;}
     [Parameter] public RenderFragment? ChildContent{get;set;}
     [Parameter] public EventCallback<KeyboardEventArgs> OnKeyDown{get;set;}
     private ElementReference dialog,errorElement;private string? lastError;
     private readonly string heading="case-modal-"+Guid.NewGuid().ToString("N");
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if(firstRender)await Js.InvokeVoidAsync("LandErpUi.open",dialog);
+        if(firstRender){await Js.InvokeVoidAsync("LandErpUi.open",dialog);await OnOpened.InvokeAsync();}
         if(Error!=null&&Error!=lastError)await errorElement.FocusAsync();
         lastError=Error;
     }

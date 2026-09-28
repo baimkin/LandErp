@@ -172,7 +172,7 @@ public static class CaseNoteDocument
         return new JsonObject { ["type"] = "doc", ["content"] = new JsonArray(paragraph) }.ToJsonString(StorageOptions);
     }
 
-    public static string PlainText(string validatedJson)
+    public static string PlainText(string validatedJson, bool includeAttachmentLabels = true)
     {
         using JsonDocument document = JsonDocument.Parse(validatedJson);
         StringBuilder result = new();
@@ -183,7 +183,7 @@ public static class CaseNoteDocument
             string? type = node.GetProperty("type").GetString();
             if (type == "text") result.Append(node.GetProperty("text").GetString());
             if (type == "image") result.Append("[Изображение]");
-            if (type == "attachment") result.Append("[Файл: ").Append(node.GetProperty("attrs").GetProperty("name").GetString()).Append(']');
+            if (type == "attachment" && includeAttachmentLabels) result.Append("[Файл: ").Append(node.GetProperty("attrs").GetProperty("name").GetString()).Append(']');
             if (type == "hardBreak") result.AppendLine();
             if (node.TryGetProperty("content", out var content)) foreach (var child in content.EnumerateArray()) Append(child);
             if (type is "paragraph" or "heading" or "tableRow" or "image") result.AppendLine();

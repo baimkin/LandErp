@@ -1,0 +1,15 @@
+<div class="photo-gallery">
+@if(Urls.Count==0){<div class="photo-empty">Нет фото</div>}
+else{
+    <a href="@Urls[index]" target="_blank" rel="noopener noreferrer" aria-label="Открыть фото крупно"><img src="@Urls[index]" alt="Фото объявления" referrerpolicy="no-referrer" /></a>
+    <div class="photo-controls">@if(Urls.Count>1){<button type="button" class="btn quiet" @onclick="()=>Move(-1)" aria-label="Предыдущее фото">‹</button>}<span>@(index+1) / @Urls.Count</span>@if(Urls.Count>1){<button type="button" class="btn quiet" @onclick="()=>Move(1)" aria-label="Следующее фото">›</button>}</div>
+}
+</div>
+@code{
+    [Parameter] public IReadOnlyList<string> Urls { get; set; }=[];
+    [Parameter] public string? InitialUrl { get; set; }
+    [Parameter] public EventCallback<string> Changed { get; set; }
+    private int index;private string? initialized;
+    protected override void OnParametersSet(){if(InitialUrl!=initialized){initialized=InitialUrl;index=Math.Max(0,Array.IndexOf(Urls.ToArray(),InitialUrl));}index=Math.Min(index,Math.Max(0,Urls.Count-1));}
+    private async Task Move(int step){index=(index+step+Urls.Count)%Urls.Count;await Changed.InvokeAsync(Urls[index]);}
+}

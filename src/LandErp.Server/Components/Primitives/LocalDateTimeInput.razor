@@ -1,0 +1,15 @@
+@using System.Globalization
+<div class="local-date-time">
+<input type="date" aria-label="Дата" value="@date" @onchange="DateChanged" />
+<input type="text" inputmode="numeric" aria-label="Время, МСК" placeholder="HH:mm" maxlength="5" data-time-entry="true" value="@time" @oninput="TimeChanged" />
+</div>
+@if(date.Length>0 && !TimeOnly.TryParseExact(time,"HH:mm",CultureInfo.InvariantCulture,DateTimeStyles.None,out _)){<small role="alert">Укажите время HH:mm по МСК.</small>}
+@code{
+    [Parameter] public string Value { get; set; }="";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    private string date="",time="",last="";
+    protected override void OnParametersSet(){if(Value!=last){last=Value;var parts=Value.Split('T');date=parts[0];time=parts.Length>1?parts[1]:"";}}
+    private async Task DateChanged(ChangeEventArgs e){date=e.Value?.ToString()??"";await Changed();}
+    private async Task TimeChanged(ChangeEventArgs e){time=e.Value?.ToString()??"";await Changed();}
+    private async Task Changed(){last=date.Length==0&&time.Length==0?"":date+"T"+time;await ValueChanged.InvokeAsync(last);}
+}

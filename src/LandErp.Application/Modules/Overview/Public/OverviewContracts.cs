@@ -7,6 +7,7 @@ public enum OverviewSeverity { Info, Warning, Critical }
 public enum OverviewDueState { None, Upcoming, Today, Overdue }
 public enum MarketGroupSort { Name, MedianDescending, MedianAscending, SampleDescending }
 
+public sealed record OverviewAttentionGroup(string Label, int Count, string Unit, string Description, string Url);
 public sealed record OverviewMetric(int Value, string Caption);
 public sealed record OverviewAttentionItem(string Key, OverviewSeverity Severity, string Title, string Reason,
     string Age, string Action, string Url);
@@ -46,7 +47,11 @@ public sealed record OverviewView(
     IReadOnlyList<OverviewTeamMember> Team,
     int TeamTotal,
     MarketGroupPage Market,
-    DateTimeOffset GeneratedAt);
+    DateTimeOffset GeneratedAt)
+{
+    public bool CanViewIncoming { get; init; }
+    public IReadOnlyList<OverviewAttentionGroup> AttentionGroups { get; init; } = [];
+};
 
 public interface IOverviewService
 {

@@ -46,7 +46,7 @@ public sealed class OverviewService(
 
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         int newIncoming = 0;
-        int receivedToday = 0;
+
         int activeCount = 0;
         int waitingCount = 0;
         int overdueCount = 0;
@@ -60,11 +60,23 @@ public sealed class OverviewService(
         int teamTotal = 0;
         MarketGroupPage market = new([], 0, 0, CompactMarketSize);
 
+        int incomingAttention=0;
+        if(effective.CanReadIncoming)
+        {
+            await db.Database.OpenConnectionAsync(cancellationToken);
+            var presets=await IncomingFilterPresetService.ReadForOrganizationAsync((Npgsql.NpgsqlConnection)db.Database.GetDbConnection(),identity.OrganizationId,cancellationToken);
+            var selected=await IncomingCatalogSelection.PrepareAsync(db,identity.OrganizationId,now,IncomingOverviewSelection.Filter(IncomingOverviewSelection.New),presets,cancellationToken);
+            var attention=await IncomingCatalogSelection.PrepareAsync(db,identity.OrganizationId,now,IncomingOverviewSelection.Filter(IncomingOverviewSelection.Attention),presets,cancellationToken);
+            var listings=db.Listings.AsNoTracking().Where(item=>item.OrganizationId==identity.OrganizationId);
+            newIncoming=await listings.Where(selected.Current).CountAsync(cancellationToken);
+            incomingAttention=await listings.Where(attention.Current).CountAsync(cancellationToken);
+        }
         if (queue != null)
         {
             IQueryable<PropertyCase> visible = ProcurementVisibility.ApplyRead(
                 db.PropertyCases.AsNoTracking(), db, effective);
-            IQueryable<PropertyCase> active = visible.Where(item => item.StageId != "rejected" && item.StageId != "acquired");
+            var queueReads = new ProcurementQueueV2ReadService(factory, employeeAccess, time);
+            IQueryable<PropertyCase> active = queueReads.OverviewCases(db, effective);
             var caseTasks = from item in active
                             from task in db.WorkTasks.AsNoTracking()
                                 .Where(t => t.OrganizationId == item.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == item.Id
@@ -84,13 +96,6 @@ public sealed class OverviewService(
                                         && source.DataRevision > link.ReviewedDataRevision))
                             };
 
-            if (effective.CanReadIncoming)
-            {
-                newIncoming = await db.Listings.AsNoTracking().CountAsync(item => item.OrganizationId == queue.OrganizationId
-                    && item.Disposition == CatalogDisposition.Incoming, cancellationToken);
-                receivedToday = await db.Listings.AsNoTracking().CountAsync(item => item.OrganizationId == queue.OrganizationId
-                    && item.Disposition == CatalogDisposition.Incoming && item.ReceivedAt >= todayStart, cancellationToken);
-            }
             activeCount = await active.CountAsync(cancellationToken);
             waitingCount = await active.CountAsync(item => item.StageId == "pending_head", cancellationToken);
             overdueCount = await caseTasks.CountAsync(row => !row.Task.Completed && !row.Task.Deleted && row.Task.DueAt < (row.Task.DueHasTime ? now : todayStart), cancellationToken);
@@ -98,13 +103,8 @@ public sealed class OverviewService(
                 && check.Level == CaseCheckLevel.Deep), cancellationToken);
             acquiredCount = await visible.CountAsync(item => item.StageId == "acquired" && item.AcquiredAt >= now.AddDays(-30), cancellationToken);
 
-            DateTimeOffset stalledBefore = now.AddDays(-3);
-            var attentionCases = caseTasks.Where(row =>
-                !row.Task.Completed && !row.Task.Deleted && row.Task.DueAt < (row.Task.DueHasTime ? now : todayStart)
-                || row.Case.StageId == "returned"
-                || !row.Task.Completed && !row.Task.Deleted && row.Task.DueAt == null && row.Task.RecordedAt < stalledBefore
-                || row.HasCheckIssue
-                || row.SourceChanged);
+            var attentionIds = queueReads.OverviewCases(db, effective, attention: true).Select(item => item.Id);
+            var attentionCases = caseTasks.Where(row => attentionIds.Contains(row.Case.Id));
             procurementAttentionCount = await attentionCases.CountAsync(cancellationToken);
             var attentionRows = await attentionCases
                 .OrderBy(row => row.Task.DueAt == null).ThenBy(row => row.Task.DueAt)
@@ -177,15 +177,9 @@ public sealed class OverviewService(
             }
         }
 
-        int incomingAttention = queue == null || !effective.CanReadIncoming ? 0
-            : await db.Listings.AsNoTracking().CountAsync(item => item.OrganizationId == queue.OrganizationId
-                && item.Disposition == CatalogDisposition.Incoming && item.AttentionRequired, cancellationToken);
-        if (queue != null && effective.CanReadIncoming && incomingAttention > 0 && attentionItems.Count < FeedSize)
-            attentionItems.Add(new("incoming", OverviewSeverity.Info, $"{incomingAttention} новых предложений требуют разбора",
-                "Входящие ещё не обработаны", Age(await db.Listings.AsNoTracking().Where(item => item.OrganizationId == queue.OrganizationId
-                    && item.Disposition == CatalogDisposition.Incoming && item.AttentionRequired).MinAsync(item => (DateTimeOffset?)item.ReceivedAt, cancellationToken), now),
-                "посмотреть входящие", "/incoming"));
-
+        if (effective.CanReadIncoming && incomingAttention > 0 && attentionItems.Count < FeedSize)
+            attentionItems.Add(new("incoming", OverviewSeverity.Info, $"{incomingAttention} входящих объявлений требуют внимания",
+                "Входящие с отметкой внимания", "Сейчас", "посмотреть объявления", "/incoming?overview=attention"));
         int collectionAttention = collectionSummary?.Statuses.Count(item => item.Severity != OverviewSeverity.Info) ?? 0;
         int attentionTotal = procurementAttentionCount + incomingAttention + collectionAttention;
         List<OverviewQuickAction> quick = [];
@@ -201,7 +195,7 @@ public sealed class OverviewService(
         int maxStage = Math.Max(1, Math.Max(newIncoming, Math.Max(activeCount, Math.Max(deepCount, Math.Max(waitingCount, acquiredCount)))));
         List<OverviewStageItem> stageItems = [];
         if (effective.CanReadIncoming)
-            stageItems.Add(Stage("incoming", "Входящие", newIncoming, "новых предложений", maxStage, "/incoming"));
+            stageItems.Add(Stage("incoming", "Входящие", newIncoming, "непросмотренных объявлений", maxStage, "/incoming?overview=new"));
         if (queue != null)
         {
             stageItems.Add(Stage("work", "В работе", activeCount, overdueCount == 0 ? "объектов в работе" : $"{overdueCount} просрочено", maxStage, "/procurement"));
@@ -212,12 +206,18 @@ public sealed class OverviewService(
         OverviewStageItem[] stages = stageItems.ToArray();
 
         return new(queue != null,
-            new(newIncoming, receivedToday == 0 ? "нет новых сегодня" : $"{receivedToday} получено сегодня"),
+            new(newIncoming, "не просмотрены · все сохранённые фильтры"),
             new(activeCount, deepCount == 0 ? "нет глубокой проверки" : $"{deepCount} на глубокой проверке"),
-            new(attentionTotal, overdueCount == 0 ? "нет просроченных" : $"{overdueCount} просрочено"),
+            new(attentionTotal, "объекты, объявления и сигналы · расшифровка ниже"),
             new(waitingCount, waitingCount == 0 ? "решения не ожидаются" : "ожидают руководителя"),
             attentionItems.Take(FeedSize).ToArray(), attentionTotal, stages, myWork, myWorkTotal,
-            collectionSummary, quick, team, teamTotal, market, now);
+            collectionSummary, quick, team, teamTotal, market, now)
+        {
+            CanViewIncoming=effective.CanReadIncoming,
+            AttentionGroups = (queue==null ? Array.Empty<OverviewAttentionGroup>() : [new("Закупка",procurementAttentionCount,"объектов","Просрочка, возврат, давняя задача без срока, вопросы проверок или новые данные. Каждый объект один раз.","/procurement?attention=true")])
+                .Concat(effective.CanReadIncoming ? [new OverviewAttentionGroup("Входящие",incomingAttention,"объявлений","Все входящие с отметкой внимания, без ограничения сохранёнными фильтрами.","/incoming?overview=attention")] : [])
+                .Concat(collectionSummary==null ? [] : [new OverviewAttentionGroup("Сбор данных",collectionAttention,"типов сигналов","Категории предупреждений и ошибок сбора; это не количество объявлений или объектов.","/#overview-collection-signals")]).ToArray()
+        };
     }
 
     public async Task<MarketGroupPage> ReadMarketGroupsAsync(Subject subject, MarketGroupQuery query, CancellationToken cancellationToken)

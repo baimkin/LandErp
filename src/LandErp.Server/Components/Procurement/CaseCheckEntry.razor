@@ -14,7 +14,7 @@
             <small class="subtle">@ExtraValues(current)</small>
         }
     }
-    <CaseRichNoteBlock @ref="editor" CaseId="CaseId" Subject="Subject" Title="@(current == null ? "Новая проверка" : "")"
+    <CaseRichNoteBlock @ref="editor" CaseId="CaseId" Subject="Subject" Title=""
         CanEdit="CanEdit" Value="@DocumentView(current)" ShowMetadata="false" EditLabel="Изменить"
         StartEditing="@(Value == null)" Attachments="Card.Attachments" AttachmentCheckId="current?.Id"
         SaveDocument="SaveResult" LoadDocument="LoadCurrent" EditingChanged="EditingChanged"
@@ -22,9 +22,14 @@
         <EditorFields Context="busy">
             <fieldset disabled="@busy" class="check-fields">
                 <label class="field"><span>Название проверки</span>
-                    <input value="@title" @oninput="TitleChanged" list="@listId" maxlength="512" placeholder="Выберите типовой пункт или напишите своё" />
+                    <input value="@title" @oninput="TitleChanged" maxlength="512" placeholder="Выберите типовой пункт или напишите своё" />
                 </label>
-                <datalist id="@listId">@foreach (var item in Templates) { <option value="@item.Title"></option> }</datalist>
+                <fieldset class="check-template-list">
+                    <legend>Типовой пункт</legend>
+                    @foreach(var item in Templates){<label><input type="radio" name="@templateGroup" checked="@(templateId==item.Id)" @onchange="()=>SelectTemplate(item.Id)" /><span>@item.Title</span></label>}
+                    <label><input type="radio" name="@templateGroup" checked="@customTitle" @onchange="()=>SelectTemplate(null)" /><span>Своё название</span></label>
+                </fieldset>
+                <div class="check-heading"><label class="field"><span>Ответственный — необязательно</span><select @bind="responsible" @bind:after="MarkDirty"><option value="">Не назначен</option>@if(responsible!=null && !Card.Assignees.Any(x=>x.EmployeeId==responsible)){<option value="@responsible">@(current?.Responsible??"Назначенный сотрудник")</option>}@foreach(var person in Card.Assignees){<option value="@person.EmployeeId">@person.Name</option>}</select></label><label class="field"><span>Срок — необязательно</span><input type="date" @bind="dueDate" @bind:after="MarkDirty" /></label></div>
                 @if (Hint.Length > 0) { <small class="subtle">@Hint</small> }
                 <div class="check-heading">
                     <label class="field"><span>Состояние</span><select value="@status" @onchange="StatusChanged">
@@ -62,7 +67,8 @@
     [Parameter] public EventCallback<Guid> Committed { get; set; }
     [Parameter] public EventCallback Cancelled { get; set; }
     private IReadOnlyCollection<Guid> DocumentAttachments => current?.ResultDocumentJson is string json ? CaseNoteDocument.Validate(json).AttachmentIds : [];
-    private readonly string listId = "check-templates-" + Guid.NewGuid().ToString("N");
+    private Guid? responsible;
+    private DateTime? dueDate;
     private CaseRichNoteBlock? editor;
     private CheckView? current;
     private CaseCard data = default!;
@@ -71,6 +77,9 @@
     private CaseCheckStatus status;
     private long caseVersion;
     private Guid? templateId;
+    private bool customTitle, templateChosen;
+    private readonly string templateGroup = Guid.NewGuid().ToString();
+    public Task CancelAsync()=>editor?.CancelAsync()??Task.CompletedTask;
     private IEnumerable<CheckTemplateView> Templates => Card.CheckTemplates.Where(item => item.Active && item.Level == Level);
     private string Hint => Templates.FirstOrDefault(item => item.Id == templateId)?.Description ?? current?.DescriptionSnapshot ?? "";
 
@@ -89,16 +98,20 @@
         if (value)
         {
             title = current?.Title ?? ""; status = current?.Status ?? CaseCheckStatus.Planned;
-            blocker = current?.Blocker ?? false; templateId = null;
+            blocker = current?.Blocker ?? false; templateId = current?.TemplateItemId; customTitle = current != null && templateId == null; templateChosen = false;
+            responsible = current?.ResponsibleEmployeeId;
+            dueDate = current?.DueAt is { } due ? TimeZoneInfo.ConvertTime(due, LandErp.Application.Modules.Workflow.Domain.WorkTaskDeadline.Moscow).Date : null;
             caseVersion = data.Item.CaseVersion;
         }
         return Task.CompletedTask;
     }
 
+    private async Task MarkDirty(){if(editor!=null)await editor.MarkDirtyAsync();}
+    private async Task SelectTemplate(Guid? id){templateChosen=true;templateId=id;customTitle=id==null;if(id!=null)title=Templates.First(x=>x.Id==id).Title;await MarkDirty();}
     private async Task TitleChanged(ChangeEventArgs args)
     {
         title = args.Value?.ToString() ?? "";
-        templateId = current == null ? Templates.FirstOrDefault(item => item.Title == title.Trim())?.Id : null;
+        templateId = null; customTitle = true;
         if (editor != null) await editor.MarkDirtyAsync();
     }
     private async Task StatusChanged(ChangeEventArgs args)
@@ -115,13 +128,15 @@
     private async Task<CaseRichNoteView> SaveResult(string json)
     {
         ValidatedCaseNote document = CaseNoteDocument.Validate(json);
+        DateTimeOffset? due = dueDate == null ? null : new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(dueDate.Value.Date.AddDays(1).AddTicks(-1), LandErp.Application.Modules.Workflow.Domain.WorkTaskDeadline.Moscow));
+        if (current?.DueAt is { } original && dueDate == TimeZoneInfo.ConvertTime(original, LandErp.Application.Modules.Workflow.Domain.WorkTaskDeadline.Moscow).Date) due = original;
         Guid id = await Workspace.SaveCheckWithIdAsync(Subject, new(CaseId, current?.Id, caseVersion, current?.Version,
-            current?.Level ?? Level, title, status, null, false, current?.DueAt, current?.Cost, "", blocker, templateId, document.Json),
+            current?.Level ?? Level, title, status, responsible, true, due, current?.Cost, "", blocker, templateChosen ? templateId : null, document.Json),
             Guid.CreateVersion7().ToString(), CancellationToken.None);
         string plain = CaseNoteDocument.PlainText(document.Json);
         if (plain.Length > 4000) plain = plain[..4000];
-        current = new(id, current?.Level ?? Level, title.Trim(), status, current?.ResponsibleEmployeeId,
-            current?.Responsible, current?.DueAt, current?.Cost, current?.Currency ?? "RUB", plain, blocker,
+        current = new(id, current?.Level ?? Level, title.Trim(), status, responsible,
+            Card.Assignees.FirstOrDefault(x=>x.EmployeeId==responsible)?.Name, due, current?.Cost, current?.Currency ?? "RUB", plain, blocker,
             (current?.Version ?? 0) + 1, Hint, current?.TemplateItemId ?? templateId, current?.TemplateItemVersion)
             { ResultDocumentJson = document.Json };
         committed = true;

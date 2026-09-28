@@ -1,0 +1,104 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+@using LandErp.Application.Modules.Procurement.Domain
+@using LandErp.Application.Modules.Procurement.Contracts
+@inject IKanbanWorkspace Kanban
+@inject NavigationManager Navigation
+<div class="kanban-settings" @ref="editorRoot" data-busy="@(busy?"true":"false")">
+    <p class="order-feedback error" role="alert" hidden></p>
+    @if(error!=null){<p role="alert" class="error">@error</p>}
+    @if(configuration==null){<p>Загрузка настроек…</p>}
+    else if(!configuration.CanConfigureKanban){<p>Нет права на настройку канбана.</p>}
+    else
+    {
+        <fieldset disabled="@busy">
+            <div class="setting-toolbar"><label>Воронка<select class="ui-select" value="@pipelineId" @onchange="SelectPipeline">@if(pipelineId==Guid.Empty){<option value="@Guid.Empty" disabled>Создание воронки</option>}@foreach(var p in configuration.Pipelines){<option value="@p.Id">@p.Name</option>}</select></label><button type="button" class="btn" @onclick="CreatePipeline">+ Создать воронку</button></div>
+            <div class="pipeline-fields"><label>Название<input maxlength="120" @bind="name" /></label><label>Порядок воронки<input type="number" @bind="order" /></label><label class="check"><input type="checkbox" @bind="isDefault" /> Основная для новых объектов</label></div>
+            <p class="hint">Рабочие стадии не подтверждают покупку, оплату или юридическое право. Скрытие и порядок общие для всех пользователей.</p>
+            <div class="stage-list">
+                @foreach(var s in stages)
+                {
+                    int index=stages.IndexOf(s);
+                    <section @key="s.Id" class="stage-row">
+                        <div class="stage-title" draggable="@(busy?"false":"true")" data-order-stage="@s.Id">
+                            <span class="handle" title="Перетащите для изменения порядка" aria-hidden="true">⠿</span><span class="stage-color" style="background:var(--@s.ColorKey)" aria-hidden="true"></span>
+                            <button type="button" class="stage-toggle" aria-expanded="@(expandedStage==s.Id)" @onclick="()=>expandedStage=expandedStage==s.Id?null:s.Id">@s.Name</button>
+                            <span class="stage-badges">@if(s.IsInitial){<span>Начальная</span>}@if(s.Kind!=KanbanStageKind.Working){<span>@(s.Kind==KanbanStageKind.PositiveFinal?"Успешная конечная":"Неуспешная конечная")</span>}@if(s.IsHiddenOnBoard){<span>Скрыта</span>}</span>
+                            <button class="btn" type="button" disabled="@(index==0)" aria-label="Выше" @onclick="()=>Reorder(index,-1)">↑</button><button class="btn" type="button" disabled="@(index==stages.Count-1)" aria-label="Ниже" @onclick="()=>Reorder(index,1)">↓</button>
+                        </div>
+                        @if(expandedStage==s.Id){<div class="stage-editor">
+                        <label>Название этапа<input maxlength="120" @bind="s.Name" /></label>
+                        <label>Пояснение<textarea maxlength="2000" rows="2" @bind="s.Description"></textarea></label>
+                        <div class="stage-options"><label>Тип<select class="ui-select" @bind="s.Kind"><option value="Working">Рабочая</option><option value="PositiveFinal">Положительная конечная</option><option value="NegativeFinal">Отрицательная конечная</option></select></label><label>Цвет<select class="ui-select" @bind="s.ColorKey"><option value="info">Синий</option><option value="accent">Акцентный</option><option value="success">Зелёный</option><option value="warning">Янтарный</option><option value="danger">Красный</option><option value="purple">Фиолетовый</option></select></label><label class="check"><input type="radio" name="kanban-initial" checked="@s.IsInitial" @onchange="()=>SetInitial(s)" /> Начальная</label><label class="check"><input type="checkbox" @bind="s.IsHiddenOnBoard" /> Скрыта на доске</label><button class="btn danger" type="button" @onclick="()=>stages.Remove(s)">Удалить этап</button></div>
+                        @if(s.Kind!=KanbanStageKind.Working)
+                        {
+                            <div class="tunnel"><label>Туннель в воронку<select class="ui-select" @bind="s.Target"><option value="@Guid.Empty">Без туннеля</option>@foreach(var target in configuration.Pipelines.Where(p=>p.Id!=pipelineId)){<option value="@target.Id">@target.Name · начальная стадия</option>}</select></label><label>Режим<select class="ui-select" @bind="s.Mode"><option value="Transfer">Передать участие</option><option value="Parallel">Добавить параллельно</option></select></label></div>
+                        }
+                        </div>}
+                    </section>
+                }
+            </div>
+            <button type="button" class="btn" @onclick="AddStage">+ Добавить этап</button>
+            <div class="actions"><button type="button" class="btn primary" disabled="@needsReload" @onclick="()=>Save(true)">Сохранить</button><button type="button" class="btn" @onclick="Cancel">Отмена</button>@if(pipelineId!=Guid.Empty){<button type="button" class="btn" disabled="@needsReload" @onclick="()=>Save(false)">Удалить воронку</button>}</div>
+        </fieldset>
+    }
+</div>
+@code {
+    [Parameter,EditorRequired] public Subject Subject{get;set;}=default!;
+    [Parameter] public Guid? SelectedPipelineId{get;set;}
+    [Parameter] public EventCallback<Guid> Saved{get;set;}
+    [Parameter] public EventCallback Cancelled{get;set;}
+    private KanbanConfiguration? configuration; private Guid pipelineId; private long version; private string name=""; private int order; private bool isDefault,busy,needsReload; private string? error;
+    private List<StageDraft> stages=[];
+    private Guid? expandedStage;
+    private Guid? returnPipeline;
+    private bool creating;
+    private sealed class StageDraft {
+        public Guid Id{get;set;}=Guid.CreateVersion7(); public string Name{get;set;}="Новая стадия"; public string Description{get;set;}="";
+        public string ColorKey{get;set;}="info"; public KanbanStageKind Kind{get;set;} public bool IsInitial{get;set;} public bool IsHiddenOnBoard{get;set;}
+        public Guid Target{get;set;} public KanbanTunnelMode Mode{get;set;}
+    }
+    protected override async Task OnInitializedAsync(){try{configuration=await Kanban.ReadConfigurationAsync(Subject,CancellationToken.None);Load(SelectedPipelineId??configuration.Pipelines.FirstOrDefault()?.Id??Guid.Empty);}catch(AccessDeniedException){error="Нет доступа к настройкам канбана.";}}
+    private void Load(Guid id){expandedStage=null;error=null;pipelineId=id;var p=configuration!.Pipelines.SingleOrDefault(p=>p.Id==id);version=p?.Version??0;name=p?.Name??"Новая воронка";order=p?.SortOrder??configuration.Pipelines.Count;isDefault=p?.IsDefault??configuration.Pipelines.Count==0;
+        stages=configuration.Stages.Where(s=>s.PipelineId==id).Select(s=>{var t=configuration.Tunnels.SingleOrDefault(t=>t.SourceStageId==s.Id);return new StageDraft{Id=s.Id,Name=s.Name,Description=s.Description,ColorKey=s.ColorKey,Kind=s.Kind,IsInitial=s.IsInitial,IsHiddenOnBoard=s.IsHiddenOnBoard,Target=t?.TargetPipelineId??Guid.Empty,Mode=t?.Mode??KanbanTunnelMode.Transfer};}).ToList();if(p==null)stages.Add(new(){Name="Взят в работу",IsInitial=true});}
+    private void CreatePipeline(){if(pipelineId!=Guid.Empty)returnPipeline=pipelineId;creating=true;Load(Guid.Empty);}
+    private void SelectPipeline(ChangeEventArgs e){error=null;if(Guid.TryParse(e.Value?.ToString(),out var id)){creating=false;Load(id);}}
+    private void AddStage(){var stage=new StageDraft();stages.Add(stage);expandedStage=stage.Id;}
+    private void SetInitial(StageDraft selected){foreach(var s in stages)s.IsInitial=s==selected;selected.Kind=KanbanStageKind.Working;}
+    private void Reorder(int index,int delta){var s=stages[index];stages.RemoveAt(index);stages.Insert(index+delta,s);}
+    private ElementReference editorRoot;
+    private DotNetObjectReference<KanbanSettings>? callback;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if(!firstRender)return;
+        callback=DotNetObjectReference.Create(this);
+        await Js.InvokeVoidAsync("LandErpKanban.attachOrder",editorRoot,callback);
+    }
+    [JSInvokable] public void ReorderStage(string source,string target)
+    {
+        if(busy || !Guid.TryParse(source,out var from) || !Guid.TryParse(target,out var to))return;
+        var moving=stages.FirstOrDefault(s=>s.Id==from);var destination=stages.FirstOrDefault(s=>s.Id==to);
+        if(moving==null||destination==null||moving==destination)return;
+        int index=stages.IndexOf(destination);stages.Remove(moving);stages.Insert(index,moving);StateHasChanged();
+    }
+    public async ValueTask DisposeAsync()
+    {
+        if(callback==null)return;
+        try{await Js.InvokeVoidAsync("LandErpKanban.detach",editorRoot);}catch(JSDisconnectedException){}catch(TaskCanceledException){}
+        callback.Dispose();
+    }
+    private async Task Cancel(){
+        if(busy)return;
+        if(Cancelled.HasDelegate){await Cancelled.InvokeAsync();return;}
+        var target=creating?returnPipeline??configuration?.Pipelines.FirstOrDefault(p=>p.IsDefault)?.Id??(configuration?.Pipelines.Count>0?configuration.Pipelines[0].Id:Guid.Empty):pipelineId;
+        creating=false;Load(target);error=null;
+        if(target==Guid.Empty)Navigation.NavigateTo("/procurement?view=table");
+    }
+    private async Task Save(bool active){if(busy||needsReload)return;busy=true;error=null;try{
+        var command=new SaveKanbanPipeline(pipelineId,version,name,order,isDefault,active,stages.Select(s=>new KanbanStageDraft(s.Id,s.Name,s.Description,s.ColorKey,s.IsInitial,s.Kind,s.IsHiddenOnBoard)).ToArray(),stages.Where(s=>s.Target!=Guid.Empty).Select(s=>new KanbanTunnelDraft(s.Id,s.Target,s.Mode)).ToArray());
+        Guid id=await Kanban.SavePipelineAsync(Subject,command,Guid.CreateVersion7().ToString(),CancellationToken.None);
+        configuration=await Kanban.ReadConfigurationAsync(Subject,CancellationToken.None);creating=false;Load(active?id:configuration.Pipelines.FirstOrDefault()?.Id??Guid.Empty);await Saved.InvokeAsync(pipelineId);
+    }catch(ArgumentException ex){error=ex.Message;}catch(Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException){needsReload=true;error="Настройки изменены другим пользователем. Закройте и откройте редактор заново.";}catch(AccessDeniedException){error="Нет права на настройку канбана.";}catch(Exception){needsReload=true;error="Сохранение не подтверждено. Закройте и заново откройте настройки, чтобы проверить результат.";}finally{busy=false;}}
+}
+

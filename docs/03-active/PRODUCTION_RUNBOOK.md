@@ -69,6 +69,14 @@ This is also the supported way to apply later built-in permission changes to an
 existing production database; Server/Worker still never mutate schema or role
 catalogs on startup.
 
+The explicit database upgrade also prepares Kanban after migrations: organizations
+without an active default pipeline receive the standard "Закупка" pipeline. Active
+cases without any Kanban membership enter its initial stage; acquired/rejected
+cases are excluded. Existing memberships (including other pipelines and transferred
+positions), business states, assignments, tasks and history are preserved. Repeating
+the command must not duplicate imports or reset stages. This setup step is required
+when upgrading existing data; applying SQL migrations alone is insufficient.
+
 ## 4.1 Initial Owner
 
 Create the first Owner only after database initialization and before public login:

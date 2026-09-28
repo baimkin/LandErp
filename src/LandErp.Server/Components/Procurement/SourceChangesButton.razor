@@ -1,0 +1,9 @@
+<button type="button" class="btn quiet" @onclick="()=>open=true">Посмотреть изменения</button>
+@if(open){<CaseSourceChanges CaseId="CaseId" CatalogItemId="CatalogItemId" OnClose="Close" OnViewed="OnViewed" />}
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public Guid CatalogItemId { get; set; }
+    [Parameter] public EventCallback OnViewed { get; set; }
+    private bool open;
+    private async Task Close(){open=false;await OnViewed.InvokeAsync();}
+}

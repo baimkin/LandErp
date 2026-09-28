@@ -55,8 +55,9 @@
             @if (!IsArchive && !IsParticipants)
             {
             <div class="v2-presets" role="group" aria-label="Режим входящих">
-                <button type="button" class="v2-preset @(incomingMode == IncomingCatalogMode.SavedFilters ? "active" : "")" aria-pressed="@(incomingMode == IncomingCatalogMode.SavedFilters)" @onclick="() => ChangeModeAsync(IncomingCatalogMode.SavedFilters)">По сохранённым фильтрам</button>
-                <button type="button" class="v2-preset @(incomingMode == IncomingCatalogMode.AllListings ? "active" : "")" aria-pressed="@(incomingMode == IncomingCatalogMode.AllListings)" @onclick="() => ChangeModeAsync(IncomingCatalogMode.AllListings)">Все объявления</button>
+                <button type="button" class="v2-preset @(incomingMode == IncomingCatalogMode.SavedFilters ? "active" : "")" aria-pressed="@(incomingMode == IncomingCatalogMode.SavedFilters ? "true" : "false")" @onclick="() => ChangeModeAsync(IncomingCatalogMode.SavedFilters)">По сохранённым фильтрам</button>
+                <button type="button" class="v2-preset @(incomingMode == IncomingCatalogMode.AllListings ? "active" : "")" aria-pressed="@(incomingMode == IncomingCatalogMode.AllListings ? "true" : "false")" @onclick="() => ChangeModeAsync(IncomingCatalogMode.AllListings)">Все объявления</button>
+                <button type="button" class="processed-today-link" aria-pressed="@(preset == IncomingCatalogPreset.ProcessedToday)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.ProcessedToday)">Обработано сегодня: @catalogPage.Summary.ProcessedToday</button>
             </div>
             @if (savedPresets.Any(item => item.CompatibilityIssue != null))
             {
@@ -69,7 +70,7 @@
                 </div>
             }
             <div class="v2-stats">
-                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.New ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.New)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.New)"><label>Новые</label><strong>@catalogPage.Summary.New</strong><span>ещё не просматривали</span></button>
+                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.New ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.New ? "true" : "false")" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.New)"><label>Новые</label><strong>@catalogPage.Summary.New</strong><span>ещё не просматривали</span></button>
                 <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PriceChanged)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PriceChanged)"><label>Цена изменилась</label><strong>@catalogPage.Summary.PriceChanged</strong><span>реальные изменения цены</span></button>
                 <button type="button" class="v2-stat v2-stat-action warn @(preset == IncomingCatalogPreset.PossibleDuplicate ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PossibleDuplicate)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PossibleDuplicate)"><label>Возможный дубль</label><strong>@catalogPage.Summary.PossibleDuplicate</strong><span>есть совпадающие признаки</span></button>
                 <button type="button" class="v2-stat v2-stat-action risk @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.Incomplete)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.Incomplete)"><label>Не хватает данных</label><strong>@catalogPage.Summary.Incomplete</strong><span>цена / площадь / локация</span></button>
@@ -77,7 +78,9 @@
             </div>
 
             }
-            @if (!IsArchive && !IsParticipants) { <button type="button" class="v2-btn processed-slice" aria-pressed="@(preset == IncomingCatalogPreset.ProcessedToday)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.ProcessedToday)">Обработано сегодня: @catalogPage.Summary.ProcessedToday</button> }
+
+            @if(preset==IncomingCatalogPreset.New && incomingMode==IncomingCatalogMode.SavedFilters && selectedSavedPresetId==null){<p class="v2-lead">Непросмотренные входящие · объединение сохранённых фильтров · объявлений: @catalogPage.Total</p>}
+            @if(filter.AttentionOnly && incomingMode==IncomingCatalogMode.AllListings){<p class="v2-lead">Входящие с отметкой внимания · все объявления · объявлений: @catalogPage.Total</p>}
             <section class="v2-surface">
                 <EditForm Model="filter" FormName="incoming-v2-filter" OnValidSubmit="ApplyFilterAsync">
                     <div class="v2-tools">
@@ -153,22 +156,25 @@
 
                     @if (SelectedSavedPreset() is { } selectedFilter)
                     {
+                        <div class="v2-context-info">
                         <p class="subtle" role="status">Выбран общий фильтр «@selectedFilter.Name». Изменения условий применяются разово, пока вы не нажмёте «Сохранить изменения».</p>
                         @if (selectedFilter.CompatibilityIssue != null) { <p role="alert">@selectedFilter.CompatibilityIssue Фильтр не применяется; выдача пуста.</p> }
-                        <button class="v2-btn sm quiet" type="button" disabled="@Busy" @onclick="ReloadSelectedPresetAsync">Загрузить сохранённые условия заново</button>
+
+                        </div>
                     }
                     @if (advancedOpen && !IsArchive && !IsParticipants)
                     {
                         <div class="v2-advanced">
                             <label class="v2-filter-field"><span>Состояние</span><InputSelect @bind-Value="filter.Disposition"><option value="">Все состояния</option>@foreach (CatalogDisposition state in Enum.GetValues<CatalogDisposition>()) { <option value="@state">@DispositionLabel(state)</option> }</InputSelect></label>
                             <label class="v2-filter-field"><span>Возраст</span><InputSelect @bind-Value="filter.Age"><option value="Any">Любой</option><option value="Today">До суток</option><option value="ThreeDays">До 3 дней</option><option value="Week">До недели</option><option value="OlderThanWeek">Старше недели</option></InputSelect></label>
-                            <label class="v2-filter-field"><span>Цена объекта от, ₽</span><InputNumber @bind-Value="filter.MinPrice" /></label>
-                            <label class="v2-filter-field"><span>Цена объекта до, ₽</span><InputNumber @bind-Value="filter.MaxPrice" /></label>
-                            <label class="v2-filter-field"><span>Цена за сотку от, ₽</span><InputNumber @bind-Value="filter.MinPricePerSotka" /></label>
-                            <label class="v2-filter-field"><span>Цена за сотку до, ₽</span><InputNumber @bind-Value="filter.MaxPricePerSotka" /></label>
-                            <label class="v2-filter-field"><span>Площадь от, сот.</span><InputNumber @bind-Value="filter.MinAreaSotki" /></label>
-                            <label class="v2-filter-field"><span>Площадь до, сот.</span><InputNumber @bind-Value="filter.MaxAreaSotki" /></label>
-                            <label class="v2-check"><InputCheckbox @bind-Value="filter.AttentionOnly" /> <span>Требует внимания</span></label>
+                            <label class="v2-filter-field"><span>Цена объекта от, ₽</span><NumberInput @bind-Value="filter.MinPrice"  Money="true" /></label>
+                            <label class="v2-filter-field"><span>Цена объекта до, ₽</span><NumberInput @bind-Value="filter.MaxPrice"  Money="true" /></label>
+                            <label class="v2-filter-field"><span>Цена за сотку от, ₽</span><NumberInput @bind-Value="filter.MinPricePerSotka"  Money="true" /></label>
+                            <label class="v2-filter-field"><span>Цена за сотку до, ₽</span><NumberInput @bind-Value="filter.MaxPricePerSotka"  Money="true" /></label>
+                            <label class="v2-filter-field"><span>Площадь от, сот.</span><NumberInput @bind-Value="filter.MinAreaSotki"  /></label>
+                            <label class="v2-filter-field"><span>Площадь до, сот.</span><NumberInput @bind-Value="filter.MaxAreaSotki"  /></label>
+                            <label class="v2-filter-field"><span>В медиане</span><select value="@(filter.IncludedInMedian?.ToString().ToLowerInvariant()??"")" @onchange="e=>filter.IncludedInMedian=bool.TryParse(e.Value?.ToString(),out var included)?included:null"><option value="">Все</option><option value="true">Учитываются</option><option value="false">Не учитываются</option></select></label>
+                            <div class="attention-filter"><label class="v2-check"><InputCheckbox @bind-Value="filter.AttentionOnly" /> <span>Требует внимания</span></label><span class="attention-help" tabindex="0" aria-label="Что значит требует внимания" aria-describedby="attention-help-text">?<span id="attention-help-text" class="attention-tip" role="tooltip">Показывает объявления, требующие обработки: новые, с изменениями в источнике, вернувшиеся из мониторинга или на повторное рассмотрение. Простой просмотр не снимает отметку — нужно принять решение по объявлению. Фильтр не влияет на участие в медиане.</span></span></div>
                             <div class="v2-land-types">
                                 <span class="v2-filter-caption">Тип участка <small>заявлено источником или найдено в тексте; не подтверждённый ВРИ</small></span>
                                 <div class="v2-land-type-options">
@@ -178,37 +184,8 @@
                                     }
                                 </div>
                             </div>
-                            @if (CanProcessIncoming) { <div class="saved-filter-settings"><h3>Сохранённый фильтр</h3>
-        <p class="subtle">Группа ограничивает выдачу объявлениями всех её поисков, включая добавленные позже. Фильтр общий для организации. Свободный текстовый поиск не сохраняется.</p>
-        <label class="field"><span><InputCheckbox @bind-Value="presetAutoInclude" /> Автоматически добавлять новые объявления в медиану</span></label>
-        <p class="subtle">Настройка действует после сохранения фильтра, только на новые объявления. Для найденных по применённым условиям используйте отдельное действие ниже.</p>
-        <label class="field"><span>Название фильтра</span><InputText @bind-Value="presetName" /></label>
-        <label class="field">
-            <span>Группа</span>
-            <InputSelect @bind-Value="presetGroupId">
-                <option value="">Без группы</option>
-                @if (catalogPage != null)
-                {
-                    @foreach (IncomingSearchGroupView group in catalogPage.SearchGroups)
-                    {
-                        <option value="@group.Id">@group.Name</option>
-                    }
-                }
-            </InputSelect>
-        </label>
-        <div class="form-actions">
-
-            @if (SelectedSavedPreset() is { CompatibilityIssue: null })
-            {
-                <ActionButton Label="Сохранить изменения" Busy="Busy" OnClick="UpdatePresetAsync" />
-            }
-            <ActionButton Label="Сохранить как новый" Busy="Busy" OnClick="SavePresetAsync" />
-            <button type="button" class="v2-btn" disabled="@(Busy || calculationPreviewBusy || catalogPage.Total == 0)" @onclick="IncludeExistingAsync">Включить найденные объявления в медиану (@catalogPage.Total)…</button>
-        </div>
-
-                            </div> }
                             <div class="v2-advanced-actions" style="gap:8px">
-                                <button class="v2-btn sm primary" type="submit">Применить фильтры</button>
+                                <button class="v2-btn sm primary" type="submit">Применить</button><button type="button" class="v2-btn sm" @onclick="ResetFilterAsync">Сбросить</button>@if(CanProcessIncoming){<button type="button" class="v2-btn sm" @onclick="()=>{OpenSavePreset();presetDialogOpen=true;}">Сохранить фильтр</button>}
 
                             </div>
                         </div>
@@ -243,16 +220,18 @@
                         <strong>Выбрано: @CalculationCount</strong>
                         @if (!allCalculationResults) { <button type="button" class="v2-btn sm quiet" @onclick="SelectAllCalculation">Выбрать все @catalogPage.Total результатов</button> }
                         <button class="v2-btn sm" type="button" disabled="@(Busy || calculationPreviewBusy)" @onclick="() => PreviewCalculationAsync(true)">Включить в медиану…</button>
-                        <button class="v2-btn sm" type="button" disabled="@(Busy || calculationPreviewBusy)" @onclick="() => PreviewCalculationAsync(false)">Исключить из медианы…</button>
+                        <button class="v2-btn sm" type="button" disabled="@(Busy || calculationPreviewBusy)" @onclick="() => PreviewCalculationAsync(false)">@(allCalculationResults && calculationExcluded.Count==0?"Исключить найденные из расчёта…":"Исключить выбранные из расчёта…")</button>
                         <button class="v2-btn sm quiet" type="button" @onclick="ClearCalculationSelection">Снять выбор</button>
                     </div>
                 }
+                <div class="v2-context-info v2-result-summary">
                 @if (IsParticipants)
                 {
                     <p class="subtle" role="status">Группа: @catalogPage.SearchGroups.FirstOrDefault(g => g.Id == ParticipantsGroupId)?.Name · В расчёте: @catalogPage.ParticipantTotal · Найдено по поиску: @catalogPage.Total</p>
                     <p class="subtle">Исключение снимает отметку объявления во всех группах. Другой отмеченный пригодный источник того же объекта может стать представителем. Цена проданного объявления — цена источника, не подтверждённая цена сделки.</p>
                 }
                 else { <p class="subtle" role="status">Найдено: @catalogPage.Total</p> }
+                </div>
                 @if (incomingMode == IncomingCatalogMode.SavedFilters && catalogPage.FilterCounts?.ApplicableCount == 0)
                 {
                     <div class="v2-empty">
@@ -276,7 +255,7 @@
                             </colgroup>
                             <thead>
                                 <tr>
-                                    @if (CanProcessIncoming) { <th class="selection-head"><button type="button" class="page-selection" role="checkbox" aria-label="Выбрать страницу" aria-checked="@(PageAllSelected ? "true" : PageSomeSelected ? "mixed" : "false")" disabled="@Busy" @onclick="ToggleCalculationPage">@(PageAllSelected ? "✓" : PageSomeSelected ? "−" : "")</button></th> }
+                                    @if (CanProcessIncoming) { <th class="selection-head"><label class="selection-hit"><input type="checkbox" class="page-selection" aria-label="Выбрать страницу" aria-checked="@(PageAllSelected ? "true" : PageSomeSelected ? "mixed" : "false")" data-indeterminate="@(PageSomeSelected && !PageAllSelected ? "true" : "false")" checked="@PageAllSelected" disabled="@Busy" @onchange="ToggleCalculationPage" /></label></th> }
                                     <th>Объявление</th><th>В медиане</th>
                                     <th aria-sort="@SortAria(IncomingCatalogSortField.Price)"><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.Price)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Price)">Цена <span>@SortIndicator(IncomingCatalogSortField.Price)</span></button></th>
                                     <th aria-sort="@SortAria(IncomingCatalogSortField.PricePerSotka)"><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.PricePerSotka)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.PricePerSotka)">Цена за сотку <span>@SortIndicator(IncomingCatalogSortField.PricePerSotka)</span></button></th>
@@ -559,31 +538,7 @@
                 }
                 else
                 {
-                    <ol>
-                        @foreach (CatalogEventView item in detail.Events)
-                        {
-                            <li>
-                                <strong>@EventLabel(item.Kind)</strong><span>@ProcurementLabels.Time(item.RecordedAt)</span>
-                                @if (HasTypedPriceChange(item))
-                                {
-                                    <p>@PriceChangeSummary(item.PreviousObservedPrice!.Value, item.ObservedPrice!.Value)</p>
-                                    @if (HasTypedPricePerSotkaChange(item))
-                                    {
-                                        <p>@PricePerSotkaChangeSummary(item.PreviousObservedPricePerSotka!.Value, item.ObservedPricePerSotka!.Value)</p>
-                                    }
-                                    @if (!string.IsNullOrWhiteSpace(item.Message)
-                                        && !string.Equals(item.Message, "Изменилась цена источника", StringComparison.Ordinal))
-                                    {
-                                        <p>@item.Message</p>
-                                    }
-                                }
-                                else
-                                {
-                                    <p>@item.Message</p>
-                                }
-                            </li>
-                        }
-                    </ol>
+                    <CaseActivityFeed Items="@detail.Events.Select(item => CaseFeedFormat.From(item, EventLabel(item.Kind))).ToArray()" />
                 }
             </section>
 
@@ -591,7 +546,7 @@
             {
                 <label class="v2-next-option">
                     <input type="checkbox" @bind="openNextAfterDecision" />
-                    <span><strong>После решения открыть следующее объявление</strong><small>Ускоряет последовательный разбор входящих.</small></span>
+                    <span><strong>После отклонения или решения о дубле открыть следующее</strong><small>Ускоряет последовательный разбор входящих.</small></span>
                 </label>
             }
         </div>
@@ -609,9 +564,9 @@
                         <DataAnnotationsValidator />
                         <div class="v2-monitor">
                             <div class="v2-monitor-grid">
-                                <div><label>Цена объявления ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.Total" /><span>₽</span></div></div>
+                                <div><label>Цена объявления ≤</label><div class="v2-money"><NumberInput @bind-Value="monitoring.Total"  Money="true" /><span>₽</span></div></div>
                                 <div class="v2-or">или</div>
-                                <div><label>Цена за сотку ≤</label><div class="v2-money"><InputNumber @bind-Value="monitoring.PerSotka" /><span>₽</span></div></div>
+                                <div><label>Цена за сотку ≤</label><div class="v2-money"><NumberInput @bind-Value="monitoring.PerSotka"  Money="true" /><span>₽</span></div></div>
                                 <button type="submit" class="v2-btn" disabled="@Busy">Поставить на мониторинг</button>
                             </div>
                             <div class="v2-monitor-reason"><label>Комментарий к мониторингу</label><InputText @bind-Value="monitoring.Reason" /></div>
@@ -631,33 +586,26 @@
             @if(CanProcessIncoming)
             {
                 <div class="v2-classify">
-                    <button type="button" class="v2-btn sm duplicate" @onclick="OpenDuplicateSearchAsync">Связать с объектом</button>
-                    <button type="button" class="v2-btn sm danger-text" @onclick="() => OpenClassification(CatalogDisposition.Fake)">Фейк</button>
-                    <button type="button" class="v2-btn sm" @onclick="() => OpenClassification(CatalogDisposition.RemovedAtSource)">Снято</button>
-                    <button type="button" class="v2-btn sm sold" @onclick="() => OpenClassification(CatalogDisposition.Sold)">Продано</button>
+
+                    <button type="button" class="v2-btn danger-text" disabled="@Busy" @onclick="() => OpenClassification(CatalogDisposition.Fake)">Фейк</button>
+                    <button type="button" class="v2-btn" disabled="@Busy" @onclick="() => OpenClassification(CatalogDisposition.RemovedAtSource)">Снято</button>
+                    <button type="button" class="v2-btn sold" disabled="@Busy" @onclick="() => OpenClassification(CatalogDisposition.Sold)">Продано</button>
                 </div>
-                <div class="v2-decide">
-                    <button type="button" class="v2-btn danger" @onclick="() => OpenClassification(CatalogDisposition.Dismissed)">Не подходит</button>
-                    @if (detail.Item.PropertyCaseId == null)
-                    {
-                        <button type="button" class="v2-btn" @onclick="() => OpenTransferAsync(detail.Item)">Передать в закупку</button>
-                        @if(CanManageProcurement){<button type="button" class="v2-btn primary" @onclick="() => OpenTakeAsync(detail.Item)">Взять в работу</button>}
-                    }
-                    else if (detail.Item.CanResumeCase && CanManageProcurement)
-                    {
-                        <button type="button" class="v2-btn primary" @onclick="ResumeAsync">Возобновить</button>
-                    }
-                    else if (CanReadProcurement)
-                    {
-                        <button type="button" class="v2-btn primary" @onclick="() => OpenCase(detail.Item.PropertyCaseId)">Открыть PropertyCase</button>
-                    }
-                </div>
+            }
+            <div class="v2-take-actions">@if(CanProcessIncoming){<button type="button" class="v2-btn danger" disabled="@Busy" @onclick="() => OpenClassification(CatalogDisposition.Dismissed)">Не подходит</button>}
+            @if(detail.Item.PropertyCaseId != null)
+            {
+                <span class="subtle">Объявление уже связано с объектом закупки.</span>
+            }
+            else if(CanProcessIncoming && CanManageProcurement)
+            {
+                <button type="button" class="v2-btn primary" disabled="@Busy" @onclick="() => OpenTakeAsync(detail.Item)">Взять в работу</button>
             }
             else
             {
-                <div class="subtle">Режим просмотра: действия обработки входящих недоступны.</div>
-                @if(detail.Item.PropertyCaseId!=null && CanReadProcurement){<button type="button" class="v2-btn" @onclick="() => OpenCase(detail.Item.PropertyCaseId)">Открыть PropertyCase</button>}
+                <span class="subtle">Нет права взять объявление в работу.</span>
             }
+            </div>
         </div>
     </aside>
 }
@@ -710,9 +658,8 @@
             <div class="v2-compare-grid">
                 <section class="v2-compare-column">
                     <div class="v2-compare-label">Текущее объявление</div>
-                    @if (detailRead.PhotoUrls.Count > 0) { <img class="v2-compare-photo" src="@detailRead.PhotoUrls[0]" alt="" /> }
-                    else { <div class="v2-compare-photo empty">Нет фото</div> }
-                    <h3>@detail.Item.Title</h3>
+                    <PhotoGallery @key="detail.Item.Id" Urls="LeftComparisonPhotos" InitialUrl="@leftComparisonPhoto" Changed="url=>leftComparisonPhoto=url" />
+                    <p class="comparison-photo-hint">@PhotoMatchHint(true)</p><h3>@detail.Item.Title</h3>
                     <div class="v2-compare-facts">
                         <span><small>Источник</small><strong>@SourceBadge.Label(detail.Item.Source)</strong></span>
                         <span><small>Цена</small><strong>@ProcurementLabels.Money(detail.Item.Price)</strong></span>
@@ -726,9 +673,8 @@
                 </section>
                 <section class="v2-compare-column">
                     <div class="v2-compare-label">Сравниваемое объявление</div>
-                    @if (duplicateCompareRead.PhotoUrls.Count > 0) { <img class="v2-compare-photo" src="@duplicateCompareRead.PhotoUrls[0]" alt="" /> }
-                    else { <div class="v2-compare-photo empty">Нет фото</div> }
-                    <h3>@duplicateCompareRead.Detail.Item.Title</h3>
+                    <PhotoGallery @key="duplicateCompareRead.Detail.Item.Id" Urls="RightComparisonPhotos" InitialUrl="@rightComparisonPhoto" Changed="url=>rightComparisonPhoto=url" />
+                    <p class="comparison-photo-hint">@PhotoMatchHint(false)</p><h3>@duplicateCompareRead.Detail.Item.Title</h3>
                     <div class="v2-compare-facts">
                         <span><small>Источник</small><strong>@SourceBadge.Label(duplicateCompareRead.Detail.Item.Source)</strong></span>
                         <span><small>Цена</small><strong>@ProcurementLabels.Money(duplicateCompareRead.Detail.Item.Price)</strong></span>
@@ -741,6 +687,8 @@
                     <div class="v2-compare-description"><small>Описание</small><p>@(duplicateCompareRead.Detail.Item.Description ?? "Описание отсутствует")</p></div>
                 </section>
             </div>
+            @if(duplicateCompareCandidate?.PhotoEvidence is { Count: > 0 } evidence){<div class="photo-pairs"><strong>Найденные пары</strong>@for(int i=0;i<evidence.Count;i++){var pairIndex=i;<button type="button" class="v2-btn sm @(evidenceIndex==i?"primary":"")" @onclick="()=>SelectPhotoPair(pairIndex)">Пара @(i+1)</button>}</div>}
+            else if(duplicateCompareCandidate?.Reasons.Any(r=>r.Contains("фото",StringComparison.OrdinalIgnoreCase))==true){<p class="subtle">Повторное сравнение доступных отпечатков не подтвердило пару. Для недоступных фотографий нужны обновлённые данные источника.</p>}
             @if (duplicateCompareCandidate?.Reasons is { Count: > 0 } compareReasons)
             {
                 <div class="v2-compare-reasons"><strong>Почему система сопоставила объявления</strong><ul>@foreach (string reason in compareReasons) { <li>@reason</li> }</ul></div>
@@ -783,7 +731,7 @@
                             <strong>@SourceBadge.Label(target.Source) · @target.Title</strong>
                             <span>@(target.Location ?? "Локация не указана") · @ProcurementLabels.Money(target.Price) · @AreaSotki(target.AreaSquareMeters)</span>
                             @if (target.ObjectGroupMemberCount > 1) { <span>Уже в группе: @target.ObjectGroupMemberCount источника</span> }
-                            @if (target.BusinessNumber != null) { <span>PropertyCase: @target.BusinessNumber</span> }
+                            @if (target.BusinessNumber != null) { <span>Объект: @target.BusinessNumber</span> }
                         </div>
                         <button type="button" class="v2-btn sm" @onclick="() => OpenManualDuplicateCompareAsync(target)">Сравнить</button>
                     </div>
@@ -796,7 +744,7 @@
 @if (unlinkObjectGroupOpen && detail != null)
 {
     <Modal Title="Исключить объявление из группы" OnClose="CloseUnlinkObjectGroup">
-        <p>Объявление снова станет самостоятельным. Если оно было добавлено в PropertyCase через эту группу, связь источника будет снята.</p>
+        <p>Объявление снова станет самостоятельным. Если оно было добавлено в объект закупки через эту группу, связь источника будет снята.</p>
         <label class="field"><span><InputCheckbox @bind-Value="unlinkIncludeCalculation" /> Учитывать в расчёте медианы</span></label>
         <label class="field"><span>Почему это другой объект</span><InputTextArea @bind-Value="unlinkObjectGroupReason" /></label>
         <div class="form-actions">
@@ -808,8 +756,8 @@
 
 @if (CanProcessIncoming && transferOpen && transferItem != null)
 {
-    <Modal Title="Передать в закупку" OnClose="CloseTransfer">
-        <p>Выберите сотрудника, который будет вести новый PropertyCase. Вы останетесь только автором передачи и не получите доступ к закупке автоматически.</p>
+    <Modal Title="Передать сотруднику" OnClose="CloseTransfer">
+        <p>Выберите сотрудника, который будет вести новый объект. Вы останетесь только автором передачи и не получите доступ к закупке автоматически.</p>
         @if(procurementTargets.Count==0)
         {
             <p class="organization-notice">Нет сотрудников, которые могут принять новый объект с текущими effective Access V1 настройками.</p>
@@ -831,8 +779,8 @@
                 <label class="field"><span>Название</span><InputText @bind-Value="manual.Title" /></label>
                 <label class="field"><span>Локация</span><InputText @bind-Value="manual.Location" /></label>
                 <label class="field"><span>Ссылка HTTPS (необязательно)</span><InputText @bind-Value="manual.Url" /></label>
-                <label class="field"><span>Цена, ₽</span><InputNumber @bind-Value="manual.Price" /></label>
-                <label class="field"><span>Площадь, м²</span><InputNumber @bind-Value="manual.Area" /></label>
+                <label class="field"><span>Цена, ₽</span><NumberInput @bind-Value="manual.Price"  Money="true" /></label>
+                <label class="field"><span>Площадь, м²</span><NumberInput @bind-Value="manual.Area"  /></label>
                 <label class="field"><span>Кадастровый номер</span><InputText @bind-Value="manual.CadastralNumber" /></label>
                 <label class="field"><span>Внешний ID (необязательно)</span><InputText @bind-Value="manual.ExternalId" /></label>
                 <label class="field" style="grid-column:1/-1"><span>Описание</span><InputTextArea @bind-Value="manual.Description" /></label>
@@ -851,21 +799,22 @@
     </Modal>
 }
 
+
 @if (takeItem != null)
 {
-    <Modal Title="Взять в работу" OnClose="() => takeItem = null">
+    <Modal Title="Связать с объектом закупки" OnClose="() => takeItem = null">@if(Error!=null){<p role="alert">@Error</p>}
         <p><strong>@takeItem.Title</strong></p>
         <p class="subtle">
             @if (takeItem.ObjectGroupMemberCount > 1)
             {
-                <span>В работу перейдёт вся группа одного объекта: @takeItem.ObjectGroupMemberCount связанных источника. Все они будут привязаны к одному PropertyCase.</span>
+                <span>В работу перейдёт вся группа одного объекта: @takeItem.ObjectGroupMemberCount связанных источника. Все они будут связаны с выбранным объектом.</span>
             }
             else
             {
-                <span>Создайте новый PropertyCase либо подтвердите связь с существующим.</span>
+                <span>Выберите существующий объект закупки.</span>
             }
         </p>
-        <label class="field"><span>PropertyCase</span><InputSelect @bind-Value="existingCaseId"><option value="">Создать новый PropertyCase</option>@foreach (CaseLinkTarget target in targets) { <option value="@target.CaseId">@target.BusinessNumber · @target.Title</option> }</InputSelect></label>
+        <label class="field"><span>Объект закупки</span><InputSelect @bind-Value="existingCaseId"><option value="">Выберите объект</option>@foreach (CaseLinkTarget target in targets) { <option value="@target.CaseId">@target.BusinessNumber · @target.Title</option> }</InputSelect></label>
         <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => takeItem = null" /><ActionButton Label="Подтвердить" Busy="Busy" OnClick="TakeAsync" /></div>
     </Modal>
 }
@@ -906,7 +855,7 @@
 
 @if (Success != null)
 {
-    <div class="v2-toast show" role="status">@Success</div>
+    <div class="v2-toast show" role="status"><span>@Success</span> @if(takenCaseId!=null){<a href="/procurement/@takenCaseId">Открыть →</a>}<button type="button" class="btn quiet" aria-label="Закрыть уведомление" @onclick="()=>{Success=null;takenCaseId=null;}">×</button></div>
 }
 
 @if (calculationPreview != null)
@@ -919,7 +868,45 @@
     </Modal>
 }
 
+@if(presetDialogOpen && CanProcessIncoming){<Modal Title="Сохранить фильтр" OnClose="()=>presetDialogOpen=false">@if(Error!=null){<p role="alert">@Error</p>}<h3>Сохранённый фильтр</h3>
+        <p class="subtle">Группа ограничивает выдачу объявлениями всех её поисков, включая добавленные позже. Фильтр общий для организации. Свободный текстовый поиск не сохраняется.</p>
+        <label class="preset-auto-include"><InputCheckbox @bind-Value="presetAutoInclude" /><span>Автоматически добавлять новые объявления в медиану</span></label>
+        <p class="subtle">При сохранении включаются существующие подходящие объявления; затем — новые поступления. Отключение настройки не снимает отметки. Повторное сохранение включённой настройки снова включит всю подходящую выборку. </p>
+        <label class="field"><span>Название фильтра</span><InputText @bind-Value="presetName" /></label>
+        <label class="field">
+            <span>Группа</span>
+            <InputSelect @bind-Value="presetGroupId">
+                <option value="">Без группы</option>
+                @if (catalogPage != null)
+                {
+                    @foreach (IncomingSearchGroupView group in catalogPage.SearchGroups)
+                    {
+                        <option value="@group.Id">@group.Name</option>
+                    }
+                }
+            </InputSelect>
+        </label>
+        <div class="form-actions">
+
+            @if (SelectedSavedPreset() is { CompatibilityIssue: null })
+            {
+                <ActionButton Label="Сохранить изменения" Busy="Busy" OnClick="UpdatePresetAsync" />
+            }
+            <ActionButton Label="Сохранить как новый" Busy="Busy" OnClick="SavePresetAsync" />
+        </div>
+
+
+</Modal>}
+
 @code {
+    private bool presetDialogOpen;
+    private int evidenceIndex;
+    private string? leftComparisonPhoto,rightComparisonPhoto;
+    private string[] LeftComparisonPhotos=>(detailRead?.PhotoUrls??[]).Concat(duplicateCompareCandidate?.PhotoEvidence.Select(x=>x.LeftUrl)??[]).Distinct().ToArray();
+    private string[] RightComparisonPhotos=>(duplicateCompareRead?.PhotoUrls??[]).Concat(duplicateCompareCandidate?.PhotoEvidence.Select(x=>x.RightUrl)??[]).Distinct().ToArray();
+    private void SelectPhotoPair(int index){var pairs=duplicateCompareCandidate?.PhotoEvidence;if(pairs==null||pairs.Count<=index)return;evidenceIndex=index;leftComparisonPhoto=pairs[index].LeftUrl;rightComparisonPhoto=pairs[index].RightUrl;}
+    private string PhotoMatchHint(bool left){var current=left?leftComparisonPhoto:rightComparisonPhoto;var other=left?RightComparisonPhotos:LeftComparisonPhotos;var pairs=duplicateCompareCandidate?.PhotoEvidence.Where(x=>(left?x.LeftUrl:x.RightUrl)==current).ToArray()??[];return pairs.Length==0?"Для этого фото совпадение не найдено":string.Join("; ",pairs.Select(x=>$"{(x.Exact?"Совпадает":"Похоже")} с фото № {Array.IndexOf(other,left?x.RightUrl:x.LeftUrl)+1} другого объявления"));}
+    private Guid? takenCaseId;
     [Parameter, SupplyParameterFromQuery(Name = "participants")] public Guid? ParticipantsGroupId { get; set; }
     private Guid? participantRoute;
     private bool IsParticipants => incomingMode == IncomingCatalogMode.Participants;
@@ -938,6 +925,8 @@
     private bool advancedOpen;
     private bool monitoringOpen;
     private bool openNextAfterDecision = true;
+    [Parameter, SupplyParameterFromQuery(Name="overview")] public string? OverviewSlice { get; set; }
+    private string? appliedOverviewSlice;
     private IncomingCatalogReadFilter? renderedCalculationFilter;
     private readonly Dictionary<Guid, long> calculationSelected = [];
     private bool allCalculationResults;
@@ -970,7 +959,7 @@
         CatalogCalculationResult? result = null;
         bool saved = await ExecuteConfirmedAsync(async () => result = await Calculation.SetAsync(CurrentSubject,
             new(item.Id, item.Version), !item.IncludeInCalculation, Guid.CreateVersion7().ToString(), CancellationToken.None));
-        if (saved && result != null) Success = CalculationResultText(result);
+        if (saved && result != null) Success = result.Ineligible>0?"Объявление не подходит для расчёта медианы.":null;
     }
 
     private async Task PreviewCalculationAsync(bool include)
@@ -1006,8 +995,7 @@
     }
 
     private static string CalculationResultText(CatalogCalculationResult result) =>
-        $"Всего: {result.Total}. Изменено: {result.Changed}. Уже имели нужную отметку: {result.AlreadySet}. Нельзя включить: {result.Ineligible}. "
-        + string.Join("; ", result.Reasons.Select(reason => $"{reason.Key}: {reason.Value}"));
+        $"Изменено: {result.Changed}." + (result.Ineligible>0?$" Не подходят для расчёта: {result.Ineligible}. "+string.Join("; ",result.Reasons.Where(r=>r.Value>0).Select(r=>$"{r.Key}: {r.Value}")):"");
 
     private IncomingCatalogPreset? preset;
     private IncomingCatalogPreset? criteriaPreset;
@@ -1079,7 +1067,7 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (participantRoute != ParticipantsGroupId) await ReloadAsync();
+        if (participantRoute != ParticipantsGroupId || appliedOverviewSlice != OverviewSlice) await ReloadAsync();
     }
 
     private GroupMarketView? groupMarket;
@@ -1093,6 +1081,17 @@
             searchGroupKey = ParticipantsGroupId?.ToString() ?? "";
             incomingMode = ParticipantsGroupId == null ? IncomingCatalogMode.SavedFilters : IncomingCatalogMode.Participants;
         }
+        if(OverviewSlice==null && ParticipantsGroupId!=null) appliedOverviewSlice=null;
+        if(appliedOverviewSlice != OverviewSlice)
+        {
+            if(OverviewSlice!=null && ParticipantsGroupId!=null) throw new ArgumentException("Нельзя одновременно открыть участников и срез обзора.");
+            var entry=OverviewSlice==null ? null : IncomingOverviewSelection.Filter(OverviewSlice);
+            filter.Reset();page=0;searchGroupKey="";selectedSavedPresetId=null;selectedPresetSnapshot=null;
+            preset=entry?.WorkingScope?.Slice;criteriaPreset=null;
+            incomingMode=entry?.WorkingScope?.Mode??IncomingCatalogMode.SavedFilters;
+            filter.AttentionOnly=entry?.Base.AttentionOnly??false;
+            appliedOverviewSlice=OverviewSlice;
+        }
         effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, CancellationToken.None);
         Guid? groupId = Guid.TryParse(searchGroupKey, out Guid parsed) ? parsed : null;
         IncomingCatalogFilter baseFilter = new(filter.Text.Trim(), filter.Source, filter.Disposition, filter.Age,
@@ -1100,7 +1099,7 @@
             filter.AttentionOnly, page * PageSize, PageSize);
         renderedCalculationFilter = new(baseFilter, null, criteriaPreset, sortField, sortDirection, groupId,
             filter.MinPricePerSotka, filter.MaxPricePerSotka, filter.LandTypes.Order().ToArray(),
-            new(incomingMode, selectedSavedPresetId, UseDraft: true, Slice: preset, ArchiveState: archiveState));
+            new(incomingMode, selectedSavedPresetId, UseDraft: true, Slice: preset, ArchiveState: archiveState), filter.IncludedInMedian);
         catalogPage = await IncomingReads.ReadAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
         groupMarket = await Markets.ReadIncomingAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
         string scope = System.Text.Json.JsonSerializer.Serialize(renderedCalculationFilter with { Base = baseFilter with { Offset = 0 } });
@@ -1325,7 +1324,7 @@
 
     private void OpenEditSelectedPreset()
     {
-        OpenSavePreset();
+        OpenSavePreset(); presetDialogOpen=true;
         // Existing controls edit only the draft. Selection and its version survive ordinary changes.
     }
 
@@ -1343,6 +1342,7 @@
         if (created != null)
         {
 
+            presetDialogOpen=false;
             selectedSavedPresetId = created.Id;
             await ReloadSavedPresetsAsync();
             await ApplySavedPresetAsync(created);
@@ -1358,6 +1358,7 @@
             new(selected.Id, selected.Version, presetName, CurrentPresetCriteria() with { SearchGroupId = presetGroupId, AutoIncludeNewInCalculation = presetAutoInclude }), CancellationToken.None));
         if (!committed || updated == null) return;
 
+        presetDialogOpen=false;
         savedPresets = savedPresets.Select(item => item.Id == updated.Id ? updated : item).ToArray();
         await ApplySavedPresetAsync(updated);
     }
@@ -1390,6 +1391,7 @@
         CancelSearchDebounce();
         criteriaPreset = criteria.Preset;
         filter.Source = criteria.Source;
+        filter.IncludedInMedian = criteria.IncludedInMedian;
         filter.Disposition = criteria.Disposition;
         filter.Age = criteria.Age;
         filter.MinPrice = criteria.MinTotalPrice;
@@ -1414,7 +1416,7 @@
         filter.MinPrice, filter.MaxPrice, filter.MinPricePerSotka, filter.MaxPricePerSotka,
         ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki), filter.LandTypes.Order().ToArray(),
         filter.AttentionOnly, sortField, sortDirection, criteriaPreset,
-        Guid.TryParse(searchGroupKey, out Guid groupId) ? groupId : null);
+        Guid.TryParse(searchGroupKey, out Guid groupId) ? groupId : null, IncludedInMedian: filter.IncludedInMedian);
 
     private IncomingFilterPresetView? SelectedSavedPreset() => selectedSavedPresetId == null
         ? null : selectedPresetSnapshot?.Id == selectedSavedPresetId ? selectedPresetSnapshot
@@ -1567,13 +1569,15 @@
 
     private async Task OpenDuplicateCompareAsync(IncomingDuplicateCandidateView candidate)
     {
-        duplicateCompareCandidate = candidate;
+        duplicateCompareCandidate = candidate; evidenceIndex=0;leftComparisonPhoto=null;rightComparisonPhoto=null;
         manualDuplicateTarget = null;
         duplicateCompareError = null;
         try
         {
             duplicateCompareRead = await IncomingReads.ReadDetailAsync(
                 CurrentSubject, candidate.CandidateListingId, CancellationToken.None);
+            SelectPhotoPair(0);
+            leftComparisonPhoto??=LeftComparisonPhotos.FirstOrDefault();rightComparisonPhoto??=RightComparisonPhotos.FirstOrDefault();
         }
         catch (Exception exception)
         {
@@ -1587,7 +1591,7 @@
     {
         duplicateSearchOpen = false;
         duplicateCompareCandidate = null;
-        manualDuplicateTarget = target;
+        manualDuplicateTarget = target;leftComparisonPhoto=null;rightComparisonPhoto=null;
         duplicateCompareError = null;
         try
         {
@@ -1736,18 +1740,21 @@
 
     private async Task OpenTakeAsync(CatalogItemView item)
     {
+        if(Busy)return;
         if(!CanProcessIncoming||!CanManageProcurement)throw new AccessDeniedException();
-        takeItem = item;
-        existingCaseId = null;
-        targets = await Workspace.ReadLinkTargetsAsync(CurrentSubject, CancellationToken.None);
+        TakeToWorkResult? result=null;
+        bool committed=await ExecuteConfirmedAsync(async()=>result=await Workspace.TakeToWorkAsync(CurrentSubject,new(item.Id,null),Guid.CreateVersion7().ToString(),CancellationToken.None));
+        if(committed && result!=null){takenCaseId=result.CaseId;detail=null;detailRead=null;Success="Объект взят в работу";}
     }
 
+    private async Task OpenLinkCaseAsync(CatalogItemView item){if(Busy)return;takeItem=item;existingCaseId=null;targets=await Workspace.ReadLinkTargetsAsync(CurrentSubject,CancellationToken.None);}
     private async Task TakeAsync()
     {
+        if(existingCaseId==null){ShowValidationError("Выберите существующий объект.");return;}
         TakeToWorkResult? result = null;
         await ExecuteAsync(async () => result = await Workspace.TakeToWorkAsync(CurrentSubject,
             new(takeItem!.Id, existingCaseId), Guid.CreateVersion7().ToString(), CancellationToken.None));
-        if (result != null) Navigation.NavigateTo($"/procurement/{result.CaseId}");
+        if (result != null){takenCaseId=result.CaseId;takeItem=null;detail=null;detailRead=null;Success="Источник связан с объектом";}
     }
 
     private async Task ReviewDuplicateAsync(IncomingDuplicateCandidateView candidate, bool confirmed)
@@ -2020,7 +2027,8 @@
         CatalogEventKind.MonitoringStarted => "Поставлено на мониторинг",
         CatalogEventKind.MonitoringTriggered => "Порог мониторинга достигнут",
         CatalogEventKind.Classified => "Принято решение",
-        _ => "PropertyCase возобновлён"
+        CatalogEventKind.CalculationParticipationChanged => "Участие в медиане изменено",
+        _ => "Изменение объявления"
     };
 
     private static string Age(DateTimeOffset value)
@@ -2049,12 +2057,13 @@
         public decimal? MinAreaSotki { get; set; }
         public decimal? MaxAreaSotki { get; set; }
         public HashSet<IncomingLandType> LandTypes { get; } = [];
+        public bool? IncludedInMedian { get; set; }
         public bool AttentionOnly { get; set; }
         public void Reset()
         {
             Text = ""; Source = null; Disposition = CatalogDisposition.Incoming; Age = CatalogAgeRange.Any;
             MinPrice = MaxPrice = MinPricePerSotka = MaxPricePerSotka = MinAreaSotki = MaxAreaSotki = null;
-            LandTypes.Clear(); AttentionOnly = false;
+            LandTypes.Clear(); AttentionOnly = false; IncludedInMedian = null;
         }
     }
 

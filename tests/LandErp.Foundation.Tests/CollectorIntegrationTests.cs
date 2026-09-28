@@ -137,14 +137,17 @@ public sealed class CollectorIntegrationTests
             listing=await db.Listings.AsNoTracking().SingleAsync();
             Assert.AreEqual(1500000m,listing.Price); Assert.AreEqual(1000m,listing.AreaSquareMeters); Assert.AreEqual("Новый адрес",listing.Location);
             Assert.AreEqual("50:15:0012345:678",listing.CadastralNumber);
-            Assert.AreEqual(missing.SourcePublishedAt,listing.SourcePublishedAt);
+            // PostgreSQL stores timestamp values at microsecond precision (10 .NET ticks).
+            Assert.IsNotNull(listing.SourcePublishedAt);
+            Assert.AreEqual(missing.SourcePublishedAt!.Value.Ticks / 10, listing.SourcePublishedAt.Value.Ticks / 10);
             Assert.AreEqual(55.758585m,listing.Latitude); Assert.AreEqual(37.970089m,listing.Longitude);
             CollectionAssert.AreEqual((string[])["Izhs","Lph"],listing.DeclaredLandTypes);
             var contacts=await db.ListingContacts.AsNoTracking().OrderBy(item=>item.Type).ToArrayAsync();
             Assert.AreEqual(2,contacts.Length);
             var phone=contacts.Single(item=>item.Type==LandErp.Application.Modules.Catalog.Domain.CatalogContactType.Phone);
-            Assert.AreEqual("+79991234567",phone.NormalizedValue); Assert.AreEqual(missing.ObservedAt,phone.LastObservedAt);
-            Assert.AreEqual(old.ObservedAt,phone.FirstObservedAt);
+            Assert.AreEqual("+79991234567",phone.NormalizedValue);
+            Assert.AreEqual(missing.ObservedAt.Ticks / 10, phone.LastObservedAt.Ticks / 10);
+            Assert.AreEqual(old.ObservedAt.Ticks / 10, phone.FirstObservedAt.Ticks / 10);
             Assert.IsTrue(phone.IsPrimary);
             Assert.AreEqual("@seller_test",contacts.Single(item=>item.Type==LandErp.Application.Modules.Catalog.Domain.CatalogContactType.Telegram).DisplayValue);
             Assert.AreEqual(2L,listing.DataRevision); Assert.IsTrue(listing.QueueReason.Contains("местоположение",StringComparison.Ordinal));

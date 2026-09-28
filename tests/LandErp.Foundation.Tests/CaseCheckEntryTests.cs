@@ -33,16 +33,17 @@ public sealed class CaseCheckEntryTests
         Assert.AreEqual("Право подтверждено", check.Result);
         Assert.IsNotNull(check.ResultDocumentJson);
         Assert.AreEqual(0, card.RichNotes.Count);
-        await f.Workspace.SaveRichNoteAsync(f.Manager, new(id, CaseNoteSection.QuickChecks, 0, Text("Общие выводы секции")), "c02-section", Ct);
+        await f.Workspace.SaveRichNoteAsync(f.Manager, new(id, CaseNoteSection.QuickChecks, 0, Text("Общие выводы секции"), Guid.CreateVersion7()), "c02-section", Ct);
         Assert.AreEqual(check, (await f.Workspace.ReadCardAsync(f.Manager, id, Ct)).Checks.Single());
 
         var deep = card.CheckTemplates.First(item => item.Active && item.Level == CaseCheckLevel.Deep);
         await Assert.ThrowsExactlyAsync<ArgumentException>(() => f.Workspace.SaveCheckAsync(f.Manager,
             new(id, null, version, null, CaseCheckLevel.Quick, deep.Title, CaseCheckStatus.Planned,
                 null, false, null, null, "", false, deep.Id), "c02-template-depth", Ct));
-        await Assert.ThrowsExactlyAsync<ArgumentException>(() => f.Workspace.SaveCheckAsync(f.Manager,
+        Guid earlyDeep = await f.Workspace.SaveCheckWithIdAsync(f.Manager,
             new(id, null, version, null, CaseCheckLevel.Deep, deep.Title, CaseCheckStatus.Passed,
-                null, false, null, null, "", false, deep.Id, Text("Заключение готово")), "c02-deep-early", Ct));
+                null, false, null, null, "", false, deep.Id, Text("Заключение готово")), "c02-deep-early", Ct);
+        Assert.AreEqual(CaseCheckLevel.Deep, (await f.Workspace.ReadCardAsync(f.Manager, id, Ct)).Checks.Single(x => x.Id == earlyDeep).Level);
         await SetStage(f, id, "approved"); version = (await f.ReadCaseAsync(id)).Version;
         Guid deepId = await f.Workspace.SaveCheckWithIdAsync(f.Manager, new(id, null, version, null, CaseCheckLevel.Deep,
             deep.Title, CaseCheckStatus.Issue, null, false, null, null, "", false, deep.Id, Text("Нужно уточнить границы")), "c02-deep", Ct);

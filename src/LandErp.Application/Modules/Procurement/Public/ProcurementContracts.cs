@@ -17,7 +17,10 @@ public sealed record ProcurementQueuePage(IReadOnlyList<QueueItem> Items, int To
 public sealed record TimelineItem(Guid Id, string Kind, string Title, string Body, string Actor, string? Target,
     DateTimeOffset RecordedAt, DateTimeOffset? EffectiveAt, DateTimeOffset? DueAt)
 {
+    public IReadOnlyList<ProcurementQueueV2Attachment> Attachments { get; init; } = [];
     public NegotiationView? Communication { get; init; }
+    public Guid? TaskId { get; init; }
+    public Guid? CaseId { get; init; }
 }
 public sealed record ObservationView(Guid Id, Guid CatalogItemId, DateTimeOffset ObservedAt, DateTimeOffset RecordedAt, ListingData Data, string[] Changes);
 public sealed record CaseSourceView(Guid CatalogItemId, CatalogSource Source, string? ExternalId, string? Url, string Title,
@@ -25,7 +28,13 @@ public sealed record CaseSourceView(Guid CatalogItemId, CatalogSource Source, st
 public sealed record DecisionTarget(Guid EmployeeId, string Name);
 public sealed record NegotiationView(Guid Id, decimal? SellerPrice, decimal? BuyerOffer, decimal? AgreedPrice, string Currency,
     string Channel, string Contact, string Outcome, string Conditions, string Comment, string NextStep, DateTimeOffset? NextStepDueAt,
-    string Author, DateTimeOffset EffectiveAt, DateTimeOffset RecordedAt);
+    string Author, DateTimeOffset EffectiveAt, DateTimeOffset RecordedAt)
+{
+    public Guid? CaseId { get; init; }
+    public Guid? TaskId { get; init; }
+    public string? TaskTitle { get; init; }
+    public IReadOnlyList<ProcurementQueueV2Attachment> Attachments { get; init; } = [];
+}
 public sealed record CheckView(Guid Id, CaseCheckLevel Level, string Title, CaseCheckStatus Status,
     Guid? ResponsibleEmployeeId, string? Responsible, DateTimeOffset? DueAt, decimal? Cost, string Currency, string Result,
     bool Blocker, long Version, string DescriptionSnapshot, Guid? TemplateItemId, long? TemplateItemVersion)
@@ -69,6 +78,9 @@ public sealed record CaseCard(QueueItem Item, string? Description, string? Selle
     bool CanCorrectSourceLinks)
 {
     public IReadOnlyList<CaseRichNoteView> RichNotes { get; init; } = [];
+    public IReadOnlyList<DecisionTarget> ReassignmentManagers { get; init; } = [];
+    public bool CanReassignManager { get; init; }
+    public string ManagerName { get; init; } = "";
     public bool CanAssignInspections { get; init; }
     public bool CanPerformInspections { get; init; }
 }
@@ -90,7 +102,7 @@ public sealed record SaveCheckTemplate(Guid? Id, long? ExpectedVersion, string T
     string Description, int SortOrder, bool Active);
 public sealed record AddCaseAttachment(Guid CaseId, CaseAttachmentOwner OwnerType, Guid? OwnerId,
     CaseAttachmentKind Kind, string Label, string Description, string OriginalName, string ContentType, byte[]? Content, string? ExternalUrl,
-    Guid? DocumentRequirementId = null);
+    Guid? DocumentRequirementId = null, Guid? UploadId = null);
 public sealed record SaveDocumentRequirement(Guid CaseId, Guid RequirementId, long ExpectedCaseVersion,
     long ExpectedRequirementVersion, CaseDocumentStatus Status, DateTimeOffset? DueAt, string Note);
 public sealed record RetryCaseAttachment(Guid CaseId, Guid AttachmentId, string OriginalName, string ContentType, byte[] Content);
@@ -117,7 +129,12 @@ public sealed record ManualPropertyCaseResult(Guid CaseId, string BusinessNumber
 public sealed record NotificationView(Guid Id, Guid CaseId, string Title, DateTimeOffset RecordedAt, bool Read);
 public interface IProcurementWorkspace
 {
+    Task<IReadOnlyList<SourceChangeNotice>> ReadSourceChangeNoticesAsync(Subject subject, Guid caseId, CancellationToken cancellationToken);
+    Task AcknowledgeSourceChangesAsync(Subject subject, AcknowledgeSourceChanges command, CancellationToken cancellationToken);
+    Task<SourceChangeComparison> ReadSourceChangesAsync(Subject subject, Guid caseId, Guid catalogItemId, CancellationToken cancellationToken);
     Task<ProcurementQueuePage> ReadQueueAsync(Subject subject, QueueFilter filter, CancellationToken cancellationToken);
+    Task DeleteRichNoteAsync(Subject subject, DeleteCaseRichNote command, string correlationId, CancellationToken cancellationToken);
+    Task ReassignManagerAsync(Subject subject, ReassignCaseManager command, string correlationId, CancellationToken cancellationToken);
     Task<CaseRichNoteView> SaveRichNoteAsync(Subject subject, SaveCaseRichNote command, string correlationId, CancellationToken cancellationToken);
     Task<CaseCard> ReadCardAsync(Subject subject, Guid caseId, CancellationToken cancellationToken);
     Task<Guid?> ResolveLegacyListingAsync(Subject subject, Guid listingId, CancellationToken cancellationToken);

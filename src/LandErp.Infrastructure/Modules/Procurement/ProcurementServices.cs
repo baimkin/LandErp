@@ -15,6 +15,7 @@ public static class ProcurementServices
     public static IServiceCollection AddLandErpProcurement(this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
     {
         services.AddLandErpFileStorage(configuration, environment);
+        services.AddScoped<IKanbanWorkspace, KanbanWorkspace>();
         services.AddScoped<ProcurementWorkspace>();
         services.AddScoped<IProcurementWorkspace>(provider => provider.GetRequiredService<ProcurementWorkspace>());
         services.AddScoped<ICatalogWorkspace>(provider => provider.GetRequiredService<ProcurementWorkspace>());

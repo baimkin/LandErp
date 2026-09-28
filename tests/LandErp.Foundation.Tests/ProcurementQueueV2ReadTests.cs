@@ -128,7 +128,9 @@ public sealed class ProcurementQueueV2ReadTests
         Assert.AreEqual(due, detail.DueAt);
         Assert.IsTrue(detail.TaskVersion > before.TaskVersion);
         Assert.IsTrue(detail.CaseVersion > before.CaseVersion);
-        Assert.IsTrue(detail.Timeline.Any(item => item.Kind == "NextActionChanged" && item.DueAt == due));
+        Guid savedTaskId = (await fixture.Workspace.ReadTasksAsync(fixture.Manager, caseId, CancellationToken.None))
+            .Tasks.Single(item => item.Title == "Позвонить собственнику").Id;
+        Assert.IsTrue(detail.Timeline.Any(item => item.Kind == "CaseTaskSave" && item.TaskId == savedTaskId));
 
         ProcurementQueueV2Row row = (await service.ReadPageAsync(fixture.Manager,
             new ProcurementQueueV2Filter(AssigneeId: secondManagerId), CancellationToken.None)).Items.Single();
@@ -138,7 +140,7 @@ public sealed class ProcurementQueueV2ReadTests
         {
             Assert.AreEqual(fixture.ManagerEmployeeId, await db.WorkAssignments.Where(item => item.ObjectId == caseId)
                 .Select(item => item.EmployeeId).SingleAsync(), "Changing the action assignee must not redefine PropertyCase visibility.");
-            Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.ObjectId == caseId && item.Action == "ProcurementNextActionChanged"));
+            Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.ObjectId == caseId && item.Action == "CaseTaskSave"));
         }
 
         await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => fixture.Workspace.SaveNextActionAsync(fixture.Manager,

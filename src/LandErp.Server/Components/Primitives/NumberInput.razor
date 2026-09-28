@@ -1,0 +1,23 @@
+@typeparam TValue
+@using System.Globalization
+@inherits InputBase<TValue>
+<input @attributes="AdditionalAttributes" type="text" inputmode="decimal" data-number-entry="@(Money?"money":"number")" class="@CssClass" value="@(focused?draft:CurrentValueAsString)" @onfocus="()=>{draft=CurrentValueAsString;focused=true;}" @onblur="()=>focused=false" @oninput="Changed" />
+@code {
+    private bool focused;
+    private string? draft;
+    private void Changed(ChangeEventArgs args){draft=args.Value?.ToString();CurrentValueAsString=draft;}
+    [Parameter] public bool Money { get; set; }
+    protected override string? FormatValueAsString(TValue? value)
+    {
+        if(value==null)return "";
+        decimal number=Convert.ToDecimal(value,CultureInfo.InvariantCulture);
+        return Money?NumberFormat.Money(number):number.ToString("#,0.############################",CultureInfo.GetCultureInfo("ru-RU")).Replace('\u00a0',' ');
+    }
+    protected override bool TryParseValueFromString(string? value,out TValue result,[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? validationErrorMessage)
+    {
+        string normalized=NumberFormat.Normalize(value??"");
+        if(normalized.Length==0 && Nullable.GetUnderlyingType(typeof(TValue))!=null){result=default!;validationErrorMessage=null;return true;}
+        if(BindConverter.TryConvertTo<TValue>(normalized,CultureInfo.InvariantCulture,out var parsed)){result=parsed!;validationErrorMessage=null;return true;}
+        result=default!;validationErrorMessage="Введите корректное число.";return false;
+    }
+}

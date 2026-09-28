@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace LandErp.Foundation.Tests;
 
-internal static class ProcurementUiScenario
+internal static partial class ProcurementUiScenario
 {
     internal static async Task RunPhase1Async(PostgresSandbox sandbox, string managerLogin, Guid unlinkedCatalogItemId)
     {
@@ -36,8 +36,9 @@ internal static class ProcurementUiScenario
             await row.ClickAsync();
             ILocator drawer = await StableDrawerAsync(page);
             await drawer.GetByRole(AriaRole.Button, new() { Name = "Взять в работу", Exact = true }).ClickAsync();
-            ILocator take = await StableDialogAsync(page);
-            await take.GetByRole(AriaRole.Button, new() { Name = "Подтвердить", Exact = true }).ClickAsync();
+            await drawer.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+            Assert.IsTrue(new Uri(page.Url).AbsolutePath == "/incoming");
+            await page.GetByRole(AriaRole.Link, new() { Name = "Открыть →", Exact = true }).ClickAsync();
             await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex("/procurement/[0-9a-f-]{36}$"));
             await ReadyAsync(page);
             await page.GetByRole(AriaRole.Heading, new() { Name = "UI Telegram Phase 1", Exact = true }).WaitForAsync();
@@ -300,7 +301,7 @@ internal static class ProcurementUiScenario
     private static async Task WaitForLiveAsync(System.Diagnostics.Process server, IPage page, string origin)
     { for (int attempt = 0; attempt < 50; attempt++) { Assert.IsFalse(server.HasExited, "HTTPS Server exited; private output suppressed."); try { await page.GotoAsync(origin + "/health/live"); return; } catch (PlaywrightException) { await Task.Delay(100); } } Assert.Fail("HTTPS Server did not become live."); }
     private static async Task LoginAsync(IPage page, string origin, string email)
-    { await page.GotoAsync(origin + "/account/login"); await page.GetByLabel("Электронная почта", new() { Exact = true }).FillAsync(email); await page.GetByLabel("Пароль", new() { Exact = true }).FillAsync("Synthetic1!PasswordForTests"); await page.GetByRole(AriaRole.Button, new() { Name = "Войти", Exact = true }).ClickAsync(); await ReadyAsync(page); Assert.AreEqual(origin + "/", page.Url); }
+    { await page.GotoAsync(origin + "/account/login"); await page.GetByLabel("Логин", new() { Exact = true }).FillAsync(email); await page.GetByLabel("Пароль", new() { Exact = true }).FillAsync("Synthetic1!PasswordForTests"); await page.GetByRole(AriaRole.Button, new() { Name = "Войти", Exact = true }).ClickAsync(); await ReadyAsync(page); Assert.AreEqual(origin + "/", page.Url); }
     private static async Task<ILocator> StableDialogAsync(IPage page)
     { ILocator latest = page.Locator("dialog.erp-modal.dialog").Last; await latest.WaitForAsync(); string? heading = await latest.GetAttributeAsync("aria-labelledby"); return page.Locator("dialog[aria-labelledby=\"" + heading + "\"]"); }
     private static async Task<ILocator> StableDrawerAsync(IPage page)

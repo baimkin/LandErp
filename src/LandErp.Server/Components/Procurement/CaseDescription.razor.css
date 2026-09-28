@@ -1,0 +1,5 @@
+.object-description{border-top:1px solid var(--border);padding-top:var(--space-4);margin-top:var(--space-4);min-width:0}
+h3{font-size:var(--text-body);margin:0 0 var(--space-2)}
+p{font-size:var(--text-sm);line-height:1.65;color:var(--text-muted);white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:var(--preview-lines,7);-webkit-box-orient:vertical;overflow:hidden;margin:0}
+p.expanded{display:block}
+button{margin-top:var(--space-2)}

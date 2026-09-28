@@ -1,0 +1,34 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+@using LandErp.Application.Modules.Procurement.Domain
+<section class="decision-state" aria-label="Состояние решения">
+    <strong>@CaseDecisionPresentation.State(Card)</strong>
+    <p class="subtle">@CaseDecisionPresentation.Responsibility(Card)</p>
+    @if (!ShowActions)
+    {
+        @foreach(var reason in CaseDecisionPresentation.Actions(Card).Select(action => CaseDecisionPresentation.Blocked(Card, action)).Where(reason => reason != null).Distinct()) { <p class="subtle">@reason</p> }
+    }
+    @if (ShowActions)
+    {
+        <div class="decision-options">
+        @foreach (var action in CaseDecisionPresentation.Actions(Card))
+        {
+            var reason = CaseDecisionPresentation.Blocked(Card, action);
+            <button type="button" class="btn @(action is ProcurementAction.Forward or ProcurementAction.Approve ? "primary" : "secondary")" disabled="@(Busy || reason != null)" @onclick="() => OnAction.InvokeAsync(action)">@CaseDecisionPresentation.Title(action)</button>
+        }
+        </div>
+        @foreach(var reason in CaseDecisionPresentation.Actions(Card).Select(action => CaseDecisionPresentation.Blocked(Card, action)).Where(reason => reason != null).Distinct()) { <p class="subtle">@reason</p> }
+    }
+    @if (Card.CanHeadDecide && Card.Item.Changed && OnSection.HasDelegate)
+    { <button class="btn quiet" type="button" @onclick='() => OnSection.InvokeAsync("sources")'>Посмотреть источники</button> }
+    @if (Card.Checks.Any(x => x.Blocker && x.Status != CaseCheckStatus.Passed) && OnSection.HasDelegate)
+    { <p class="subtle">В проверках есть блокирующие вопросы. Учтите их при принятии решения.</p><button class="btn quiet" type="button" @onclick='() => OnSection.InvokeAsync("checks")'>Открыть проверки</button> }
+    @if (Card.CanConfirmPurchase && Card.Item.Stage is "monitor" or "rejected")
+    { <p class="subtle">Чтобы оформить покупку, сначала возобновите работу с объектом.</p> }
+</section>
+@code {
+    [Parameter, EditorRequired] public CaseCard Card { get; set; } = default!;
+    [Parameter] public bool ShowActions { get; set; } = true;
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<ProcurementAction> OnAction { get; set; }
+    [Parameter] public EventCallback<string> OnSection { get; set; }
+}

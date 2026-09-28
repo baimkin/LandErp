@@ -70,9 +70,20 @@ public sealed partial class ProcurementQueueV2ReadService
         CaseNegotiation[] negotiations = times.Length == 0 ? [] : await db.CaseNegotiations.AsNoTracking()
             .Where(item => item.OrganizationId == organizationId && item.PropertyCaseId == caseId && times.Contains(item.RecordedAt))
             .ToArrayAsync(cancellationToken);
+        var files = await AttachmentRows(db, organizationId, caseId).ToArrayAsync(cancellationToken);
+        var attachmentLinks=await db.CaseAttachments.AsNoTracking().Where(a=>a.OrganizationId==organizationId && a.PropertyCaseId==caseId).ToArrayAsync(cancellationToken);
+        var tasks = await db.WorkTasks.AsNoTracking().Where(t=>t.OrganizationId==organizationId && t.ObjectType=="PropertyCase" && t.ObjectId==caseId && t.SourceNegotiationId!=null && !t.Deleted).ToArrayAsync(cancellationToken);
+        NegotiationView? Communication(BusinessTimelineEntry entry)
+        {
+            var n=CaseTimelineCommunication.Find(entry,negotiations,id=>actors.GetValueOrDefault(id,"Сотрудник"));
+            if(n==null)return null;
+            var task=tasks.FirstOrDefault(t=>t.SourceNegotiationId==n.Id);
+            return n with {CaseId=caseId,TaskId=task?.Id,TaskTitle=task?.Title,Attachments=files.Where(f=>f.NegotiationId==n.Id).Select(ProjectAttachment).ToArray()};
+        }
+        var timelineFileIds=entries.ToDictionary(e=>e.Id,e=>CaseTimelineAttachment.Find(e,attachmentLinks));
         return entries.Select(item => new ProcurementTimelineSummary(item.Id, item.Kind, item.Title, item.Body,
             actors.GetValueOrDefault(item.ActorEmployeeId, "Сотрудник"), item.RecordedAt, item.EffectiveAt, item.DueAt)
-            { Communication = CaseTimelineCommunication.Find(item, negotiations, id => actors.GetValueOrDefault(id, "Сотрудник")) }).ToArray();
+            { Communication = Communication(item), CaseId=caseId, TaskId=item.TaskId, Attachments=files.Where(f=>f.Id==timelineFileIds[item.Id]).Select(ProjectAttachment).ToArray() }).ToArray();
     }
 
     private static ProcurementQuickCheckSummary QuickSummary(CheckDb[] rows)

@@ -1,0 +1,56 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+@using LandErp.Application.Modules.Procurement.Domain
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+<div class="board-info"><span>Объектов: @Board.Total @if(Board.HiddenCount>0){<text> · в скрытых стадиях: @Board.HiddenCount</text>}</span><span>Перетащите карточку для смены этапа</span></div>
+<p class="drag-feedback" role="status" @ref="dragFeedback" hidden></p>
+@if(Board.Columns.All(c=>c.Stage.IsHiddenOnBoard)){<p>Все стадии скрыты настройками воронки. Объекты доступны в списке</p>}
+<div class="kanban-board" @ref="boardElement" data-busy="@(Busy ? "true" : "false")" aria-label="Доска закупки">
+<div class="board-track">
+@foreach(var column in Board.Columns.Where(c=>!c.Stage.IsHiddenOnBoard))
+{
+    <section @key="column.Stage.Id" class="kanban-column" data-stage-id="@column.Stage.Id" style="--column-color:var(--@column.Stage.ColorKey)">
+        <header class="column-head"><h2 title="@column.Stage.Description"><span>@column.Stage.Name</span><span class="count">@column.Total</span></h2><small>@if(column.Stage.Kind!=KanbanStageKind.Working){<span>@(column.Stage.Kind==KanbanStageKind.PositiveFinal?"Положительная конечная":"Отрицательная конечная") · </span>}@foreach(var sum in column.KnownPriceTotals){<span>@NumberFormat.Money(sum.Value) @(sum.Key=="RUB"?"₽":sum.Key) </span>}@if(column.WithoutPrice>0){<span> · без цены: @column.WithoutPrice</span>}</small></header>
+        <div class="cards">@foreach(var card in column.Cards){<KanbanCard @key="card.Membership.Id" Card="card" Now="Board.ServerNow" Busy="Busy" Open="Open" OpenTask="OpenTask" />}
+        @if(column.Total==0){<div class="empty">Пока нет объектов</div>}
+        @if(column.NextCursor!=null){<button type="button" class="btn" disabled="Busy" @onclick="()=>More.InvokeAsync(column)">Ещё @(Math.Max(0,column.Total-column.Cards.Count))</button>}</div>
+    </section>
+}
+</div>
+</div>
+@code{
+    [Parameter,EditorRequired] public KanbanBoardView Board{get;set;}=default!;
+    [Parameter] public bool Busy{get;set;}
+    [Parameter] public EventCallback<Guid> Open{get;set;}
+    [Parameter] public EventCallback<(Guid CaseId,Guid TaskId)> OpenTask{get;set;}
+    [Parameter] public EventCallback<(KanbanCardView Card,Guid Stage)> Move{get;set;}
+    [Parameter] public EventCallback<KanbanColumn> More{get;set;}
+    private ElementReference boardElement;
+    private ElementReference dragFeedback;
+    private DotNetObjectReference<KanbanBoard>? callback;
+    private bool dropPending;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if(!firstRender)return;
+        callback=DotNetObjectReference.Create(this);
+        await Js.InvokeVoidAsync("LandErpKanban.attach",boardElement,callback,dragFeedback);
+    }
+    [JSInvokable]
+    public async Task DropCard(string membershipId,string stageId)
+    {
+        if(Busy||dropPending||!Guid.TryParse(membershipId,out var member)||!Guid.TryParse(stageId,out var stage))return;
+        // The DOM carries identifiers only. Resolve the current authorized DTO before invoking
+        // the shared command, which rechecks permissions and versions on the server.
+        var card=Board.Columns.SelectMany(c=>c.Cards).SingleOrDefault(c=>c.Membership.Id==member);
+        if(card?.CanMove!=true||card.Membership.StageId==stage||!Board.Columns.Any(c=>c.Stage.Id==stage&&!c.Stage.IsHiddenOnBoard))return;
+        dropPending=true;
+        try{await Move.InvokeAsync((card,stage));}finally{dropPending=false;}
+    }
+    public async ValueTask DisposeAsync()
+    {
+        if(callback==null)return;
+        try{await Js.InvokeVoidAsync("LandErpKanban.detach",boardElement);}catch(JSDisconnectedException){}catch(TaskCanceledException){}
+        callback?.Dispose();
+    }
+}

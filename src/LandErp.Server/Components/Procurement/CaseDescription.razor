@@ -1,0 +1,25 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+<div class="object-description">
+    @if(Title.Length>0){<h3>@Title</h3>}
+    <p @ref="textElement" style="@($"--preview-lines:{Lines}")" class="@(expanded?"expanded":"")">@(string.IsNullOrWhiteSpace(Text)?EmptyText:Text)</p>
+    @if(truncated){<button type="button" class="btn quiet" aria-expanded="@expanded" @onclick="()=>expanded=!expanded">@(expanded?"Свернуть ↑":"Показать полностью ↓")</button>}
+</div>
+@code{
+    [Parameter] public string? Text{get;set;}
+    [Parameter] public string Title{get;set;}="Описание";
+    [Parameter] public string EmptyText{get;set;}="Описание пока не добавлено.";
+    [Parameter] public int Lines{get;set;}=7;
+    private ElementReference textElement;
+    private bool expanded,truncated;
+    private string? observedText;
+    private IJSObjectReference? module,observer;
+    private DotNetObjectReference<CaseDescription>? self;
+    protected override async Task OnAfterRenderAsync(bool firstRender){
+        if(firstRender){module=await JS.InvokeAsync<IJSObjectReference>("import","./js/description-overflow.js");self=DotNetObjectReference.Create(this);observer=await module.InvokeAsync<IJSObjectReference>("observe",textElement,self,Lines);}
+        if(observedText!=Text && observer!=null){observedText=Text;await observer.InvokeVoidAsync("measure");}
+    }
+    [JSInvokable] public Task SetOverflow(bool value){if(truncated==value)return Task.CompletedTask;truncated=value;if(!value)expanded=false;return InvokeAsync(StateHasChanged);}
+    public async ValueTask DisposeAsync(){try{if(observer!=null){await observer.InvokeVoidAsync("dispose");await observer.DisposeAsync();}if(module!=null)await module.DisposeAsync();}catch(JSDisconnectedException){}self?.Dispose();}
+}

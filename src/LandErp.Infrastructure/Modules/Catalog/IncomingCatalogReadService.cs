@@ -227,13 +227,21 @@ public sealed class IncomingCatalogReadService(
                                    {
                                        duplicate.Id, duplicate.Version, duplicate.CandidateListingId, candidate.Source,
                                        candidate.Title, candidate.Location, candidate.Price, candidate.AreaSquareMeters,
-                                       candidate.CadastralNumber, candidate.Url, duplicate.ReasonsJson, duplicate.RecordedAt,
+                                       candidate.CadastralNumber, candidate.Url, duplicate.ReasonsJson, duplicate.PhotoEvidenceJson, duplicate.RecordedAt,
                                        duplicate.Score
                                    }).ToArrayAsync(cancellationToken);
         IncomingDuplicateCandidateView[] duplicateCandidates = duplicateRows.Select(value =>
             new IncomingDuplicateCandidateView(value.Id, value.Version, value.CandidateListingId, value.Source,
                 value.Title ?? "Название неизвестно", value.Location, value.Price, value.AreaSquareMeters,
-                value.CadastralNumber, value.Url, DuplicateReasons(value.ReasonsJson), value.RecordedAt, value.Score)).ToArray();
+                value.CadastralNumber, value.Url, DuplicateReasons(value.ReasonsJson), value.RecordedAt, value.Score) { PhotoEvidence = JsonSerializer.Deserialize<DuplicatePhotoEvidence[]>(value.PhotoEvidenceJson) ?? [] }).ToArray();
+
+        for(int index=0;index<duplicateCandidates.Length;index++)
+        {
+            var candidate=duplicateCandidates[index];
+            if(candidate.PhotoEvidence.Count>0)continue;
+            var other=await db.Listings.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==candidate.CandidateListingId && x.OrganizationId==context.OrganizationId,cancellationToken);
+            if(other!=null)duplicateCandidates[index]=candidate with { PhotoEvidence=await IncomingDuplicateDetector.RebuildPhotoEvidenceAsync(db,item,other,cancellationToken) };
+        }
 
         IncomingListingContactView[] contacts = await db.ListingContacts.AsNoTracking()
             .Where(value => value.OrganizationId == context.OrganizationId && value.ListingId == catalogItemId)

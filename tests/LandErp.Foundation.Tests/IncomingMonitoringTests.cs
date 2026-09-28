@@ -524,8 +524,11 @@ public sealed class IncomingMonitoringTests
         Assert.AreEqual(1, duplicatePage.Total);
         IncomingCatalogDetailRead detail = await reads.ReadDetailAsync(fixture.Manager, secondId, CancellationToken.None);
         Assert.IsTrue(detail.DuplicateCandidates!.Single().Reasons.Any(reason =>
-            reason.Contains("2 фотографии", StringComparison.Ordinal)));
+            reason.Contains("2 пары", StringComparison.Ordinal)));
 
+        Assert.AreEqual(2,detail.DuplicateCandidates!.Single().PhotoEvidence.Count);
+        Assert.IsTrue(detail.DuplicateCandidates!.Single().PhotoEvidence.All(p=>!p.Exact));
+        Assert.IsTrue(detail.DuplicateCandidates!.Single().PhotoEvidence.All(p=>p.LeftUrl.Contains(secondId.ToString(),StringComparison.Ordinal)));
         DuplicateDetectionSettingsView current = await settings.ReadAsync(fixture.Owner, CancellationToken.None);
         await settings.SaveAsync(fixture.Owner,
             new(current.CandidateThreshold, current.DescriptionSimilarityPercent, current.AreaTolerancePercent,
@@ -571,7 +574,10 @@ public sealed class IncomingMonitoringTests
         ProcurementTests.Phase1Fixture fixture, Guid listingId, int index, long hash)
     {
         await using LandErpDbContext db = await fixture.Factory.CreateDbContextAsync();
-        Listing listing = await db.Listings.AsNoTracking().SingleAsync(item => item.Id == listingId);
+        Listing listing = await db.Listings.SingleAsync(item => item.Id == listingId);
+        string url=$"https://example.invalid/{listingId}/{index}.png";
+        string[] photos=System.Text.Json.JsonSerializer.Deserialize<string[]>(listing.PhotosJson)??[];
+        listing.PhotosJson=System.Text.Json.JsonSerializer.Serialize(photos.Append(url));
         db.CatalogPhotoFingerprints.Add(new()
         {
             Id = Guid.CreateVersion7(),
@@ -579,7 +585,7 @@ public sealed class IncomingMonitoringTests
             ListingId = listingId,
             PhotoIndex = index,
             UrlHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                System.Text.Encoding.UTF8.GetBytes($"{listingId}:{index}"))),
+                System.Text.Encoding.UTF8.GetBytes(url))),
             PerceptualHash = hash,
             Status = PhotoFingerprintStatus.Ready,
             SourceDataRevision = listing.DataRevision,

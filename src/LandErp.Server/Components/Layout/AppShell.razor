@@ -3,6 +3,7 @@
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider Authentication
 @inject IEmployeeAccessService AccessV1
+@inject LandErp.Application.Modules.Procurement.Contracts.IKanbanWorkspace Kanban
 @inject IAccessControl LegacyAccess
 <div class="app-shell" data-sidebar="@(sidebarCollapsed ? "compact" : "expanded")" data-density="@(compact ? "compact" : "comfortable")" data-interactive-ready="@(interactiveReady ? "true" : "false")" inert="@(!interactiveReady)">
     <aside id="app-navigation" class="sidebar @(menuOpen ? "open" : "")" aria-label="Навигация LandErp" @onkeydown="HandleMenuKey">
@@ -30,6 +31,7 @@
             }
             <span class="nav-item nav-item-disabled" aria-disabled="true" title="Раздел ещё не подключён"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V3h8v4 M3 12h18 M10 12v3h4v-3"/></svg></span><span class="nav-caption">Проекты и финансы</span></span>
 
+            @if(canConfigureKanban){<p class="nav-label">Справочники</p><NavLink class="nav-item" href="/directories/kanban" title="Канбан"><span class="nav-icon" aria-hidden="true">▥</span><span class="nav-caption">Канбан</span></NavLink>}
             <p class="nav-label">Система</p>
             @if (NavigationAccess.Collection) { <NavLink class="nav-item" href="/collectors" @onclick="() => menuOpen = false" title="Поиски и парсинг" aria-label="Поиски и парсинг"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6 M7 10h6 M10 7v6"/></svg></span><span class="nav-caption">Поиски и парсинг</span></NavLink> }
             <AuthorizeView Policy="users.read"><NavLink class="nav-item" href="/organization" @onclick="() => menuOpen = false" title="Организация" aria-label="Организация"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5 M5 17v-5h14v5"/></svg></span><span class="nav-caption">Организация</span></NavLink></AuthorizeView>
@@ -71,6 +73,7 @@
 </div>
 
 @code {
+    private bool canConfigureKanban;
     private bool compact;
     private bool sidebarCollapsed;
     private bool menuOpen;
@@ -89,6 +92,7 @@
                 Subject subject = PermissionAuthorization.SubjectFrom(state.User);
                 effectiveAccess = await AccessV1.ResolveAsync(subject, CancellationToken.None);
                 navigationAccess = AccessV1Ui.Navigation(effectiveAccess);
+                try { canConfigureKanban = (await Kanban.ReadConfigurationAsync(subject, CancellationToken.None)).CanConfigureKanban; } catch (AccessDeniedException) { canConfigureKanban = false; }
                 if (navigationAccess.Audit && effectiveAccess.IsSystemOwner)
                 {
                     try

@@ -1,12 +1,16 @@
 @using LandErp.Application.Modules.Procurement.Contracts
 <Modal Title="@Title" OnClose="OnClose"><p class="subtle">@Card.Item.BusinessNumber · @Card.Item.Title</p>
+<CaseDecisionState Card="Card" ShowActions="false" />
+@if(CaseDecisionPresentation.Blocked(Card,Action) is {} blocked){<p role="status">@blocked</p>}
+@if(Action==ProcurementAction.Approve){<p class="subtle">Это разрешение продолжить переговоры и проверки. Покупка оформляется отдельно.</p>}
+@if(Error!=null){<p class="subtle">Проверьте актуальное состояние перед повтором. Введённый текст сохраняется.</p><button class="btn secondary" type="button" disabled="@Busy" @onclick="OnRefresh">Обновить состояние решения</button>}
 <EditForm Model="draft" FormName="decision" OnValidSubmit="() => OnConfirm.InvokeAsync(draft)"><DataAnnotationsValidator /><ValidationSummary />
     <label class="field"><span>Причина / результат анализа</span><textarea @bind="draft.Reason" @bind:event="oninput" maxlength="4000"></textarea></label>
     @if(Action is ProcurementAction.Return or ProcurementAction.Clarify) { <label class="field"><span>Что исправить или уточнить</span><textarea @bind="draft.Clarification" @bind:event="oninput" maxlength="4000"></textarea></label> }
     @if(Action is ProcurementAction.Forward or ProcurementAction.Return) { <label class="field"><span>@(Action==ProcurementAction.Forward ? "Руководитель закупки" : "Кому вернуть")</span><InputSelect aria-label="@(Action==ProcurementAction.Forward ? "Руководитель закупки" : "Кому вернуть")" @bind-Value="draft.Target"><option value="">Выберите сотрудника</option>@foreach(DecisionTarget target in Action==ProcurementAction.Forward ? Card.Heads : Card.Managers) { <option value="@target.EmployeeId">@target.Name</option> }</InputSelect></label> }
-    <label class="field"><span>Срок (МСК), при необходимости</span><input type="datetime-local" value="@draft.Due" @oninput="e => draft.Due=e.Value?.ToString()??string.Empty" /></label>
+    <label class="field"><span>Срок (МСК), при необходимости</span><LocalDateTimeInput @bind-Value="draft.Due" /></label>
     @if(Error!=null) { <PageState Kind="error" Title="@Error" /> }
-    <div class="form-actions"><ActionButton Label="Отмена" Tone="secondary" OnClick="OnClose" /><ActionButton Label="Подтвердить решение" Type="submit" Busy="Busy" Disabled="@(string.IsNullOrWhiteSpace(draft.Reason) || (Action is ProcurementAction.Forward or ProcurementAction.Return) && draft.Target==null)" /></div>
+    <div class="form-actions"><ActionButton Label="Отмена" Tone="secondary" OnClick="OnClose" /><ActionButton Label="@CaseDecisionPresentation.Title(Action)" Type="submit" Busy="Busy" Disabled="@(NeedsRefresh || CaseDecisionPresentation.Blocked(Card,Action)!=null || string.IsNullOrWhiteSpace(draft.Reason) || (Action is ProcurementAction.Forward or ProcurementAction.Return) && draft.Target==null)" /></div>
 </EditForm></Modal>
 @code {
     [Parameter,EditorRequired] public CaseCard Card { get; set; }=default!;
@@ -16,6 +20,8 @@
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public bool Busy { get; set; }
     [Parameter] public string? Error { get; set; }
+    [Parameter] public bool NeedsRefresh { get; set; }
+    [Parameter] public EventCallback OnRefresh { get; set; }
     private DecisionDraft draft=new(); private bool initialized;
     protected override void OnParametersSet() { if(!initialized) { initialized=true; draft=new() { Target=Action==ProcurementAction.Return ? Card.ManagerEmployeeId : null }; } }
 }

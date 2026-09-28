@@ -7,6 +7,9 @@ namespace LandErp.Server.Components.Procurement;
 public sealed record CaseFeedRow(Guid Id, DateTimeOffset Date, string DateLabel, string DateHint,
     string Text, IReadOnlyList<string> Details, string Type, string Author, string FullAuthor)
 {
+    public Guid? CaseId { get; init; }
+    public Guid? TaskId { get; init; }
+    public string? TaskTitle { get; init; }
     public IReadOnlyList<ProcurementQueueV2Attachment> Attachments { get; init; } = [];
 }
 
@@ -27,20 +30,21 @@ public static class CaseFeedFormat
         Add(details,main,value.NextStep,"Следующий шаг: ");
         if (value.NextStepDueAt != null) details.Add("Срок следующего шага: " + ProcurementLabels.Time(value.NextStepDueAt));
         return Row(value.Id,value.EffectiveAt,value.RecordedAt,main,details,Channel(value.Channel),value.Author,
-            string.IsNullOrWhiteSpace(value.Contact) ? null : "Собеседник: " + value.Contact);
+            string.IsNullOrWhiteSpace(value.Contact) ? null : "Собеседник: " + value.Contact)
+            with { Attachments=value.Attachments, CaseId=value.CaseId, TaskId=value.TaskId, TaskTitle=value.TaskTitle };
     }
 
     public static CaseFeedRow From(ProcurementNegotiationHistoryItem value) => From(new NegotiationView(value.Id,
         value.SellerPrice,value.BuyerOffer,value.AgreedPrice,value.Currency,value.Channel,value.Contact,value.Outcome,
         value.Conditions,value.Comment,value.NextStep,value.NextStepDueAt,value.Author,value.EffectiveAt,value.RecordedAt))
-        with { Attachments = value.Attachments };
+        with { Attachments = value.Attachments, CaseId=value.CaseId, TaskId=value.TaskId, TaskTitle=value.TaskTitle };
 
     public static CaseFeedRow From(ProcurementQueueV2Negotiation value) => From(value.Communication ?? new NegotiationView(
         value.Id,value.SellerPrice,value.BuyerOffer,value.AgreedPrice,value.Currency,value.Channel,"",value.Outcome,"",value.Comment,
         "",null,"",value.EffectiveAt,value.EffectiveAt));
 
     public static CaseFeedRow From(ProcurementTimelineSummary value) => From(new TimelineItem(value.Id,value.Kind,value.Title,
-        value.Body,value.Actor,null,value.RecordedAt,value.EffectiveAt,value.DueAt) { Communication=value.Communication });
+        value.Body,value.Actor,null,value.RecordedAt,value.EffectiveAt,value.DueAt) { Communication=value.Communication, CaseId=value.CaseId, TaskId=value.TaskId, Attachments=value.Attachments });
 
     public static CaseFeedRow From(TimelineItem value)
     {
@@ -70,10 +74,26 @@ public static class CaseFeedFormat
             if (!value.Body.Split('\n').Any(x=>x==value.Title || x=="Результат: "+value.Title))
                 Add(details,main,value.Title,"");
         }
-        else if (!plain) Add(details,main,value.Body,"");
+        else if (!plain && value.Attachments.Count==0) Add(details,main,value.Body,"");
+        if(value.Kind=="Attachment" && value.Attachments.Count==0)details.Add("Ссылка на файл не определена. Проверьте вложения объекта.");
         if (value.Target != null) details.Add("Исполнитель: " + value.Target);
         if (value.DueAt != null) details.Add("Срок: " + ProcurementLabels.Time(value.DueAt));
-        return Row(value.Id,value.EffectiveAt??value.RecordedAt,value.RecordedAt,main,details,type,value.Actor);
+        return Row(value.Id,value.EffectiveAt??value.RecordedAt,value.RecordedAt,main,details,type,value.Actor) with { CaseId=value.CaseId, TaskId=value.TaskId, TaskTitle="Открыть задачу", Attachments=value.Attachments };
+    }
+
+    public static CaseFeedRow From(LandErp.Application.Modules.Catalog.Contracts.CatalogEventView value, string title)
+    {
+        List<string> details=[];
+        if(value.PreviousObservedPrice is decimal before && value.ObservedPrice is decimal after && before!=after)
+        {
+            string changes="Изменения:\nЦена: "+Primitives.NumberFormat.Money(before)+" ₽ → "+Primitives.NumberFormat.Money(after)+" ₽";
+            if(value.PreviousObservedPricePerSotka is decimal oldUnit && value.ObservedPricePerSotka is decimal newUnit && oldUnit!=newUnit)
+                changes+="\nЦена за сотку: "+Primitives.NumberFormat.Money(oldUnit)+" ₽ → "+Primitives.NumberFormat.Money(newUnit)+" ₽";
+            details.Add(changes);
+        }
+        Add(details,title,value.Message,"");
+        // The catalog event contract has no author; do not infer one from the current viewer.
+        return Row(value.Id,value.RecordedAt,value.RecordedAt,title,details,"Объявление","");
     }
 
     public static string ShortAuthor(string value)
@@ -95,7 +115,7 @@ public static class CaseFeedFormat
             && !target.Any(x=>x==value || x==prefix+value)) target.Add(prefix+value);
     }
     private static string? Price(string label,decimal? value,string currency) => value==null?null
-        : label+": "+value.Value.ToString(value==decimal.Truncate(value.Value)?"N0":"N2",Russian)+" "+(currency=="RUB"?"₽":currency);
+        : label+": "+LandErp.Server.Components.Primitives.NumberFormat.Money(value.Value)+" "+(currency=="RUB"?"₽":currency);
     private static string Channel(string value) => value switch {
         "Телефон" or "Звонок" => "Звонок", "Сообщение" or "Мессенджер" => "Переписка",
         "" => "Общение", _ => value };

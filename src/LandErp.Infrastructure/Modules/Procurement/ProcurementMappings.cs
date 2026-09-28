@@ -16,7 +16,9 @@ internal static class ProcurementMappings
             .HasComment("Независимая секция: рабочие заметки, базовые или глубокие проверки; не результат структурированной проверки.");
         builder.Entity<CaseRichNote>().Property(item => item.DocumentJson).HasColumnType("jsonb")
             .HasComment("Очищенный сервером JSON документа C-01; изображения только по проверенным ID CaseAttachment, без HTML и base64.");
-        builder.Entity<CaseRichNote>().HasIndex(item => new { item.PropertyCaseId, item.Section }).IsUnique();
+        builder.Entity<CaseRichNote>().Property(item => item.Deleted).HasComment("Заметка удалена из списка; текст и ссылки на файлы сохраняются для истории.");
+        builder.Entity<CaseRichNote>().HasIndex(item => new { item.PropertyCaseId, item.Section }).IsUnique()
+            .HasFilter("section = 'Working' AND NOT deleted");
         builder.Entity<CaseRichNote>().HasOne<PropertyCase>().WithMany().HasForeignKey(item => item.PropertyCaseId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<CaseRichNote>().HasOne<Employee>().WithMany().HasForeignKey(item => item.UpdatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.HasSequence<long>("property_case_numbers", "procurement").StartsAt(1);
@@ -38,6 +40,9 @@ internal static class ProcurementMappings
         builder.Entity<WorkTask>().Property(item => item.Type).HasConversion<string>().HasMaxLength(64);
         builder.Entity<WorkTask>().Property(item => item.Title).HasMaxLength(512);
         builder.Entity<WorkTask>().Property(item => item.Description).HasMaxLength(4000);
+        builder.Entity<WorkTask>().Property(item => item.ResultDocumentJson).HasColumnType("jsonb");
+        builder.Entity<WorkTask>().HasOne<Employee>().WithMany().HasForeignKey(item => item.CompletedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<WorkTask>().HasOne<CaseNegotiation>().WithMany().HasForeignKey(item => item.SourceNegotiationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<WorkTask>().HasIndex(item => new { item.EmployeeId, item.Completed, item.DueAt });
         builder.Entity<WorkTask>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<WorkflowTransition>().ToTable("transitions", "workflow");

@@ -1,0 +1,20 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+@inherits CaseWorkspaceComponent
+@inject IProcurementWorkspace Workspace
+@if(Error!=null){<div role="alert">Не удалось проверить изменения источников. <button class="btn quiet" @onclick="Refresh">Обновить</button></div>}
+@foreach(var notice in notices)
+{
+    <button type="button" class="source-change-notice" @onclick="()=>openSource=notice.CatalogItemId">
+        <strong>Есть изменения в источнике · @ProcurementLabels.Source(notice.Source)</strong>
+        <span>@notice.Title</span><span>Посмотреть изменения →</span>
+    </button>
+}
+@if(openSource is {} source){<CaseSourceChanges @key="source" CaseId="CaseId" CatalogItemId="source" OnClose="Close" OnViewed="Refresh" />}
+@code {
+    [Parameter] public Guid CaseId {get;set;}
+    private IReadOnlyList<SourceChangeNotice> notices=[];
+    private Guid? openSource;
+    protected override async Task ReadAsync()=>notices=await Workspace.ReadSourceChangeNoticesAsync(CurrentSubject,CaseId,CancellationToken.None);
+    public async Task Refresh(){await ReloadAsync();await InvokeAsync(StateHasChanged);}
+    private async Task Close(){openSource=null;await Refresh();}
+}

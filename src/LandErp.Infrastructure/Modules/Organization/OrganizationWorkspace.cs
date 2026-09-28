@@ -515,14 +515,17 @@ public sealed class OrganizationWorkspace(
     }
 
     private sealed record CaseWorkImpact(PropertyCase Case, Guid CaseAssigneeEmployeeId,
-        bool Manager, bool Assignment, bool OpenTask, int OpenChecks, bool PendingApproval);
+        bool Manager, bool Assignment, int OpenTasks, int OpenChecks, bool PendingApproval)
+    {
+        public bool OpenTask => OpenTasks > 0;
+    }
 
     private sealed record EmployeeWorkState(Employee Source, CaseWorkImpact[] Cases,
         SiteInspection[] Inspections, EmployeeHandoverCandidate[] Candidates)
     {
         public EmployeeWorkImpact View => new(Source.Id, Source.DisplayName, Cases.Length,
             Cases.Count(item => item.Manager), Cases.Count(item => item.Assignment),
-            Cases.Count(item => item.OpenTask), Cases.Sum(item => item.OpenChecks),
+            Cases.Sum(item => item.OpenTasks), Cases.Sum(item => item.OpenChecks),
             Inspections.Length, Cases.Count(item => item.PendingApproval), Candidates);
     }
 
@@ -533,17 +536,24 @@ public sealed class OrganizationWorkspace(
             item => item.Id == employeeId && item.OrganizationId == organizationId, cancellationToken)
             ?? throw new AccessDeniedException();
 
+        // Include independent user tasks as well as a still-open workflow anchor.
+        // Task-only responsibility must survive even when the case is already closed.
+        var taskCounts = await db.WorkTasks.AsNoTracking()
+            .Where(item => item.OrganizationId == organizationId && item.ObjectType == "PropertyCase"
+                && item.EmployeeId == employeeId && !item.Completed && !item.Deleted)
+            .GroupBy(item => item.ObjectId)
+            .Select(group => new { CaseId = group.Key, Count = group.Count() }).ToArrayAsync(cancellationToken);
+        var openTasks = taskCounts.ToDictionary(item => item.CaseId, item => item.Count);
+        Guid[] taskCaseIds = openTasks.Keys.ToArray();
         var caseRows = await (from propertyCase in db.PropertyCases.AsNoTracking()
                               join assignment in db.WorkAssignments.AsNoTracking() on propertyCase.AssignmentId equals assignment.Id
-                              join task in db.WorkTasks.AsNoTracking() on propertyCase.WorkTaskId equals task.Id
                               where propertyCase.OrganizationId == organizationId
-                                  && propertyCase.StageId != "acquired" && propertyCase.StageId != "rejected"
+                                  && ((propertyCase.StageId != "acquired" && propertyCase.StageId != "rejected")
+                                      || taskCaseIds.Contains(propertyCase.Id))
                               select new
                               {
                                   Case = propertyCase,
-                                  AssigneeEmployeeId = assignment.EmployeeId,
-                                  TaskEmployeeId = task.EmployeeId,
-                                  task.Completed
+                                  AssigneeEmployeeId = assignment.EmployeeId
                               }).ToArrayAsync(cancellationToken);
 
         var openCheckRows = await db.CaseChecks.AsNoTracking()
@@ -556,11 +566,12 @@ public sealed class OrganizationWorkspace(
 
         CaseWorkImpact[] impacts = caseRows.Select(row =>
         {
-            int checks = openChecks.GetValueOrDefault(row.Case.Id);
-            bool assignment = row.AssigneeEmployeeId == employeeId;
+            bool activeCase = row.Case.StageId is not ("acquired" or "rejected");
+            int checks = activeCase ? openChecks.GetValueOrDefault(row.Case.Id) : 0;
+            bool assignment = activeCase && row.AssigneeEmployeeId == employeeId;
             return new CaseWorkImpact(row.Case, row.AssigneeEmployeeId,
-                row.Case.ManagerEmployeeId == employeeId, assignment,
-                row.TaskEmployeeId == employeeId && !row.Completed, checks,
+                activeCase && row.Case.ManagerEmployeeId == employeeId, assignment,
+                openTasks.GetValueOrDefault(row.Case.Id), checks,
                 row.Case.PendingApprovalId != null && assignment);
         }).Where(item => item.Manager || item.Assignment || item.OpenTask || item.OpenChecks > 0 || item.PendingApproval)
           .ToArray();
@@ -617,23 +628,24 @@ public sealed class OrganizationWorkspace(
         Guid[] caseIds = state.Cases.Select(item => item.Case.Id).ToArray();
         PropertyCase[] cases = await db.PropertyCases.Where(item => caseIds.Contains(item.Id)).ToArrayAsync(cancellationToken);
         Guid[] assignmentIds = cases.Select(item => item.AssignmentId).ToArray();
-        Guid[] taskIds = cases.Select(item => item.WorkTaskId).ToArray();
         Assignment[] assignments = await db.WorkAssignments.Where(item => assignmentIds.Contains(item.Id)).ToArrayAsync(cancellationToken);
-        WorkTask[] tasks = await db.WorkTasks.Where(item => taskIds.Contains(item.Id)).ToArrayAsync(cancellationToken);
-        CaseCheck[] checks = await db.CaseChecks.Where(item => caseIds.Contains(item.PropertyCaseId)
+        WorkTask[] tasks = await db.WorkTasks.Where(item => item.OrganizationId == context.OrganizationId
+            && item.ObjectType == "PropertyCase" && caseIds.Contains(item.ObjectId)
+            && item.EmployeeId == state.Source.Id && !item.Completed && !item.Deleted)
+            .ToArrayAsync(cancellationToken);
+        Guid[] checkCaseIds = state.Cases.Where(item => item.OpenChecks > 0).Select(item => item.Case.Id).ToArray();
+        CaseCheck[] checks = await db.CaseChecks.Where(item => checkCaseIds.Contains(item.PropertyCaseId)
                 && item.ResponsibleEmployeeId == state.Source.Id
                 && item.Status != CaseCheckStatus.Passed && item.Status != CaseCheckStatus.Issue)
             .ToArrayAsync(cancellationToken);
         Dictionary<Guid, PropertyCase> caseMap = cases.ToDictionary(item => item.Id);
         Dictionary<Guid, Assignment> assignmentMap = assignments.ToDictionary(item => item.Id);
-        Dictionary<Guid, WorkTask> taskMap = tasks.ToDictionary(item => item.Id);
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
         foreach (CaseWorkImpact impact in state.Cases)
         {
             PropertyCase propertyCase = caseMap[impact.Case.Id];
             Assignment assignment = assignmentMap[propertyCase.AssignmentId];
-            WorkTask task = taskMap[propertyCase.WorkTaskId];
             List<string> responsibilities = [];
 
             if (impact.Manager && propertyCase.ManagerEmployeeId == state.Source.Id)
@@ -646,10 +658,11 @@ public sealed class OrganizationWorkspace(
                 assignment.EmployeeId = recipientEmployeeId;
                 responsibilities.Add(impact.PendingApproval ? "ожидающее решение руководителя" : "текущий исполнитель");
             }
-            if (impact.OpenTask && task.EmployeeId == state.Source.Id && !task.Completed)
+            WorkTask[] caseTasks = tasks.Where(item => item.ObjectId == propertyCase.Id).ToArray();
+            foreach (WorkTask task in caseTasks) task.EmployeeId = recipientEmployeeId;
+            if (caseTasks.Length > 0)
             {
-                task.EmployeeId = recipientEmployeeId;
-                responsibilities.Add("следующее действие");
+                responsibilities.Add($"открытые задачи: {caseTasks.Length}");
             }
 
             CaseCheck[] caseChecks = checks.Where(item => item.PropertyCaseId == propertyCase.Id).ToArray();

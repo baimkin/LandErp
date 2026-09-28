@@ -6,17 +6,15 @@ namespace LandErp.Infrastructure.Modules.Procurement;
 
 public static class CaseTimelineCommunication
 {
-    // Старый timeline не хранит NegotiationId. Только однозначное полное совпадение
-    // фактов автора/времени/содержания позволяет дополнить отображение структурой.
-    // Никакие события не удаляются; при неоднозначности UI получает исходный Body.
+    // Только сохранённый идентификатор связывает событие с общением.
+    // Старые события без него сохраняют исходный Body без догадок.
     public static NegotiationView? Find(BusinessTimelineEntry entry, IEnumerable<CaseNegotiation> negotiations, Func<Guid,string> author)
     {
         if (entry.Kind != "Negotiation") return null;
-        var matches = negotiations.Where(x => x.OrganizationId == entry.OrganizationId && x.PropertyCaseId == entry.ObjectId
-            && x.AuthorEmployeeId == entry.ActorEmployeeId && x.RecordedAt == entry.RecordedAt
-            && x.EffectiveAt == entry.EffectiveAt && x.NextStepDueAt == entry.DueAt
-            && Body(x) == entry.Body).Take(2).ToArray();
-        return matches.Length == 1 ? View(matches[0], author(matches[0].AuthorEmployeeId)) : null;
+        // Only a stored identifier proves the relationship. Legacy entries retain their body.
+        var match = negotiations.FirstOrDefault(x => x.Id == entry.NegotiationId
+            && x.OrganizationId == entry.OrganizationId && x.PropertyCaseId == entry.ObjectId);
+        return match == null ? null : View(match, author(match.AuthorEmployeeId));
     }
 
     public static NegotiationView View(CaseNegotiation x, string author) => new(x.Id,x.SellerPrice,x.BuyerOffer,x.AgreedPrice,

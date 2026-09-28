@@ -26,12 +26,23 @@ public sealed partial class ProcurementWorkspace
         ValidatedCaseNote document = CaseNoteDocument.Validate(command.DocumentJson);
         await ValidateNoteImagesAsync(db, context.OrganizationId, command.CaseId, document, null, cancellationToken);
         CaseRichNote? note = await db.CaseRichNotes.SingleOrDefaultAsync(item => item.PropertyCaseId == command.CaseId
-            && item.OrganizationId == context.OrganizationId && item.Section == command.Section, cancellationToken);
+            && item.OrganizationId == context.OrganizationId && item.Section == command.Section
+            && (command.Section == CaseNoteSection.Working || item.Id == command.NoteId), cancellationToken);
+        if (note?.Deleted == true) throw new DbUpdateConcurrencyException("Заметка уже удалена.");
+        if (command.Section != CaseNoteSection.Working && (command.NoteId is null || command.NoteId == Guid.Empty))
+            throw new ArgumentException("Не указан идентификатор заметки.");
+        // Stable client ID makes retry after a lost response safe without creating another note.
+        if (note != null && command.ExpectedVersion == 0 && command.Section != CaseNoteSection.Working
+            && note.DocumentJson == document.Json)
+        {
+            string existingAuthor = await db.Employees.Where(e => e.Id == note.UpdatedByEmployeeId).Select(e => e.DisplayName).SingleAsync(cancellationToken);
+            return NoteView(note, existingAuthor);
+        }
         if ((note?.Version ?? 0) != command.ExpectedVersion) throw new DbUpdateConcurrencyException("Текст уже изменён другим сотрудником.");
         string before = note?.DocumentJson ?? CaseNoteDocument.Empty;
         if (note == null)
         {
-            note = new() { Id = Guid.CreateVersion7(), OrganizationId = context.OrganizationId,
+            note = new() { Id = command.NoteId ?? Guid.CreateVersion7(), OrganizationId = context.OrganizationId,
                 PropertyCaseId = command.CaseId, Section = command.Section };
             db.CaseRichNotes.Add(note);
         }
@@ -40,10 +51,10 @@ public sealed partial class ProcurementWorkspace
         note.UpdatedAt = time.GetUtcNow();
         note.UpdatedByEmployeeId = context.EmployeeId;
         OrganizationWorkspace.AddAudit(db, context, subject, "CaseRichNoteChanged", "PropertyCase", command.CaseId,
-            new { Section = NoteTitle(command.Section), Previous = before, Current = document.Json, note.Version }, correlationId);
+            new { NoteId = note.Id, Section = NoteTitle(command.Section), Previous = before, Current = document.Json, note.Version }, correlationId);
         db.BusinessTimeline.Add(new() { Id = Guid.CreateVersion7(), OrganizationId = context.OrganizationId,
             ObjectType = "PropertyCase", ObjectId = command.CaseId, ActorEmployeeId = context.EmployeeId,
-            Kind = "Note", Title = "Обновлён текст секции", Body = NoteTitle(command.Section), RecordedAt = note.UpdatedAt });
+            Kind = "Note", Title = command.Section == CaseNoteSection.Working ? "Обновлён текст секции" : command.ExpectedVersion == 0 ? "Добавлена заметка к проверкам" : "Изменена заметка к проверкам", Body = NoteTitle(command.Section), RecordedAt = note.UpdatedAt });
         await db.SaveChangesAsync(cancellationToken);
         string author = await db.Employees.Where(item => item.Id == context.EmployeeId).Select(item => item.DisplayName).SingleAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -72,7 +83,7 @@ public sealed partial class ProcurementWorkspace
     }
 
     private static CaseRichNoteView NoteView(CaseRichNote note, string author) =>
-        new(note.Section, note.DocumentJson, CaseNoteDocument.Validate(note.DocumentJson).Html, note.Version, author, note.UpdatedAt);
+        new(note.Section, note.DocumentJson, CaseNoteDocument.Validate(note.DocumentJson).Html, note.Version, author, note.UpdatedAt) { Id = note.Id };
 
     private static string NoteTitle(CaseNoteSection section) => section switch
     {

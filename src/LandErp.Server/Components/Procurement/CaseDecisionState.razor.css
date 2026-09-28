@@ -1,0 +1,3 @@
+.decision-state { display: grid; gap: var(--space-3, 12px); min-width: 0; }
+.decision-state p { margin: 0; }
+.decision-options { display: flex; flex-wrap: wrap; gap: var(--space-3, 12px); }

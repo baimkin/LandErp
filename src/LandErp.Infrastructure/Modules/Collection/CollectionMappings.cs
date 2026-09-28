@@ -126,6 +126,8 @@ internal static class CollectionMappings
         builder.Entity<CatalogDuplicateCandidate>().ToTable("duplicate_candidates", "catalog");
         builder.Entity<CatalogDuplicateCandidate>().Property(item => item.Status).HasConversion<string>();
         builder.Entity<CatalogDuplicateCandidate>().Property(item => item.ReasonsJson).HasColumnType("jsonb");
+        builder.Entity<CatalogDuplicateCandidate>().Property(item => item.PhotoEvidenceJson).HasColumnType("jsonb");
+        builder.Entity<CatalogPhotoFingerprint>().Property(item => item.ContentSha256).HasMaxLength(64);
         builder.Entity<CatalogDuplicateCandidate>().HasIndex(item => item.ListingId);
         builder.Entity<CatalogDuplicateCandidate>().HasIndex(item => item.CandidateListingId);
         builder.Entity<CatalogDuplicateCandidate>().HasIndex(item => item.ReviewedByEmployeeId);

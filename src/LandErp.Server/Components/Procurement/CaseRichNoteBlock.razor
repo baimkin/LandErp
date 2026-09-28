@@ -14,7 +14,7 @@
     <div class="section-heading">
         @if (Title.Length > 0) { <h3>@Title</h3> }
         @if (!editing && CanEdit)
-        { <button class="btn quiet" @onclick="Begin">@(EditLabel ?? (saved == null ? "Добавить текст" : "Редактировать"))</button> }
+        { <button type="button" class="btn quiet" @onclick="Begin">@(EditLabel ?? (saved == null ? "Добавить текст" : "Редактировать"))</button> }
     </div>
     @if (editing)
     {
@@ -26,12 +26,12 @@
         }
         <CaseTextInput @key="editorGeneration" @ref="editor" DocumentJson="@(saved?.DocumentJson ?? CaseNoteDocument.Empty)" Changed="Changed" ReadyChanged="EditorReady" Upload="UploadFile" />
         <div class="form-actions">
-            <button class="btn primary" disabled="@(busy || !CanEdit || editor?.Ready != true)" @onclick="Save">Сохранить</button>
-            <button class="btn quiet" disabled="@busy" @onclick="Cancel">Отмена</button>
+            <button type="button" class="btn primary" disabled="@(busy || !CanEdit || editor?.Ready != true)" @onclick="Save">Сохранить</button>
+            <button type="button" class="btn quiet" disabled="@busy" @onclick="Cancel">Отмена</button>
             <small role="status">@(busy ? "Загрузка / сохранение…" : dirty ? "Есть несохранённые изменения" : "Без изменений")</small>
         </div>
         @if (conflict)
-        { <p class="case-problem">Другой сотрудник изменил этот текст. Ваш черновик сохранён в редакторе. Скопируйте нужные фрагменты перед загрузкой актуального текста. <button class="btn quiet" disabled="@busy" @onclick="LoadCurrent">Загрузить сохранённую версию</button></p> }
+        { <p class="case-problem">Другой сотрудник изменил этот текст. Ваш черновик сохранён в редакторе. Скопируйте нужные фрагменты перед загрузкой актуального текста. <button type="button" class="btn quiet" disabled="@busy" @onclick="LoadCurrent">Загрузить сохранённую версию</button></p> }
     }
     else if (saved != null)
     { <div class="rich-note-document">@((MarkupString)saved.SafeHtml)</div> }
@@ -43,6 +43,9 @@
 </div>
 
 @code {
+    private readonly Dictionary<string,Guid> uploadIds = [];
+    private Guid UploadId(string name,byte[] bytes){string key=name+":"+Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));if(!uploadIds.TryGetValue(key,out var id)){id=Guid.CreateVersion7();uploadIds.Add(key,id);}return id;}
+
     [Parameter] public Guid CaseId { get; set; }
     [Parameter] public CaseNoteSection Section { get; set; }
     [Parameter] public string Title { get; set; } = "";
@@ -102,7 +105,7 @@
             using MemoryStream buffer = new(); await input.CopyToAsync(buffer);
             Guid id = await Workspace.AddAttachmentAsync(Subject, new(CaseId,
                 AttachmentCheckId == null ? CaseAttachmentOwner.Case : CaseAttachmentOwner.Check, AttachmentCheckId,
-                CaseNoteDocument.IsImageType(contentType) ? CaseAttachmentKind.Photo : contentType.StartsWith("audio/", StringComparison.Ordinal) ? CaseAttachmentKind.Audio : CaseAttachmentKind.Document, name, "", name, contentType, buffer.ToArray(), null),
+                CaseNoteDocument.IsImageType(contentType) ? CaseAttachmentKind.Photo : contentType.StartsWith("audio/", StringComparison.Ordinal) ? CaseAttachmentKind.Audio : CaseAttachmentKind.Document, name, "", name, contentType, buffer.ToArray(), null, UploadId: UploadId(name,buffer.ToArray())),
                 Guid.CreateVersion7().ToString(), CancellationToken.None);
             return id.ToString();
         }
@@ -111,6 +114,7 @@
         catch (Exception) { error = "Изображение не загружено. Текст сохранён в редакторе. Проверьте незавершённые вложения на вкладке «Документы»; повтор продолжит существующее вложение."; return null; }
         finally
         {
+            busy = false;
             await stream.DisposeAsync();
             await InvokeAsync(StateHasChanged);
         }
@@ -138,6 +142,7 @@
         finally { busy = false; if (editor != null) await editor.ResumeAsync(); }
     }
 
+    public Task CancelAsync()=>busy?Task.CompletedTask:Cancel();
     private async Task Cancel()
     {
         if (editor != null && !await editor.ConfirmDiscardAsync()) return;

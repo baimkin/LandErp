@@ -45,7 +45,7 @@ public sealed class CaseRichNoteTests
         long caseVersion = (await f.ReadCaseAsync(id)).Version;
         foreach (var section in Enum.GetValues<CaseNoteSection>())
         {
-            var saved = await f.Workspace.SaveRichNoteAsync(f.Manager, new(id, section, 0, Text(section.ToString())), "c01-insert", Ct);
+            var saved = await f.Workspace.SaveRichNoteAsync(f.Manager, new(id, section, 0, Text(section.ToString()), Guid.CreateVersion7()), "c01-insert", Ct);
             Assert.AreEqual(1L, saved.Version);
             Assert.AreEqual("Manager", saved.UpdatedBy);
             Assert.AreEqual(TimeSpan.Zero, saved.UpdatedAt.Offset);
@@ -59,7 +59,8 @@ public sealed class CaseRichNoteTests
         Assert.AreEqual(1L, card.RichNotes.Single(item => item.Section == CaseNoteSection.QuickChecks).Version);
         Assert.AreEqual(1L, card.RichNotes.Single(item => item.Section == CaseNoteSection.DeepChecks).Version);
         Assert.AreEqual(caseVersion, card.Item.CaseVersion);
-        Assert.AreEqual(4, card.Timeline.Count(item => item.Title == "Обновлён текст секции"));
+        Assert.AreEqual(2, card.Timeline.Count(item => item.Title == "Обновлён текст секции"));
+        Assert.AreEqual(2, card.Timeline.Count(item => item.Title == "Добавлена заметка к проверкам"));
         await using var db = f.Sandbox.Context();
         var audit = await db.AuditEvents.Where(item => item.ObjectId == id && item.Action == "CaseRichNoteChanged").ToArrayAsync();
         Assert.AreEqual(4, audit.Length);
@@ -143,13 +144,16 @@ public sealed class CaseRichNoteTests
             file.OrganizationId = f.OrganizationId; await db.SaveChangesAsync();
         }
         // A failed provider write leaves the existing durable link; recovery must reuse its ID.
+        Guid uploadId=Guid.CreateVersion7();
         var recoverable = new ProcurementWorkspace(f.Factory, TimeProvider.System, new FailFirstWriteStorage(f.FileStorage));
         await Assert.ThrowsExactlyAsync<IOException>(() => recoverable.AddAttachmentAsync(f.Manager, new(id,
-            CaseAttachmentOwner.Case, null, CaseAttachmentKind.Photo, "Повтор", "", "retry.png", "image/png", bytes, null), "c01-failed-upload", Ct));
+            CaseAttachmentOwner.Case, null, CaseAttachmentKind.Photo, "Повтор", "", "retry.png", "image/png", bytes, null, UploadId: uploadId), "c01-failed-upload", Ct));
         var failed = (await f.Workspace.ReadCardAsync(f.Manager, id, Ct)).Attachments.Single(item => item.OriginalName == "retry.png");
         Assert.AreEqual(StoredFileStatus.UploadFailed, failed.Status);
-        await recoverable.RetryAttachmentAsync(f.Manager, new(id, failed.Id, "retry.png", "image/png", bytes), "c01-retry", Ct);
-        await f.Workspace.SaveRichNoteAsync(f.Manager, new(id, CaseNoteSection.QuickChecks, 0, Image(failed.Id)), "c01-recovered-image", Ct);
+        var upload = new AddCaseAttachment(id, CaseAttachmentOwner.Case, null, CaseAttachmentKind.Photo, "Повтор", "", "retry.png", "image/png", bytes, null, UploadId: uploadId);
+        Assert.AreEqual(failed.Id,await recoverable.AddAttachmentAsync(f.Manager,upload,"c01-retry",Ct));
+        Assert.AreEqual(failed.Id,await recoverable.AddAttachmentAsync(f.Manager,upload,"c01-lost-ack",Ct));
+        await f.Workspace.SaveRichNoteAsync(f.Manager, new(id, CaseNoteSection.QuickChecks, 0, Image(failed.Id), Guid.CreateVersion7()), "c01-recovered-image", Ct);
         Assert.AreEqual(2, (await f.Workspace.ReadCardAsync(f.Manager, id, Ct)).Attachments.Count);
         CollectionAssert.AreEqual(bytes, (await f.Workspace.ReadAttachmentAsync(f.Manager, failed.Id, Ct)).Content!);
         await f.SetExplicitAccessAsync(f.EmployeeId("manager-phase1@test.invalid"),

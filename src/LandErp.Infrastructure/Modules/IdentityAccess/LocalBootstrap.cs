@@ -81,6 +81,7 @@ public static class OwnerBootstrap
         Employee employee = new() { Id = DataConventions.NewId(), OrganizationId = organization.Id,
             UserId = user.Id, DisplayName = "Владелец", Active = true };
         db.Organizations.Add(organization);
+        LandErp.Infrastructure.Modules.Procurement.KanbanProvisioning.CreateDefault(db, organization.Id);
         db.Employees.Add(employee);
         db.EmployeeAssignments.Add(new() { Id = DataConventions.NewId(), EmployeeId = employee.Id,
             RoleId = (await roles.FindByNameAsync("Owner"))!.Id, Scope = AccessScope.Organization });

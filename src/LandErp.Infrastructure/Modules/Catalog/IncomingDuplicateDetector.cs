@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using LandErp.Application.Modules.Catalog.Contracts;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
@@ -101,9 +103,10 @@ internal static partial class IncomingDuplicateDetector
             && item.Disposition is not (CatalogDisposition.Fake or CatalogDisposition.Duplicate)).ToArray();
         Listing[] others = local.Concat(persisted).GroupBy(item => item.Id).Select(group => group.First()).ToArray();
 
-        Dictionary<Guid, long[]> hashesByListing = await CurrentHashesAsync(db, subject, others, cancellationToken);
-        hashesByListing.TryGetValue(subject.Id, out long[]? subjectHashes);
-        subjectHashes ??= [];
+        Dictionary<Guid, CatalogPhotoFingerprint[]> photosByListing = await CurrentHashesAsync(db, subject, others, cancellationToken);
+        photosByListing.TryGetValue(subject.Id, out var subjectPhotos);
+        subjectPhotos ??= [];
+        long[] subjectHashes = subjectPhotos.Select(p=>p.PerceptualHash!.Value).ToArray();
         Dictionary<long, int> commonCounts = await CommonExactHashCountsAsync(
             db, subject.OrganizationId, subjectHashes, cancellationToken);
 
@@ -111,8 +114,10 @@ internal static partial class IncomingDuplicateDetector
         foreach (Listing other in others)
         {
             if (subject.ObjectGroupId != null && subject.ObjectGroupId == other.ObjectGroupId) continue;
-            hashesByListing.TryGetValue(other.Id, out long[]? otherHashes);
-            MatchResult? match = Match(subject, other, subjectHashes, otherHashes ?? [], commonCounts, settings);
+            photosByListing.TryGetValue(other.Id, out var otherPhotos);
+            otherPhotos ??= [];
+            long[] otherHashes = otherPhotos.Select(p=>p.PerceptualHash!.Value).ToArray();
+            MatchResult? match = Match(subject, other, subjectHashes, otherHashes, commonCounts, settings);
             if (match == null || match.Score < settings.CandidateThreshold) continue;
 
             Guid low = subject.Id.CompareTo(other.Id) < 0 ? subject.Id : other.Id;
@@ -131,6 +136,14 @@ internal static partial class IncomingDuplicateDetector
                         || (item.ListingId == other.Id && item.CandidateListingId == subject.Id)), cancellationToken);
 
             string reasonsJson = JsonSerializer.Serialize(match.Reasons);
+            string? Url(Listing listing, CatalogPhotoFingerprint photo) => (JsonSerializer.Deserialize<string[]>(listing.PhotosJson) ?? []).FirstOrDefault(url => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url))) == photo.UrlHash);
+            var proof = MatchingPhotoPairs(subjectHashes, otherHashes, commonCounts, settings).Select(pair => {
+                var left = subjectPhotos[pair.Left]; var right = otherPhotos[pair.Right];
+                string? l = Url(subject,left), rr = Url(other,right);
+                return l == null || rr == null ? null : new DuplicatePhotoEvidence(l,rr,pair.Distance,left.ContentSha256 != null && left.ContentSha256 == right.ContentSha256);
+            }).OfType<DuplicatePhotoEvidence>().ToArray();
+            if(existing != null && existing.ListingId != subject.Id) proof = proof.Select(p=>new DuplicatePhotoEvidence(p.RightUrl,p.LeftUrl,p.Distance,p.Exact)).ToArray();
+            string evidenceJson = JsonSerializer.Serialize(proof);
             if (existing == null)
             {
                 existing = new()
@@ -141,6 +154,7 @@ internal static partial class IncomingDuplicateDetector
                     CandidateListingId = other.Id,
                     Score = match.Score,
                     ReasonsJson = reasonsJson,
+                    PhotoEvidenceJson = evidenceJson,
                     Status = DuplicateCandidateStatus.Pending,
                     RecordedAt = now,
                     UpdatedAt = now
@@ -152,16 +166,18 @@ internal static partial class IncomingDuplicateDetector
                 existing.Status = DuplicateCandidateStatus.Pending;
                 existing.Score = match.Score;
                 existing.ReasonsJson = reasonsJson;
+                existing.PhotoEvidenceJson = evidenceJson;
                 existing.UpdatedAt = now;
                 existing.ReviewedAt = null;
                 existing.ReviewedByEmployeeId = null;
             }
             else if (existing.Status == DuplicateCandidateStatus.Pending)
             {
-                if (existing.Score != match.Score || !string.Equals(existing.ReasonsJson, reasonsJson, StringComparison.Ordinal))
+                if (existing.Score != match.Score || existing.PhotoEvidenceJson != evidenceJson || !string.Equals(existing.ReasonsJson, reasonsJson, StringComparison.Ordinal))
                 {
                     existing.Score = match.Score;
                     existing.ReasonsJson = reasonsJson;
+                existing.PhotoEvidenceJson = evidenceJson;
                     existing.UpdatedAt = now;
                 }
             }
@@ -181,6 +197,31 @@ internal static partial class IncomingDuplicateDetector
             item.Status = DuplicateCandidateStatus.Obsolete;
             item.UpdatedAt = now;
         }
+    }
+
+    // Reconstruct old missing evidence from the same fingerprints and thresholds as detection.
+    // No invented pair and no mutation of a candidate's review/version during a read.
+    internal static async Task<DuplicatePhotoEvidence[]> RebuildPhotoEvidenceAsync(LandErpDbContext db,
+        Listing left, Listing right, CancellationToken cancellationToken)
+    {
+        var settings=await DuplicateDetectionSettingsService.ReadValuesAsync(db,left.OrganizationId,cancellationToken);
+        // Worker also reuses ready fingerprints for unchanged URLs after a data revision.
+        // Recover evidence even when only non-photo source fields changed since hashing.
+        var urls = new[]{left,right}.ToDictionary(x=>x.Id,x=>(JsonSerializer.Deserialize<string[]>(x.PhotosJson)??[])
+            .Select(url=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url)))).ToHashSet());
+        var fingerprints=await db.CatalogPhotoFingerprints.AsNoTracking().Where(x=>x.OrganizationId==left.OrganizationId
+            && (x.ListingId==left.Id||x.ListingId==right.Id) && x.Status==PhotoFingerprintStatus.Ready && x.PerceptualHash!=null).ToArrayAsync(cancellationToken);
+        var rows=fingerprints.Where(x=>urls[x.ListingId].Contains(x.UrlHash)).GroupBy(x=>x.ListingId)
+            .ToDictionary(x=>x.Key,x=>x.OrderBy(p=>p.PhotoIndex).ToArray());
+        var a=rows.GetValueOrDefault(left.Id)??[];var b=rows.GetValueOrDefault(right.Id)??[];
+        var ah=a.Select(x=>x.PerceptualHash!.Value).ToArray();var bh=b.Select(x=>x.PerceptualHash!.Value).ToArray();
+        var common=await CommonExactHashCountsAsync(db,left.OrganizationId,ah,cancellationToken);
+        string? Url(Listing listing,CatalogPhotoFingerprint p)=>(JsonSerializer.Deserialize<string[]>(listing.PhotosJson)??[])
+            .FirstOrDefault(url=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url)))==p.UrlHash);
+        return MatchingPhotoPairs(ah,bh,common,settings).Select(pair=>{
+            var l=a[pair.Left];var r=b[pair.Right];var lu=Url(left,l);var ru=Url(right,r);
+            return lu==null||ru==null?null:new DuplicatePhotoEvidence(lu,ru,pair.Distance,l.ContentSha256!=null&&l.ContentSha256==r.ContentSha256);
+        }).OfType<DuplicatePhotoEvidence>().ToArray();
     }
 
     private static MatchResult? Match(
@@ -252,13 +293,13 @@ internal static partial class IncomingDuplicateDetector
             { score += 5; reasons.Add("Близкая цена"); }
         }
 
-        int matchingPhotos = MatchingPhotoCount(leftHashes, rightHashes, commonCounts, settings);
+        int matchingPhotos = MatchingPhotoPairs(leftHashes, rightHashes, commonCounts, settings).Count;
         if (matchingPhotos > 0)
         {
             score += matchingPhotos >= settings.StrongPhotoMatches
                 ? 60
                 : Math.Min(50, 20 + 15 * matchingPhotos);
-            reasons.Add(matchingPhotos == 1 ? "Совпала фотография" : $"Совпали {matchingPhotos} фотографии");
+            reasons.Add(matchingPhotos == 1 ? "Похожие фотографии" : $"Похожие фотографии: {matchingPhotos} пары");
         }
 
         bool corroborated = matchingPhotos > 0 || description >= minimumDescription
@@ -267,13 +308,13 @@ internal static partial class IncomingDuplicateDetector
         return score >= settings.CandidateThreshold && corroborated ? new(Math.Min(score, 100), reasons) : null;
     }
 
-    private static int MatchingPhotoCount(
+    private static List<(int Distance, int Left, int Right)> MatchingPhotoPairs(
         long[] left,
         long[] right,
         IReadOnlyDictionary<long, int> commonCounts,
         DuplicateDetectionSettingsValues settings)
     {
-        if (left.Length == 0 || right.Length == 0) return 0;
+        if (left.Length == 0 || right.Length == 0) return [];
         List<(int Distance, int Left, int Right)> pairs = [];
         for (int leftIndex = 0; leftIndex < left.Length; leftIndex++)
         {
@@ -289,21 +330,21 @@ internal static partial class IncomingDuplicateDetector
 
         bool[] usedLeft = new bool[left.Length];
         bool[] usedRight = new bool[right.Length];
-        int count = 0;
+        List<(int Distance, int Left, int Right)> selected = [];
         foreach (var pair in pairs.OrderBy(item => item.Distance))
         {
             if (usedLeft[pair.Left] || usedRight[pair.Right]) continue;
             usedLeft[pair.Left] = true;
             usedRight[pair.Right] = true;
-            count++;
+            selected.Add(pair);
         }
-        return count;
+        return selected;
     }
 
     internal static int HammingDistance(long left, long right) =>
         BitOperations.PopCount(unchecked((ulong)(left ^ right)));
 
-    private static async Task<Dictionary<Guid, long[]>> CurrentHashesAsync(
+    private static async Task<Dictionary<Guid, CatalogPhotoFingerprint[]>> CurrentHashesAsync(
         LandErpDbContext db, Listing subject, IReadOnlyList<Listing> others, CancellationToken cancellationToken)
     {
         Dictionary<Guid, long> revisions = others.ToDictionary(item => item.Id, item => item.DataRevision);
@@ -314,12 +355,11 @@ internal static partial class IncomingDuplicateDetector
                 && ids.Contains(item.ListingId)
                 && item.Status == PhotoFingerprintStatus.Ready
                 && item.PerceptualHash != null)
-            .Select(item => new { item.ListingId, item.PerceptualHash, item.SourceDataRevision })
             .ToArrayAsync(cancellationToken);
 
         return rows.Where(item => revisions.GetValueOrDefault(item.ListingId) == item.SourceDataRevision)
             .GroupBy(item => item.ListingId)
-            .ToDictionary(group => group.Key, group => group.Select(item => item.PerceptualHash!.Value).Distinct().ToArray());
+            .ToDictionary(group => group.Key, group => group.GroupBy(item => item.PerceptualHash).Select(g => g.OrderBy(p=>p.PhotoIndex).First()).ToArray());
     }
 
     private static async Task<Dictionary<long, int>> CommonExactHashCountsAsync(

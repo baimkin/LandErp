@@ -45,6 +45,11 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CatalogDuplicateCandidate> CatalogDuplicateCandidates => Set<CatalogDuplicateCandidate>();
     public DbSet<CatalogPhotoFingerprint> CatalogPhotoFingerprints => Set<CatalogPhotoFingerprint>();
     public DbSet<CatalogDuplicateSettings> CatalogDuplicateSettings => Set<CatalogDuplicateSettings>();
+    public DbSet<KanbanPipeline> KanbanPipelines => Set<KanbanPipeline>();
+    public DbSet<KanbanStage> KanbanStages => Set<KanbanStage>();
+    public DbSet<KanbanMembership> KanbanMemberships => Set<KanbanMembership>();
+    public DbSet<KanbanTransition> KanbanTransitions => Set<KanbanTransition>();
+    public DbSet<KanbanTunnel> KanbanTunnels => Set<KanbanTunnel>();
     public DbSet<PropertyCase> PropertyCases => Set<PropertyCase>();
     public DbSet<PropertyCaseSourceLink> PropertyCaseSourceLinks => Set<PropertyCaseSourceLink>();
     public DbSet<CaseNegotiation> CaseNegotiations => Set<CaseNegotiation>();
@@ -137,6 +142,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
         builder.Entity<Team>().HasIndex(item => new { item.OrgUnitId, item.Name }).IsUnique();
         CollectionMappings.Apply(builder);
         ProcurementMappings.Apply(builder);
+        KanbanMappings.Apply(builder);
         ModelConventions.Apply(builder);
         builder.Entity<CaseRichNote>().Property(item => item.PropertyCaseId)
             .HasComment("Объект закупки, которому принадлежит текст секции; описание внешнего источника не изменяется.");
@@ -159,7 +165,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
             }
 
             if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation or CatalogEvent or WorkflowTransition or Approval
-                or BusinessTimelineEntry or CaseNegotiation or CaseAttachment or PropertyCaseFactRevision
+                or KanbanTransition or BusinessTimelineEntry or CaseNegotiation or CaseAttachment or PropertyCaseFactRevision
                 && entry.State is EntityState.Modified or EntityState.Deleted)
             {
                 throw new InvalidOperationException("Audit facts are append-only.");

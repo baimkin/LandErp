@@ -24,20 +24,38 @@
     { <div class="overview-state"><strong>Загружаем оперативную картину…</strong><span>Собираем показатели в разрешённой области данных.</span></div> }
     else if (Forbidden)
     { <div class="overview-state risk"><strong>Рабочие данные недоступны</strong><span>Проверьте назначение и область доступа.</span></div> }
+    else if (Error != null) { <div class="overview-state risk" role="alert"><strong>@Error</strong><button class="overview-btn" @onclick="ReloadAsync">Повторить загрузку</button></div> }
     else if (view != null)
     {
         @if (Error != null) { <div class="overview-state risk"><strong>@Error</strong><button class="overview-btn small" type="button" @onclick="ReloadAsync">Повторить</button></div> }
         @if (Success != null) { <div class="overview-state success"><strong>@Success</strong></div> }
 
+        <div class="overview-stats">
+            @if(view.CanViewIncoming){<a class="overview-stat" href="/incoming?overview=new"><span class="stat-label">Непросмотренные входящие</span><strong>@view.NewIncoming.Value</strong><span>@view.NewIncoming.Caption</span></a>}
+            @if(view.CanViewProcurement){<a class="overview-stat" href="/procurement?overview=true"><span class="stat-label">В закупке</span><strong>@view.ActiveProcurement.Value</strong><span>активных объектов · кроме отклонённых и купленных</span></a>}
+            @if(view.AttentionGroups.Count>0){<button type="button" class="overview-stat attention" @onclick="()=>attentionOpen=true"><span class="stat-label">Требуют внимания</span><strong>@view.Attention.Value</strong><span>@view.Attention.Caption</span></button>}
+            @if(view.CanViewProcurement){<a class="overview-stat waiting" href="/procurement?stage=pending_head"><span class="stat-label">Ждут решения</span><strong>@view.WaitingDecision.Value</strong><span>объектов у руководителя</span></a>}
+        </div>
+        @if(attentionOpen && view.AttentionGroups.Count>0)
+        {
+            <Modal Title="Требуют внимания" OnClose="()=>attentionOpen=false">
+            <section class="overview-card attention-breakdown" id="overview-attention" tabindex="-1">
+                <div class="overview-card-head"><div><h2>Требуют внимания — состав</h2><p>Разные единицы показаны отдельно. Объект с несколькими причинами учитывается один раз.</p></div></div>
+                <div class="overview-rows">
+                    @foreach(var group in view.AttentionGroups){<a class="attention-row" href="@group.Url"><span class="attention-main"><b>@group.Label · @group.Unit: @group.Count</b><small>@group.Description</small></span><span class="row-arrow">›</span></a>}
+                </div>
+                @if(view.Collection!=null)
+                {
+                    <div id="overview-collection-signals" tabindex="-1" class="overview-rows"><h3>Сигналы сбора данных</h3>
+                    @if(!view.Collection.Statuses.Any(x=>x.Severity!=OverviewSeverity.Info)){<p>Предупреждений и ошибок нет.</p>}
+                    @foreach(var signal in view.Collection.Statuses.Where(x=>x.Severity!=OverviewSeverity.Info)){<a class="attention-row" href="@signal.Url"><span class="attention-main"><b>@signal.Label</b><small>@signal.Value</small></span><span class="row-arrow">›</span></a>}
+                    </div>
+                }
+            </section>
+            </Modal>
+        }
         @if (view.CanViewProcurement)
         {
-            <div class="overview-stats">
-                <article class="overview-stat"><label>Новые входящие</label><strong>@view.NewIncoming.Value</strong><span>@view.NewIncoming.Caption</span></article>
-                <article class="overview-stat"><label>В закупке</label><strong>@view.ActiveProcurement.Value</strong><span>@view.ActiveProcurement.Caption</span></article>
-                <article class="overview-stat attention"><label>Требуют внимания</label><strong>@view.Attention.Value</strong><span>@view.Attention.Caption</span></article>
-                <article class="overview-stat waiting"><label>Ждут решения</label><strong>@view.WaitingDecision.Value</strong><span>@view.WaitingDecision.Caption</span></article>
-            </div>
-
             <section class="overview-card market-card">
                 <div class="overview-card-head market-card-head"><div><h2>Рынок по группам поиска</h2><p>Медианная и средняя цена за сотку участников групп. Один подтверждённый участок — один участник.</p></div><button class="overview-btn small" type="button" @onclick="OpenAllGroupsAsync">Посмотреть все группы</button></div>
                 <div class="market-table">
@@ -60,7 +78,7 @@
             <div class="overview-layout">
                 <div class="overview-column">
                     <section class="overview-card">
-                        <div class="overview-card-head"><div><h2>Требует внимания</h2><p>Сначала то, что может задержать закупку или потерять объект.</p></div><span class="overview-meta">@view.AttentionTotal событий</span></div>
+                        <div class="overview-card-head"><div><h2>Требует внимания</h2><p>Сначала то, что может задержать закупку или потерять объект.</p></div><span class="overview-meta">Состав показан выше</span></div>
                         <div class="overview-rows">
                             @if (view.AttentionItems.Count == 0) { <div class="overview-empty success-text">Срочных действий нет.</div> }
                             @foreach (OverviewAttentionItem item in view.AttentionItems)
@@ -103,7 +121,7 @@
                 </div>
             </div>
         }
-        else { <div class="overview-state"><strong>Нет доступного рабочего контура</strong><span>На странице появятся блоки, соответствующие вашим permissions и области данных.</span></div> }
+        else if(!view.CanViewIncoming && view.Collection==null) { <div class="overview-state"><strong>Нет доступного рабочего контура</strong><span>На странице появятся блоки, соответствующие вашим permissions и области данных.</span></div> }
     }
 </section>
 
@@ -131,7 +149,7 @@
 @code {
     private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru-RU");
     private async Task MarketSavedAsync(){await ReloadAsync();if(allGroupsOpen)await ReloadAllGroupsAsync();}
-    private OverviewView? view; private MarketGroupPage? allGroups; private bool allGroupsOpen; private bool allGroupsLoading;
+    private bool attentionOpen; private OverviewView? view; private MarketGroupPage? allGroups; private bool allGroupsOpen; private bool allGroupsLoading;
     private string marketText=""; private MarketGroupSort marketSort; private int marketOffset;
     protected override async Task ReadAsync()=>view=await Overview.ReadAsync(CurrentSubject,CancellationToken.None);
     private async Task OpenAllGroupsAsync(){allGroupsOpen=true;marketOffset=0;await ReloadAllGroupsAsync();}

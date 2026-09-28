@@ -2,7 +2,7 @@
 @attribute [Authorize]
 @using LandErp.Server.Components.Procurement
 <PageTitle>Объект закупки · LandErp</PageTitle>
-<CaseWorkspace CaseId="CaseId" FullPage="true" InitialTab="InitialTab" />
+<CaseWorkspace CaseId="CaseId" FullPage="true" InitialTab="@InitialTab" />
 @code {
     [Parameter] public Guid CaseId { get; set; }
     [Parameter, SupplyParameterFromQuery(Name="tab")] public string? InitialTab { get; set; }

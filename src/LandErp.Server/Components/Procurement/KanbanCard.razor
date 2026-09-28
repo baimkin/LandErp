@@ -1,0 +1,26 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+@using LandErp.Application.Modules.Workflow.Domain
+<article class="kanban-card" data-membership-id="@Card.Membership.Id" @onclick="()=>Open.InvokeAsync(Card.Membership.PropertyCaseId)" draggable="@(Card.CanMove&&!Busy ? "true" : "false")">
+    <div class="card-meta"><span>@Card.BusinessNumber</span><span title="@WorkTaskDeadline.Format(Card.Membership.StageEnteredAt,true)">@Age</span></div>
+    <a class="card-title" href="/procurement/@Card.Membership.PropertyCaseId" target="_blank" rel="noopener noreferrer" draggable="false" @onclick:stopPropagation="true" @ref="titleButton" title="Открыть полную карточку в новой вкладке">@Card.Title</a>
+    <div class="location" title="@Card.Location">@(Card.Location??"—")</div>
+    <div class="price">@(Card.Price==null?"—":NumberFormat.Money(Card.Price.Value)+" "+(Card.Currency=="RUB"?"₽":Card.Currency))</div>
+    <div class="unit">@(Card.AreaSquareMeters==null?"—":(Card.AreaSquareMeters.Value/100m).ToString("0.##",System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))+" сот.") @if(Card.Price!=null&&Card.AreaSquareMeters>0){<span> · @NumberFormat.Money(Card.Price.Value/(Card.AreaSquareMeters.Value/100m)) @(Card.Currency=="RUB"?"₽":Card.Currency)/сот.</span>}</div>
+    <div class="next">
+        @if(Card.NextTask is {} task){<button type="button" class="task-link @(task.Overdue?"overdue":"")" @onclick:stopPropagation="true" @onclick="()=>OpenTask.InvokeAsync((Card.Membership.PropertyCaseId,task.Id))">@task.Title</button><small class="@(task.Overdue?"overdue":"")">@(task.Overdue?"Просрочено · ":"")@WorkTaskDeadline.Format(task.DueAt,task.DueHasTime)</small>}
+        else{<span>Нет задач</span>}
+    </div>
+    <div class="card-foot"><span class="person" title="Ответственный объекта">@Card.Assignee</span><span class="business-state">@ProcurementLabels.Stage(Card.BusinessStage)</span></div>
+</article>
+@code{
+    [Parameter,EditorRequired] public KanbanCardView Card{get;set;}=default!;
+    [Parameter] public DateTimeOffset Now{get;set;}
+    [Parameter] public bool Busy{get;set;}
+    [Parameter] public EventCallback<Guid> Open{get;set;}
+    [Parameter] public EventCallback<(Guid CaseId,Guid TaskId)> OpenTask{get;set;}
+    private ElementReference titleButton;
+    public ValueTask FocusAsync()=>titleButton.FocusAsync();
+    private string Age{get{int days=Math.Max(0,(int)((Card.Membership.StageExitedAt??Now)-Card.Membership.StageEnteredAt).TotalDays);return days==0?"Меньше дня на этапе":$"{days} {(days%10==1&&days%100!=11?"день":days%10 is >=2 and <=4&&days%100 is not (>=12 and <=14)?"дня":"дней")} на этапе";}}
+}
+
+

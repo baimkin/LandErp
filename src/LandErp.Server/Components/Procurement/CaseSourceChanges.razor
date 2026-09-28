@@ -1,0 +1,55 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+@inherits CaseWorkspaceComponent
+@implements IDisposable
+@inject IProcurementWorkspace Workspace
+<CaseModal Title="Изменения источника" Subtitle="@(comparison==null?null:ProcurementLabels.Source(comparison.Source)+" · "+comparison.Title)" OnClose="OnClose" OnOpened="()=>modalOpened=true" Kind="source-changes-modal">
+    @if(Loading){<p role="status">Загружаем сравнение…</p>}
+    else if(Error!=null){<div role="alert"><p>Не удалось загрузить сравнение. Уведомление остаётся непросмотренным.</p><button class="btn secondary" @onclick="ReloadAsync">Повторить загрузку</button></div>}
+    else if(comparison is {} data)
+    {
+        <div class="source-comparison">
+            @if(ackError!=null){<div role="alert"><p>@ackError</p><button class="btn secondary" @onclick="RetryAcknowledgement">Повторить сохранение просмотра</button></div>}
+            @if(!data.CanAcknowledge){<p class="source-history-gap">Актуальное сравнение не сохранено полностью. Уведомление остаётся непросмотренным.</p>}
+            <p class="subtle">Наблюдение: @ProcurementLabels.Time(data.ObservedAt). Рабочие данные объекта сохраняются без изменений.</p>
+            @if(!data.CompleteHistory){<p class="source-history-gap">История сохранена не полностью. Там, где прежнее значение неизвестно, сравнение не восстанавливается предположением.</p>}
+            @if(data.Observations.Count==0){<p>Сохранённого сравнения для этого источника нет. Предыдущее значение не сохранено.</p>}
+            @foreach(var item in data.Observations)
+            {
+                <section class="source-observation" @key="item.Id">
+                    <h3>@ProcurementLabels.Time(item.ObservedAt)</h3>
+                    <div class="source-columns" aria-hidden="true"><span>Поле</span><span>Было</span><span>Стало</span></div>
+                    @foreach(var field in item.Fields)
+                    {
+                        <div class="source-change-row">
+                            <strong>@field.Name</strong>
+                            <div><span class="source-mobile-label">Было</span><SourceChangeValueView Value="field.Before" Field="@field.Name" MissingText="Предыдущее значение не сохранено" Highlighted="@Removed(field)" HighlightLabel="Убрано из списка фото" /></div>
+                            <div><span class="source-mobile-label">Стало</span><SourceChangeValueView Value="field.After" Field="@field.Name" MissingText="Новое значение не сохранено" Highlighted="@Added(field)" HighlightLabel="Добавлено в список фото" /></div>
+                        </div>
+                    }
+                </section>
+            }
+        </div>
+    }
+</CaseModal>
+@code {
+    [Parameter] public Guid CaseId { get; set; }
+    [Parameter] public Guid CatalogItemId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnViewed { get; set; }
+    private SourceChangeComparison? comparison;
+    private bool attempted, disposed, modalOpened;
+    private string? ackError;
+    protected override async Task ReadAsync(){comparison=await Workspace.ReadSourceChangesAsync(CurrentSubject,CaseId,CatalogItemId,CancellationToken.None);attempted=false;ackError=null;}
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Rendering completes before the receipt is written. Failed/closed loads never reach this branch.
+        if(disposed||!modalOpened||Loading||Error!=null||attempted||comparison is not {CanAcknowledge:true} shown)return;
+        attempted=true;
+        try{await Workspace.AcknowledgeSourceChangesAsync(CurrentSubject,new(CaseId,shown.LinkId,shown.CatalogItemId,shown.Revision),CancellationToken.None);if(!disposed)await OnViewed.InvokeAsync();}
+        catch(Exception){ackError="Сравнение открыто, но просмотр пока не сохранён.";if(!disposed)await InvokeAsync(StateHasChanged);}
+    }
+    private void RetryAcknowledgement(){ackError=null;attempted=false;}
+    public void Dispose(){disposed=true;GC.SuppressFinalize(this);}
+    private static string[] Added(SourceChangeField value)=>value.Before?.Photos is {} before&&value.After?.Photos is {} after?after.Except(before,StringComparer.Ordinal).ToArray():[];
+    private static string[] Removed(SourceChangeField value)=>value.Before?.Photos is {} before&&value.After?.Photos is {} after?before.Except(after,StringComparer.Ordinal).ToArray():[];
+}

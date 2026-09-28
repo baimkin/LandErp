@@ -33,6 +33,8 @@ public sealed class PropertyCase
 
 public sealed class PropertyCaseSourceLink
 {
+    /// <summary>Team receipt for displayed source history; never used as business-decision approval.</summary>
+    public long ViewedDataRevision { get; set; }
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
     public Guid PropertyCaseId { get; set; }

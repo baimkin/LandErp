@@ -1,0 +1,60 @@
+@using LandErp.Application.Modules.IdentityAccess.Contracts
+@using LandErp.Application.Modules.Procurement.Contracts
+@using LandErp.Application.Modules.Procurement.Domain
+@using Microsoft.EntityFrameworkCore
+@inject IProcurementWorkspace Workspace
+
+<section class="check-notes" aria-label="Общие заметки">
+    <h3>Общие заметки</h3>
+    @foreach(var note in Card.RichNotes.Where(n=>n.Section==Section))
+    {
+        <article class="check-note" @key="note.Id">
+            <div class="note-body"><CaseDescription Text="@CaseNoteDocument.PlainText(note.DocumentJson, includeAttachmentLabels:false)" Title="" Lines="5" EmptyText="Заметка с вложениями" /></div>
+            <div class="note-tools">
+                @foreach(var file in Files(note))
+                {
+                    <a class="note-icon file" href="@($"/api/procurement/attachments/{file.Id}")" target="_blank" rel="noopener noreferrer" title="@($"Открыть: {file.OriginalName}")" aria-label="@($"Открыть: {file.OriginalName}")"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/></svg><span class="file-name">@file.OriginalName</span></a>
+                }
+                @if(Card.CanManageDossier)
+                {
+                    <button type="button" class="note-icon edit" title="Изменить заметку" aria-label="Изменить заметку" @onclick="()=>Edit(note)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m4 16-1 5 5-1L20 8l-4-4Z M14 6l4 4"/></svg></button>
+                    <button type="button" class="note-icon delete" title="Удалить заметку" aria-label="Удалить заметку" @onclick="()=>{error=null;deleting=note;}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7"/></svg></button>
+                }
+            </div>
+        </article>
+    }
+    @if(!Card.RichNotes.Any(n=>n.Section==Section)){<p class="subtle">Заметок пока нет.</p>}
+    @if(Card.CanManageDossier){<div class="add-note"><button type="button" class="btn quiet" @onclick="()=>Edit(null)">＋ Добавить заметку</button></div>}
+</section>
+@if(editing)
+{
+    <CaseModal Title="@(selected==null?"Добавить заметку":"Изменить заметку")" OnClose="CloseEditor">
+        <CaseRichNoteBlock @ref="editor" @key="noteId" CaseId="CaseId" Section="Section" Subject="Subject" CanEdit="Card.CanManageDossier" Value="selected" StartEditing="true" ShowMetadata="false" SaveDocument="SaveDocument" LoadDocument="LoadDocument" Saved="Saved" Cancelled="()=>editing=false" />
+    </CaseModal>
+}
+@if(deleting!=null)
+{
+    <CaseModal Title="Удалить заметку?" Busy="busy" Error="@error" OnClose="()=>{if(!busy)deleting=null;}">
+        <p>Заметка исчезнет из списка. Запись об удалении останется в истории объекта.</p>
+        <div class="form-actions"><button type="button" class="btn secondary" disabled="@busy" @onclick="()=>deleting=null">Отмена</button><button type="button" class="btn danger" disabled="@busy" @onclick="Delete">Удалить</button></div>
+    </CaseModal>
+}
+@code {
+    [Parameter] public Guid CaseId {get;set;}
+    [Parameter] public CaseNoteSection Section {get;set;}
+    [Parameter] public Subject Subject {get;set;}=default!;
+    [Parameter] public CaseCard Card {get;set;}=default!;
+    [Parameter] public EventCallback Refresh {get;set;}
+    private CaseRichNoteView? selected,deleting;
+    private CaseRichNoteBlock? editor;
+    private Guid noteId;
+    private bool editing,busy;
+    private string? error;
+    private IEnumerable<AttachmentView> Files(CaseRichNoteView note){var ids=CaseNoteDocument.Validate(note.DocumentJson).AttachmentIds;return Card.Attachments.Where(a=>ids.Contains(a.Id));}
+    private void Edit(CaseRichNoteView? note){selected=note;noteId=note?.Id??Guid.CreateVersion7();editing=true;}
+    private Task CloseEditor()=>editor?.CancelAsync()??Task.CompletedTask;
+    private Task<CaseRichNoteView> SaveDocument(string json)=>Workspace.SaveRichNoteAsync(Subject,new(CaseId,Section,selected?.Version??0,json,noteId),Guid.CreateVersion7().ToString(),CancellationToken.None);
+    private async Task<CaseRichNoteView?> LoadDocument(){selected=(await Workspace.ReadCardAsync(Subject,CaseId,CancellationToken.None)).RichNotes.SingleOrDefault(n=>n.Id==noteId);if(selected==null)throw new ArgumentException("Заметка удалена.");return selected;}
+    private async Task Saved(){editing=false;await Refresh.InvokeAsync();}
+    private async Task Delete(){if(deleting==null||busy)return;busy=true;error=null;try{await Workspace.DeleteRichNoteAsync(Subject,new(CaseId,deleting.Id,deleting.Version),Guid.CreateVersion7().ToString(),CancellationToken.None);deleting=null;await Refresh.InvokeAsync();}catch(DbUpdateConcurrencyException){error="Заметка изменилась. Закройте окно и обновите карточку.";}catch(AccessDeniedException){error="Нет права удалить заметку.";}catch(Exception){error="Не удалось подтвердить удаление. Обновите карточку перед повтором.";}finally{busy=false;}}
+}

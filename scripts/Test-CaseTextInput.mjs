@@ -12,7 +12,7 @@ class Element {
 }
 globalThis.document = { createElement: tag => new Element(tag) };
 globalThis.window = { addEventListener() {}, removeEventListener() {}, confirm: () => true };
-globalThis.DotNet = { createJSObjectReference: value => value, createJSStreamReference: value => value };
+globalThis.DotNet = { createJSObjectReference: value => ({ __jsObjectId: 1 }), createJSStreamReference: value => ({ __jsObjectId: 2, __jsStreamReferenceLength: value.byteLength ?? value.size }) };
 const empty = '{"type":"doc","content":[{"type":"paragraph"}]}';
 let uploads = 0, fail = false;
 const bridge = { async invokeMethodAsync(method) {
@@ -25,6 +25,7 @@ const file = new File(['data'], 'note.txt', {type:'text/plain'});
 const image = new File(['image'], 'paste.png', {type:'image/png'});
 const host = new Element('div');
 const input = create(host, empty, bridge);
+assert.equal(typeof input.text, "function", "Typed Blazor return must receive the actual object, not a reference descriptor");
 const [textarea, list, , picker] = host.children;
 textarea.value = '<literal>\nВторая строка'; textarea.oninput();
 picker.files = [file]; picker.onchange();

@@ -26,6 +26,7 @@ internal sealed class IncomingCatalogQuery(LandErpDbContext db, Guid organizatio
                 || EF.Functions.ILike(item.CadastralNumber ?? "", pattern)
                 || EF.Functions.ILike(item.SellerName ?? "", pattern));
         }
+        if (filter.IncludedInMedian != null) query = query.Where(item => item.IncludeInCalculation == filter.IncludedInMedian);
         if (baseFilter.Source != null) query = query.Where(item => item.Source == baseFilter.Source);
         if (baseFilter.Disposition != null && filter.Preset != IncomingCatalogPreset.PossibleDuplicate)
             query = query.Where(item => item.Disposition == baseFilter.Disposition);
@@ -122,7 +123,7 @@ internal sealed class IncomingCatalogQuery(LandErpDbContext db, Guid organizatio
         new(text, c.Source, c.Disposition, c.Age, c.MinTotalPrice, c.MaxTotalPrice,
             c.MinAreaSquareMeters, c.MaxAreaSquareMeters, c.AttentionOnly),
         c.SearchConfigurationId, c.Preset, c.SortField, c.SortDirection, c.SearchGroupId,
-        c.MinPricePerSotka, c.MaxPricePerSotka, c.LandTypes);
+        c.MinPricePerSotka, c.MaxPricePerSotka, c.LandTypes, IncludedInMedian: c.IncludedInMedian);
 
     public static Expression<Func<Listing, bool>> And(Expression<Func<Listing, bool>> left, Expression<Func<Listing, bool>> right)
         => Combine(left, right, false);

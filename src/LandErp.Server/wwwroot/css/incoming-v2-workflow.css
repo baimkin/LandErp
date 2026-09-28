@@ -320,3 +320,37 @@
 .incoming-v2 .selection-cell input{margin:0}
 .incoming-v2 .saved-filter-settings input[type=checkbox]{min-height:20px}
 .incoming-v2 .page-selection:focus-visible,.incoming-v2 .median-switch:focus-visible{outline:none;box-shadow:var(--focus)}
+
+.erp-modal.compare{max-height:calc(100dvh - 40px);overflow:hidden}.erp-modal.compare .modal-body{display:flex;flex-direction:column;min-height:0;overflow:hidden}.erp-modal.compare .modal-header{flex-shrink:0}.erp-modal.compare .v2-compare-grid{overflow:auto;min-height:0;flex:1;padding-bottom:var(--space-4)}.erp-modal.compare .v2-compare-reasons,.erp-modal.compare .form-actions,.erp-modal.compare .photo-proof{flex-shrink:0}.erp-modal.compare .v2-compare-reasons{padding:var(--space-2);font-size:var(--text-sm)}.v2-compare-reasons ul{display:flex;flex-wrap:wrap;gap:var(--space-2);padding-left:var(--space-4);margin:var(--space-1) 0}.photo-proof{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2)}.photo-proof img{width:72px;height:56px;object-fit:cover}.v2-advanced{grid-template-columns:repeat(2,minmax(0,1fr))}.v2-advanced-actions{display:flex;flex-wrap:wrap}.case-feedback{padding:var(--panel-padding-compact,16px)}
+
+.erp-modal.compare[open]{display:flex;flex-direction:column;height:calc(100dvh - 40px)}
+.erp-modal.compare .modal-body{flex:1}
+
+.incoming-v2 .v2-context-info{padding:var(--space-3) var(--panel-padding-compact,16px);display:grid;gap:var(--space-2);justify-items:start}
+.incoming-v2 .v2-context-info p{margin:0}
+.incoming-v2 .v2-context-info .v2-btn{white-space:normal;text-align:left}
+
+/* Modal checkbox is independent of full-width text field rules. */
+.erp-modal .preset-auto-include{display:flex;align-items:flex-start;gap:var(--space-2);font-size:var(--text-ui);line-height:var(--leading-ui)}
+.erp-modal .preset-auto-include input[type=checkbox]{flex:0 0 18px;width:18px;height:18px;min-width:18px;min-height:18px;max-width:18px;max-height:18px;margin:2px 0 0;padding:0;accent-color:var(--accent)}
+.erp-modal .preset-auto-include span{min-width:0}
+.v2-drawer-foot{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)}
+.v2-take-actions,.v2-classify{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
+.v2-take-actions{margin-left:auto}
+.v2-drawer-foot .v2-btn{min-height:var(--control-sm-h);height:auto}
+.v2-toast.show{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap}
+.v2-toast.show a{white-space:nowrap}.v2-toast.show>button{margin-left:auto}
+.v2-compare-reasons ul{display:block;list-style:disc;margin:var(--space-2) 0 0;padding-left:var(--space-5)}
+.v2-compare-reasons li{display:list-item;margin-block:var(--space-1);padding-left:var(--space-1)}
+.photo-pairs{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin-block:var(--space-3)}
+.comparison-photo-hint{min-height:1.5em;margin:var(--space-2) 0;color:var(--accent);font-size:var(--text-sm)}
+
+.incoming-v2 .selection-head{padding-inline:14px}
+.incoming-v2 .page-selection{width:18px;height:18px;min-height:18px;padding:0;border-radius:2px;font-size:var(--text-sm);line-height:16px;vertical-align:middle}
+.incoming-v2 .page-selection[aria-checked="true"],.incoming-v2 .page-selection[aria-checked="mixed"]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.attention-filter{display:flex;align-items:center;gap:var(--space-2)}.attention-filter .v2-check{flex:1}
+.attention-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex-shrink:0;border:1px solid var(--border-strong);border-radius:50%;color:var(--accent);cursor:help;font-size:var(--text-sm)}
+.attention-tip{display:none;position:absolute;z-index:30;left:0;top:calc(100% + var(--space-2));width:min(340px,75vw);padding:var(--space-3);border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);box-shadow:var(--shadow-md);font-size:var(--text-sm);line-height:var(--leading-body);color:var(--text);font-weight:var(--weight-normal)}
+.attention-help:hover .attention-tip,.attention-help:focus .attention-tip{display:block}.attention-help:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.incoming-v2 .v2-table .selection-head input.page-selection{appearance:auto;width:20px;height:20px;min-height:20px;padding:0;margin:0;accent-color:var(--accent);background:initial;border:initial;border-radius:initial}
+.incoming-v2 .v2-presets{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}.incoming-v2 .processed-today-link{margin-left:auto;border:0;background:transparent;color:var(--accent);font-size:var(--text-ui);padding:var(--space-2);min-height:var(--control-h)}.incoming-v2 .processed-today-link:hover{text-decoration:underline}.incoming-v2 .processed-today-link[aria-pressed="true"]{font-weight:var(--weight-semibold)}

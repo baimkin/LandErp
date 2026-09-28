@@ -1,0 +1,13 @@
+@using LandErp.Application.Modules.Procurement.Domain
+<select class="ui-select" @key="renderVersion" aria-label="Статус работы" value="@Membership.StageId" disabled="@Disabled" @onchange="Changed">
+@foreach(var stage in Stages){<option value="@stage.Id">@stage.Name @(stage.IsHiddenOnBoard?"(скрыта на доске)":"")</option>}
+</select>
+@code{
+    [Parameter,EditorRequired]public KanbanMembership Membership{get;set;}=default!;
+    [Parameter]public IReadOnlyList<KanbanStage> Stages{get;set;}=[];
+    [Parameter]public bool Disabled{get;set;}
+    [Parameter]public EventCallback<(KanbanMembership Membership,Guid Stage)> Move{get;set;}
+    private int renderVersion;
+    private async Task Changed(ChangeEventArgs e){if(Guid.TryParse(e.Value?.ToString(),out var id)&&!Disabled){await Move.InvokeAsync((Membership,id));renderVersion++;}}
+}
+

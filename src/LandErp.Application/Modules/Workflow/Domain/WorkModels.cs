@@ -24,6 +24,11 @@ public sealed class WorkTask
     public string Title { get; set; } = "";
     public string Description { get; set; } = "";
     public Guid EmployeeId { get; set; }
+    // Null for legacy completions; never infer a result or completion timestamp.
+    public string? ResultDocumentJson { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public Guid? CompletedByEmployeeId { get; set; }
+    public Guid? SourceNegotiationId { get; set; }
     public bool Completed { get; set; }
     public bool Deleted { get; set; }
     // Пользовательскую задачу нельзя перезаписать системным переходом case.
@@ -71,6 +76,8 @@ public sealed class Approval
 }
 public sealed class BusinessTimelineEntry
 {
+    public Guid? TaskId { get; set; }
+    public Guid? NegotiationId { get; set; }
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
     public string ObjectType { get; set; } = "";

@@ -2,6 +2,20 @@
    These selectors intentionally use the page root / main-content id so they win over CSS-isolated
    negative margins without changing shared AppShell behavior. */
 
+/* In board view, reserve the remaining viewport for one shared scroll container.
+   Flex sizing follows the actual toolbar height, including wrapping and density. */
+.app-shell:has(.pq2-kanban) { height:100dvh; min-height:0; }
+.app-shell:has(.pq2-kanban) .workspace { height:100%; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.app-shell:has(.pq2-kanban) .topbar { flex-shrink:0; }
+#main-content:has(> .pq2-kanban) { flex:1; min-height:0; overflow:hidden; }
+#main-content > .pq2-kanban { height:100%; min-height:0; overflow:hidden; }
+#main-content > .pq2-kanban > .main { height:100%; min-height:0; display:flex; flex-direction:column; }
+.pq2-kanban .kanban-toolbar { flex-shrink:0; }
+.pq2-reference .kanban-pipeline { display:flex; align-items:center; gap:8px; margin:0; color:var(--text-muted); font-size:var(--text-ui); }
+.pq2-reference .kanban-pipeline .ui-select { width:auto; color:var(--text); }
+.pq2-reference .kanban-scope-hint { margin:6px 0 12px; color:var(--text-muted); font-size:var(--text-sm); }
+.pq2-reference .ui-select,.pq2-reference ~ .drawer .ui-select { min-height:var(--control-h); height:auto; border-color:var(--border-strong); border-radius:var(--radius-sm); background:var(--surface); padding:var(--space-2) var(--space-3); color:var(--text); }
+
 #main-content > .pq2-reference {
     width: 100%;
     max-width: none;
@@ -191,3 +205,17 @@
 }
 
 .pq2-reference .badge,.pq2-reference ~ .drawer .badge { max-width:100%; white-space:normal; line-height:var(--leading-ui); padding-block:3px; }
+.pq2-reference ~ .drawer .facts .work-status{grid-column:1 / -1;display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}.work-status>span{font-size:var(--text-sm);color:var(--text-muted)}.pq2-reference ~ .drawer .work-status .ui-select{width:auto;max-width:100%;flex:1;min-width:180px}.pq2-reference .queue-photo-placeholder{display:block;flex:0 0 54px;width:54px;height:42px;min-height:0;max-height:42px;overflow:hidden;line-height:42px;text-align:center;background:var(--surface-subtle);border-radius:var(--radius-sm);color:var(--text-muted)}
+/* Column widths belong to the complete 8/9-column schema, not positional leftovers. */
+.pq2-reference .procurement-table th,.pq2-reference .procurement-table td{width:auto}
+.pq2-reference .procurement-table{min-width:1680px}
+.pq2-reference ~ .drawer .hero{grid-template-columns:minmax(0,45fr) minmax(0,55fr);align-items:stretch;gap:var(--space-4)}
+.pq2-reference ~ .drawer .hero .photo{width:100%;height:100%;min-height:230px;max-height:340px;object-fit:cover;align-self:stretch}
+.pq2-reference ~ .drawer .hero .facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;gap:var(--space-3);min-width:0}
+.pq2-reference ~ .drawer .hero .facts>.fact{grid-column:auto}
+.pq2-reference ~ .drawer .hero .facts>.work-status{grid-column:1 / -1}
+.pq2-reference ~ .drawer .hero .fact{padding:0;border:0;background:transparent}
+.pq2-reference ~ .drawer .hero .fact label{margin-bottom:2px;text-transform:none}
+.pq2-reference ~ .drawer .hero .work-status{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-2);margin:var(--space-1) 0}
+.pq2-reference ~ .drawer .hero .work-status .ui-select{flex:1 1 150px;width:auto;min-width:0;max-width:260px;padding:var(--space-1) var(--space-2)}
+@media(max-width:460px){.pq2-reference ~ .drawer .hero{gap:var(--space-2)}.pq2-reference ~ .drawer .hero .photo{min-height:220px}.pq2-reference ~ .drawer .hero .work-status .ui-select{max-width:100%}}

@@ -14,6 +14,59 @@ namespace LandErp.Foundation.Tests;
 public sealed class ReleasePackageB104Tests
 {
     [TestMethod]
+    public async Task TaskOnlyHandoverCountsEveryOpenTaskAndPreservesCompletedDeletedAndOtherEmployees()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(true, false);
+        Guid id = (await f.Workspace.CreateManualCaseAsync(f.Manager,
+            new("Только задачи", "Москва", null, 1000m, 100m, "handover"), "task-only", CancellationToken.None)).CaseId;
+        var organization = await f.Organization.ReadAsync(f.Owner, CancellationToken.None);
+        var source = organization.Employees.Single(x => x.Login == "manager2-phase1@test.invalid");
+        async Task<Guid> Add(Guid employee)
+        {
+            var current = await f.Workspace.ReadTasksAsync(f.Manager, id, CancellationToken.None);
+            return await f.Workspace.ChangeTaskAsync(f.Manager,
+                new(id, current.CaseVersion, null, 0, CaseTaskAction.Save, "Работа", "", WorkTaskType.Call,
+                    employee, null, false, Guid.CreateVersion7()), "handover-task", CancellationToken.None);
+        }
+        Guid first = await Add(source.Id), second = await Add(source.Id);
+        Guid completed = await Add(source.Id), deleted = await Add(source.Id), other = await Add(f.ManagerEmployeeId);
+        Guid[] history;
+        await using (var db = f.Sandbox.Context())
+        {
+            (await db.WorkTasks.SingleAsync(x => x.Id == completed)).Completed = true;
+            (await db.WorkTasks.SingleAsync(x => x.Id == deleted)).Deleted = true;
+            // An uncompleted task on a closed case must not strand an inactive employee.
+            (await db.PropertyCases.SingleAsync(x => x.Id == id)).StageId = "rejected";
+            await db.SaveChangesAsync();
+            history = await db.BusinessTimeline.Where(x => x.ObjectId == id).Select(x => x.Id).ToArrayAsync();
+        }
+        var impact = await f.Organization.ReadEmployeeWorkImpactAsync(f.Owner, source.Id, CancellationToken.None);
+        Assert.AreEqual(2, impact.OpenTasks);
+        Assert.AreEqual(1, impact.AffectedCases);
+        Assert.AreEqual(0, impact.ManagedCases);
+        Assert.AreEqual(0, impact.AssignedCases);
+        Assert.IsTrue(impact.Candidates.Any(x => x.EmployeeId == f.ManagerEmployeeId));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => f.Organization.SetEmployeeActiveAsync(f.Owner,
+            new(source.Id, source.EmployeeVersion, false), "no-recipient", CancellationToken.None));
+        await f.Organization.SetEmployeeActiveAsync(f.Owner,
+            new(source.Id, source.EmployeeVersion, false, f.ManagerEmployeeId), "handover", CancellationToken.None);
+        await using var result = f.Sandbox.Context();
+        var rows = await result.WorkTasks.Where(x => x.ObjectId == id).ToDictionaryAsync(x => x.Id);
+        Assert.AreEqual(f.ManagerEmployeeId, rows[first].EmployeeId);
+        Assert.AreEqual(f.ManagerEmployeeId, rows[second].EmployeeId);
+        Assert.AreEqual(source.Id, rows[completed].EmployeeId);
+        Assert.AreEqual(source.Id, rows[deleted].EmployeeId);
+        Assert.AreEqual(f.ManagerEmployeeId, rows[other].EmployeeId);
+        Assert.IsTrue(rows[completed].Completed);
+        Assert.IsTrue(rows[deleted].Deleted);
+        Assert.AreEqual(history.Length, await result.BusinessTimeline.CountAsync(x => history.Contains(x.Id)));
+        var propertyCase = await result.PropertyCases.SingleAsync(x => x.Id == id);
+        Assert.AreEqual("rejected", propertyCase.StageId);
+        Assert.AreEqual(f.ManagerEmployeeId, propertyCase.ManagerEmployeeId);
+        Assert.AreEqual(0, (await f.Organization.ReadEmployeeWorkImpactAsync(f.Owner, source.Id, CancellationToken.None)).OpenTasks);
+    }
+
+    [TestMethod]
     public async Task DeactivationRequiresExplicitHandoverAndTransfersAllResponsibilities()
     {
         await using ProcurementTests.Phase1Fixture fixture = await ProcurementTests.Phase1Fixture.CreateAsync(true, false);
@@ -26,6 +79,13 @@ public sealed class ReleasePackageB104Tests
                 "Открытая проверка B1-04", CaseCheckStatus.InProgress, fixture.ManagerEmployeeId, true,
                 null, null, "Проверка в работе", false),
             "b1-04-check", CancellationToken.None);
+
+        // Workflow anchors are not user tasks; create a real task for the handover.
+        var tasks = await fixture.Workspace.ReadTasksAsync(fixture.Manager, created.CaseId, CancellationToken.None);
+        Guid userTask = await fixture.Workspace.ChangeTaskAsync(fixture.Manager,
+            new(created.CaseId, tasks.CaseVersion, null, 0, CaseTaskAction.Save,
+                "Передаваемая задача", "", WorkTaskType.Call, fixture.ManagerEmployeeId, null, false, Guid.CreateVersion7()),
+            "b1-04-task", CancellationToken.None);
 
         OrganizationView organization = await fixture.Organization.ReadAsync(fixture.Owner, CancellationToken.None);
         EmployeeView source = organization.Employees.Single(item => item.Login == "manager-phase1@test.invalid");
@@ -59,7 +119,8 @@ public sealed class ReleasePackageB104Tests
         CaseCheck check = await db.CaseChecks.AsNoTracking().SingleAsync(item => item.PropertyCaseId == created.CaseId);
         Assert.AreEqual(recipient.Id, propertyCase.ManagerEmployeeId);
         Assert.AreEqual(recipient.Id, assignment.EmployeeId);
-        Assert.AreEqual(recipient.Id, task.EmployeeId);
+        Assert.AreEqual(source.Id, task.EmployeeId, "The completed workflow anchor is historical, not a user task.");
+        Assert.AreEqual(recipient.Id, (await db.WorkTasks.SingleAsync(item => item.Id == userTask)).EmployeeId);
         Assert.AreEqual(recipient.Id, check.ResponsibleEmployeeId);
         Assert.AreEqual(source.Id, check.AuthorEmployeeId, "Handover must not rewrite historical authors.");
         Assert.IsTrue(await db.BusinessTimeline.AnyAsync(item => item.ObjectId == created.CaseId

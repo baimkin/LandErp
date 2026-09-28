@@ -1,0 +1,29 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+@if(Value is null){<span class="source-missing">@MissingText</span>}
+else if(Value.Photos is {} photos)
+{
+    <div class="source-photos">
+    @foreach(var url in photos)
+    {
+        <figure>
+        @if(!SafeUrl(url) || failed.Contains(url)){<div class="source-photo-error">Фото недоступно</div>}
+        else{<a href="@url" target="_blank" rel="noopener noreferrer"><img src="@url" alt="Фото источника" referrerpolicy="no-referrer" @onerror="()=>failed.Add(url)" /></a>}
+        @if(Highlighted?.Contains(url)==true){<figcaption>@HighlightLabel</figcaption>}
+        </figure>
+    }
+    </div>
+}
+else if(Value.Number is {} number)
+{
+    <span>@(Field=="цена"?ProcurementLabels.Money(number):number.ToString("#,0.####",System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))+" м²")</span>
+}
+else{<span class="source-text">@Value.Text</span>}
+@code {
+    [Parameter] public SourceChangeValue? Value { get; set; }
+    [Parameter] public string Field { get; set; } = "";
+    [Parameter] public string MissingText { get; set; } = "Значение не сохранено";
+    [Parameter] public IReadOnlyList<string>? Highlighted { get; set; }
+    [Parameter] public string HighlightLabel { get; set; } = "";
+    private readonly HashSet<string> failed = new(StringComparer.Ordinal);
+    private static bool SafeUrl(string value) => Uri.TryCreate(value,UriKind.Absolute,out var uri)&&uri.Scheme is "https" or "http";
+}

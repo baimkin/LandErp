@@ -65,8 +65,15 @@ public sealed partial class ProcurementQueueV2ReadService(
             var memberships = GroupMarketService.CaseGroups(db, context.OrganizationId).Where(item => item.GroupId == groupId);
             visible = visible.Where(row => memberships.Any(item => item.CaseId == row.Case.Id));
         }
+        if (filter.PipelineId is Guid pipelineId)
+        {
+            if (!await db.KanbanPipelines.AnyAsync(p => p.Id == pipelineId && p.OrganizationId == context.OrganizationId && p.IsActive, cancellationToken)) throw new AccessDeniedException();
+            visible = visible.Where(row => db.KanbanMemberships.Any(m => m.OrganizationId == context.OrganizationId && m.PipelineId == pipelineId && m.PropertyCaseId == row.Case.Id && m.TransferredAt == null));
+            // A pipeline view has exactly its membership set; old queue filters never silently narrow it.
+            filter = new ProcurementQueueV2Filter(Offset: filter.Offset, Size: filter.Size, PipelineId: pipelineId);
+        }
         Guid[] priceChangedCaseIds = await PriceChangedCaseIdsAsync(db, visible, cancellationToken);
-        IQueryable<Row> query = string.IsNullOrWhiteSpace(filter.Stage)
+        IQueryable<Row> query = filter.PipelineId != null ? visible : string.IsNullOrWhiteSpace(filter.Stage)
             ? visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired")
             : visible.Where(row => row.Case.StageId == filter.Stage);
         if (filter.MineOnly) query = query.Where(row => row.Assignment.EmployeeId == context.EmployeeId);
@@ -102,6 +109,7 @@ public sealed partial class ProcurementQueueV2ReadService(
         if (filter.DueTodayOnly) query = query.Where(row => db.WorkTasks.Any(t => t.OrganizationId == row.Case.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == row.Case.Id && !t.Completed && !t.Deleted && t.DueAt >= todayStart && t.DueAt < tomorrowStart));
         if (filter.OverdueOnly) query = query.Where(row => db.WorkTasks.Any(t => t.OrganizationId == row.Case.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == row.Case.Id && !t.Completed && !t.Deleted && t.DueAt < (t.DueHasTime ? now : todayStart)));
         query = ApplyCheckFilter(query, filter.Checks, db);
+        if (filter.AttentionOnly) query = WhereAttention(query, db);
 
         int total = await query.CountAsync(cancellationToken);
         Row[] pageRows = await ApplySort(query, filter, db).Skip(offset).Take(size).ToArrayAsync(cancellationToken);
@@ -129,6 +137,12 @@ public sealed partial class ProcurementQueueV2ReadService(
 
         ProcurementQueueV2Row[] items = pageRows.Select(row => ProjectRow(row, names, sourcesByCase.GetValueOrDefault(row.Case.Id, []),
             checksByCase.GetValueOrDefault(row.Case.Id, []), contactsByCase.GetValueOrDefault(row.Case.Id), todayStart, tomorrowStart)).ToArray();
+        if (filter.PipelineId != null)
+        {
+            var memberships = await db.KanbanMemberships.AsNoTracking().Where(m => m.OrganizationId == context.OrganizationId && m.PipelineId == filter.PipelineId && pageIds.Contains(m.PropertyCaseId) && m.TransferredAt == null).ToDictionaryAsync(m => m.PropertyCaseId, cancellationToken);
+            var moveIds = effective.CanManageProcurement ? await ProcurementVisibility.Apply(db.PropertyCases, db, effective.ProcurementWorkContext).Where(c => pageIds.Contains(c.Id)).Select(c => c.Id).ToArrayAsync(cancellationToken) : [];
+            items = items.Select(item => item with { KanbanMembership = memberships.GetValueOrDefault(item.CaseId), CanMoveKanban = moveIds.Contains(item.CaseId) }).ToArray();
+        }
         bool canCreateManualCase = effective.CanManageProcurement
             && ProcurementVisibility.CanReceiveNewCase(effective.ProcurementWorkContext);
         return new(items, total, summary, assignees, stages, offset, size, canCreateManualCase);

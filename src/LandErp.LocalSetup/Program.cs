@@ -84,6 +84,7 @@ try
         if (!File.Exists(ownerFile))
             await File.WriteAllTextAsync(ownerFile, "Login: " + login + Environment.NewLine + "Password: " + password);
     }
+    await LandErp.Infrastructure.Modules.Procurement.KanbanProvisioning.InitializeAsync(db);
     NpgsqlConnectionStringBuilder runtimeSettings = new(settings.RuntimeConnection);
     string runtimeRole = runtimeSettings.Username ?? throw new InvalidOperationException("Runtime role missing.");
     if (!runtimeRole.StartsWith("le_local_r_", StringComparison.Ordinal) || !runtimeRole.All(character => char.IsAsciiLetterOrDigit(character) || character == '_'))

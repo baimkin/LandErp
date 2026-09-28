@@ -12,5 +12,6 @@ public sealed class CaseRichNote
     public string DocumentJson { get; set; } = "";
     public Guid UpdatedByEmployeeId { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+    public bool Deleted { get; set; }
     public long Version { get; set; } = 1;
 }

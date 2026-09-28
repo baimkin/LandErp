@@ -1,0 +1,8 @@
+@page "/directories/kanban"
+@attribute [Authorize]
+@inherits WorkspaceComponent
+@using LandErp.Server.Components.Procurement
+<PageTitle>Справочники · Канбан</PageTitle>
+<h1>Справочники → Канбан</h1>
+@if(Loading){<p>Загрузка…</p>}else if(Forbidden){<p>Нет доступа.</p>}else{<KanbanSettings Subject="CurrentSubject" />}
+@code{protected override Task ReadAsync()=>Task.CompletedTask;}

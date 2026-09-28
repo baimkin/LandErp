@@ -297,9 +297,12 @@ public sealed class AccessV1Ap03UiTests
         Assert.IsFalse(shell.Contains("Policy=\"collection.read\"", StringComparison.Ordinal));
         Assert.IsFalse(shell.Contains("Policy=\"audit.read\"", StringComparison.Ordinal));
 
-        StringAssert.Contains(caseWorkspace, "card.CanManagerDecide||card.CanHeadDecide");
+        StringAssert.Contains(caseWorkspace, "CaseDecisionPresentation.HasActions(card)");
+        string decisions = File.ReadAllText(Path.Combine(root, "src", "LandErp.Server", "Components", "Procurement", "CaseDecisionPresentation.cs"));
+        StringAssert.Contains(decisions, "card.CanManagerDecide");
+        StringAssert.Contains(decisions, "card.CanHeadDecide");
         StringAssert.Contains(caseWorkspace, "card.CanAssignInspections||card.CanPerformInspections");
-        StringAssert.Contains(caseWorkspace, "card.CanPerformInspections&&");
+        StringAssert.Contains(caseWorkspace, "card.Inspection!=null&&card.CanPerformInspections");
         StringAssert.Contains(procurementQueue, "detail.CanAssignInspections");
         StringAssert.Contains(procurementQueue, "detail.CanPerformInspections");
     }

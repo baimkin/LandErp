@@ -52,6 +52,8 @@ public sealed class MedianParticipationTests
         await using var db = f.Sandbox.Context();
         Assert.AreEqual(0, await db.Listings.CountAsync(x => excluded.Contains(x.Id) && x.IncludeInCalculation));
         Assert.AreEqual(3, await db.Listings.CountAsync(x => x.IncludeInCalculation));
+        Assert.AreEqual(3,(await reads.ReadAsync(f.Manager,request with {IncludedInMedian=true},CancellationToken.None)).Total);
+        Assert.AreEqual(2,(await reads.ReadAsync(f.Manager,request with {IncludedInMedian=false},CancellationToken.None)).Total);
         await Assert.ThrowsExactlyAsync<ArgumentException>(() => service.PreviewAsync(f.Manager,
             new(request, [new(first.Items[0].Id, first.Items[0].Version)], excluded), true, CancellationToken.None));
         var stale = await service.PreviewAsync(f.Manager, selection, false, CancellationToken.None);
@@ -251,7 +253,7 @@ public sealed class MedianParticipationTests
     }
 
     [TestMethod]
-    public async Task NewIngressOnlyUsesGroupFiltersAndNeverReaddsManualExclusionOrBackfills()
+    public async Task SavingAutomaticFilterIncludesExistingMatchesAndNewIngressPreservesManualExclusion()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
         await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
@@ -271,9 +273,9 @@ public sealed class MedianParticipationTests
         var saved = await presets.CreateAsync(f.Manager, new(group, "Авто M01", Criteria(group: group)), CancellationToken.None);
         Assert.IsFalse(saved.Criteria.AutoIncludeNewInCalculation);
         saved = await presets.UpdateAsync(f.Manager, new(saved.Id, saved.Version, saved.Name, saved.Criteria with { AutoIncludeNewInCalculation = true }), CancellationToken.None);
-        Assert.AreEqual(0, await f.CountAsync(db => db.Listings.CountAsync(item => item.IncludeInCalculation)));
+        Assert.AreEqual(1, await f.CountAsync(db => db.Listings.CountAsync(item => item.IncludeInCalculation)));
         await f.IngestChangedAvitoAsync(pair.Agent, pair.Administration, 1_900_000m);
-        Assert.AreEqual(0, await f.CountAsync(db => db.Listings.CountAsync(item => item.IncludeInCalculation)));
+        Assert.AreEqual(1, await f.CountAsync(db => db.Listings.CountAsync(item => item.IncludeInCalculation)));
         Guid manual = await Manual(f);
         Assert.IsFalse((await f.Workspace.ReadItemAsync(f.Manager, manual, CancellationToken.None)).Item.IncludeInCalculation);
         CollectorGateway gateway = new(f.Factory, TimeProvider.System);
@@ -314,7 +316,7 @@ public sealed class MedianParticipationTests
         Assert.IsTrue((await f.Workspace.ReadItemAsync(f.Manager, autoManual, CancellationToken.None)).Item.IncludeInCalculation);
         await presets.UpdateAsync(f.Manager, new(global.Id, global.Version, global.Name, global.Criteria with { AutoIncludeNewInCalculation = false }), CancellationToken.None);
         Assert.IsTrue((await f.Workspace.ReadItemAsync(f.Manager, autoManual, CancellationToken.None)).Item.IncludeInCalculation);
-        Assert.IsFalse((await f.Workspace.ReadItemAsync(f.Manager, manual, CancellationToken.None)).Item.IncludeInCalculation);
+        Assert.IsTrue((await f.Workspace.ReadItemAsync(f.Manager, manual, CancellationToken.None)).Item.IncludeInCalculation);
         // A legacy JSON without the optional flag stays false; a broken legacy binding never executes.
         await using (var connection = new NpgsqlConnection(f.Sandbox.MigratorConnection))
         {

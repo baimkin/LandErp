@@ -28,3 +28,4 @@ fieldset{border:0;padding:0;margin:0;min-width:0}
 header,.body{padding:18px}
 .body ::deep .form-grid{grid-template-columns:1fr}
 .body ::deep .dossier-wide{grid-column:auto}}
+.case-modal.kanban-settings-modal{width:min(1120px,calc(100vw - 32px));max-width:1120px}

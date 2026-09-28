@@ -44,7 +44,7 @@ public sealed class AuditReadService : IAuditReadService
         "CollectionSearchCreated", "CollectionSearchUpdated", "CollectionSearchGroupCreated", "CollectionSearchGroupArchived",
         "CatalogItemCreatedManually", "CatalogDispositionChanged", "CatalogMonitoringStarted", "CatalogItemTakenToWork",
         "CatalogItemLinkedToCase", "CatalogDuplicateConfirmed", "CatalogDuplicateRejected", "CatalogDuplicateSettingsChanged",
-        "PropertyCaseResumedFromCatalog", "SellerContactRecorded", "CaseNoteAdded", "CaseRichNoteChanged",
+        "PropertyCaseResumedFromCatalog", "SellerContactRecorded", "CaseNoteAdded", "CaseRichNoteChanged", "CaseManagerReassigned",
         "CaseNegotiationAdded", "CaseCheckSaved", "CaseCheckTemplateSaved", "InspectionTemplateSaved",
         "SiteInspectionStarted", "SiteInspectionDraftSaved", "SiteInspectionCompleted", "PropertyCaseAcquired",
         "CaseAttachmentAdded", "CaseAttachmentUploadRetried", "CaseFactAppliedFromSource"
@@ -226,6 +226,8 @@ public sealed class AuditReadService : IAuditReadService
             using JsonDocument document = JsonDocument.Parse(json);
             JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return [new("Результат", "—", "Действие выполнено")];
+            if (action == "CaseManagerReassigned")
+                return [new("Ответственный", root.GetProperty("Previous").GetString() ?? "—", root.GetProperty("Current").GetString() ?? "—")];
             if (action == "CaseRichNoteChanged")
                 return [new(root.GetProperty("Section").GetString() ?? "Текст секции", NoteText(root.GetProperty("Previous").GetString()!), NoteText(root.GetProperty("Current").GetString()!))];
             JsonElement before = root.TryGetProperty("Before", out JsonElement beforeValue) ? beforeValue : default;
@@ -380,6 +382,9 @@ public sealed class AuditReadService : IAuditReadService
                 "CollectionSearchCreated" => Collection("Создан поисковый запрос", summary), "CollectionSearchUpdated" => Collection("Изменён поисковый запрос", summary),
                 "CollectionSearchGroupCreated" => Collection("Создана группа поисков", summary), "CollectionSearchGroupArchived" => Collection("Группа поисков архивирована", summary, "warning"),
                 "CollectionJobQueued" => Collection("Поставлено задание на сбор данных", summary),
+                "KanbanConfigured" => Procurement("Изменены настройки канбана", summary),
+                "KanbanMoved" => Procurement("Изменён статус работы", summary),
+                "KanbanJoined" => Procurement("Добавлено участие в воронке", summary),
                 "CatalogItemCreatedManually" => Procurement("Добавлено входящее предложение", summary),
                 "CatalogItemViewed" => Procurement("Просмотрено входящее предложение", summary),
                 "CatalogDispositionChanged" => Procurement("Изменено состояние предложения", summary),
@@ -391,6 +396,7 @@ public sealed class AuditReadService : IAuditReadService
                 "CatalogDuplicateSettingsChanged" => Procurement("Изменены настройки определения дублей", summary),
                 "PropertyCaseResumedFromCatalog" => Procurement("Работа по объекту возобновлена", summary, "success"),
                 "SellerContactRecorded" => Procurement("Зафиксирован контакт с продавцом", summary), "CaseNoteAdded" => Procurement("Добавлена заметка", summary),
+                "CaseManagerReassigned" => Procurement("Изменён ответственный за объект", summary),
                 "CaseRichNoteChanged" => Procurement("Изменён текст секции объекта", summary),
                 "CaseNegotiationAdded" => Procurement("Добавлены переговоры", summary), "CaseCheckSaved" => Procurement("Сохранена проверка", summary),
                 "CaseCheckTemplateSaved" => Procurement("Изменён шаблон проверки", summary), "InspectionTemplateSaved" => Procurement("Изменён шаблон осмотра", summary),

@@ -27,7 +27,7 @@ public sealed record IncomingCatalogReadFilter(IncomingCatalogFilter Base, Guid?
     IncomingCatalogPreset? Preset = null, IncomingCatalogSortField SortField = IncomingCatalogSortField.ChangedAt,
     IncomingCatalogSortDirection SortDirection = IncomingCatalogSortDirection.Descending,
     Guid? SearchGroupId = null, decimal? MinPricePerSotka = null, decimal? MaxPricePerSotka = null,
-    IReadOnlyList<IncomingLandType>? LandTypes = null, IncomingCatalogWorkingScope? WorkingScope = null);
+    IReadOnlyList<IncomingLandType>? LandTypes = null, IncomingCatalogWorkingScope? WorkingScope = null, bool? IncludedInMedian = null);
 public sealed record IncomingSearchGroupView(Guid Id, string Name, int SortOrder);
 public sealed record IncomingSearchConfigurationView(Guid Id, string Label, CatalogSource Source, Guid? SearchGroupId);
 public sealed record IncomingCatalogRowRead(Guid CatalogItemId, Guid? SearchConfigurationId,
@@ -49,7 +49,10 @@ public sealed record IncomingCatalogFilterCounts(IReadOnlyList<IncomingFilterPre
 public sealed record IncomingDuplicateCandidateView(Guid Id, long Version, Guid CandidateListingId,
     CatalogSource Source, string Title, string? Location, decimal? Price, decimal? AreaSquareMeters,
     string? CadastralNumber, string? Url, IReadOnlyList<string> Reasons, DateTimeOffset RecordedAt,
-    int Score = 0);
+    int Score = 0)
+{
+    public IReadOnlyList<DuplicatePhotoEvidence> PhotoEvidence { get; init; } = [];
+}
 
 public sealed record IncomingObjectGroupMemberView(Guid CatalogItemId, CatalogSource Source, string Title,
     string? Location, decimal? Price, decimal? PricePerSotka, decimal? AreaSquareMeters,
@@ -85,7 +88,7 @@ public sealed record IncomingFilterPresetCriteriaV1(int SchemaVersion, CatalogSo
     decimal? MinTotalPrice, decimal? MaxTotalPrice, decimal? MinPricePerSotka, decimal? MaxPricePerSotka,
     decimal? MinAreaSquareMeters, decimal? MaxAreaSquareMeters, IncomingLandType[] LandTypes,
     bool AttentionOnly, IncomingCatalogSortField SortField, IncomingCatalogSortDirection SortDirection,
-    IncomingCatalogPreset? Preset = null, Guid? SearchGroupId = null, bool AutoIncludeNewInCalculation = false);
+    IncomingCatalogPreset? Preset = null, Guid? SearchGroupId = null, bool AutoIncludeNewInCalculation = false, bool? IncludedInMedian = null);
 public sealed record IncomingFilterPresetView(Guid Id, Guid? SearchGroupId, string Name,
     IncomingFilterPresetCriteriaV1 Criteria, int SortOrder, long Version, string? CompatibilityIssue = null);
 public sealed record CreateIncomingFilterPreset(Guid? SearchGroupId, string Name, IncomingFilterPresetCriteriaV1 Criteria);
@@ -122,3 +125,5 @@ public interface IIncomingDuplicateMatchingMaintenance
 {
     Task RefreshAsync(Guid catalogItemId, CancellationToken cancellationToken);
 }
+
+public sealed record DuplicatePhotoEvidence(string LeftUrl, string RightUrl, int Distance, bool Exact);

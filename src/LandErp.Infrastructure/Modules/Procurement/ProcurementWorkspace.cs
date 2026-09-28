@@ -1000,7 +1000,17 @@ public sealed partial class ProcurementWorkspace(
                                  where link.PropertyCaseId == caseId
                                  orderby link.RecordedAt descending
                                  select new { Link = link, File = file }).ToArrayAsync(cancellationToken);
-        CaseRichNote[] richNotes = await db.CaseRichNotes.AsNoTracking().Where(item => item.PropertyCaseId == caseId && item.OrganizationId == context.OrganizationId).ToArrayAsync(cancellationToken);
+        CaseRichNote[] richNotes = await db.CaseRichNotes.AsNoTracking().Where(item => item.PropertyCaseId == caseId && item.OrganizationId == context.OrganizationId && !item.Deleted).OrderBy(item => item.Id).ToArrayAsync(cancellationToken);
+        var linkedTasks = await db.WorkTasks.AsNoTracking().Where(t => t.OrganizationId == context.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == caseId && t.SourceNegotiationId != null && !t.Deleted).ToArrayAsync(cancellationToken);
+        NegotiationView CommunicationView(CaseNegotiation n)
+        {
+            var task = linkedTasks.FirstOrDefault(t => t.SourceNegotiationId == n.Id);
+            return CaseTimelineCommunication.View(n, names.GetValueOrDefault(n.AuthorEmployeeId, "Сотрудник")) with {
+                CaseId = caseId, TaskId = task?.Id, TaskTitle = task?.Title,
+                Attachments = attachments.Where(a => a.Link.NegotiationId == n.Id).Select(a => new ProcurementQueueV2Attachment(a.Link.Id,a.Link.Kind,a.Link.Label,a.Link.Description,a.File.OriginalName,a.File.ContentType,a.File.SizeBytes,a.File.Status,a.Link.RecordedAt)).ToArray()
+            };
+        }
+        var timelineFileIds=timeline.ToDictionary(e=>e.Id,e=>CaseTimelineAttachment.Find(e,attachments.Select(a=>a.Link)));
         Listing? primary = sources.OrderBy(item => item.Link.RecordedAt).Select(item => item.Item).FirstOrDefault();
         string[] photos = sources.SelectMany(item => JsonSerializer.Deserialize<string[]>(item.Item.PhotosJson) ?? []).Distinct().ToArray();
         return new(Item(row, names, sources), primary?.Description, primary?.SellerName, photos,
@@ -1009,14 +1019,12 @@ public sealed partial class ProcurementWorkspace(
                 value.Item.Provenance, value.Item.LastObservedAt)).ToArray(),
             timeline.Select(item => new TimelineItem(item.Id, item.Kind, item.Title, item.Body, names.GetValueOrDefault(item.ActorEmployeeId, "Сотрудник"),
                 item.TargetEmployeeId == null ? null : names.GetValueOrDefault(item.TargetEmployeeId.Value, "Сотрудник"), item.RecordedAt, item.EffectiveAt, item.DueAt)
-                { Communication = CaseTimelineCommunication.Find(item, negotiations, id => names.GetValueOrDefault(id, "Сотрудник")) }).ToArray(),
+                { Communication = negotiations.FirstOrDefault(n => n.Id == item.NegotiationId) is { } n ? CommunicationView(n) : null, TaskId = item.TaskId, CaseId = caseId, Attachments=attachments.Where(a=>a.Link.Id==timelineFileIds[item.Id]).Select(a=>new ProcurementQueueV2Attachment(a.Link.Id,a.Link.Kind,a.Link.Label,a.Link.Description,a.File.OriginalName,a.File.ContentType,a.File.SizeBytes,a.File.Status,a.Link.RecordedAt)).ToArray() }).ToArray(),
             observations.Select(item => new ObservationView(item.Id, item.ListingId, item.ObservedAt, item.RecordedAt,
                 JsonSerializer.Deserialize<ListingData>(item.PayloadJson, CollectionJson.Options)!, JsonSerializer.Deserialize<string[]>(item.ChangesJson)!)).ToArray(),
             heads.Where(item => item.EmployeeId != context.EmployeeId).ToArray(), managers, assignees,
             row.Case.ManagerEmployeeId, manager, head,
-            negotiations.Select(item => new NegotiationView(item.Id, item.SellerPrice, item.BuyerOffer, item.AgreedPrice, item.Currency,
-                item.Channel, item.Contact, item.Outcome, item.Conditions, item.Comment, item.NextStep, item.NextStepDueAt,
-                names.GetValueOrDefault(item.AuthorEmployeeId, "Сотрудник"), item.EffectiveAt, item.RecordedAt)).ToArray(),
+            negotiations.Select(CommunicationView).ToArray(),
             checks.Select(item => new CheckView(item.Id, item.Level, item.Title, item.Status,
                 item.ResponsibleEmployeeId,
                 item.ResponsibleEmployeeId == null ? null : names.GetValueOrDefault(item.ResponsibleEmployeeId.Value, "Сотрудник"),
@@ -1041,6 +1049,9 @@ public sealed partial class ProcurementWorkspace(
             row.Case.CadastralNumber, row.Case.AcquisitionPrice, row.Case.AcquisitionDate, row.Case.AcquisitionComment,
             canManageDossier, canManageTemplates, canManageBlockers, canConfirmPurchase, canCorrectSourceLinks)
         {
+            ReassignmentManagers = managers.Where(item => row.Case.StageId != "pending_head" || item.EmployeeId != row.Assignment.EmployeeId).ToArray(),
+            CanReassignManager = workVisible && effective.CanHeadProcurement,
+            ManagerName = names.GetValueOrDefault(row.Case.ManagerEmployeeId, "Сотрудник"),
             RichNotes = richNotes.Select(item => NoteView(item, names.GetValueOrDefault(item.UpdatedByEmployeeId, "Сотрудник"))).ToArray(),
             CanAssignInspections = canAssignInspections,
             CanPerformInspections = canPerformInspections
@@ -1279,14 +1290,14 @@ public sealed partial class ProcurementWorkspace(
         if (communication?.NextTask is { } requested && !string.IsNullOrWhiteSpace(requested.Title))
         {
             nextTask = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
-                ObjectType = "PropertyCase", ObjectId = row.Case.Id, RecordedAt = negotiation.RecordedAt };
+                ObjectType = "PropertyCase", ObjectId = row.Case.Id, RecordedAt = negotiation.RecordedAt, SourceNegotiationId = negotiation.Id };
             await ApplyTaskDetailsAsync(db, row, nextTask, new(row.Case.Id, row.Case.Version, null, 0,
                 CaseTaskAction.Save, requested.Title, "", WorkTaskType.General, requested.EmployeeId,
                 requested.DueAt, requested.DueHasTime, command.CommandId!.Value), cancellationToken);
             db.WorkTasks.Add(nextTask);
             db.BusinessTimeline.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
                 ObjectType = "PropertyCase", ObjectId = row.Case.Id, ActorEmployeeId = context.EmployeeId,
-                Kind = "CaseTaskSave", Title = "Задача добавлена после общения",
+                Kind = "CaseTaskSave", TaskId = nextTask.Id, Title = "Задача добавлена после общения",
                 Body = nextTask.Title + "\n" + WorkTaskDeadline.Format(nextTask.DueAt, nextTask.DueHasTime),
                 TargetEmployeeId = nextTask.EmployeeId, RecordedAt = negotiation.RecordedAt });
         }
@@ -1295,7 +1306,7 @@ public sealed partial class ProcurementWorkspace(
         db.BusinessTimeline.Add(new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase", ObjectId = row.Case.Id,
-            ActorEmployeeId = context.EmployeeId, Kind = "Negotiation", Title = NegotiationLabel(negotiation),
+            ActorEmployeeId = context.EmployeeId, Kind = "Negotiation", NegotiationId = negotiation.Id, Title = NegotiationLabel(negotiation),
             Body = NegotiationBody(negotiation), EffectiveAt = negotiation.EffectiveAt, DueAt = negotiation.NextStepDueAt, RecordedAt = negotiation.RecordedAt
         });
         object changes = communication == null
@@ -1327,8 +1338,7 @@ public sealed partial class ProcurementWorkspace(
         if (row.Case.Version != command.ExpectedCaseVersion) throw new DbUpdateConcurrencyException();
         if (row.Case.StageId == "acquired") throw new ArgumentException("Проверки купленного объекта доступны только для чтения.");
         if (row.Case.StageId is "rejected" or "monitor") throw new ArgumentException("Сначала возобновите PropertyCase.");
-        if (command.Level == CaseCheckLevel.Deep && row.Case.StageId is not ("negotiation" or "approved"))
-            throw new ArgumentException("Глубокая проверка доступна после решения руководителя продолжить работу.");
+        // Both check levels share the same employee permissions and closed-case boundary.
         if (command.ResponsibleEmployeeId != null)
         {
             DecisionTarget[] responsibleTargets = await TargetsAsync(db, row.Case, row.Assignment.EmployeeId,
@@ -1895,12 +1905,31 @@ public sealed partial class ProcurementWorkspace(
         if (!external) FileUploadLimits.EnsureRawFileSize(command.Content!.LongLength);
         string contentType = external ? "text/uri-list" : Required(command.ContentType, 3, 256, "Укажите MIME-тип файла.");
         if (!external && !AllowedContentType(command.Kind, contentType)) throw new ArgumentException("Тип файла не разрешён для выбранного вложения.");
-        Guid storedId = DataConventions.NewId(); Guid attachmentId = DataConventions.NewId(); DateTimeOffset now = time.GetUtcNow();
+        // Stable draft upload ID covers a lost acknowledgement and provider failure without adding another file.
+        string? contentHash = command.Content == null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(command.Content));
+        if (command.UploadId is Guid uploadId)
+        {
+            var existing = await (from link in db.CaseAttachments join file in db.StoredFiles on link.StoredFileId equals file.Id
+                where link.Id == uploadId select new { Link=link, File=file }).SingleOrDefaultAsync(cancellationToken);
+            if (existing != null)
+            {
+                if(existing.Link.OrganizationId != context.OrganizationId || existing.Link.PropertyCaseId != command.CaseId
+                    || existing.Link.OwnerType != command.OwnerType || AttachmentOwnerId(existing.Link) != command.OwnerId
+                    || existing.Link.Kind != command.Kind || existing.File.OriginalName != command.OriginalName
+                    || existing.File.ContentType != contentType || existing.File.Sha256 != contentHash)
+                    throw new ArgumentException("Ключ загрузки уже использован для другого файла.");
+                if(existing.File.Status == StoredFileStatus.Available) return uploadId;
+                if(command.Content == null) throw new ArgumentException("Для повтора требуется содержимое файла.");
+                await RetryAttachmentAsync(subject,new(command.CaseId,uploadId,command.OriginalName,contentType,command.Content),correlationId,cancellationToken);
+                return uploadId;
+            }
+        }
+        Guid storedId = DataConventions.NewId(); Guid attachmentId = command.UploadId ?? DataConventions.NewId(); DateTimeOffset now = time.GetUtcNow();
         StoredFile stored = new()
         {
             Id = storedId, OrganizationId = context.OrganizationId, OwnerModule = "Procurement", Purpose = command.Kind.ToString(),
             ExternalUrl = externalUrl, OriginalName = external ? Required(command.Label, 2, 512, "Укажите название ссылки.") : Required(command.OriginalName, 1, 512, "Укажите имя файла."),
-            ContentType = contentType, Status = external ? StoredFileStatus.Available : StoredFileStatus.PendingUpload,
+            ContentType = contentType, Sha256 = contentHash, Status = external ? StoredFileStatus.Available : StoredFileStatus.PendingUpload,
             CreatedByEmployeeId = context.EmployeeId, RecordedAt = now
         };
         db.StoredFiles.Add(stored);
@@ -2504,6 +2533,7 @@ public sealed partial class ProcurementWorkspace(
         db.WorkAssignments.Add(assignment);
         db.WorkTasks.Add(task);
         db.PropertyCases.Add(propertyCase);
+        await KanbanProvisioning.JoinNewCaseAsync(db, propertyCase, actorContext.EmployeeId, now, cancellationToken);
         db.CaseDocumentRequirements.AddRange(DefaultDocumentRequirements(propertyCase, actorContext.EmployeeId, now));
         db.WorkflowTransitions.Add(new()
         {
@@ -2592,7 +2622,7 @@ public sealed partial class ProcurementWorkspace(
     private static QueueItem Item(Row row, Dictionary<Guid, string> names, List<(PropertyCaseSourceLink Link, Listing Item)> sources) => new(
         row.Case.Id, row.Case.BusinessNumber, row.Case.WorkingTitle, sources.Select(item => item.Item.Source).Distinct().ToArray(),
         row.Case.WorkingPrice, row.Case.Currency, row.Case.WorkingAreaSquareMeters, row.Case.WorkingLocation, row.Case.StageId,
-        names.GetValueOrDefault(row.Assignment.EmployeeId, "Сотрудник"), (row.Task.Completed || row.Task.Deleted ? null : row.Task.DueAt),
+        names.GetValueOrDefault(row.Assignment.EmployeeId), (row.Task.Completed || row.Task.Deleted ? null : row.Task.DueAt),
         row.Case.StageId == "returned" ? "Руководитель вернул: требуются исправления" : SourcesChanged(sources) ? "Источник изменился" : "Рабочий объект закупки",
         new[] { row.Case.WorkingPrice == null ? "цена" : null, row.Case.WorkingAreaSquareMeters == null ? "площадь" : null, row.Case.WorkingLocation == null ? "местоположение" : null }.OfType<string>().ToArray(),
         SourcesChanged(sources), SourceRevision(sources), row.Case.Version,

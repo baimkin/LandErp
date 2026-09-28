@@ -7,7 +7,7 @@
     @if (editing)
     {
         <div class="demand-input">
-            <input type="number" step="0.01" min="0.01" @bind="draft" aria-label="Тест спроса, рублей за сотку" disabled="@saving" @onkeydown="KeyDown" />
+            <NumberInput Money="true" @bind-Value="draft" aria-label="Тест спроса, рублей за сотку" disabled="@saving" @onkeydown="KeyDown" />
             <button type="button" disabled="@saving" @onclick="SaveAsync" title="Сохранить тест спроса" aria-label="Сохранить тест спроса">✓</button>
             <button type="button" disabled="@saving" @onclick="Cancel" title="Отмена" aria-label="Отмена">×</button>
         </div>
@@ -33,7 +33,7 @@
     private decimal? draft;
     private bool editing, saving;
     private string? error;
-    public static string Money(decimal? price) => price?.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")) + (price.HasValue ? " ₽" : "—");
+    public static string Money(decimal? price) => (price==null?null:NumberFormat.Money(price.Value)) + (price.HasValue ? " ₽" : "—");
     protected override void OnParametersSet()
     {
         if (groupId == Value.SearchGroupId && version == Value.Version) return;

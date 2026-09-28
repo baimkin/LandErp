@@ -6,7 +6,7 @@
 @inherits CaseWorkspaceComponent
 @inject IProcurementWorkspace Workspace
 
-<CaseModal Title="Записать общение" Error="@Error" Busy="@(Busy || uploading)" OnClose="Close">
+<CaseModal Title="Записать общение" Error="@Error" Busy="@(Busy || uploading || preparing)" OnClose="Close">
     @if (Loading) { <p>Загружаем данные…</p> }
     else if (saved)
     {
@@ -18,28 +18,28 @@
     {
         @if (LastWriteWasConflict) { <p>Запись не сохранена: объект изменился. Черновик сохранён.</p><button class="btn quiet" @onclick="RefreshVersion">Обновить данные</button> }
         @if (WriteOutcome == WorkspaceWriteOutcome.Unknown) { <button class="btn secondary" @onclick="Persist">Проверить сохранение</button> }
-        <EditForm Model="draft" OnSubmit="Save">
-            <fieldset disabled="@(Busy || uploading || WriteOutcome == WorkspaceWriteOutcome.Unknown)" class="communication-form">
+        <EditForm Model="draft" OnValidSubmit="Save"><DataAnnotationsValidator /><ValidationSummary />
+            <fieldset disabled="@(Busy || uploading || preparing || WriteOutcome == WorkspaceWriteOutcome.Unknown)" class="communication-form">
                 <div class="channels" role="group" aria-label="Способ связи">
                     @foreach (var option in Channels)
                     { <button type="button" class="btn @(draft.Channel == option.Value ? "secondary" : "quiet")" aria-pressed="@(draft.Channel == option.Value)" @onclick="()=>draft.Channel=option.Value">@option.Label</button> }
                 </div>
                 <div class="communication-row when">
                     <label>Когда, МСК<input type="date" value="@draft.Date" @onchange='e=>draft.Date=e.Value?.ToString()??""' />@FieldError("When")</label>
-                    <label>Время<input type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" @bind="draft.Time" /></label>
+                    <label>Время<input type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" data-time-entry="true" @bind="draft.Time" @bind:event="oninput" />@if(TimeEntry.Invalid(draft.Time)){<small class="input-error">Укажите время HH:mm по МСК.</small>}</label>
                     <label>С кем<input type="text" maxlength="512" @bind="draft.Contact" /></label>
                 </div>
                 <div><label>Что обсудили</label><CaseTextInput @ref="textInput" Label="Что обсудили" MaxLength="1000" Upload="StageFile" />@FieldError("Text")@FieldError("Files")</div>
                 <div class="communication-row prices">
-                    <label>Продавец, ₽<input type="text" inputmode="decimal" @bind="draft.Seller" @onblur='()=>FormatMoney("Seller")' />@FieldError("Seller")</label>
-                    <label>Наше предложение, ₽<input type="text" inputmode="decimal" @bind="draft.Buyer" @onblur='()=>FormatMoney("Buyer")' />@FieldError("Buyer")</label>
-                    <label>Согласовали, ₽<input type="text" inputmode="decimal" @bind="draft.Agreed" @onblur='()=>FormatMoney("Agreed")' />@FieldError("Agreed")</label>
+                    <label>Продавец, ₽<NumberInput TValue="decimal?" Money="true" @bind-Value="draft.Seller" />@FieldError("Seller")</label>
+                    <label>Наше предложение, ₽<NumberInput TValue="decimal?" Money="true" @bind-Value="draft.Buyer" />@FieldError("Buyer")</label>
+                    <label>Согласовали, ₽<NumberInput TValue="decimal?" Money="true" @bind-Value="draft.Agreed" />@FieldError("Agreed")</label>
                 </div>
                 <div class="next-task">
                     <label>Следующая задача <small>необязательно</small><input type="text" maxlength="512" @bind="draft.TaskTitle" @bind:event="oninput" placeholder="Что сделать" />@FieldError("TaskTitle")</label>
                     <div class="communication-row task-date">
                         <label>Дата<input type="date" value="@draft.TaskDate" @onchange='e=>draft.TaskDate=e.Value?.ToString()??""' />@FieldError("TaskDue")</label>
-                        <label>Время МСК<input type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" @bind="draft.TaskTime" /></label>
+                        <label>Время МСК<input type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" data-time-entry="true" @bind="draft.TaskTime" @bind:event="oninput" />@if(TimeEntry.Invalid(draft.TaskTime)){<small class="input-error">Укажите время HH:mm по МСК.</small>}</label>
                         <label>Ответственный<select @bind="draft.EmployeeId">
                             @if (!data.Assignees.Any(x=>x.EmployeeId==draft.EmployeeId)) { <option value="@draft.EmployeeId">Выберите сотрудника</option> }
                             @foreach (var employee in data.Assignees) { <option value="@employee.EmployeeId">@employee.Name</option> }
@@ -67,7 +67,7 @@
     private RecordCaseCommunication? pending;
     private CaseTextInput? textInput;
     private List<Material> materials = [];
-    private bool initialized, saved, uploading;
+    private bool initialized, saved, uploading, preparing;
     private string savedMessage = "";
     private Guid savedNegotiationId;
     protected override async Task ReadAsync()
@@ -78,20 +78,10 @@
     private async Task RefreshVersion() { await ReloadAsync(); if (Error == null && data != null) { draft.Version = data.CaseVersion; pending = null; } }
     private RenderFragment FieldError(string key) => @<text>@if(errors.TryGetValue(key,out var message)){<span class="input-error" role="alert">@message</span>}</text>;
     private void QuickDate(int days) => draft.TaskDate = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, WorkTaskDeadline.Moscow).AddDays(days).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture);
-    private static bool Money(string input, out decimal? value)
+    private static bool Money(decimal? input, out decimal? value)
     {
-        value = null;
-        if (string.IsNullOrWhiteSpace(input)) return true;
-        string normalized = input.Replace(" ", "", StringComparison.Ordinal).Replace("\u00a0", "", StringComparison.Ordinal).Replace("\u202f", "", StringComparison.Ordinal).Replace(',', '.');
-        if (!decimal.TryParse(normalized, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal amount) || amount <= 0 || amount > 999_999_999_999_999m) return false;
-        value = amount; return true;
-    }
-    private void FormatMoney(string key)
-    {
-        string input = key == "Seller" ? draft.Seller : key == "Buyer" ? draft.Buyer : draft.Agreed;
-        if (!Money(input, out var value)) return;
-        string formatted = value?.ToString(value == decimal.Truncate(value.Value) ? "N0" : "N2", Russian) ?? "";
-        if (key == "Seller") draft.Seller = formatted; else if (key == "Buyer") draft.Buyer = formatted; else draft.Agreed = formatted;
+        value=input;
+        return input==null || (input>0 && input<=999_999_999_999_999m);
     }
     private static bool LocalTime(string date, string time, bool required, out DateTimeOffset? result)
     {
@@ -120,10 +110,13 @@
     }
     private async Task Save()
     {
-        if (Busy || uploading || saved || data == null) return;
+        if (Busy || uploading || preparing || saved || data == null) return;
+        preparing=true;
+        try {
         errors.Clear();
-        if (textInput?.Ready != true) return;
-        draft.Text = await textInput.TextAsync();
+        if (textInput?.Ready != true) { errors["Text"] = "Поле ввода ещё не готово. Подождите и повторите сохранение."; return; }
+        try { draft.Text = await textInput.TextAsync(); }
+        catch (JSException exception) { errors["Text"] = ReadFailure(exception, "Не удалось прочитать текст. Запись не отправлена; черновик остаётся в форме."); return; }
         if (draft.Text.Trim().Length < 3) errors["Text"]="Запишите содержательный результат общения.";
         if (!LocalTime(draft.Date,draft.Time,true,out var effective) || effective > DateTimeOffset.UtcNow.AddMinutes(5)) errors["When"]="Укажите дату и время HH:mm по МСК, не в будущем.";
         if (!Money(draft.Seller,out var seller)) errors["Seller"]="Укажите положительную сумму или оставьте пустым.";
@@ -148,6 +141,7 @@
         finally { uploading = false; await textInput.ResumeAsync(); }
         pending = new(new(CaseId,draft.Version,seller,buyer,agreed,draft.Channel,draft.Contact,draft.Text.Trim(),"","","",null,effective!.Value,Guid.CreateVersion7()),task);
         await Persist();
+        } finally { preparing=false; }
     }
     private async Task Persist()
     {
@@ -171,7 +165,7 @@
             foreach (var material in materials.Where(x => !uploadedMaterials.Contains(x.Id)))
             {
                 await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,CaseAttachmentOwner.Negotiation,savedNegotiationId,material.Kind,
-                    material.Name,"Материал к общению",material.Name,material.ContentType,material.Content,null),OperationId,CancellationToken.None);
+                    material.Name,"Материал к общению",material.Name,material.ContentType,material.Content,null,UploadId:material.Id),OperationId,CancellationToken.None);
                 uploadedMaterials.Add(material.Id);
             }
         }
@@ -180,7 +174,7 @@
         if (NeedsRefresh) { savedMessage += " Экран не обновлён; обновите карточку."; return; }
         await Finish();
     }
-    private async Task Close() { if (!Busy && !uploading) { if (saved) await Finish(); else if (textInput == null || await textInput.ConfirmDiscardAsync()) await OnClose.InvokeAsync(); } }
+    private async Task Close() { if (!Busy && !uploading && !preparing) { if (saved) await Finish(); else if (textInput == null || await textInput.ConfirmDiscardAsync()) await OnClose.InvokeAsync(); } }
     private async Task Finish() => await OnSaved.InvokeAsync(savedMessage);
     private readonly HashSet<Guid> uploadedMaterials = [];
     private sealed record Material(Guid Id, string Name,string ContentType,CaseAttachmentKind Kind,byte[] Content);
@@ -198,7 +192,7 @@
         public string Date { get; set; }
         public string Time { get; set; }
         public string Text { get; set; }="";
-        public string Seller { get; set; }=""; public string Buyer { get; set; }=""; public string Agreed { get; set; }="";
+        public decimal? Seller { get; set; } public decimal? Buyer { get; set; } public decimal? Agreed { get; set; }
         public string TaskTitle { get; set; }=""; public string TaskDate { get; set; }=""; public string TaskTime { get; set; }="";
         public Guid EmployeeId { get; set; }
     }

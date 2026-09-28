@@ -227,3 +227,14 @@ tbody tr:hover td{background:#fbfcfe}
 @media(max-width:540px){.stats{grid-template-columns:1fr}}
 
 .drawer-checks ::deep .check-columns{grid-template-columns:1fr}
+
+.inspection-report-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4)}
+.inspection-report-group{display:grid;align-content:start;gap:var(--space-2);min-width:0}
+.inspection-report-group h4{margin:0}
+.inspection-report-item{padding:var(--space-4)}
+@media(max-width:1024px){.inspection-report-list{grid-template-columns:1fr}}
+.decisions-footer{display:block;max-height:55vh;overflow:auto;flex-shrink:0}
+
+.decisions-footer{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);padding-block:var(--space-3)}
+.decisions-footer ::deep .decision-state{flex-basis:100%}
+.kanban-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}.kanban-toolbar select{min-width:190px;max-width:320px}.kanban-switch{display:flex;gap:4px}.kanban-feedback{font-size:var(--text-sm);padding:8px 0}.kanban-drawer-stage{padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:12px}.kanban-drawer-stage label{display:block;margin-bottom:6px}.kanban-drawer-stage select{width:100%}

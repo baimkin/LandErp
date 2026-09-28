@@ -29,6 +29,9 @@ public static partial class ProductionDatabaseInitializer
         await using (LandErpDbContext db = new(options.Options))
         {
             await db.Database.MigrateAsync(cancellationToken);
+            // Explicit upgrade step: existing organizations and cases need a board too.
+            // This is never run by Server/Worker startup and preserves existing positions.
+            await Modules.Procurement.KanbanProvisioning.InitializeAsync(db, cancellationToken);
         }
 
         await ApplyRuntimeAccessAsync(migrator.ConnectionString, runtime.Username!, cancellationToken);
@@ -63,6 +66,8 @@ public static partial class ProductionDatabaseInitializer
             GRANT SELECT ON workflow.stages TO {role};
             GRANT SELECT,INSERT,UPDATE ON workflow.assignments,workflow.work_tasks,procurement.property_cases,procurement.property_case_source_links,procurement.case_checks,procurement.case_check_template_items,procurement.case_document_requirements,procurement.case_rich_notes,procurement.inspection_template_items,procurement.site_inspections,procurement.site_inspection_items,foundation.notifications,foundation.stored_files TO {role};
             GRANT SELECT,INSERT ON workflow.transitions,workflow.approvals,foundation.business_timeline,procurement.negotiations,procurement.case_attachments,procurement.case_fact_revisions TO {role};
+            GRANT SELECT,INSERT,UPDATE ON procurement.kanban_pipelines,procurement.kanban_stages,procurement.kanban_memberships,procurement.kanban_tunnels TO {role};
+            GRANT SELECT,INSERT ON procurement.kanban_transitions TO {role};
             GRANT USAGE ON ALL SEQUENCES IN SCHEMA procurement,identity,organization TO {role};
             """;
         await using NpgsqlConnection connection = new(migrator.ConnectionString);

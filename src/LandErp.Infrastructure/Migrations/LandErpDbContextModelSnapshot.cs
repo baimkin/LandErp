@@ -141,6 +141,11 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("organization_id")
                         .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
 
+                    b.Property<string>("PhotoEvidenceJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("photo_evidence_json");
+
                     b.Property<string>("ReasonsJson")
                         .IsRequired()
                         .HasColumnType("jsonb")
@@ -253,6 +258,80 @@ namespace LandErp.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CatalogItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("catalog_item_id")
+                        .HasComment("Входящий элемент Catalog, к которому относится неизменяемое событие внимания.");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind")
+                        .HasComment("Стабильный тип события: изменение источника, мониторинг, классификация или возобновление кейса.");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("message")
+                        .HasComment("Человекочитаемое объяснение события без секретов и raw payload источника.");
+
+                    b.Property<decimal?>("ObservedPrice")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("observed_price")
+                        .HasComment("Общая цена источника в момент события, если была известна.");
+
+                    b.Property<decimal?>("ObservedPricePerSotka")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("observed_price_per_sotka")
+                        .HasComment("Вычисленная цена за сотку в момент события, если цена и площадь были известны.");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<decimal?>("PreviousObservedPrice")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("previous_observed_price")
+                        .HasComment("Предыдущее известное значение публичной цены непосредственно перед событием изменения источника.");
+
+                    b.Property<decimal?>("PreviousObservedPricePerSotka")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("previous_observed_price_per_sotka")
+                        .HasComment("Предыдущая вычисленная цена за сотку непосредственно перед событием изменения источника.");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at")
+                        .HasComment("UTC момент записи факта в LandErp; не заменяет неизвестную дату действия факта в реальном мире.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_events");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_events_organization_id");
+
+                    b.HasIndex("CatalogItemId", "RecordedAt")
+                        .HasDatabaseName("ix_events_catalog_item_id_recorded_at");
+
+                    b.ToTable("events", "catalog", t =>
+                        {
+                            t.HasComment("Неизменяемая бизнес-история внимания к входящему предложению: изменения источника, мониторинг цены, классификация и возобновление кейса.");
+                        });
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogObjectGroup", b =>
                 {
                     b.Property<Guid>("Id")
@@ -289,151 +368,6 @@ namespace LandErp.Infrastructure.Migrations
                     b.ToTable("object_groups", "catalog", t =>
                         {
                             t.HasComment("Подтверждённые группы объявлений одного физического объекта. Группа не имеет главного объявления и не заменяет PropertyCase.");
-                        });
-                });
-
-            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogPhotoFingerprint", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<int>("FailureCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("failure_count");
-
-                    b.Property<Guid>("ListingId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("listing_id");
-
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("organization_id")
-                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
-
-                    b.Property<long?>("PerceptualHash")
-                        .HasColumnType("bigint")
-                        .HasColumnName("perceptual_hash");
-
-                    b.Property<int>("PhotoIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("photo_index");
-
-                    b.Property<DateTimeOffset?>("RetryAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("retry_at");
-
-                    b.Property<long>("SourceDataRevision")
-                        .HasColumnType("bigint")
-                        .HasColumnName("source_data_revision");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("status");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UrlHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("url_hash");
-
-                    b.HasKey("Id")
-                        .HasName("pk_photo_fingerprints");
-
-                    b.HasIndex("ListingId", "UrlHash")
-                        .IsUnique()
-                        .HasDatabaseName("ix_photo_fingerprints_listing_id_url_hash");
-
-                    b.HasIndex("OrganizationId", "PerceptualHash")
-                        .HasDatabaseName("ix_photo_fingerprints_organization_id_perceptual_hash")
-                        .HasFilter("perceptual_hash IS NOT NULL");
-
-                    b.HasIndex("OrganizationId", "Status", "RetryAt")
-                        .HasDatabaseName("ix_photo_fingerprints_organization_id_status_retry_at");
-
-                    b.ToTable("photo_fingerprints", "catalog", t =>
-                        {
-                            t.HasComment("Компактные perceptual hashes фотографий входящих объявлений. Исходные изображения в PostgreSQL не сохраняются.");
-                        });
-                });
-
-            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("CatalogItemId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("catalog_item_id")
-                        .HasComment("Входящий элемент Catalog, к которому относится неизменяемое событие внимания.");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("kind")
-                        .HasComment("Стабильный тип события: изменение источника, мониторинг, классификация или возобновление кейса.");
-
-                    b.Property<string>("Message")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)")
-                        .HasColumnName("message")
-                        .HasComment("Человекочитаемое объяснение события без секретов и raw payload источника.");
-
-                    b.Property<decimal?>("ObservedPrice")
-                        .HasPrecision(19, 4)
-                        .HasColumnType("numeric(19,4)")
-                        .HasColumnName("observed_price")
-                        .HasComment("Общая цена источника в момент события, если была известна.");
-
-                    b.Property<decimal?>("PreviousObservedPrice")
-                        .HasPrecision(19, 4)
-                        .HasColumnType("numeric(19,4)")
-                        .HasColumnName("previous_observed_price")
-                        .HasComment("Предыдущее известное значение публичной цены непосредственно перед событием изменения источника.");
-
-                    b.Property<decimal?>("PreviousObservedPricePerSotka")
-                        .HasPrecision(19, 4)
-                        .HasColumnType("numeric(19,4)")
-                        .HasColumnName("previous_observed_price_per_sotka")
-                        .HasComment("Предыдущая вычисленная цена за сотку непосредственно перед событием изменения источника.");
-
-                    b.Property<decimal?>("ObservedPricePerSotka")
-                        .HasPrecision(19, 4)
-                        .HasColumnType("numeric(19,4)")
-                        .HasColumnName("observed_price_per_sotka")
-                        .HasComment("Вычисленная цена за сотку в момент события, если цена и площадь были известны.");
-
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("organization_id")
-                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
-
-                    b.Property<DateTimeOffset>("RecordedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("recorded_at")
-                        .HasComment("UTC момент записи факта в LandErp; не заменяет неизвестную дату действия факта в реальном мире.");
-
-                    b.HasKey("Id")
-                        .HasName("pk_events");
-
-                    b.HasIndex("OrganizationId")
-                        .HasDatabaseName("ix_events_organization_id");
-
-                    b.HasIndex("CatalogItemId", "RecordedAt")
-                        .HasDatabaseName("ix_events_catalog_item_id_recorded_at");
-
-                    b.ToTable("events", "catalog", t =>
-                        {
-                            t.HasComment("Неизменяемая бизнес-история внимания к входящему предложению: изменения источника, мониторинг цены, классификация и возобновление кейса.");
                         });
                 });
 
@@ -513,6 +447,82 @@ namespace LandErp.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogPhotoFingerprint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ContentSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("content_sha256");
+
+                    b.Property<int>("FailureCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("failure_count");
+
+                    b.Property<Guid>("ListingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("listing_id");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<long?>("PerceptualHash")
+                        .HasColumnType("bigint")
+                        .HasColumnName("perceptual_hash");
+
+                    b.Property<int>("PhotoIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("photo_index");
+
+                    b.Property<DateTimeOffset?>("RetryAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("retry_at");
+
+                    b.Property<long>("SourceDataRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("source_data_revision");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UrlHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("url_hash");
+
+                    b.HasKey("Id")
+                        .HasName("pk_photo_fingerprints");
+
+                    b.HasIndex("ListingId", "UrlHash")
+                        .IsUnique()
+                        .HasDatabaseName("ix_photo_fingerprints_listing_id_url_hash");
+
+                    b.HasIndex("OrganizationId", "PerceptualHash")
+                        .HasDatabaseName("ix_photo_fingerprints_organization_id_perceptual_hash")
+                        .HasFilter("perceptual_hash IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "Status", "RetryAt")
+                        .HasDatabaseName("ix_photo_fingerprints_organization_id_status_retry_at");
+
+                    b.ToTable("photo_fingerprints", "catalog", t =>
+                        {
+                            t.HasComment("Компактные perceptual hashes фотографий входящих объявлений. Исходные изображения в PostgreSQL не сохраняются.");
+                        });
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.Listing", b =>
                 {
                     b.Property<Guid>("Id")
@@ -564,7 +574,7 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("data_revision")
                         .HasComment("Версия существенных данных объявления. Не увеличивается от неизменного повторного наблюдения.");
 
-                    b.Property<string[]>("DeclaredLandTypes")
+                    b.PrimitiveCollection<string[]>("DeclaredLandTypes")
                         .IsRequired()
                         .HasColumnType("text[]")
                         .HasColumnName("declared_land_types")
@@ -597,18 +607,18 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("first_observed_at")
                         .HasComment("Самый ранний известный UTC момент наблюдения этого объявления.");
 
-                    b.Property<string>("IngestionKind")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("ingestion_kind")
-                        .HasComment("Способ поступления: Collector, сотрудник, миграция или интеграция; ручной путь не создаёт фиктивные jobs/observations.");
-
                     b.Property<bool>("IncludeInCalculation")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false)
                         .HasColumnName("include_in_calculation")
                         .HasComment("Общая для организации отметка участия в расчёте; существующие объявления не включаются автоматически.");
+
+                    b.Property<string>("IngestionKind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("ingestion_kind")
+                        .HasComment("Способ поступления: Collector, сотрудник, миграция или интеграция; ручной путь не создаёт фиктивные jobs/observations.");
 
                     b.Property<string>("IngressComment")
                         .HasMaxLength(4000)
@@ -763,6 +773,9 @@ namespace LandErp.Infrastructure.Migrations
                     b.HasIndex("DepartmentId")
                         .HasDatabaseName("ix_listings_department_id");
 
+                    b.HasIndex("ObjectGroupId")
+                        .HasDatabaseName("ix_listings_object_group_id");
+
                     b.HasIndex("TeamId")
                         .HasDatabaseName("ix_listings_team_id");
 
@@ -772,9 +785,6 @@ namespace LandErp.Infrastructure.Migrations
                     b.HasIndex("OrganizationId", "ObjectGroupId")
                         .HasDatabaseName("ix_listings_organization_id_object_group_id")
                         .HasFilter("object_group_id IS NOT NULL");
-
-                    b.HasIndex("ObjectGroupId")
-                        .HasDatabaseName("ix_listings_object_group_id");
 
                     b.HasIndex("OrganizationId", "Source", "ExternalId")
                         .IsUnique()
@@ -2513,6 +2523,72 @@ namespace LandErp.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.CaseRichNote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("deleted")
+                        .HasComment("Заметка удалена из списка; текст и ссылки на файлы сохраняются для истории.");
+
+                    b.Property<string>("DocumentJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("document_json")
+                        .HasComment("Очищенный сервером JSON документа C-01; изображения только по проверенным ID CaseAttachment, без HTML и base64.");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<Guid>("PropertyCaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("property_case_id")
+                        .HasComment("Объект закупки, которому принадлежит текст секции; описание внешнего источника не изменяется.");
+
+                    b.Property<string>("Section")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("section")
+                        .HasComment("Независимая секция: рабочие заметки, базовые или глубокие проверки; не результат структурированной проверки.");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UpdatedByEmployeeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by_employee_id");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_case_rich_notes");
+
+                    b.HasIndex("UpdatedByEmployeeId")
+                        .HasDatabaseName("ix_case_rich_notes_updated_by_employee_id");
+
+                    b.HasIndex("PropertyCaseId", "Section")
+                        .IsUnique()
+                        .HasDatabaseName("ix_case_rich_notes_property_case_id_section")
+                        .HasFilter("section = 'Working' AND NOT deleted");
+
+                    b.ToTable("case_rich_notes", "procurement", t =>
+                        {
+                            t.HasComment("Рабочий документ и отдельные заметки проверок PropertyCase. Текущие версии и удалённые записи; прежние значения в неизменяемом аудите.");
+                        });
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.InspectionTemplateItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2595,6 +2671,415 @@ namespace LandErp.Infrastructure.Migrations
                     b.ToTable("inspection_template_items", "procurement", t =>
                         {
                             t.HasComment("Версионируемый настраиваемый чек-лист полевого осмотра организации без универсального rules engine.");
+                        });
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasComment("Канбан: Id. Исторические факты не удаляются.");
+
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("joined_at")
+                        .HasComment("Канбан: JoinedAt. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<Guid>("PipelineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("pipeline_id")
+                        .HasComment("Канбан: PipelineId. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("PropertyCaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("property_case_id")
+                        .HasComment("Самостоятельный рабочий объект закупки, к которому относится источник.");
+
+                    b.Property<DateTimeOffset>("StageEnteredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("stage_entered_at")
+                        .HasComment("Канбан: StageEnteredAt. Исторические факты не удаляются.");
+
+                    b.Property<DateTimeOffset?>("StageExitedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("stage_exited_at")
+                        .HasComment("Канбан: StageExitedAt. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("StageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stage_id")
+                        .HasComment("Текущая стадия закупки. Только acquired обозначает подтверждённую завершённую покупку.");
+
+                    b.Property<DateTimeOffset?>("TransferredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("transferred_at")
+                        .HasComment("Канбан: TransferredAt. Исторические факты не удаляются.");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_kanban_memberships");
+
+                    b.HasAlternateKey("OrganizationId", "PropertyCaseId", "Id")
+                        .HasName("ak_kanban_memberships_organization_id_property_case_id_id");
+
+                    b.HasIndex("OrganizationId", "PropertyCaseId", "PipelineId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_kanban_memberships_organization_id_property_case_id_pipeline_id");
+
+                    b.HasIndex("OrganizationId", "PipelineId", "StageId", "TransferredAt")
+                        .HasDatabaseName("ix_kanban_memberships_organization_id_pipeline_id_stage_id_transferred_at");
+
+                    b.ToTable("kanban_memberships", "procurement", t =>
+                        {
+                            t.HasComment("Участия PropertyCase в воронках; переданные позиции сохранены.");
+                        });
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanPipeline", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasComment("Канбан: Id. Исторические факты не удаляются.");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active")
+                        .HasComment("Канбан: IsActive. Исторические факты не удаляются.");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_default")
+                        .HasComment("Канбан: IsDefault. Исторические факты не удаляются.");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("name")
+                        .HasComment("Канбан: Name. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order")
+                        .HasComment("Канбан: SortOrder. Исторические факты не удаляются.");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_kanban_pipelines");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_kanban_pipelines_organization_id_id");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_kanban_pipelines_organization_id")
+                        .HasFilter("is_default AND is_active");
+
+                    b.ToTable("kanban_pipelines", "procurement", t =>
+                        {
+                            t.HasComment("Воронки организации; пользовательские стадии независимы от бизнес-решений.");
+
+                            t.HasCheckConstraint("ck_kanban_pipeline_name", "length(btrim(name)) > 0");
+                        });
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanStage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasComment("Канбан: Id. Исторические факты не удаляются.");
+
+                    b.Property<string>("ColorKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("color_key")
+                        .HasComment("Канбан: ColorKey. Исторические факты не удаляются.");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("description")
+                        .HasComment("Канбан: Description. Исторические факты не удаляются.");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active")
+                        .HasComment("Канбан: IsActive. Исторические факты не удаляются.");
+
+                    b.Property<bool>("IsHiddenOnBoard")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_hidden_on_board")
+                        .HasComment("Канбан: IsHiddenOnBoard. Исторические факты не удаляются.");
+
+                    b.Property<bool>("IsInitial")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_initial")
+                        .HasComment("Канбан: IsInitial. Исторические факты не удаляются.");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind")
+                        .HasComment("Канбан: Kind. Исторические факты не удаляются.");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("name")
+                        .HasComment("Канбан: Name. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<Guid>("PipelineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("pipeline_id")
+                        .HasComment("Канбан: PipelineId. Исторические факты не удаляются.");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order")
+                        .HasComment("Канбан: SortOrder. Исторические факты не удаляются.");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_kanban_stages");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_kanban_stages_organization_id_id");
+
+                    b.HasAlternateKey("OrganizationId", "PipelineId", "Id")
+                        .HasName("ak_kanban_stages_organization_id_pipeline_id_id");
+
+                    b.HasIndex("OrganizationId", "PipelineId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_kanban_stages_organization_id_pipeline_id")
+                        .HasFilter("is_initial AND is_active");
+
+                    b.ToTable("kanban_stages", "procurement", t =>
+                        {
+                            t.HasComment("Пользовательские стадии: порядок и видимость общие для воронки.");
+
+                            t.HasCheckConstraint("ck_kanban_stage_initial", "NOT is_initial OR (is_active AND kind = 'Working')");
+
+                            t.HasCheckConstraint("ck_kanban_stage_name", "length(btrim(name)) > 0");
+                        });
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanTransition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasComment("Канбан: Id. Исторические факты не удаляются.");
+
+                    b.Property<Guid?>("ActorEmployeeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_employee_id")
+                        .HasComment("Канбан: ActorEmployeeId. Исторические факты не удаляются.");
+
+                    b.Property<Guid?>("CommandId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("command_id")
+                        .HasComment("Канбан: CommandId. Исторические факты не удаляются.");
+
+                    b.Property<Guid?>("FromPipelineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("from_pipeline_id")
+                        .HasComment("Канбан: FromPipelineId. Исторические факты не удаляются.");
+
+                    b.Property<string>("FromPipelineName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("from_pipeline_name")
+                        .HasComment("Канбан: FromPipelineName. Исторические факты не удаляются.");
+
+                    b.Property<Guid?>("FromStageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("from_stage_id")
+                        .HasComment("Стадия объекта непосредственно перед сохранённым переходом.");
+
+                    b.Property<string>("FromStageName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("from_stage_name")
+                        .HasComment("Канбан: FromStageName. Исторические факты не удаляются.");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("kind")
+                        .HasComment("Канбан: Kind. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("MembershipId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("membership_id")
+                        .HasComment("Канбан: MembershipId. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<Guid>("PropertyCaseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("property_case_id")
+                        .HasComment("Самостоятельный рабочий объект закупки, к которому относится источник.");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at")
+                        .HasComment("UTC момент записи факта в LandErp; не заменяет неизвестную дату действия факта в реальном мире.");
+
+                    b.Property<Guid>("ToPipelineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("to_pipeline_id")
+                        .HasComment("Канбан: ToPipelineId. Исторические факты не удаляются.");
+
+                    b.Property<string>("ToPipelineName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("to_pipeline_name")
+                        .HasComment("Канбан: ToPipelineName. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("ToStageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("to_stage_id")
+                        .HasComment("Стадия объекта после сохранённого перехода; не планируемая будущая стадия.");
+
+                    b.Property<string>("ToStageName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("to_stage_name")
+                        .HasComment("Канбан: ToStageName. Исторические факты не удаляются.");
+
+                    b.Property<Guid?>("TunnelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tunnel_id")
+                        .HasComment("Канбан: TunnelId. Исторические факты не удаляются.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_kanban_transitions");
+
+                    b.HasIndex("ActorEmployeeId")
+                        .HasDatabaseName("ix_kanban_transitions_actor_employee_id");
+
+                    b.HasIndex("TunnelId")
+                        .HasDatabaseName("ix_kanban_transitions_tunnel_id");
+
+                    b.HasIndex("OrganizationId", "PropertyCaseId", "MembershipId")
+                        .HasDatabaseName("ix_kanban_transitions_organization_id_property_case_id_membership_id");
+
+                    b.HasIndex("OrganizationId", "PropertyCaseId", "RecordedAt")
+                        .HasDatabaseName("ix_kanban_transitions_organization_id_property_case_id_recorded_at");
+
+                    b.HasIndex("OrganizationId", "ToPipelineId", "ToStageId")
+                        .HasDatabaseName("ix_kanban_transitions_organization_id_to_pipeline_id_to_stage_id");
+
+                    b.ToTable("kanban_transitions", "procurement", t =>
+                        {
+                            t.HasComment("Неизменяемая история канбана с названиями на момент события.");
+                        });
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanTunnel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasComment("Канбан: Id. Исторические факты не удаляются.");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active")
+                        .HasComment("Канбан: IsActive. Исторические факты не удаляются.");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("mode")
+                        .HasComment("Канбан: Mode. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id")
+                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
+
+                    b.Property<Guid>("SourceStageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_stage_id")
+                        .HasComment("Канбан: SourceStageId. Исторические факты не удаляются.");
+
+                    b.Property<Guid>("TargetPipelineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("target_pipeline_id")
+                        .HasComment("Канбан: TargetPipelineId. Исторические факты не удаляются.");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version")
+                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
+
+                    b.HasKey("Id")
+                        .HasName("pk_kanban_tunnels");
+
+                    b.HasIndex("OrganizationId", "SourceStageId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_kanban_tunnels_organization_id_source_stage_id")
+                        .HasFilter("is_active");
+
+                    b.HasIndex("OrganizationId", "TargetPipelineId")
+                        .HasDatabaseName("ix_kanban_tunnels_organization_id_target_pipeline_id");
+
+                    b.ToTable("kanban_tunnels", "procurement", t =>
+                        {
+                            t.HasComment("Синхронные переходы из конечной стадии в начальную другой воронки.");
                         });
                 });
 
@@ -2743,6 +3228,9 @@ namespace LandErp.Infrastructure.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_property_cases");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_property_cases_organization_id_id");
 
                     b.HasIndex("AcquiredByEmployeeId")
                         .HasDatabaseName("ix_property_cases_acquired_by_employee_id");
@@ -2897,6 +3385,11 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("reviewed_data_revision")
                         .HasComment("Версия публичных данных, рассмотренная при последнем решении. Новые данные возвращают объект в изменившуюся очередь.");
 
+                    b.Property<long>("ViewedDataRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("viewed_data_revision")
+                        .HasComment("Версия источника, показанная команде в сравнении. 0 означает отсутствие отметки; не заменяет бизнес-рассмотрение.");
+
                     b.HasKey("Id")
                         .HasName("pk_property_case_source_links");
 
@@ -2915,66 +3408,6 @@ namespace LandErp.Infrastructure.Migrations
                     b.ToTable("property_case_source_links", "procurement", t =>
                         {
                             t.HasComment("Подтверждённые и возможные связи входящих элементов Catalog с PropertyCase. Один входящий элемент может иметь не более одной подтверждённой связи.");
-                        });
-                });
-
-            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.CaseRichNote", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("DocumentJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("document_json")
-                        .HasComment("Очищенный сервером JSON документа C-01; изображения только по проверенным ID CaseAttachment, без HTML и base64.");
-
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("organization_id")
-                        .HasComment("Организация-владелец записи; граница изоляции доступа, устанавливаемая сервером.");
-
-                    b.Property<Guid>("PropertyCaseId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("property_case_id")
-                        .HasComment("Объект закупки, которому принадлежит текст секции; описание внешнего источника не изменяется.");
-
-                    b.Property<string>("Section")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("section")
-                        .HasComment("Независимая секция: рабочие заметки, базовые или глубокие проверки; не результат структурированной проверки.");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<Guid>("UpdatedByEmployeeId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("updated_by_employee_id");
-
-                    b.Property<long>("Version")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint")
-                        .HasColumnName("version")
-                        .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
-
-                    b.HasKey("Id")
-                        .HasName("pk_case_rich_notes");
-
-                    b.HasIndex("UpdatedByEmployeeId")
-                        .HasDatabaseName("ix_case_rich_notes_updated_by_employee_id");
-
-                    b.HasIndex("PropertyCaseId", "Section")
-                        .IsUnique()
-                        .HasDatabaseName("ix_case_rich_notes_property_case_id_section");
-
-                    b.ToTable("case_rich_notes", "procurement", t =>
-                        {
-                            t.HasComment("Три независимых свободных документа PropertyCase. Текущее значение и версия; прежние значения в неизменяемом аудите.");
                         });
                 });
 
@@ -3055,15 +3488,15 @@ namespace LandErp.Infrastructure.Migrations
                     b.HasKey("Id")
                         .HasName("pk_site_inspections");
 
-                    b.HasIndex("InspectorEmployeeId", "DueAt")
-                        .HasDatabaseName("ix_site_inspections_inspector_employee_id_due_at");
-
                     b.HasIndex("PropertyCaseId")
                         .IsUnique()
                         .HasDatabaseName("ix_site_inspections_property_case_id");
 
                     b.HasIndex("RequestedByEmployeeId")
                         .HasDatabaseName("ix_site_inspections_requested_by_employee_id");
+
+                    b.HasIndex("InspectorEmployeeId", "DueAt")
+                        .HasDatabaseName("ix_site_inspections_inspector_employee_id_due_at");
 
                     b.ToTable("site_inspections", "procurement", t =>
                         {
@@ -3336,6 +3769,10 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnType("character varying(512)")
                         .HasColumnName("kind");
 
+                    b.Property<Guid?>("NegotiationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("negotiation_id");
+
                     b.Property<Guid>("ObjectId")
                         .HasColumnType("uuid")
                         .HasColumnName("object_id")
@@ -3361,6 +3798,10 @@ namespace LandErp.Infrastructure.Migrations
                     b.Property<Guid?>("TargetEmployeeId")
                         .HasColumnType("uuid")
                         .HasColumnName("target_employee_id");
+
+                    b.Property<Guid?>("TaskId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("task_id");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -3461,6 +3902,19 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("completed")
                         .HasComment("Завершена ли текущая рабочая задача; факты истории сохраняются независимо.");
 
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<Guid?>("CompletedByEmployeeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("completed_by_employee_id");
+
+                    b.Property<bool>("Deleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("deleted")
+                        .HasComment("Задача убрана из рабочих списков; история и сама запись сохраняются.");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(4000)
@@ -3473,10 +3927,20 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("due_at")
                         .HasComment("Опциональный UTC срок выполнения рабочей задачи или уточнений при возврате.");
 
+                    b.Property<bool>("DueHasTime")
+                        .HasColumnType("boolean")
+                        .HasColumnName("due_has_time")
+                        .HasComment("True: точный срок UTC. False: due_at хранит начало даты Europe/Moscow; просрочка со следующего дня, время не показывается.");
+
                     b.Property<Guid>("EmployeeId")
                         .HasColumnType("uuid")
                         .HasColumnName("employee_id")
                         .HasComment("Сотрудник, к которому относится назначение или приглашение.");
+
+                    b.Property<bool>("IsUserTask")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_user_task")
+                        .HasComment("Пользовательская или сохранённая прежняя задача; системные переходы не перезаписывают её.");
 
                     b.Property<Guid>("ObjectId")
                         .HasColumnType("uuid")
@@ -3500,6 +3964,14 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("recorded_at")
                         .HasComment("UTC момент записи факта в LandErp; не заменяет неизвестную дату действия факта в реальном мире.");
 
+                    b.Property<string>("ResultDocumentJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("result_document_json");
+
+                    b.Property<Guid?>("SourceNegotiationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_negotiation_id");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -3519,23 +3991,14 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("version")
                         .HasComment("Версия для optimistic concurrency. Каждое изменение увеличивает значение; stale commands отклоняются.");
 
-                    b.Property<bool>("Deleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("deleted")
-                        .HasComment("Задача убрана из рабочих списков; история и сама запись сохраняются.");
-
-                    b.Property<bool>("IsUserTask")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_user_task")
-                        .HasComment("Пользовательская или сохранённая прежняя задача; системные переходы не перезаписывают её.");
-
-                    b.Property<bool>("DueHasTime")
-                        .HasColumnType("boolean")
-                        .HasColumnName("due_has_time")
-                        .HasComment("True: точный срок UTC. False: due_at хранит начало даты Europe/Moscow; просрочка со следующего дня, время не показывается.");
-
                     b.HasKey("Id")
                         .HasName("pk_work_tasks");
+
+                    b.HasIndex("CompletedByEmployeeId")
+                        .HasDatabaseName("ix_work_tasks_completed_by_employee_id");
+
+                    b.HasIndex("SourceNegotiationId")
+                        .HasDatabaseName("ix_work_tasks_source_negotiation_id");
 
                     b.HasIndex("EmployeeId", "Completed", "DueAt")
                         .HasDatabaseName("ix_work_tasks_employee_id_completed_due_at");
@@ -4046,23 +4509,6 @@ namespace LandErp.Infrastructure.Migrations
                         .HasConstraintName("fk_duplicate_settings_organization_id");
                 });
 
-            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogPhotoFingerprint", b =>
-                {
-                    b.HasOne("LandErp.Application.Modules.Catalog.Domain.Listing", null)
-                        .WithMany()
-                        .HasForeignKey("ListingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_photo_fingerprints_listing_id");
-
-                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_photo_fingerprints_organization_id");
-                });
-
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogEvent", b =>
                 {
                     b.HasOne("LandErp.Application.Modules.Catalog.Domain.Listing", null)
@@ -4078,6 +4524,16 @@ namespace LandErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_events_organization_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogObjectGroup", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_object_groups_organization_id");
                 });
 
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogObservation", b =>
@@ -4104,14 +4560,21 @@ namespace LandErp.Infrastructure.Migrations
                         .HasConstraintName("fk_observations_listing_id");
                 });
 
-            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogObjectGroup", b =>
+            modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.CatalogPhotoFingerprint", b =>
                 {
+                    b.HasOne("LandErp.Application.Modules.Catalog.Domain.Listing", null)
+                        .WithMany()
+                        .HasForeignKey("ListingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_photo_fingerprints_listing_id");
+
                     b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_object_groups_organization_id");
+                        .HasConstraintName("fk_photo_fingerprints_organization_id");
                 });
 
             modelBuilder.Entity("LandErp.Application.Modules.Catalog.Domain.Listing", b =>
@@ -4504,6 +4967,113 @@ namespace LandErp.Infrastructure.Migrations
                         .HasConstraintName("fk_negotiations_property_case_id");
                 });
 
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.CaseRichNote", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.PropertyCase", null)
+                        .WithMany()
+                        .HasForeignKey("PropertyCaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_case_rich_notes_property_case_id");
+
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_case_rich_notes_updated_by_employee_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanMembership", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.PropertyCase", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PropertyCaseId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_kanban_memberships_organization_id_property_case_id");
+
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.KanbanStage", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PipelineId", "StageId")
+                        .HasPrincipalKey("OrganizationId", "PipelineId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_kanban_memberships_organization_id_pipeline_id_stage_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanPipeline", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_kanban_pipelines_organization_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanStage", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.KanbanPipeline", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PipelineId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_kanban_stages_organization_id_pipeline_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanTransition", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("ActorEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_kanban_transitions_actor_employee_id");
+
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.KanbanTunnel", null)
+                        .WithMany()
+                        .HasForeignKey("TunnelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_kanban_transitions_tunnel_id");
+
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.KanbanMembership", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PropertyCaseId", "MembershipId")
+                        .HasPrincipalKey("OrganizationId", "PropertyCaseId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_kanban_transitions_organization_id_property_case_id_membership_id");
+
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.KanbanStage", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ToPipelineId", "ToStageId")
+                        .HasPrincipalKey("OrganizationId", "PipelineId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_kanban_transitions_organization_id_to_pipeline_id_to_stage_id");
+                });
+
+            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.KanbanTunnel", b =>
+                {
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.KanbanStage", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SourceStageId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_kanban_tunnels_organization_id_source_stage_id");
+
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.KanbanPipeline", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "TargetPipelineId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_kanban_tunnels_organization_id_target_pipeline_id");
+                });
+
             modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.PropertyCase", b =>
                 {
                     b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
@@ -4606,23 +5176,6 @@ namespace LandErp.Infrastructure.Migrations
                         .HasConstraintName("fk_property_case_source_links_property_case_id");
                 });
 
-            modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.CaseRichNote", b =>
-                {
-                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.PropertyCase", null)
-                        .WithMany()
-                        .HasForeignKey("PropertyCaseId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_case_rich_notes_property_case_id");
-
-                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
-                        .WithMany()
-                        .HasForeignKey("UpdatedByEmployeeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_case_rich_notes_updated_by_employee_id");
-                });
-
             modelBuilder.Entity("LandErp.Application.Modules.Procurement.Domain.SiteInspection", b =>
                 {
                     b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
@@ -4720,10 +5273,22 @@ namespace LandErp.Infrastructure.Migrations
                 {
                     b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
                         .WithMany()
+                        .HasForeignKey("CompletedByEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_work_tasks_completed_by_employee_id");
+
+                    b.HasOne("LandErp.Application.Modules.Organization.Domain.Employee", null)
+                        .WithMany()
                         .HasForeignKey("EmployeeId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_work_tasks_employee_id");
+
+                    b.HasOne("LandErp.Application.Modules.Procurement.Domain.CaseNegotiation", null)
+                        .WithMany()
+                        .HasForeignKey("SourceNegotiationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_work_tasks_source_negotiation_id");
                 });
 
             modelBuilder.Entity("LandErp.Application.Modules.Workflow.Domain.WorkflowTransition", b =>

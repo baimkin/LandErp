@@ -39,12 +39,15 @@ public sealed class CaseTasksTests
         await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => f.Workspace.ChangeTaskAsync(f.Manager,
             edit with { CommandId = Guid.CreateVersion7() }, "stale", Ct));
         current = await f.Workspace.ReadTasksAsync(f.Manager, id, Ct);
-        var complete = Edit(current, a, id, CaseTaskAction.Complete);
+        var complete = Edit(current, a, id, CaseTaskAction.Complete) with { ResultDocumentJson = CaseNoteDocument.FromPlainText("Документы получены") };
         await f.Workspace.ChangeTaskAsync(f.Manager, complete, "complete", Ct);
         await f.Workspace.ChangeTaskAsync(f.Manager, complete, "repeat-complete", Ct);
         current = await f.Workspace.ReadTasksAsync(f.Manager, id, Ct);
         Assert.IsTrue(current.Tasks.Single(x => x.Id == a).Completed);
         Assert.AreEqual("Сохранённые подробности", current.Tasks.Single(x => x.Id == a).Description);
+        Assert.IsNotNull(current.Tasks.Single(x => x.Id == a).CompletedAt);
+        Assert.IsNotNull(current.Tasks.Single(x => x.Id == a).CompletedBy);
+        StringAssert.Contains(current.Tasks.Single(x => x.Id == a).ResultHtml!, "Документы получены");
         Assert.IsFalse(current.Tasks.Single(x => x.Id == b).Completed);
         var delete = Edit(current, b, id, CaseTaskAction.Delete);
         await f.Workspace.ChangeTaskAsync(f.Manager, delete, "delete", Ct);
@@ -56,6 +59,23 @@ public sealed class CaseTasksTests
         Assert.AreEqual(5, await db.AuditEvents.CountAsync(x => x.ObjectId == id && x.Action.StartsWith("CaseTask")));
         var queue = await new ProcurementQueueV2ReadService(f.Factory, TimeProvider.System).ReadPageAsync(f.Manager, new(), Ct);
         Assert.AreEqual("Нет задач", queue.Items.Single().NextActionTitle);
+    }
+
+    [TestMethod]
+    public async Task ResultRejectsForeignCaseFilesAndAllowsCompletionWithoutReport()
+    {
+        await using var f=await ProcurementTests.Phase1Fixture.CreateAsync(false,false);
+        Guid id=await Create(f), other=await Create(f);
+        var view=await f.Workspace.ReadTasksAsync(f.Manager,id,Ct);
+        Guid task=await f.Workspace.ChangeTaskAsync(f.Manager,Command(id,view.CaseVersion,f.ManagerEmployeeId,"Проверить файл"),"add",Ct);
+        Guid file=await f.Workspace.AddAttachmentAsync(f.Manager,new(other,LandErp.Application.Modules.Procurement.Domain.CaseAttachmentOwner.Case,null,LandErp.Application.Modules.Procurement.Domain.CaseAttachmentKind.Document,"Чужой файл","","result.txt","text/plain","test"u8.ToArray(),null),"file",Ct);
+        view=await f.Workspace.ReadTasksAsync(f.Manager,id,Ct);
+        string json=System.Text.Json.JsonSerializer.Serialize(new {type="doc",content=new[]{new{type="attachment",attrs=new{attachmentId=file,name="result.txt"}}}});
+        await Assert.ThrowsExactlyAsync<ArgumentException>(()=>f.Workspace.ChangeTaskAsync(f.Manager,Edit(view,task,id,CaseTaskAction.Complete) with{ResultDocumentJson=json},"foreign",Ct));
+        Assert.IsFalse((await f.Workspace.ReadTasksAsync(f.Manager,id,Ct)).Tasks.Single().Completed);
+        await f.Workspace.ChangeTaskAsync(f.Manager,Edit(view,task,id,CaseTaskAction.Complete),"empty-result",Ct);
+        var result=(await f.Workspace.ReadTasksAsync(f.Manager,id,Ct)).Tasks.Single();
+        Assert.IsTrue(result.Completed);Assert.IsNull(result.ResultDocumentJson);Assert.IsNotNull(result.CompletedAt);
     }
 
     [TestMethod]

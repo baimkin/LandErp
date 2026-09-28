@@ -18,17 +18,33 @@
 
 <PageTitle>Очередь закупки · LandErp</PageTitle>
 
-<section class="pq2-reference">
+<section class="pq2-reference @(ShowKanban ? "pq2-kanban" : "")">
     <main class="main">
+        @if(!InPipeline){
+        @if(!Loading && Error==null && !Forbidden && queuePage!=null){<p class="queue-scope" role="status">@(attentionOnly ? "Требуют внимания · каждый объект один раз" : stageFilter=="pending_head" ? "Ждут решения руководителя" : stageFilter.Length==0 ? "Активные объекты · кроме отклонённых и купленных" : ProcurementLabels.Stage(stageFilter)) · объектов: @queuePage.Total</p>}
         <div class="head">
             <div>
                 <span class="kicker">Рабочие объекты закупки</span>
                 <h1>Очередь закупки</h1>
-                <p>Только уже выбранные PropertyCase. В очереди — минимум информации; детали открываются справа.</p>
+                <p>Только уже выбранные объекты. В очереди — минимум информации; детали открываются справа.</p>
             </div>
             <button type="button" class="btn primary" disabled="@(queuePage?.CanCreateManualCase != true || Busy)" @onclick="OpenManualCase">+ Создать объект вручную</button>
         </div>
 
+        }
+        @if(kanbanConfig!=null)
+        {
+            <div class="kanban-toolbar">
+                <label class="kanban-pipeline"><span>Воронка</span><select class="ui-select" value="@(InPipeline?activePipeline:Guid.Empty)" @onchange="ChangePipeline">@if(!ShowKanban){<option value="@Guid.Empty">Все воронки</option>}@foreach(var p in kanbanConfig.Pipelines){<option value="@p.Id">@p.Name</option>}</select></label>
+                <div class="kanban-switch"><button type="button" class="btn @(!ShowKanban?"primary":"")" @onclick="()=>ChangeView(false)">Таблица</button><button type="button" class="btn @(ShowKanban?"primary":"")" @onclick="()=>ChangeView(true)">Канбан</button></div>
+                @if(InPipeline&&kanbanConfig.CanConfigureKanban){<button type="button" class="btn" @onclick="()=>kanbanSettingsOpen=true">Настроить этапы</button>}
+                @if(InPipeline&&kanbanConfig.CanManageCards){<button type="button" class="btn" @onclick="OpenAddExisting">Добавить существующий объект</button>}
+                @if(InPipeline){<button type="button" class="btn primary" disabled="@(queuePage?.CanCreateManualCase!=true||Busy)" @onclick="OpenManualCase">+ Создать объект вручную</button>}
+            </div>
+            @if(!InPipeline){<p class="kanban-scope-hint">Общая очередь: доступные объекты закупки из всех воронок и без воронки. По умолчанию — кроме купленных и отклонённых. Канбан показывает одну выбранную воронку.</p>}
+            <KanbanToast Message="@kanbanMessage" AutoDismiss="kanbanSuccess" Sequence="kanbanNoticeVersion" />
+            @if(pendingMove!=null&&!kanbanBusy){<button type="button" class="btn" @onclick="RetryKanbanMove">Проверить результат переноса</button>}
+        }
         @if (Loading)
         {
             <div class="state"><strong>Загружаем очередь закупки…</strong></div>
@@ -50,6 +66,13 @@
 
             @if (queuePage != null)
             {
+                @if(ShowKanban && kanbanBoard!=null)
+                {
+                    <KanbanBoard Board="kanbanBoard" Busy="@(kanbanBusy||pendingMove!=null)" Open="OpenKanbanDrawer" OpenTask="OpenKanbanTask" Move="MoveBoardCard" More="MoreKanban" />
+                }
+                else
+                {
+                @if(!InPipeline){
                 <div class="stats" aria-label="Сводка очереди">
                     <button type="button" class="stat @(dueTodayOnly ? "selected" : "")" @onclick="ToggleDueTodayAsync">
                         <span>Сегодня</span><b>@(queuePage.Summary.DueToday)</b><small>объектов с задачами</small>
@@ -66,28 +89,30 @@
                     <div class="stat market-stat"><GroupMarketPrices Value="groupMarket" Subject="CurrentSubject" Saved="ReloadAsync" EmptyText="Выберите группу поиска в фильтрах" /></div>
                 </div>
 
+                }
                 <section class="box">
+                    @if(!InPipeline){
                     <div class="tools">
                         <input value="@searchDraft"
                                @oninput="e => searchDraft = e.Value?.ToString() ?? string.Empty"
                                @onchange="SearchChangedAsync"
                                @onkeydown="SearchKeyDownAsync"
                                placeholder="Адрес, PC, кадастровый номер, продавец…" />
-                        <select value="@stageFilter" @onchange="StageChangedAsync" aria-label="Этап">
-                            <option value="">Все этапы</option>
+                        <select class="ui-select" value="@stageFilter" @onchange="StageChangedAsync" aria-label="Состояние закупки">
+                            <option value="">Все состояния закупки</option>
                             @foreach (string stage in queuePage.Stages)
                             {
                                 <option value="@stage">@ProcurementLabels.Stage(stage)</option>
                             }
                         </select>
-                        <select value="@assigneeFilter" @onchange="AssigneeChangedAsync" aria-label="Ответственный">
+                        <select class="ui-select" value="@assigneeFilter" @onchange="AssigneeChangedAsync" aria-label="Ответственный">
                             <option value="">Все ответственные</option>
                             @foreach (ProcurementQueueV2Assignee assignee in queuePage.Assignees)
                             {
                                 <option value="@assignee.Id">@assignee.Name</option>
                             }
                         </select>
-                        <select value="@marketGroupId" @onchange="MarketGroupChangedAsync" aria-label="Группа поиска"><option value="">Все группы поиска</option>@foreach(var group in marketGroups){<option value="@group.Id">@group.Name</option>}</select>
+                        <select class="ui-select" value="@marketGroupId" @onchange="MarketGroupChangedAsync" aria-label="Группа поиска"><option value="">Все группы поиска</option>@foreach(var group in marketGroups){<option value="@group.Id">@group.Name</option>}</select>
                         @if (HasFilters)
                         {
                             <button type="button" class="btn reset" @onclick="ClearFiltersAsync">Сбросить</button>
@@ -103,12 +128,15 @@
                         <button type="button" class="chipbtn @(stageFilter == "pending_head" ? "on" : "")" @onclick="ShowPendingHeadAsync">У руководителя <b>@(queuePage.Summary.PendingHead)</b></button>
                     </div>
 
+                    }
                     <div class="table">
-                        <table>
+                        <table class="procurement-table">
+                            <colgroup>@foreach(var width in InPipeline?new[]{20,9,13,10,13,7,13,8,7}:new[]{24,9,11,15,9,13,12,7}){<col style="width:@(width)%" />}</colgroup>
                             <thead>
                                 <tr>
                                     <th>Объект</th>
-                                    <th>Этап</th>
+                                    <th>Состояние закупки</th>
+                                    @if(InPipeline){<th>Статус работы</th>}
                                     <th>Цена / площадь</th>
                                     <th>Следующее действие</th>
                                     <th>Проверка</th>
@@ -120,7 +148,7 @@
                             <tbody>
                                 @if (queuePage.Items.Count == 0)
                                 {
-                                    <tr><td colspan="8" class="empty">По выбранным условиям объектов нет.</td></tr>
+                                    <tr><td colspan="@(InPipeline?9:8)" class="empty">По выбранным условиям объектов нет.</td></tr>
                                 }
                                 @foreach (ProcurementQueueV2Row item in queuePage.Items)
                                 {
@@ -133,11 +161,11 @@
                                                 }
                                                 else
                                                 {
-                                                    <span class="thumb fallback" aria-hidden="true">⌂</span>
+                                                    <span class="queue-photo-placeholder" aria-hidden="true">⌂</span>
                                                 }
                                                 <div>
                                                     <a class="object-title-link"
-                                                       href="@($"/procurement/{item.CaseId}")"
+                                                       href="@($"/procurement/{item.CaseId}")" target="_blank" rel="noopener noreferrer"
                                                        title="Открыть полную карточку"
                                                        @onclick:stopPropagation="true">@item.Title</a>
                                                     <div class="sub">@item.BusinessNumber@if (!string.IsNullOrWhiteSpace(item.CadastralNumber)) { <text> · @item.CadastralNumber</text> }</div>
@@ -145,6 +173,7 @@
                                             </div>
                                         </td>
                                         <td><span class="badge @StageBadge(item.Stage)">@ProcurementLabels.Stage(item.Stage)</span></td>
+                                        @if(InPipeline){<td @onclick:stopPropagation="true">@if(item.KanbanMembership is {} membership){<KanbanStagePicker Membership="membership" Stages="CurrentKanbanStages" Disabled="@(!item.CanMoveKanban||kanbanBusy||pendingMove!=null)" Move="MoveSelectedStage" />}else{<span>—</span>}</td>}
                                         <td class="price"><b>@MoneyCompact(item.WorkingPrice)</b><div class="sub">@AreaSotki(item.AreaSquareMeters)</div></td>
                                         <td><span class="badge neutral">@NextActionTypeLabel(item.NextActionType)</span><b>@ValueOrDash(item.NextActionTitle)</b><div class="sub" title="@item.NextActionDescription">@CompactText(item.NextActionDescription, 80)</div><div class="sub @DueCss(item.DueState)">@WorkTaskDeadline.Format(item.DueAt, item.DueHasTime)</div></td>
                                         <td><span class="badge @CheckBadge(item.QuickChecks)">@CheckRatio(item.QuickChecks)</span></td>
@@ -174,6 +203,7 @@
                         </div>
                     </footer>
                 </section>
+                }
             }
         }
     </main>
@@ -182,7 +212,7 @@
 @if (selectedCaseId != null)
 {
     <div class="overlay on" @onclick="CloseDrawer"></div>
-    <aside class="drawer on" @onclick:stopPropagation="true" aria-label="Карточка объекта">
+    <aside class="drawer on" @onclick:stopPropagation="true" aria-label="Карточка объекта" @onkeydown="KanbanDrawerKey">
         @if (drawerLoading)
         {
             <div class="dh"><div class="grow"><b>Карточка объекта</b></div><button class="btn" type="button" @onclick="CloseDrawer">×</button></div>
@@ -203,6 +233,8 @@
             <div class="db">
                 @if (Success != null) { <div class="state" role="status"><strong>@Success</strong>@if (RefreshRequired) { <button class="btn" type="button" @onclick="ReloadAsync">Обновить данные</button> }</div> }
                 @if (Error != null) { <div class="state error" role="alert">@Error</div> }
+
+                <CaseSourceChangesNotice @key="detail.CaseId" @ref="sourceNotice" CaseId="detail.CaseId" />
                 <div class="card hero">
                     @if (!string.IsNullOrWhiteSpace(detail.ThumbnailUrl))
                     {
@@ -213,10 +245,21 @@
                         <div class="photo fallback" aria-hidden="true">⌂</div>
                     }
                     <div class="facts">
+                        @if(InPipeline && SelectedMembership is {} selectedMembership){<div class="fact work-status"><span>Статус работы</span><KanbanStagePicker Membership="selectedMembership" Stages="CurrentKanbanStages" Disabled="@(!SelectedCanMove||kanbanBusy||pendingMove!=null)" Move="MoveSelectedStage" /></div>}
                         <div class="fact"><label>Объект</label><b>@detail.Title</b><small>@ValueOrDash(detail.CadastralNumber)</small></div>
+                        <div class="fact"><label>Состояние закупки</label><b>@ProcurementLabels.Stage(detail.Stage)</b></div>
                         <div class="fact"><label>Площадь</label><b>@AreaSotki(detail.AreaSquareMeters)</b></div>
-                        <div class="fact"><label>Этап</label><b>@ProcurementLabels.Stage(detail.Stage)</b></div>
                         <div class="fact"><label>Ответственный</label><b>@detail.AssigneeName</b></div>
+                        @if(drawerMarkets.Count==0)
+                        {
+                            <div class="fact"><label>Медиана</label><b title="У объекта нет связанной группы поиска">—</b></div>
+                            <div class="fact"><label>Тест спроса</label><b title="У объекта нет связанной группы поиска">—</b></div>
+                        }
+                        @foreach(var market in drawerMarkets)
+                        {
+                            <div class="fact"><label title="@market.Name">Медиана</label><b>@DemandTestPrice.Money(market.MedianPricePerSotka)@if(market.MedianPricePerSotka!=null){<text> / сот.</text>}</b>@if(drawerMarkets.Count>1){<small>@market.Name</small>}</div>
+                            <div class="fact"><label title="Ручной ориентир цены, не измеренный спрос">Тест спроса</label><b>@DemandTestPrice.Money(market.DemandTestPricePerSotka)@if(market.DemandTestPricePerSotka!=null){<text> / сот.</text>}</b>@if(drawerMarkets.Count>1){<small>@market.Name</small>}</div>
+                        }
                     </div>
                 </div>
 
@@ -303,26 +346,19 @@
                     else
                     {
                         <CaseSourceLinks Items="detail.Sources.Select(x=>new CaseSourceLinkItem(x.Source,x.Title??x.ExternalId??ProcurementLabels.Source(x.Source),x.Url)).ToArray()"/>
+                        @foreach(var source in detail.Sources){<div><span>@ProcurementLabels.Source(source.Source)</span><SourceChangesButton @key="(detail.CaseId,source.CatalogItemId)" CaseId="detail.CaseId" CatalogItemId="source.CatalogItemId" OnViewed="RefreshSourceNotices" /></div>}
 
                     }
                 </div>
             </div>
 
-            <div class="df">
-                @if (detail.CanHeadDecide)
+            <div class="df decisions-footer">
+                @if(drawerCard!=null)
                 {
-                    <button class="btn bad" type="button" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Return)">Вернуть</button>
-                    <button class="btn primary" type="button" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Approve)">Продолжить</button>
+                    <CaseDecisionState Card="drawerCard" Busy="Busy" OnAction="OpenDecisionAsync" OnSection="OpenCaseSection" />
+                    @if(CaseDecisionPresentation.CanPurchase(drawerCard)){<button class="btn secondary" type="button" @onclick="OpenFullCase">Оформить покупку в карточке</button>}
                 }
-                else if (detail.CanManagerDecide)
-                {
-                    <button class="btn bad" type="button" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Reject)">Не подходит</button>
-                    <button class="btn primary" type="button" disabled="@Busy" @onclick="() => OpenDecisionAsync(ProcurementAction.Forward)">Передать руководителю</button>
-                }
-                else
-                {
-                    <span></span><button class="btn primary" type="button" @onclick="OpenFullCase">Открыть карточку</button>
-                }
+                <button class="btn quiet" type="button" @onclick="OpenFullCase">Открыть карточку</button>
             </div>
         }
     </aside>
@@ -332,7 +368,7 @@
 {
     <div class="modalBack on" @onclick="CloseManualCase">
         <div class="modal add-modal" @onclick:stopPropagation="true">
-            <div class="mh"><div class="grow"><b>Создать объект вручную</b><div class="sub">PropertyCase без обязательного входящего объявления</div></div><button class="btn" type="button" @onclick="CloseManualCase">×</button></div>
+            <div class="mh"><div class="grow"><b>Создать объект вручную</b><div class="sub">Объект без обязательного входящего объявления</div></div><button class="btn" type="button" @onclick="CloseManualCase">×</button></div>
             <EditForm Model="manualCase" FormName="procurement-v2-manual-case" OnValidSubmit="CreateManualCaseAsync">
                 <DataAnnotationsValidator />
                 <div class="mb">
@@ -342,8 +378,8 @@
                         <div class="field full"><label>Название объекта</label><input @bind="manualCase.Title" maxlength="512" placeholder="Например, участок у деревни Новая" /></div>
                         <div class="field"><label>Локация</label><input @bind="manualCase.Location" maxlength="20000" /></div>
                         <div class="field"><label>Кадастровый номер</label><input @bind="manualCase.CadastralNumber" maxlength="128" /></div>
-                        <div class="field"><label>Рабочая цена, ₽</label><InputNumber @bind-Value="manualCase.Price" /></div>
-                        <div class="field"><label>Площадь, м²</label><InputNumber @bind-Value="manualCase.AreaSquareMeters" /></div>
+                        <div class="field"><label>Рабочая цена, ₽</label><NumberInput @bind-Value="manualCase.Price"  Money="true" /></div>
+                        <div class="field"><label>Площадь, м²</label><NumberInput @bind-Value="manualCase.AreaSquareMeters"  /></div>
                         <div class="field full"><label>Как узнали об объекте / контекст</label><textarea @bind="manualCase.Comment" maxlength="900" placeholder="Звонок собственника, Telegram, рекомендация директора…"></textarea></div>
                     </div>
                 </div>
@@ -355,7 +391,7 @@
 
 @if (decisionCard != null)
 {
-    <DecisionDialog Card="decisionCard" Action="decisionAction" Title="@DecisionTitle(decisionAction)" Busy="@Busy" Error="@Error"
+    <DecisionDialog Card="decisionCard" Action="decisionAction" Title="@CaseDecisionPresentation.Title(decisionAction)" Busy="@Busy" Error="@Error" NeedsRefresh="decisionNeedsRefresh" OnRefresh="RefreshDecisionAsync"
                     OnConfirm="ConfirmDecisionAsync" OnClose="CloseDecision" />
 }
 
@@ -396,7 +432,7 @@
 {
     <div class="modalBack on" @onclick="CloseInspectionReport">
         <div class="modal history-modal" @onclick:stopPropagation="true">
-            <div class="mh"><div class="grow"><b>Результат осмотра</b><div class="sub">@detail.BusinessNumber · read-only отчёт</div></div><button class="btn" type="button" @onclick="CloseInspectionReport">×</button></div>
+            <div class="mh"><div class="grow"><b>Результат осмотра</b><div class="sub">@detail.BusinessNumber · Результаты осмотра</div></div><button class="btn" type="button" @onclick="CloseInspectionReport">×</button></div>
             <div class="mb history-body">
                 @if (inspectionReportLoading)
                 {
@@ -427,8 +463,11 @@
                         }
                     </div>
                     <div class="inspection-report-list">
-                        @foreach (ProcurementInspectionReportItem item in inspectionReport.Items)
+                        @foreach (var group in inspectionReport.Items.GroupBy(item => InspectionGroup(item.Title)))
                         {
+                            <section class="inspection-report-group"><h4>@group.Key</h4>
+                            @foreach (var item in group)
+                            {
                             <article class="inspection-report-item @(item.Problem ? "problem" : "")">
                                 <div><b>@item.Title</b><span class="badge @(item.Problem ? "warn" : item.Status == InspectionItemStatus.Answered ? "ok" : "neutral")">@InspectionStatusLabel(item)</span></div>
                                 @if (!string.IsNullOrWhiteSpace(item.Note)) { <p>@item.Note</p> }
@@ -440,6 +479,8 @@
                                     }
                                 </div>
                             </article>
+                            }
+                            </section>
                         }
                     </div>
                 }
@@ -449,7 +490,12 @@
     </div>
 }
 
+@if(kanbanSettingsOpen){<CaseModal Title="Канбан · воронки и этапы" Kind="kanban-settings-modal" OnClose="()=>kanbanSettingsOpen=false"><KanbanSettings Subject="CurrentSubject" SelectedPipelineId="activePipeline" Saved="SettingsSaved" Cancelled="()=>kanbanSettingsOpen=false" /></CaseModal>}
+@if(addExistingOpen){<CaseModal Title="Добавить существующий объект" Error="candidateError" Busy="kanbanBusy" OnClose="()=>addExistingOpen=false"><p>Один объект, общие документы и задачи. Поиск показывает до 50 доступных объектов.</p><label>Номер или название<input @bind="candidateSearch" /></label><button type="button" class="btn" @onclick="FindCandidates">Найти</button>@foreach(var item in candidates){<p><button type="button" class="btn" disabled="@(pendingAdd!=null)" @onclick="()=>AddExisting(item)">@(item.TransferredMembershipVersion==null?"Добавить":"Вернуть прежнее участие")</button> @item.Number · @item.Title</p>}@if(pendingAdd!=null){<button type="button" class="btn" @onclick="RetryAddExisting">Проверить результат добавления</button>}</CaseModal>}
+@if(boardTaskTarget is {} taskTarget){<CaseNextAction @key="taskTarget.CaseId" @ref="boardTask" CaseId="taskTarget.CaseId" ShowList="false" OnSaved="ReloadAsync" />}
 @code {
+    private CaseSourceChangesNotice? sourceNotice;
+    private Task RefreshSourceNotices()=>sourceNotice?.Refresh()??Task.CompletedTask;
     [Parameter, SupplyParameterFromQuery(Name = "stage")] public string? InitialStage { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "mine")] public bool MineOnly { get; set; }
     private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
@@ -465,8 +511,11 @@
     private string stageFilter = "";
     private string assigneeFilter = "";
     private bool dueTodayOnly;
+    private bool attentionOnly;
     private bool overdueOnly;
-    private bool queryInitialized;
+    [Parameter, SupplyParameterFromQuery(Name="attention")] public bool AttentionOnly { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name="overview")] public bool FromOverview { get; set; }
+    private (string? Stage,bool Mine,bool Attention,bool Overview)? appliedRoute;
     private bool priceChangedOnly;
     private int offset;
     private const int PageSize = 30;
@@ -487,19 +536,24 @@
     private string? inspectionReportError;
     private ProcurementInspectionReport? inspectionReport;
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
-        if (queryInitialized) return;
-        stageFilter = InitialStage ?? "";
-        queryInitialized = true;
+        if(appliedRoute!=(InitialStage,MineOnly,AttentionOnly,FromOverview)||appliedKanbanRoute!=(PipelineId,View)) await ReloadAsync();
     }
-
     private Guid? marketGroupId;
     private GroupMarketView? groupMarket;
+    private IReadOnlyList<GroupMarketView> drawerMarkets = [];
     private IReadOnlyList<IncomingSearchGroupView> marketGroups = [];
     private async Task MarketGroupChangedAsync(ChangeEventArgs args) { marketGroupId = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null; offset = 0; await ReloadAsync(); }
     protected override async Task ReadAsync()
     {
+        if(appliedRoute!=(InitialStage,MineOnly,AttentionOnly,FromOverview))
+        {
+            attentionOnly=AttentionOnly;stageFilter=InitialStage??"";search=searchDraft=assigneeFilter="";
+            marketGroupId=null;dueTodayOnly=overdueOnly=priceChangedOnly=false;offset=0;
+            appliedRoute=(InitialStage,MineOnly,AttentionOnly,FromOverview);
+        }
+        await ReadKanbanAsync();
         queuePage = await ReadModel.ReadPageAsync(CurrentSubject, BuildFilter(), CancellationToken.None);
         marketGroups = await Markets.ReadProcurementGroupsAsync(CurrentSubject, CancellationToken.None);
         groupMarket = await Markets.ReadProcurementAsync(CurrentSubject, marketGroupId, CancellationToken.None);
@@ -507,11 +561,13 @@
         {
             detail = await ReadModel.ReadDetailAsync(CurrentSubject, caseId, CancellationToken.None);
             drawerCard = await Workspace.ReadCardAsync(CurrentSubject, caseId, CancellationToken.None);
+            drawerMarkets = await Markets.ReadCaseAsync(CurrentSubject, caseId, CancellationToken.None);
         }
     }
 
     private ProcurementQueueV2Filter BuildFilter()
     {
+        if(InPipeline)return new ProcurementQueueV2Filter(Offset:offset,Size:PageSize,PipelineId:activePipeline);
         Guid? assignee = Guid.TryParse(assigneeFilter, out Guid assigneeId) ? assigneeId : null;
         return new ProcurementQueueV2Filter(
             Text: search,
@@ -527,11 +583,11 @@
             Offset: offset,
             Size: PageSize,
             MineOnly: MineOnly,
-            PriceChangedOnly: priceChangedOnly, SearchGroupId: marketGroupId);
+            PriceChangedOnly: priceChangedOnly, SearchGroupId: marketGroupId, AttentionOnly: attentionOnly);
     }
 
-    private bool HasFilters => marketGroupId != null || search.Length > 0 || stageFilter.Length > 0 || assigneeFilter.Length > 0 || dueTodayOnly || overdueOnly || priceChangedOnly;
-    private bool HasOperationalFilter => stageFilter.Length > 0 || dueTodayOnly || overdueOnly || priceChangedOnly;
+    private bool HasFilters => attentionOnly || marketGroupId != null || search.Length > 0 || stageFilter.Length > 0 || assigneeFilter.Length > 0 || dueTodayOnly || overdueOnly || priceChangedOnly;
+    private bool HasOperationalFilter => attentionOnly || stageFilter.Length > 0 || dueTodayOnly || overdueOnly || priceChangedOnly;
     private string PageCaption => queuePage == null || queuePage.Total == 0 ? "Показано 0 объектов" : $"Показано {queuePage.Offset + 1}–{Math.Min(queuePage.Offset + queuePage.Size, queuePage.Total)} из {queuePage.Total} объектов";
 
     private async Task ApplySearchAsync() { search = searchDraft.Trim(); offset = 0; await ReloadAsync(); }
@@ -546,21 +602,21 @@
     private async Task ShowCheckingAsync() { stageFilter = stageFilter == "analysis" ? "" : "analysis"; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
     private async Task ShowPendingHeadAsync() { stageFilter = stageFilter == "pending_head" ? "" : "pending_head"; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
     private async Task ClearOperationalFiltersAsync() { stageFilter = ""; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
-    private async Task ClearFiltersAsync() { marketGroupId = null; search = searchDraft = stageFilter = assigneeFilter = ""; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
+    private async Task ClearFiltersAsync() { attentionOnly=false; marketGroupId = null; search = searchDraft = stageFilter = assigneeFilter = ""; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
     private async Task PreviousPageAsync() { offset = Math.Max(0, offset - PageSize); await ReloadAsync(); }
     private async Task NextPageAsync() { if (queuePage != null && offset + PageSize < queuePage.Total) { offset += PageSize; await ReloadAsync(); } }
 
     private async Task OpenDrawerAsync(Guid caseId)
     {
         if (Busy) return;
-        selectedCaseId = caseId; detail = null; drawerCard = null; drawerError = null; drawerLoading = true;
+        selectedCaseId = caseId; detail = null; drawerCard = null; drawerMarkets = []; drawerError = null; drawerLoading = true;
         try { detail = await ReadModel.ReadDetailAsync(CurrentSubject, caseId, CancellationToken.None); drawerCard = await Workspace.ReadCardAsync(CurrentSubject, caseId, CancellationToken.None); }
         catch (AccessDeniedException exception) { drawerError = ReadFailure(exception, "Нет доступа к этому объекту."); }
         catch (Exception exception) { drawerError = ReadFailure(exception, "Не удалось загрузить объект. Повторите после восстановления соединения."); }
         finally { drawerLoading = false; }
     }
 
-    private void CloseDrawer() { if (Busy) return; selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = negotiationsOpen = inspectionReportOpen = false; }
+    private void CloseDrawer() { if (Busy) return; RestoreKanbanFocus(); selectedCaseId = null; detail = null; drawerError = null; decisionCard = null; negotiationOpen = negotiationsOpen = inspectionReportOpen = false; }
     private void OpenFullCase() { if (!Busy && detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}"); }
     private void OpenCaseSection(string section) { if (!Busy && detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}?tab={section}"); }
     private void OpenInspectionEditor() { if (!Busy && detail != null) Navigation.NavigateTo($"/procurement/{detail.CaseId}/inspection"); }
@@ -621,6 +677,7 @@
         {
             manualCaseOpen = false;
             manualCase = new();
+            if(InPipeline && kanbanConfig?.Pipelines.SingleOrDefault(p=>p.IsDefault) is {} defaultPipeline){kanbanMessage="Объект создан в основной воронке «"+defaultPipeline.Name+"».";Navigation.NavigateTo($"/procurement?view={(ShowKanban?"kanban":"table")}&pipeline={defaultPipeline.Id}");}
             if (!Forbidden) await OpenDrawerAsync(result.CaseId);
         }
     }
@@ -629,7 +686,7 @@
     {
         if (Busy || detail == null) return;
         drawerError = null;
-        try { decisionAction = action; decisionCard = await Workspace.ReadCardAsync(CurrentSubject, detail.CaseId, CancellationToken.None); }
+        try { ClearFeedback(); decisionNeedsRefresh=false; var current = await Workspace.ReadCardAsync(CurrentSubject, detail.CaseId, CancellationToken.None); drawerCard=current; if(CaseDecisionPresentation.Blocked(current,action)!=null) return; decisionAction=action; decisionCard=current; }
         catch (AccessDeniedException exception) { drawerError = ReadFailure(exception, "Нет права на это решение."); }
         catch (Exception exception) { drawerError = ReadFailure(exception, "Не удалось подготовить действие."); }
     }
@@ -638,12 +695,13 @@
 
     private async Task ConfirmDecisionAsync(DecisionDraft draft)
     {
-        if (decisionCard == null) return;
+        if (decisionCard == null || decisionNeedsRefresh) return;
         CaseCard card = decisionCard;
         bool committed = await ExecuteConfirmedAsync(() => Workspace.DecideAsync(CurrentSubject,
             new DecisionCommand(card.Item.CaseId, card.Item.CaseVersion, card.Item.SourceRevision, decisionAction,
                 draft.Reason, draft.Clarification, draft.Target, ProcurementLabels.ParseLocal(draft.Due)),
             OperationId, CancellationToken.None));
+        decisionNeedsRefresh=!committed && (LastWriteWasConflict || Forbidden || WriteOutcome==WorkspaceWriteOutcome.Unknown);
         if (committed) decisionCard = null;
     }
 
@@ -660,15 +718,14 @@
         Success = message;
     }
 
-    private static string DecisionTitle(ProcurementAction action) => action switch
+    private bool decisionNeedsRefresh;
+    private async Task RefreshDecisionAsync()
     {
-        ProcurementAction.Forward => "Передать руководителю",
-        ProcurementAction.Return => "Вернуть менеджеру",
-        ProcurementAction.Approve => "Продолжить работу",
-        ProcurementAction.Reject => "Не подходит",
-        _ => "Решение"
-    };
-
+        if(decisionCard==null || Busy) return;
+        Guid id=decisionCard.Item.CaseId;
+        await ReloadAsync();
+        if(!Forbidden && Error==null && drawerCard?.Item.CaseId==id) { decisionCard=drawerCard; decisionNeedsRefresh=false; }
+    }
     private static string NextActionTypeLabel(WorkTaskType type) => type switch
     {
         WorkTaskType.Call => "Звонок",
@@ -686,7 +743,7 @@
     {
         if (value == null) return "—";
         if (Math.Abs(value.Value) >= 1_000_000m) return $"{(value.Value / 1_000_000m).ToString("0.#", Ru)} млн ₽";
-        return $"{value.Value.ToString("N0", Ru)} ₽";
+        return $"{NumberFormat.Money(value.Value)} ₽";
     }
     private static string SellerPriceCaption(ProcurementQueueV2Detail item) => item.LatestSellerOffer != null
         ? "последняя цена в переговорах"
@@ -778,14 +835,22 @@
     private static string InspectionStatusLabel(ProcurementInspectionReportItem item) => item.Status switch
     {
         InspectionItemStatus.NotChecked => "Не проверено",
-        InspectionItemStatus.Unanswered => "Нет ответа",
+        InspectionItemStatus.Unanswered => "Не указано",
         _ when item.Problem => $"Проблема · {InspectionAnswer(item)}",
         _ => InspectionAnswer(item)
     };
 
+    private static string InspectionGroup(string title)
+    {
+        string text=title.ToLowerInvariant();
+        if(text.Contains("дорог") || text.Contains("подъезд")) return "Подъезд";
+        if(text.Contains("электр") || text.Contains("газ") || text.Contains("вод") || text.Contains("канализац")) return "Коммуникации";
+        if(text.Contains("участ") || text.Contains("рельеф") || text.Contains("границ") || text.Contains("забор")) return "Участок";
+        return "Окружение";
+    }
     private static string InspectionAnswer(ProcurementInspectionReportItem item) => string.IsNullOrWhiteSpace(item.Answer)
-        ? "Ответ не указан"
-        : item.Answer + (string.IsNullOrWhiteSpace(item.Unit) ? "" : " " + item.Unit);
+        ? "Не указано"
+        : bool.TryParse(item.Answer, out bool answer) ? (answer ? "Да" : "Нет") : item.Answer + (string.IsNullOrWhiteSpace(item.Unit) ? "" : " " + item.Unit);
 
     private static string MaterialIcon(CaseAttachmentKind kind) => kind switch
     {

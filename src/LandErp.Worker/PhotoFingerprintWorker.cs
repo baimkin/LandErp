@@ -157,6 +157,7 @@ public sealed class PhotoFingerprintWorker(
                 try
                 {
                     row.PerceptualHash = PerceptualHash(fetch.Bytes);
+                    row.ContentSha256 = Convert.ToHexString(SHA256.HashData(fetch.Bytes));
                     row.Status = PhotoFingerprintStatus.Ready;
                     row.FailureCount = 0;
                     row.RetryAt = null;

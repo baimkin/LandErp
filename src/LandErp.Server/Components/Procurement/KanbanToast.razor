@@ -1,0 +1,26 @@
+@implements IDisposable
+@if(visible && !string.IsNullOrWhiteSpace(Message))
+{
+    <div class="kanban-toast @(!AutoDismiss?"attention":"")" role="@(AutoDismiss?"status":"alert")">
+        <span>@Message</span><button type="button" class="btn quiet" aria-label="Закрыть уведомление" @onclick="()=>visible=false">×</button>
+    </div>
+}
+@code {
+    [Parameter] public string? Message {get;set;}
+    [Parameter] public bool AutoDismiss {get;set;}
+    [Parameter] public int Sequence {get;set;}
+    private (string?,int,bool) previous;
+    private bool visible;
+    private CancellationTokenSource? timer;
+    protected override void OnParametersSet()
+    {
+        if(previous==(Message,Sequence,AutoDismiss))return;
+        previous=(Message,Sequence,AutoDismiss);timer?.Cancel();timer?.Dispose();timer=null;visible=true;
+        if(AutoDismiss){timer=new();_ = HideAsync(timer.Token);}
+    }
+    private async Task HideAsync(CancellationToken token)
+    {
+        try{await Task.Delay(3000,token);await InvokeAsync(()=>{if(!token.IsCancellationRequested){visible=false;StateHasChanged();}});}catch(OperationCanceledException){}
+    }
+    public void Dispose(){timer?.Cancel();timer?.Dispose();}
+}

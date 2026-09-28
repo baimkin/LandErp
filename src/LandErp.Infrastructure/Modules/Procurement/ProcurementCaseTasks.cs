@@ -27,12 +27,22 @@ public sealed partial class ProcurementWorkspace
                            where task.OrganizationId == context.OrganizationId && task.ObjectType == "PropertyCase"
                                && task.ObjectId == caseId && !task.Deleted && task.Title != ""
                            select new { Task = task, employee.DisplayName }).ToArrayAsync(cancellationToken);
+        var card = await ReadCardAsync(subject, caseId, cancellationToken);
+        var completedNames = await db.Employees.Where(x => x.OrganizationId == context.OrganizationId)
+            .ToDictionaryAsync(x => x.Id, x => x.DisplayName, cancellationToken);
         var now = time.GetUtcNow();
         return new(row.Case.Version, row.Assignment.EmployeeId, canEdit, assignees,
             tasks.OrderBy(x => x.Task.Completed).ThenByDescending(x => WorkTaskDeadline.Overdue(x.Task, now))
                 .ThenBy(x => x.Task.DueAt == null).ThenBy(x => x.Task.DueAt).ThenBy(x => x.Task.RecordedAt).ThenBy(x => x.Task.Id)
                 .Select(x => new CaseTaskView(x.Task.Id, x.Task.Title, x.Task.Description, x.Task.Type, x.Task.EmployeeId,
-                    x.DisplayName, x.Task.DueAt, x.Task.DueHasTime, x.Task.Completed, WorkTaskDeadline.Overdue(x.Task, now), x.Task.Version)).ToArray());
+                    x.DisplayName, x.Task.DueAt, x.Task.DueHasTime, x.Task.Completed, WorkTaskDeadline.Overdue(x.Task, now), x.Task.Version) {
+                        ResultDocumentJson = x.Task.ResultDocumentJson,
+                        ResultHtml = x.Task.ResultDocumentJson == null ? null : CaseNoteDocument.Validate(x.Task.ResultDocumentJson).Html,
+                        CompletedAt = x.Task.CompletedAt,
+                        CompletedBy = x.Task.CompletedByEmployeeId is Guid who ? completedNames.GetValueOrDefault(who, "Сотрудник") : null,
+                        SourceCommunication = card.Negotiations.FirstOrDefault(n => n.Id == x.Task.SourceNegotiationId),
+                        SourceAttachments = card.Attachments.Where(a => a.OwnerType == LandErp.Application.Modules.Procurement.Domain.CaseAttachmentOwner.Negotiation && a.OwnerId == x.Task.SourceNegotiationId).ToArray()
+                    }).ToArray());
     }
 
     public async Task<Guid> ChangeTaskAsync(Subject subject, ChangeCaseTask command, string correlationId, CancellationToken cancellationToken)
@@ -79,17 +89,36 @@ public sealed partial class ProcurementWorkspace
         {
             await ApplyTaskDetailsAsync(db, row, task, command, cancellationToken);
         }
-        else if (command.Action == CaseTaskAction.Complete) task.Completed = true;
+        else if (command.Action == CaseTaskAction.Complete)
+        {
+            if (command.ResultDocumentJson != null)
+            {
+                var result = CaseNoteDocument.Validate(command.ResultDocumentJson);
+                await ValidateNoteImagesAsync(db, context.OrganizationId, row.Case.Id, result, null, cancellationToken);
+                task.ResultDocumentJson = result.Json;
+            }
+            task.Completed = true;
+            task.CompletedAt = time.GetUtcNow();
+            task.CompletedByEmployeeId = context.EmployeeId;
+        }
         else task.Deleted = true;
         db.Entry(row.Case).Property(x => x.Version).IsModified = true;
         string label = command.Action switch { CaseTaskAction.Complete => "Задача выполнена", CaseTaskAction.Delete => "Задача удалена", _ => created ? "Задача добавлена" : "Задача изменена" };
+        List<string> changed = [];
+        if(command.Action == CaseTaskAction.Save && !created)
+        {
+            if(before.Title != task.Title) changed.Add($"Название: {before.Title} → {task.Title}");
+            if(before.Description != task.Description) changed.Add($"Описание: {before.Description} → {task.Description}");
+            if(before.DueAt != task.DueAt || before.DueHasTime != task.DueHasTime) changed.Add($"Срок: {WorkTaskDeadline.Format(before.DueAt,before.DueHasTime)} → {WorkTaskDeadline.Format(task.DueAt,task.DueHasTime)}");
+        }
+        string changeDetail = changed.Count == 0 ? "" : "\nИзменения:\n" + string.Join("\n",changed);
         db.BusinessTimeline.Add(new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
             ObjectType = "PropertyCase", ObjectId = row.Case.Id, ActorEmployeeId = context.EmployeeId,
-            Kind = "CaseTask" + command.Action, Title = label, Body = task.Title + "\n" + WorkTaskDeadline.Format(task.DueAt, task.DueHasTime),
+            Kind = "CaseTask" + command.Action, TaskId = task.Id, Title = label, Body = task.Title + "\n" + (command.Action == CaseTaskAction.Complete ? (task.ResultDocumentJson == null ? "Без отчёта" : CaseNoteDocument.PlainText(task.ResultDocumentJson)) : WorkTaskDeadline.Format(task.DueAt, task.DueHasTime)) + changeDetail,
             TargetEmployeeId = task.EmployeeId, RecordedAt = time.GetUtcNow() });
         replay.Record(db, context, subject, row.Case.Id, task.Id,
             new { TaskId = task.Id, Before = before, After = new { task.Title, task.Description, task.Type, task.EmployeeId,
-                task.DueAt, task.DueHasTime, task.Completed, task.Deleted } }, correlationId, time.GetUtcNow());
+                task.DueAt, task.DueHasTime, task.Completed, task.Deleted, task.ResultDocumentJson, task.CompletedAt, task.CompletedByEmployeeId } }, correlationId, time.GetUtcNow());
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return task.Id;

@@ -26,7 +26,7 @@ public sealed record ProcurementQueueV2Filter(
     int Size = 30,
     bool MineOnly = false,
     bool PriceChangedOnly = false,
-    Guid? SearchGroupId = null);
+    Guid? SearchGroupId = null, bool AttentionOnly = false, Guid? PipelineId = null);
 
 public sealed record ProcurementQueueV2Summary(
     int InWork,
@@ -67,7 +67,7 @@ public sealed record ProcurementQueueV2Row(
     bool SourceChanged,
     ProcurementQueueV2RowState RowState,
     long CaseVersion,
-    long SourceRevision) { public bool DueHasTime { get; init; } = true; };
+    long SourceRevision) { public bool DueHasTime { get; init; } = true; public KanbanMembership? KanbanMembership { get; init; } public bool CanMoveKanban { get; init; } };
 
 public sealed record ProcurementQueueV2Page(
     IReadOnlyList<ProcurementQueueV2Row> Items,
@@ -91,6 +91,8 @@ public sealed record ProcurementQueueV2Negotiation(
     string Currency)
 {
     public NegotiationView? Communication { get; init; }
+    public Guid? CaseId { get; init; }
+    public Guid? TaskId { get; init; }
 }
 
 public sealed record ProcurementCheckLevelSummary(
@@ -142,7 +144,12 @@ public sealed record ProcurementNegotiationHistoryItem(
     decimal? AgreedPrice,
     string Currency,
     string Author,
-    IReadOnlyList<ProcurementQueueV2Attachment> Attachments);
+    IReadOnlyList<ProcurementQueueV2Attachment> Attachments)
+{
+    public Guid? CaseId { get; init; }
+    public Guid? TaskId { get; init; }
+    public string? TaskTitle { get; init; }
+}
 
 public sealed record ProcurementNegotiationHistoryPage(
     IReadOnlyList<ProcurementNegotiationHistoryItem> Items,
@@ -182,7 +189,10 @@ public sealed record ProcurementTimelineSummary(
     DateTimeOffset? EffectiveAt,
     DateTimeOffset? DueAt)
 {
+    public IReadOnlyList<ProcurementQueueV2Attachment> Attachments { get; init; } = [];
     public NegotiationView? Communication { get; init; }
+    public Guid? CaseId { get; init; }
+    public Guid? TaskId { get; init; }
 }
 
 public sealed record ProcurementSourceDetail(

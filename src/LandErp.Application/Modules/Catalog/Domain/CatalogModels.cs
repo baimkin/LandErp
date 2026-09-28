@@ -100,6 +100,7 @@ public sealed class CatalogDuplicateCandidate
     public Guid CandidateListingId { get; set; }
     public int Score { get; set; }
     public string ReasonsJson { get; set; } = "[]";
+    public string PhotoEvidenceJson { get; set; } = "[]";
     public DuplicateCandidateStatus Status { get; set; } = DuplicateCandidateStatus.Pending;
     public Guid? ReviewedByEmployeeId { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
@@ -115,6 +116,7 @@ public sealed class CatalogPhotoFingerprint
     public Guid ListingId { get; set; }
     public int PhotoIndex { get; set; }
     public string UrlHash { get; set; } = "";
+    public string? ContentSha256 { get; set; }
     public long? PerceptualHash { get; set; }
     public PhotoFingerprintStatus Status { get; set; } = PhotoFingerprintStatus.Retry;
     public int FailureCount { get; set; }

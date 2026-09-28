@@ -1,0 +1,1 @@
+.photo-gallery{position:relative}.photo-gallery img,.photo-empty{width:100%;height:220px;object-fit:contain;background:var(--surface-muted,#f3f5f7);border-radius:var(--radius-sm)}.photo-empty{display:grid;place-items:center}.photo-controls{display:flex;justify-content:center;align-items:center;gap:var(--space-3)}

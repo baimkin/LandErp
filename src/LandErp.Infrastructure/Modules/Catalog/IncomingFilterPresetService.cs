@@ -5,6 +5,8 @@ using LandErp.Application.Modules.IdentityAccess.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using NpgsqlTypes;
+using LandErp.Infrastructure.Persistence;
+using LandErp.Application.Modules.Catalog.Domain;
 
 namespace LandErp.Infrastructure.Modules.Catalog;
 
@@ -98,6 +100,7 @@ public sealed class IncomingFilterPresetService(
             insert.Parameters.AddWithValue("sort_order", sortOrder);
             await insert.ExecuteNonQueryAsync(cancellationToken);
             await AuditAsync(connection, context.OrganizationId, subject.UserId, id, null, command.Criteria, cancellationToken);
+            await IncludeExistingAsync(connection, transaction, context.OrganizationId, subject.UserId, command.Criteria, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return new(id, command.SearchGroupId, name, command.Criteria, sortOrder, 1);
         }
@@ -150,6 +153,7 @@ public sealed class IncomingFilterPresetService(
                 result = ReadView(reader);
             }
             await AuditAsync(connection, context.OrganizationId, subject.UserId, command.Id, original.Criteria, command.Criteria, cancellationToken);
+            await IncludeExistingAsync(connection, transaction, context.OrganizationId, subject.UserId, command.Criteria, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return result;
         }
@@ -157,6 +161,31 @@ public sealed class IncomingFilterPresetService(
         {
             throw new ArgumentException("Сохранённый фильтр с таким названием уже существует в выбранной группе.");
         }
+    }
+
+    // Saving an opted-in filter is one transaction with inclusion of its existing cohort.
+    // Re-observation does not repeat this explicit action; switching the option off excludes nothing.
+    private static async Task IncludeExistingAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid organizationId, Guid actorId, IncomingFilterPresetCriteriaV1 criteria, CancellationToken cancellationToken)
+    {
+        if(!criteria.AutoIncludeNewInCalculation)return;
+        var options = new DbContextOptionsBuilder<LandErpDbContext>().UseNpgsql(connection).Options;
+        await using var db = new LandErpDbContext(options);
+        await db.Database.UseTransactionAsync(transaction,cancellationToken);
+        var now=DateTimeOffset.UtcNow;
+        var saved=await ReadForOrganizationAsync(connection,organizationId,cancellationToken);
+        var prepared=await IncomingCatalogSelection.PrepareAsync(db,organizationId,now,
+            new(new(),WorkingScope:new(IncomingCatalogMode.AllListings)),saved,cancellationToken);
+        var predicate=prepared.Predicates.Conditions(IncomingCatalogQuery.FromCriteria(criteria));
+        Guid[] ids=await db.Listings.Where(x=>x.OrganizationId==organizationId).Where(predicate).Select(x=>x.Id).ToArrayAsync(cancellationToken);
+        if(ids.Length==0)return;
+        var items=await db.Listings.FromSqlInterpolated($"SELECT * FROM catalog.listings WHERE organization_id={organizationId} AND id=ANY({ids}) ORDER BY id FOR UPDATE").ToArrayAsync(cancellationToken);
+        // Re-evaluate after acquiring row locks so concurrent data changes cannot widen the cohort.
+        var stillMatching=(await db.Listings.AsNoTracking().Where(x=>x.OrganizationId==organizationId && ids.Contains(x.Id)).Where(predicate).Select(x=>x.Id).ToArrayAsync(cancellationToken)).ToHashSet();
+        foreach(var item in items)
+            if(stillMatching.Contains(item.Id) && CatalogCalculationEligibility.Reason(item)==null)
+                CatalogCalculationService.Change(db,item,true,actorId,"Сохранён фильтр с автоматическим включением",Guid.CreateVersion7().ToString(),now);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<IncomingFilterPresetView> RenameAsync(Subject subject, RenameIncomingFilterPreset command, CancellationToken cancellationToken)

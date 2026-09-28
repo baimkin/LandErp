@@ -21,7 +21,7 @@ export function create(host, json, dotnet, label = 'Текст', maxLength = 640
   const status=document.createElement('div'); status.className='draft-status'; status.setAttribute('role','status');
   const picker=document.createElement('input'); picker.type='file'; picker.multiple=true; picker.hidden=true;
   picker.accept='image/png,image/jpeg,image/webp,image/gif,audio/*,.pdf,.txt,.csv,.docx,.xlsx';
-  const attach=document.createElement('button'); attach.type='button';attach.textContent='📎 Прикрепить фото или файл';attach.onclick=()=>picker.click();
+  const attach=document.createElement('button'); attach.type='button';attach.className='case-attach-button';const clip=document.createElement('span');clip.textContent='📎';clip.setAttribute('aria-hidden','true');const caption=document.createElement('span');caption.textContent='Прикрепить фото или файл';attach.append(clip,caption);attach.onclick=()=>picker.click();
   host.replaceChildren(textarea, list, attach, picker, status);
   let dirty=false, frozen=false, destroyed=false;
   const changed=()=>{dirty=true;void dotnet.invokeMethodAsync('OnChanged').catch(()=>{});};
@@ -67,7 +67,8 @@ export function create(host, json, dotnet, label = 'Текст', maxLength = 640
   const beforeUnload=e=>{if(dirty||frozen){e.preventDefault();e.returnValue='';}};
   window.addEventListener('beforeunload',beforeUnload);
   render();
-  return DotNet.createJSObjectReference({
+  // Blazor wraps typed JS return values; return the object itself, not a reference descriptor.
+  return {
     text(){return textarea.value;},
     collectFiles,
     async document(){
@@ -75,11 +76,11 @@ export function create(host, json, dotnet, label = 'Текст', maxLength = 640
       const content=[...preserved,...plainParagraphs(textarea.value),...files.map(f=>f.node)];
       const blob=new Blob([JSON.stringify({type:'doc',content})],{type:'application/json'});
       if(blob.size>128*1024){freeze(false);throw Error('Текст превышает 128 КБ.');}
-      return DotNet.createJSStreamReference(blob);
+      return blob;
     },
     markDirty(){dirty=true;},
     resume(){if(!destroyed)freeze(false);},
     confirmDiscard(){return !frozen && (!dirty||window.confirm('Отбросить несохранённые изменения?'));},
     destroy(){destroyed=true;window.removeEventListener('beforeunload',beforeUnload);for(const f of files)if(f.preview)URL.revokeObjectURL(f.preview);host.replaceChildren();}
-  });
+  };
 }

@@ -54,11 +54,13 @@ public sealed class CaseFeedTests
         var entry=new BusinessTimelineEntry { Id=Guid.NewGuid(),OrganizationId=item.OrganizationId,ObjectId=item.PropertyCaseId,
             ObjectType="PropertyCase",Kind="Negotiation",ActorEmployeeId=item.AuthorEmployeeId,RecordedAt=Recorded,EffectiveAt=Effective,
             Body="Канал: Звонок\nКонтакт: Продавец\nРезультат: Обсудили осмотр\nКомментарий",Title=item.Outcome };
+        Assert.IsNull(CaseTimelineCommunication.Find(entry,[item],_=>"Автор"));
+        entry.NegotiationId=item.Id;
         var matched=CaseTimelineCommunication.Find(entry,[item],_=>"Автор");
         Assert.IsNotNull(matched);Assert.AreEqual(item.Conditions,matched.Conditions);
-        Assert.IsNull(CaseTimelineCommunication.Find(entry,[item,item],_=>"Автор"));
+        Assert.IsNotNull(CaseTimelineCommunication.Find(entry,[item,item],_=>"Автор"));
         entry.Body+="\nДополнительные сведения";
-        Assert.IsNull(CaseTimelineCommunication.Find(entry,[item],_=>"Автор"));
+        Assert.IsNotNull(CaseTimelineCommunication.Find(entry,[item],_=>"Автор"));
         var raw=new TimelineItem(entry.Id,entry.Kind,entry.Title,entry.Body,"Автор",null,Recorded,Effective,null);
         var fallback=CaseFeedFormat.From(raw);Assert.AreEqual(entry.Body,fallback.Text);
         Assert.AreEqual(0,fallback.Details.Count);

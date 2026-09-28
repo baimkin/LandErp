@@ -43,11 +43,12 @@ public sealed partial class ProcurementQueueV2ReadService
             .GroupBy(item => item.NegotiationId!.Value)
             .ToDictionary(group => group.Key, group => group.Select(ProjectAttachment).ToArray());
 
+        var tasks = await db.WorkTasks.AsNoTracking().Where(t=>t.OrganizationId==context.OrganizationId && t.ObjectType=="PropertyCase" && t.ObjectId==caseId && t.SourceNegotiationId!=null && !t.Deleted).ToArrayAsync(cancellationToken);
         ProcurementNegotiationHistoryItem[] items = rows.Select(item => new ProcurementNegotiationHistoryItem(
             item.Id, item.EffectiveAt, item.RecordedAt, item.Channel, item.Contact, item.Outcome, item.Conditions,
             item.Comment, item.NextStep, item.NextStepDueAt, item.SellerPrice, item.BuyerOffer, item.AgreedPrice,
             item.Currency, authors.GetValueOrDefault(item.AuthorEmployeeId, "Сотрудник"),
-            byNegotiation.GetValueOrDefault(item.Id, []))).ToArray();
+            byNegotiation.GetValueOrDefault(item.Id, [])) { CaseId=caseId, TaskId=tasks.FirstOrDefault(t=>t.SourceNegotiationId==item.Id)?.Id, TaskTitle=tasks.FirstOrDefault(t=>t.SourceNegotiationId==item.Id)?.Title }).ToArray();
         return new(items, total, offset, size);
     }
 

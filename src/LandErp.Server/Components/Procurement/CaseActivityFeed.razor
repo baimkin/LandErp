@@ -7,7 +7,11 @@
             <time datetime="@row.Date.ToString("O",CultureInfo.InvariantCulture)" title="@row.DateHint">@row.DateLabel</time>
             <div class="feed-content">
                 <div class="feed-text">@row.Text</div>
-                @foreach(var detail in row.Details){<div class="feed-detail">@detail</div>}
+                @foreach(var detail in row.Details){@if(detail.Contains("Изменения:",StringComparison.Ordinal)){<details class="feed-detail"><summary>Подробнее</summary><div style="white-space:pre-wrap">@detail</div></details>}else{<div class="feed-detail">@detail</div>}}
+                @if(row.TaskId is Guid taskId && row.CaseId!=null && taskId!=SuppressedTaskId){
+                    @if(OnOpenTask.HasDelegate){<button type="button" class="btn quiet" @onclick="()=>OnOpenTask.InvokeAsync(taskId)">@(row.TaskTitle??"Открыть задачу") →</button>}
+                    else{<a href="/procurement/@row.CaseId?task=@taskId">@(row.TaskTitle??"Открыть задачу") →</a>}
+                }
                 @if(row.Attachments.Count>0){<div class="feed-materials">@foreach(var material in row.Attachments){
                     @if(material.Status==StoredFileStatus.Available){<a href="/api/procurement/attachments/@material.Id" target="_blank" rel="noopener noreferrer">@material.Label ↗</a>}
                     else{<span>@material.Label · @ProcurementLabels.FileStatus(material.Status)</span>}
@@ -17,4 +21,8 @@
         </article>
     }
 </div>
-@code { [Parameter] public IReadOnlyList<CaseFeedRow> Items { get; set; }=[]; }
+@code {
+    [Parameter] public IReadOnlyList<CaseFeedRow> Items { get; set; }=[];
+    [Parameter] public Guid? SuppressedTaskId { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenTask { get; set; }
+}

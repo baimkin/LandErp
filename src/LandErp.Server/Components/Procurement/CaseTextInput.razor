@@ -42,7 +42,13 @@
     }
     public ValueTask<string> TextAsync() => editor!.InvokeAsync<string>("text");
     public ValueTask<string[]> CollectFilesAsync() => editor!.InvokeAsync<string[]>("collectFiles");
-    public ValueTask ResumeAsync() => editor!.InvokeVoidAsync("resume");
+    public async ValueTask ResumeAsync()
+    {
+        if (editor == null) return;
+        try { await editor.InvokeVoidAsync("resume"); }
+        catch (JSException) { error = "Связь с полем ввода потеряна. Сохраните текст перед обновлением страницы."; }
+        catch (ObjectDisposedException) { }
+    }
     public ValueTask MarkDirtyAsync() => editor!.InvokeVoidAsync("markDirty");
     public async Task<bool> ConfirmDiscardAsync() => editor == null || await editor.InvokeAsync<bool>("confirmDiscard");
     public async ValueTask DisposeAsync()

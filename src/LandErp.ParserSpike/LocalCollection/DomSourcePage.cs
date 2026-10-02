@@ -307,13 +307,15 @@ public sealed class DomSourcePage : ISourcePage
         string paginationJson = await page.EvaluateAsync<string>("site => JSON.stringify((" + PaginationScript + ")(site))", Source.ToString())
             .WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
         Pagination pagination = LocalJson.Read<Pagination>(paginationJson);
-        string elementsJson = await page.EvaluateAsync<string>("""() => {
-            const visible=e=>!!e&&!!e.getClientRects().length;
-            const roots=[...document.querySelectorAll('[data-name*="Pagination"],[data-marker*="pagination"],[class*="pagination" i]')].filter(visible).slice(0,8);
-            const nodes=[...new Set(roots.flatMap(root=>[root,...root.querySelectorAll('a,button,span')]))].filter(visible).slice(0,30);
-            return JSON.stringify(nodes.map(e=>({tag:e.tagName.toLowerCase(),text:(e.innerText||e.textContent||'').trim().slice(0,120),
-              href:e.href||null,dataName:e.getAttribute('data-name'),dataMarker:e.getAttribute('data-marker'),className:String(e.className||'').slice(0,200)})));
-        }""").WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
+        string elementsJson = await page.EvaluateAsync<string>("""
+            () => {
+                const visible=e=>!!e&&!!e.getClientRects().length;
+                const roots=[...document.querySelectorAll('[data-name*="Pagination"],[data-marker*="pagination"],[class*="pagination" i]')].filter(visible).slice(0,8);
+                const nodes=[...new Set(roots.flatMap(root=>[root,...root.querySelectorAll('a,button,span')]))].filter(visible).slice(0,30);
+                return JSON.stringify(nodes.map(e=>({tag:e.tagName.toLowerCase(),text:(e.innerText||e.textContent||'').trim().slice(0,120),
+                  href:e.href||null,dataName:e.getAttribute('data-name'),dataMarker:e.getAttribute('data-marker'),className:String(e.className||'').slice(0,200)})));
+            }
+            """).WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
         PaginationElementDiagnostic[] elements = LocalJson.Read<PaginationElementDiagnostic[]>(elementsJson);
         string? candidate = candidateUrl ?? pagination.Url;
         return new(CurrentUrl, candidate, pagination.Kind.ToString(), pagination.Reason ?? "",

@@ -33,27 +33,8 @@
         <div class="overview-stats">
             @if(view.CanViewIncoming){<a class="overview-stat" href="/incoming?overview=new"><span class="stat-label">Непросмотренные входящие</span><strong>@view.NewIncoming.Value</strong><span>@view.NewIncoming.Caption</span></a>}
             @if(view.CanViewProcurement){<a class="overview-stat" href="/procurement?overview=true"><span class="stat-label">В закупке</span><strong>@view.ActiveProcurement.Value</strong><span>активных объектов · кроме отклонённых и купленных</span></a>}
-            @if(view.AttentionGroups.Count>0){<button type="button" class="overview-stat attention" @onclick="()=>attentionOpen=true"><span class="stat-label">Требуют внимания</span><strong>@view.Attention.Value</strong><span>@view.Attention.Caption</span></button>}
             @if(view.CanViewProcurement){<a class="overview-stat waiting" href="/procurement?stage=pending_head"><span class="stat-label">Ждут решения</span><strong>@view.WaitingDecision.Value</strong><span>объектов у руководителя</span></a>}
         </div>
-        @if(attentionOpen && view.AttentionGroups.Count>0)
-        {
-            <Modal Title="Требуют внимания" OnClose="()=>attentionOpen=false">
-            <section class="overview-card attention-breakdown" id="overview-attention" tabindex="-1">
-                <div class="overview-card-head"><div><h2>Требуют внимания — состав</h2><p>Разные единицы показаны отдельно. Объект с несколькими причинами учитывается один раз.</p></div></div>
-                <div class="overview-rows">
-                    @foreach(var group in view.AttentionGroups){<a class="attention-row" href="@group.Url"><span class="attention-main"><b>@group.Label · @group.Unit: @group.Count</b><small>@group.Description</small></span><span class="row-arrow">›</span></a>}
-                </div>
-                @if(view.Collection!=null)
-                {
-                    <div id="overview-collection-signals" tabindex="-1" class="overview-rows"><h3>Сигналы сбора данных</h3>
-                    @if(!view.Collection.Statuses.Any(x=>x.Severity!=OverviewSeverity.Info)){<p>Предупреждений и ошибок нет.</p>}
-                    @foreach(var signal in view.Collection.Statuses.Where(x=>x.Severity!=OverviewSeverity.Info)){<a class="attention-row" href="@signal.Url"><span class="attention-main"><b>@signal.Label</b><small>@signal.Value</small></span><span class="row-arrow">›</span></a>}
-                    </div>
-                }
-            </section>
-            </Modal>
-        }
         @if (view.CanViewProcurement)
         {
             <section class="overview-card market-card">
@@ -77,15 +58,6 @@
 
             <div class="overview-layout">
                 <div class="overview-column">
-                    <section class="overview-card">
-                        <div class="overview-card-head"><div><h2>Требует внимания</h2><p>Сначала то, что может задержать закупку или потерять объект.</p></div><span class="overview-meta">Состав показан выше</span></div>
-                        <div class="overview-rows">
-                            @if (view.AttentionItems.Count == 0) { <div class="overview-empty success-text">Срочных действий нет.</div> }
-                            @foreach (OverviewAttentionItem item in view.AttentionItems)
-                            { <a class="attention-row" href="@item.Url" @key="item.Key"><span class="attention-icon @Severity(item.Severity)">@SeverityIcon(item.Severity)</span><span class="attention-main"><b>@item.Title</b><small>@item.Reason</small></span><span class="attention-side"><strong>@item.Age</strong>@item.Action</span><span class="row-arrow">›</span></a> }
-                        </div>
-                    </section>
-
                     <section class="overview-card">
                         <div class="overview-card-head"><div><h2>Закупка сейчас</h2><p>Состояние текущего потока от входящих до покупки.</p></div><a class="overview-btn small" href="/procurement">Открыть очередь</a></div>
                         <div class="overview-flow">
@@ -149,7 +121,7 @@
 @code {
     private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru-RU");
     private async Task MarketSavedAsync(){await ReloadAsync();if(allGroupsOpen)await ReloadAllGroupsAsync();}
-    private bool attentionOpen; private OverviewView? view; private MarketGroupPage? allGroups; private bool allGroupsOpen; private bool allGroupsLoading;
+    private OverviewView? view; private MarketGroupPage? allGroups; private bool allGroupsOpen; private bool allGroupsLoading;
     private string marketText=""; private MarketGroupSort marketSort; private int marketOffset;
     protected override async Task ReadAsync()=>view=await Overview.ReadAsync(CurrentSubject,CancellationToken.None);
     private async Task OpenAllGroupsAsync(){allGroupsOpen=true;marketOffset=0;await ReloadAllGroupsAsync();}

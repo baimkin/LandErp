@@ -34,6 +34,7 @@ public sealed class MarketDemandTests
         Guid group = await administration.CreateGroupAsync(f.Owner, "Тест спроса", 0, "m03", Ct);
         var original = (await service.ReadProcurementAsync(f.Head, group, Ct))!;
         Assert.IsNull(original.DemandTestPricePerSotka);
+        Assert.IsNull(original.TargetPurchasePricePerSotka);
         Assert.IsTrue(original.CanEditDemand);
         Assert.IsFalse((await service.ReadProcurementAsync(f.Manager, group, Ct))!.CanEditDemand);
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.SaveDemandAsync(f.Manager, new(group, original.Version, 100m), "m03", Ct));
@@ -47,16 +48,25 @@ public sealed class MarketDemandTests
         Assert.IsTrue(changed.Version > original.Version);
         Assert.AreEqual(original.MedianPricePerSotka, changed.MedianPricePerSotka);
         await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => service.SaveDemandAsync(f.Head, new(group, original.Version, 500m), "m03-stale", Ct));
-        await service.SaveDemandAsync(f.Owner, new(group, changed.Version, null), "m03-clear", Ct);
-        Assert.IsNull((await service.ReadProcurementAsync(f.Head, group, Ct))!.DemandTestPricePerSotka);
+        await service.SaveTargetPurchaseAsync(f.Head, new(group, changed.Version, 95_555.555m), "m03-target");
+        var targetChanged = (await service.ReadProcurementAsync(f.Owner, group, Ct))!;
+        Assert.AreEqual(95_555.56m, targetChanged.TargetPurchasePricePerSotka);
+        Assert.AreEqual(123.46m, targetChanged.DemandTestPricePerSotka);
+        await service.SaveDemandAsync(f.Owner, new(group, targetChanged.Version, null), "m03-clear", Ct);
+        var cleared = (await service.ReadProcurementAsync(f.Head, group, Ct))!;
+        Assert.IsNull(cleared.DemandTestPricePerSotka);
+        Assert.AreEqual(95_555.56m, cleared.TargetPurchasePricePerSotka);
         await using (var db = f.Sandbox.Context())
         {
             var audit = await db.AuditEvents.Where(item => item.ObjectId == group && item.Action == "DemandTestPriceChanged").ToArrayAsync();
             Assert.AreEqual(2, audit.Length);
             CollectionAssert.AreEquivalent(new[] { f.Head.UserId, f.Owner.UserId }, audit.Select(item => item.ActorId).ToArray());
+            Assert.AreEqual(1, await db.AuditEvents.CountAsync(item => item.ObjectId == group && item.Action == "TargetPurchasePriceChanged"));
             Assert.IsFalse(db.Database.HasPendingModelChanges());
             string comment = await db.Database.SqlQueryRaw<string>("SELECT col_description('collection.search_group_market_settings'::regclass, attnum) AS \"Value\" FROM pg_attribute WHERE attrelid='collection.search_group_market_settings'::regclass AND attname='demand_test_price_per_sotka'").SingleAsync();
             StringAssert.Contains(comment, "Ручная цена теста спроса");
+            string targetComment = await db.Database.SqlQueryRaw<string>("SELECT col_description('collection.search_group_market_settings'::regclass, attnum) AS \"Value\" FROM pg_attribute WHERE attrelid='collection.search_group_market_settings'::regclass AND attname='target_purchase_price_per_sotka'").SingleAsync();
+            StringAssert.Contains(targetComment, "нужная цена покупки");
         }
         await f.SetExplicitAccessAsync(f.EmployeeId("head-phase1@test.invalid"), EmployeeAccessRules.NoAccess);
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.SaveDemandAsync(f.Head, new(group, changed.Version, 1m), "m03-revoked", Ct));

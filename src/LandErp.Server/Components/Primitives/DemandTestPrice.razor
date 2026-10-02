@@ -7,18 +7,18 @@
     @if (editing)
     {
         <div class="demand-input">
-            <NumberInput Money="true" @bind-Value="draft" aria-label="Тест спроса, рублей за сотку" disabled="@saving" @onkeydown="KeyDown" />
-            <button type="button" disabled="@saving" @onclick="SaveAsync" title="Сохранить тест спроса" aria-label="Сохранить тест спроса">✓</button>
+            <NumberInput Money="true" @bind-Value="draft" aria-label="@($"{FieldLabel}, рублей за сотку")" disabled="@saving" @onkeydown="KeyDown" />
+            <button type="button" disabled="@saving" @onclick="SaveAsync" title="@("Сохранить " + FieldLabel.ToLowerInvariant())" aria-label="@("Сохранить " + FieldLabel.ToLowerInvariant())">✓</button>
             <button type="button" disabled="@saving" @onclick="Cancel" title="Отмена" aria-label="Отмена">×</button>
         </div>
         <small>Пустое поле — убрать ориентир</small>
     }
     else
     {
-        <span title="Ручной ориентир теста спроса; не измеренный спрос и не цена сделки">@Money(Value.DemandTestPricePerSotka)</span>
+        <span title="@FieldHint">@Money(CurrentValue)</span>
         @if (Value.CanEditDemand)
         {
-            <button type="button" class="edit-demand" @onclick="Edit" title="Изменить тест спроса" aria-label="Изменить тест спроса">✎</button>
+            <button type="button" class="edit-demand" @onclick="Edit" title="@("Изменить " + FieldLabel.ToLowerInvariant())" aria-label="@("Изменить " + FieldLabel.ToLowerInvariant())">✎</button>
         }
     }
     @if (error != null) { <small class="demand-error" role="alert">@error</small> }
@@ -28,18 +28,25 @@
     [Parameter, EditorRequired] public GroupMarketView Value { get; set; } = default!;
     [Parameter, EditorRequired] public Subject Subject { get; set; } = default!;
     [Parameter] public EventCallback Saved { get; set; }
+    [Parameter] public bool PurchaseTarget { get; set; }
     private Guid groupId;
     private long version;
+    private bool purchaseMode;
     private decimal? draft;
     private bool editing, saving;
     private string? error;
+    private decimal? CurrentValue => PurchaseTarget ? Value.TargetPurchasePricePerSotka : Value.DemandTestPricePerSotka;
+    private string FieldLabel => PurchaseTarget ? "Нужная цена покупки" : "Тест спроса";
+    private string FieldHint => PurchaseTarget
+        ? "Ручной ориентир нужной цены покупки за сотку; не цена объявления и не цена сделки"
+        : "Ручной ориентир теста спроса; не измеренный спрос и не цена сделки";
     public static string Money(decimal? price) => (price==null?null:NumberFormat.Money(price.Value)) + (price.HasValue ? " ₽" : "—");
     protected override void OnParametersSet()
     {
-        if (groupId == Value.SearchGroupId && version == Value.Version) return;
-        groupId = Value.SearchGroupId; version = Value.Version; editing = false; error = null;
+        if (groupId == Value.SearchGroupId && version == Value.Version && purchaseMode == PurchaseTarget) return;
+        groupId = Value.SearchGroupId; version = Value.Version; purchaseMode = PurchaseTarget; editing = false; error = null;
     }
-    private void Edit() { draft = Value.DemandTestPricePerSotka; version = Value.Version; error = null; editing = true; }
+    private void Edit() { draft = CurrentValue; version = Value.Version; error = null; editing = true; }
     private void Cancel() { editing = false; error = null; }
     private async Task KeyDown(KeyboardEventArgs args) { if (saving) return; if (args.Key == "Escape") Cancel(); else if (args.Key == "Enter") await SaveAsync(); }
     private async Task SaveAsync()
@@ -49,7 +56,10 @@
         bool committed = false;
         try
         {
-            await Markets.SaveDemandAsync(Subject, new(Value.SearchGroupId, version, draft), Guid.NewGuid().ToString("N"), CancellationToken.None);
+            if (PurchaseTarget)
+                await Markets.SaveTargetPurchaseAsync(Subject, new(Value.SearchGroupId, version, draft), Guid.NewGuid().ToString("N"), CancellationToken.None);
+            else
+                await Markets.SaveDemandAsync(Subject, new(Value.SearchGroupId, version, draft), Guid.NewGuid().ToString("N"), CancellationToken.None);
             committed = true; editing = false;
             await Saved.InvokeAsync();
         }

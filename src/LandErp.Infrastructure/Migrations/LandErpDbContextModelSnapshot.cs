@@ -1171,8 +1171,8 @@ namespace LandErp.Infrastructure.Migrations
 
                     b.Property<string>("Url")
                         .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)")
+                        .HasMaxLength(12000)
+                        .HasColumnType("character varying(12000)")
                         .HasColumnName("url");
 
                     b.Property<long>("Version")
@@ -1265,6 +1265,12 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnType("numeric(19,4)")
                         .HasColumnName("demand_test_price_per_sotka")
                         .HasComment("Ручная цена теста спроса за сотку в RUB; не измеренный спрос и не цена сделки.");
+
+                    b.Property<decimal?>("TargetPurchasePricePerSotka")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("target_purchase_price_per_sotka")
+                        .HasComment("Ручная нужная цена покупки за сотку в RUB; ориентир закупки, не цена объявления и не цена сделки.");
 
                     b.Property<decimal?>("MaxPricePerSotka")
                         .HasPrecision(19, 4)

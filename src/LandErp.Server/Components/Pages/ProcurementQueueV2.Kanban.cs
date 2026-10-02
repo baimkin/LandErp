@@ -38,13 +38,14 @@ public partial class ProcurementQueueV2
         ?? queuePage?.Items.FirstOrDefault(c=>c.CaseId==selectedCaseId)?.KanbanMembership;
     private bool SelectedCanMove => kanbanBoard?.Columns.SelectMany(c=>c.Cards).FirstOrDefault(c=>c.Membership.PropertyCaseId==selectedCaseId)?.CanMove
         ?? queuePage?.Items.FirstOrDefault(c=>c.CaseId==selectedCaseId)?.CanMoveKanban ?? false;
+    private Guid? SelectedKanbanAssigneeId => Guid.TryParse(assigneeFilter, out Guid id) ? id : null;
 
     private async Task ReadKanbanAsync()
     {
         if(appliedKanbanRoute!=(PipelineId,View)){offset=0;appliedKanbanRoute=(PipelineId,View);}
         kanbanConfig=await Kanban.ReadConfigurationAsync(CurrentSubject,CancellationToken.None);
         activePipeline=PipelineId??kanbanConfig.Pipelines.FirstOrDefault(p=>p.IsDefault)?.Id??Guid.Empty;
-        kanbanBoard=InPipeline?await Kanban.ReadBoardAsync(CurrentSubject,activePipeline,null,CancellationToken.None):null;
+        kanbanBoard=InPipeline?await Kanban.ReadBoardAsync(CurrentSubject,activePipeline,SelectedKanbanAssigneeId,null,CancellationToken.None):null;
     }
     private async Task ChangePipeline(ChangeEventArgs e)
     {
@@ -114,7 +115,7 @@ public partial class ProcurementQueueV2
         if(column.NextCursor==null||kanbanBusy||kanbanBoard==null)return;
         kanbanBusy=true;
         try{
-            var page=await Kanban.ReadBoardAsync(CurrentSubject,activePipeline,new Dictionary<Guid,string>{{column.Stage.Id,column.NextCursor}},CancellationToken.None);
+            var page=await Kanban.ReadBoardAsync(CurrentSubject,activePipeline,SelectedKanbanAssigneeId,new Dictionary<Guid,string>{{column.Stage.Id,column.NextCursor}},CancellationToken.None);
             var next=page.Columns.Single(c=>c.Stage.Id==column.Stage.Id);
             if(page.Pipeline.Version!=kanbanBoard.Pipeline.Version){kanbanSuccess=false;kanbanNoticeVersion++;kanbanMessage="Настройки изменились. Доска обновлена.";await ReadAsync();return;}
             var combined=column.Cards.Concat(next.Cards).DistinctBy(c=>c.Membership.Id).ToArray();

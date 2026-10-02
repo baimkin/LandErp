@@ -144,11 +144,24 @@ public sealed class CollectionAdministration(
         return search.NextRunAt;
     }
 
+    private static void ValidateSearchDefinition(CatalogSource source, string url, int maxPages)
+    {
+        string? error = ContractRules.SearchValidationError(url, CollectorSource(source), maxPages);
+        if (error == null) return;
+        throw error switch
+        {
+            ContractRules.SearchUrlRequired => new ArgumentException("Вставьте ссылку поиска."),
+            ContractRules.SearchUrlTooLong => new ArgumentException($"Ссылка слишком длинная: {url.Length} символов. Максимум {ContractRules.MaxSearchUrlLength}."),
+            ContractRules.SearchSourceMismatch => new ArgumentException($"Ссылка не соответствует выбранному источнику {source}. Используйте публичную HTTPS-ссылку Avito или Cian без авторизации."),
+            ContractRules.SearchPageLimitInvalid => new ArgumentException("Предел страниц должен быть от 1 до 100."),
+            _ => new ArgumentException("Параметры поиска некорректны.")
+        };
+    }
+
     public async Task CreateSearchAsync(Subject subject, CreateSearch command, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
-        if (!ContractRules.IsSourceUrl(command.Url, CollectorSource(command.Source)) || command.Url.Length > 2000 || command.MaxPages is < 1 or > 100)
-            throw new ArgumentException("Укажите публичную HTTPS-ссылку Avito/Cian и предел 1–100 страниц.");
+        ValidateSearchDefinition(command.Source, command.Url, command.MaxPages);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         string zone = await db.Organizations.Where(item => item.Id == context.OrganizationId).Select(item => item.BusinessTimeZone).SingleAsync(cancellationToken);
         if (command.SearchGroupId != null && !await db.SearchGroups.AnyAsync(item => item.Id == command.SearchGroupId && item.OrganizationId == context.OrganizationId && item.Active, cancellationToken)) throw new AccessDeniedException();
@@ -173,7 +186,7 @@ public sealed class CollectionAdministration(
     public async Task UpdateSearchAsync(Subject subject, UpdateSearch command, string correlationId, CancellationToken cancellationToken)
     {
         AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
-        if (!ContractRules.IsSourceUrl(command.Url, CollectorSource(command.Source)) || command.Url.Length > 2000 || command.MaxPages is < 1 or > 100) throw new ArgumentException("Параметры поиска некорректны.");
+        ValidateSearchDefinition(command.Source, command.Url, command.MaxPages);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         SearchConfiguration search = await db.SearchConfigurations.SingleOrDefaultAsync(item => item.Id == command.Id && item.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
         if (search.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException();

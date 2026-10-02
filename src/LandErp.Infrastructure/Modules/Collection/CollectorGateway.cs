@@ -21,8 +21,8 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
 {
     public async Task<CollectorSearchView> UpdateSearchAsync(AgentCredential credential, UpdateCollectorSearch command, CancellationToken cancellationToken)
     {
-        if (command.MaxPages is < 1 or > 100 || command.Url is not { Length: > 0 and <= 2000 }
-            || !ContractRules.IsSourceUrl(command.Url, command.Source)) throw new ArgumentException("COLLECTOR_SEARCH_INVALID");
+        if (ContractRules.SearchValidationError(command.Url, command.Source, command.MaxPages) is string validationError)
+            throw new ArgumentException(validationError);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         CollectorAgent agent = await AuthenticateAsync(db, credential, cancellationToken);
@@ -133,8 +133,9 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
 
     public async Task<CollectorSearchView> CreateSearchAsync(AgentCredential credential, CreateCollectorSearch command, CancellationToken cancellationToken)
     {
-        if (command.CommandId == Guid.Empty || command.MaxPages is < 1 or > 100 || command.Url.Length > 2000
-            || !ContractRules.IsSourceUrl(command.Url, command.Source)) throw new ArgumentException("COLLECTOR_SEARCH_INVALID");
+        string? validationError = ContractRules.SearchValidationError(command.Url, command.Source, command.MaxPages);
+        if (command.CommandId == Guid.Empty || validationError != null)
+            throw new ArgumentException(validationError ?? "COLLECTOR_SEARCH_INVALID");
         string label = OrganizationWorkspace.ValidateName(command.Label);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);

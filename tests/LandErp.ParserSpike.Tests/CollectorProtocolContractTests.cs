@@ -10,6 +10,23 @@ public sealed class CollectorProtocolContractTests
     private static readonly string[] FixedTimes = ["09:00", "18:00"];
 
     [TestMethod]
+    public void SearchUrlValidationAcceptsLongPublicCianUrlAndReturnsSpecificReasons()
+    {
+        string cian = "https://balashikha.cian.ru/cat.php?in_polygon%5B0%5D=" + new string('1', 2_200);
+        Assert.IsTrue(cian.Length > 2_000);
+        Assert.IsTrue(cian.Length < ContractRules.MaxSearchUrlLength);
+        Assert.IsNull(ContractRules.SearchValidationError(cian, ListingSource.Cian, 10));
+        Assert.AreEqual(ContractRules.SearchSourceMismatch,
+            ContractRules.SearchValidationError(cian, ListingSource.Avito, 10));
+        Assert.AreEqual(ContractRules.SearchPageLimitInvalid,
+            ContractRules.SearchValidationError(cian, ListingSource.Cian, 0));
+
+        string tooLong = "https://www.cian.ru/cat.php?q=" + new string('1', ContractRules.MaxSearchUrlLength);
+        Assert.AreEqual(ContractRules.SearchUrlTooLong,
+            ContractRules.SearchValidationError(tooLong, ListingSource.Cian, 10));
+    }
+
+    [TestMethod]
     public void ListingEnrichmentIsAdditiveAndValidated()
     {
         DateTimeOffset observed = new(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);

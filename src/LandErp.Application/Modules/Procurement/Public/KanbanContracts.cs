@@ -34,5 +34,10 @@ public interface IKanbanWorkspace
     Task<KanbanCommandResult> AddAsync(Subject subject, AddKanbanCase c, string correlationId, CancellationToken ct);
     Task<IReadOnlyList<KanbanCandidate>> CandidatesAsync(Subject subject, Guid pipelineId, string text, CancellationToken ct);
     Task<KanbanBoardView> ReadBoardAsync(Subject subject, Guid pipelineId, IReadOnlyDictionary<Guid, string>? cursors, CancellationToken ct);
+    Task<KanbanBoardView> ReadBoardAsync(Subject subject, Guid pipelineId, Guid? assigneeId,
+        IReadOnlyDictionary<Guid, string>? cursors, CancellationToken ct) =>
+        assigneeId == null
+            ? ReadBoardAsync(subject, pipelineId, cursors, ct)
+            : throw new NotSupportedException("Фильтр менеджера не поддержан реализацией канбана.");
 }
 

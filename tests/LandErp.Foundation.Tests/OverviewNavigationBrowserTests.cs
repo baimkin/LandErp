@@ -49,10 +49,10 @@ internal static partial class ProcurementUiScenario
         try
         {
             await WaitForLiveAsync(server,page,origin);await LoginAsync(page,origin,"manager-phase1@test.invalid");
-            var stats=page.Locator("a.overview-stat");await Assertions.Expect(stats).ToHaveCountAsync(4);
+            var stats=page.Locator("a.overview-stat");await Assertions.Expect(stats).ToHaveCountAsync(3);
             await Assertions.Expect(stats.Nth(0).Locator("strong")).ToHaveTextAsync("2");
             await Assertions.Expect(stats.Nth(1).Locator("strong")).ToHaveTextAsync("1");
-            await Assertions.Expect(stats.Nth(3).Locator("strong")).ToHaveTextAsync("1");
+            await Assertions.Expect(stats.Nth(2).Locator("strong")).ToHaveTextAsync("1");
             Assert.AreEqual(0,await stats.Locator("button,a,input,select").CountAsync());
             await page.ScreenshotAsync(new(){Path=Path.Combine(images,"overview-1440.png")});
             await stats.Nth(0).GetByText("Непросмотренные входящие",new(){Exact=true}).ClickAsync();
@@ -64,8 +64,8 @@ internal static partial class ProcurementUiScenario
             await Assertions.Expect(page.Locator(".queue-scope")).ToContainTextAsync("Активные объекты");
             await Assertions.Expect(page.Locator(".queue-scope")).ToContainTextAsync("объектов: 1");
             await page.GotoAsync(origin);await ReadyAsync(page);
-            await stats.Nth(3).FocusAsync();await Assertions.Expect(stats.Nth(3)).ToBeFocusedAsync();
-            await stats.Nth(3).PressAsync("Enter");
+            await stats.Nth(2).FocusAsync();await Assertions.Expect(stats.Nth(2)).ToBeFocusedAsync();
+            await stats.Nth(2).PressAsync("Enter");
             await Assertions.Expect(page.Locator(".queue-scope")).ToContainTextAsync("Ждут решения руководителя · объектов: 1");
             await page.ScreenshotAsync(new(){Path=Path.Combine(images,"waiting-matching-slice.png")});
             await page.GotoAsync(origin);await ReadyAsync(page);
@@ -74,14 +74,7 @@ internal static partial class ProcurementUiScenario
             await popup.CloseAsync();
             await page.SetViewportSizeAsync(1024,900);
             await page.ScreenshotAsync(new(){Path=Path.Combine(images,"overview-1024.png")});
-            await stats.Nth(2).ClickAsync();
-            await Assertions.Expect(page.Locator("#overview-attention")).ToContainTextAsync("Закупка · объектов: 1");
-            await Assertions.Expect(page.Locator("#overview-attention")).ToContainTextAsync("Входящие ·");
-            await page.ScreenshotAsync(new(){Path=Path.Combine(images,"attention-breakdown.png")});
-            await page.Locator("#overview-attention a[href='/procurement?attention=true']").ClickAsync();
-            await Assertions.Expect(page.Locator(".queue-scope")).ToContainTextAsync("Требуют внимания · каждый объект один раз · объектов: 1");
-            await page.GetByRole(AriaRole.Button,new(){Name="Сбросить",Exact=true}).ClickAsync();
-            await Assertions.Expect(page.Locator(".queue-scope")).ToContainTextAsync("Активные объекты");
+            await Assertions.Expect(page.GetByText("Требуют внимания",new(){Exact=true})).ToHaveCountAsync(0);
             // Simulate an unavailable read on this disposable DB only: no fake zero tiles.
             await using(var db=f.Sandbox.Context())
             {

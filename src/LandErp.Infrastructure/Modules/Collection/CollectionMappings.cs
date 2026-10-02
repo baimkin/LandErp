@@ -1,6 +1,7 @@
 using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Application.Modules.Collection.Domain;
 using LandErp.Application.Modules.Organization.Domain;
+using LandErp.Collector.Contracts.V1;
 using Microsoft.EntityFrameworkCore;
 
 namespace LandErp.Infrastructure.Modules.Collection;
@@ -20,7 +21,7 @@ internal static class CollectionMappings
         builder.Entity<SearchConfiguration>().Property(item => item.FixedTimesJson).HasColumnType("jsonb");
         builder.Entity<SearchConfiguration>().Property(item => item.ConsecutiveFailures)
             .HasComment("Число последовательных неуспешных запусков; успешный или ограниченный лимитом запуск сбрасывает счётчик.");
-        builder.Entity<SearchConfiguration>().Property(item => item.Url).HasMaxLength(2000);
+        builder.Entity<SearchConfiguration>().Property(item => item.Url).HasMaxLength(ContractRules.MaxSearchUrlLength);
         // Compatibility-only columns remain physically present until final cleanup; runtime routing never reads them.
         builder.Entity<SearchConfiguration>().Property<Guid?>("AgentId");
         builder.Entity<SearchConfiguration>().Property<Guid?>("DepartmentId");
@@ -36,6 +37,8 @@ internal static class CollectionMappings
         builder.Entity<SearchGroupMarketSettings>().Property(item => item.MaxPricePerSotka).HasPrecision(19, 4);
         builder.Entity<SearchGroupMarketSettings>().Property(item => item.DemandTestPricePerSotka).HasPrecision(19, 4)
             .HasComment("Ручная цена теста спроса за сотку в RUB; не измеренный спрос и не цена сделки.");
+        builder.Entity<SearchGroupMarketSettings>().Property(item => item.TargetPurchasePricePerSotka).HasPrecision(19, 4)
+            .HasComment("Ручная нужная цена покупки за сотку в RUB; ориентир закупки, не цена объявления и не цена сделки.");
         builder.Entity<SearchGroupMarketSettings>().HasOne<SearchGroup>().WithOne().HasForeignKey<SearchGroupMarketSettings>(item => item.SearchGroupId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<SearchGroupMarketSettings>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<SearchGroupMarketSettings>().HasIndex(item => new { item.OrganizationId, item.SearchGroupId }).IsUnique();

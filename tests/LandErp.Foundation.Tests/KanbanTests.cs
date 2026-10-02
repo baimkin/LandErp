@@ -171,6 +171,35 @@ public sealed class KanbanTests
     }
 
     [TestMethod]
+    public async Task BoardManagerFilterKeepsCountsCardsAndPaginationInOneScope()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(true, false);
+        var k = Service(f);
+        var cfg = await Config(k, f.Owner);
+        var pipeline = cfg.Pipelines.Single();
+
+        Guid managerCase = (await f.Workspace.CreateManualCaseAsync(f.Manager,
+            new("Менеджер 1", "Москва", null, 1_000_000m, 1000m, "kanban manager filter", Guid.CreateVersion7()),
+            "kanban-manager-1", Ct)).CaseId;
+        Guid secondCase = (await f.Workspace.CreateManualCaseAsync(f.SecondManager,
+            new("Менеджер 2", "Москва", null, 2_000_000m, 1000m, "kanban manager filter", Guid.CreateVersion7()),
+            "kanban-manager-2", Ct)).CaseId;
+
+        var all = await k.ReadBoardAsync(f.Owner, pipeline.Id, null, Ct);
+        var managerOnly = await k.ReadBoardAsync(f.Owner, pipeline.Id, f.ManagerEmployeeId, null, Ct);
+        Guid secondEmployee = f.EmployeeId("manager2-phase1@test.invalid");
+        var secondOnly = await k.ReadBoardAsync(f.Owner, pipeline.Id, secondEmployee, null, Ct);
+
+        Assert.AreEqual(2, all.Total);
+        Assert.AreEqual(1, managerOnly.Total);
+        Assert.AreEqual(1, secondOnly.Total);
+        Assert.AreEqual(managerCase, managerOnly.Columns.SelectMany(column => column.Cards).Single().Membership.PropertyCaseId);
+        Assert.AreEqual(secondCase, secondOnly.Columns.SelectMany(column => column.Cards).Single().Membership.PropertyCaseId);
+        Assert.AreEqual(1, managerOnly.Columns.Sum(column => column.Total));
+        Assert.AreEqual(1, secondOnly.Columns.Sum(column => column.Total));
+    }
+
+    [TestMethod]
     public async Task PaginationTotalsNearestTaskAndOccupiedStageRace()
     {
         await using var f=await ProcurementTests.Phase1Fixture.CreateAsync(false,false);var k=Service(f);var cfg=await Config(k,f.Owner);var p=cfg.Pipelines.Single();Guid first=Guid.Empty;

@@ -18,7 +18,12 @@ public sealed partial class KanbanWorkspace
         n = a.Due.CompareTo(b.Due); if (n != 0) return n;
         n = string.Compare(a.Number, b.Number, StringComparison.Ordinal); return n != 0 ? n : a.Id.CompareTo(b.Id);
     }
-    public async Task<KanbanBoardView> ReadBoardAsync(Subject subject, Guid pipelineId, IReadOnlyDictionary<Guid, string>? cursors, CancellationToken ct)
+    public Task<KanbanBoardView> ReadBoardAsync(Subject subject, Guid pipelineId,
+        IReadOnlyDictionary<Guid, string>? cursors, CancellationToken ct) =>
+        ReadBoardAsync(subject, pipelineId, null, cursors, ct);
+
+    public async Task<KanbanBoardView> ReadBoardAsync(Subject subject, Guid pipelineId, Guid? assigneeId,
+        IReadOnlyDictionary<Guid, string>? cursors, CancellationToken ct)
     {
         var a = await access.ResolveAsync(subject, ct);
         if (!a.CanReadProcurement) throw new AccessDeniedException();
@@ -32,6 +37,7 @@ public sealed partial class KanbanWorkspace
                           join assignment in db.WorkAssignments.AsNoTracking() on item.AssignmentId equals assignment.Id
                           join employee in db.Employees.AsNoTracking() on assignment.EmployeeId equals employee.Id
                           where m.OrganizationId == a.OrganizationId && m.PipelineId == p.Id && m.TransferredAt == null
+                              && (assigneeId == null || assignment.EmployeeId == assigneeId)
                           select new { Membership = m, Case = item, Assignee = employee.DisplayName }).ToArrayAsync(ct);
         var ids = rows.Select(x => x.Case.Id).ToArray();
         // One batch of tasks for the entire visible membership set, no per-card detail calls.

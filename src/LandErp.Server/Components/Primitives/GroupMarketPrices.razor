@@ -8,9 +8,17 @@
     else
     {
         <div class="market-group" title="@Value.Name">@Value.Name</div>
-        <div class="price-line"><span>Медиана</span><b>@DemandTestPrice.Money(Value.MedianPricePerSotka) / сот.</b></div>
-        <div class="price-line"><span>Средняя</span><b>@DemandTestPrice.Money(Value.AveragePricePerSotka) / сот.</b></div>
-        <div class="price-line"><span title="Ручной ориентир">Тест спроса</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" /><span>/ сот.</span></span></div>
+        @if (PurchaseMode)
+        {
+            <div class="price-line"><span title="Ручной ориентир цены, не измеренный спрос">Тест спроса</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" /><span>/ сот.</span></span></div>
+            <div class="price-line"><span title="Целевая цена закупки">Нужная цена покупки</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" PurchaseTarget="true" /><span>/ сот.</span></span></div>
+        }
+        else
+        {
+            <div class="price-line"><span>Медиана</span><b>@DemandTestPrice.Money(Value.MedianPricePerSotka) / сот.</b></div>
+            <div class="price-line"><span>Средняя</span><b>@DemandTestPrice.Money(Value.AveragePricePerSotka) / сот.</b></div>
+            <div class="price-line"><span title="Ручной ориентир">Тест спроса</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" /><span>/ сот.</span></span></div>
+        }
         <div class="market-caption">@if (Value.CanReadParticipants) { <a href="@($"/incoming?participants={Value.SearchGroupId}")">В расчёте: @Value.ParticipantCount</a> } else { <span>В расчёте: @Value.ParticipantCount</span> }</div>
     }
 </div>
@@ -20,4 +28,5 @@
     [Parameter, EditorRequired] public Subject Subject { get; set; } = default!;
     [Parameter] public EventCallback Saved { get; set; }
     [Parameter] public string EmptyText { get; set; } = "Выберите группу поиска или сохранённый фильтр с группой";
+    [Parameter] public bool PurchaseMode { get; set; }
 }

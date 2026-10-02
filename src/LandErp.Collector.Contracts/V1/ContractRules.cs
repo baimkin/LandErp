@@ -2,11 +2,26 @@ namespace LandErp.Collector.Contracts.V1;
 
 public static class ContractRules
 {
+    public const int MaxSearchUrlLength = 12_000;
+    public const string SearchUrlRequired = "SEARCH_URL_REQUIRED";
+    public const string SearchUrlTooLong = "SEARCH_URL_TOO_LONG";
+    public const string SearchSourceMismatch = "SEARCH_SOURCE_MISMATCH";
+    public const string SearchPageLimitInvalid = "SEARCH_PAGE_LIMIT_INVALID";
+
     public static bool IsSourceUrl(string? value, ListingSource source) => Enum.IsDefined(source)
         && Uri.TryCreate(value, UriKind.Absolute, out Uri? url) && url.Scheme == Uri.UriSchemeHttps
         && url.UserInfo.Length == 0 && url.IsDefaultPort
         && (url.Host.Equals(source == ListingSource.Avito ? "avito.ru" : "cian.ru", StringComparison.OrdinalIgnoreCase)
             || url.Host.EndsWith(source == ListingSource.Avito ? ".avito.ru" : ".cian.ru", StringComparison.OrdinalIgnoreCase));
+
+    public static string? SearchValidationError(string? value, ListingSource source, int maxPages)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return SearchUrlRequired;
+        if (value.Length > MaxSearchUrlLength) return SearchUrlTooLong;
+        if (!IsSourceUrl(value, source)) return SearchSourceMismatch;
+        if (maxPages is < 1 or > 100) return SearchPageLimitInvalid;
+        return null;
+    }
 
     public static void Validate(ListingData data)
     {

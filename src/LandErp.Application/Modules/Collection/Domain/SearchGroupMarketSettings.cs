@@ -10,5 +10,6 @@ public sealed class SearchGroupMarketSettings
     public decimal? MinPricePerSotka { get; set; }
     public decimal? MaxPricePerSotka { get; set; }
     public decimal? DemandTestPricePerSotka { get; set; }
+    public decimal? TargetPurchasePricePerSotka { get; set; }
     public long Version { get; set; } = 1;
 }

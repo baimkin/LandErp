@@ -105,7 +105,10 @@ public sealed class GroupMarketService(IDbContextFactory<LandErpDbContext> facto
             var total = totals.GetValueOrDefault(group.Id);
             return new GroupMarketView(group.Id, group.Name, total.Count == 0 ? null : total.Median,
                 total.Count == 0 ? null : total.Average, total.Count, value?.DemandTestPricePerSotka,
-                value?.Version ?? 0, effective.CanHeadProcurement, effective.CanReadIncoming);
+                value?.Version ?? 0, effective.CanHeadProcurement, effective.CanReadIncoming)
+            {
+                TargetPurchasePricePerSotka = value?.TargetPurchasePricePerSotka
+            };
         }).ToArray();
     }
 
@@ -133,6 +136,33 @@ public sealed class GroupMarketService(IDbContextFactory<LandErpDbContext> facto
         settings.DemandTestPricePerSotka = price;
         OrganizationWorkspace.AddAudit(db, effective.OrganizationContext, subject, "DemandTestPriceChanged", "SearchGroup", group.Id,
             new { PreviousPricePerSotka = previous, PricePerSotka = price, Currency = "RUB", Meaning = "Ручной ориентир теста спроса" }, correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task SaveTargetPurchaseAsync(Subject subject, SaveTargetPurchasePrice command, string correlationId, CancellationToken cancellationToken)
+    {
+        var effective = await access.ResolveAsync(subject, cancellationToken);
+        if (!effective.CanHeadProcurement) throw new AccessDeniedException();
+        decimal? price = command.PricePerSotka is decimal raw ? decimal.Round(raw, 2, MidpointRounding.ToEven) : null;
+        if (price is <= 0 or >= 1000000000000000m) throw new ArgumentException("Укажите положительную цену в рублях или очистите поле.");
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var group = await db.SearchGroups.FromSqlInterpolated($"SELECT * FROM collection.search_groups WHERE id = {command.SearchGroupId} AND organization_id = {effective.OrganizationId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
+        if (!group.Active) throw new AccessDeniedException();
+        var settings = await db.SearchGroupMarketSettings.SingleOrDefaultAsync(item => item.OrganizationId == effective.OrganizationId
+            && item.SearchGroupId == group.Id, cancellationToken);
+        if ((settings?.Version ?? 0) != command.ExpectedVersion) throw new DbUpdateConcurrencyException();
+        if (settings == null)
+        {
+            settings = new SearchGroupMarketSettings { Id = DataConventions.NewId(), OrganizationId = effective.OrganizationId, SearchGroupId = group.Id };
+            db.SearchGroupMarketSettings.Add(settings);
+        }
+        decimal? previous = settings.TargetPurchasePricePerSotka;
+        settings.TargetPurchasePricePerSotka = price;
+        OrganizationWorkspace.AddAudit(db, effective.OrganizationContext, subject, "TargetPurchasePriceChanged", "SearchGroup", group.Id,
+            new { PreviousPricePerSotka = previous, PricePerSotka = price, Currency = "RUB", Meaning = "Нужная цена покупки за сотку" }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }

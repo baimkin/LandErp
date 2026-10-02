@@ -26,6 +26,7 @@ public sealed class ServerOutbox
               json TEXT NOT NULL,acked INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,last_code TEXT NOT NULL DEFAULT 'Pending');
             CREATE TABLE IF NOT EXISTS server_work(id INTEGER PRIMARY KEY CHECK(id=1),json TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS server_identity(id INTEGER PRIMARY KEY CHECK(id=1),origin TEXT NOT NULL,agent_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS server_outbox_recovery(sequence INTEGER PRIMARY KEY,json TEXT NOT NULL);
             """;
         command.ExecuteNonQuery();
         EnsureColumn(db, "server_outbox", "terminal_state", "TEXT NOT NULL DEFAULT ''");
@@ -33,6 +34,7 @@ public sealed class ServerOutbox
         EnsureColumn(db, "server_outbox", "duplicate_count", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(db, "server_outbox", "new_count", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(db, "server_outbox", "changed_count", "INTEGER NOT NULL DEFAULT 0");
+        PruneAcknowledgedHistory(db);
     }
     public void Bind(ServerConnection connection, bool allowUnboundData)
     {
@@ -92,7 +94,7 @@ public sealed class ServerOutbox
     public PendingDelivery[] Pending()
     {
         using SqliteConnection db = Open(); using SqliteCommand command = db.CreateCommand();
-        command.CommandText = "SELECT sequence,json,attempts FROM server_outbox WHERE acked=0 ORDER BY sequence";
+        command.CommandText = "SELECT sequence,json,attempts FROM server_outbox WHERE acked=0 AND terminal_state='' ORDER BY sequence";
         using SqliteDataReader reader = command.ExecuteReader(); List<PendingDelivery> results = [];
         while (reader.Read()) results.Add(new(reader.GetInt64(0), JsonSerializer.Deserialize<CollectionResult>(reader.GetString(1), CollectionJson.Options)!, reader.GetInt32(2)));
         return results.ToArray();
@@ -103,6 +105,37 @@ public sealed class ServerOutbox
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read()) { CollectionResult value = JsonSerializer.Deserialize<CollectionResult>(reader.GetString(0), CollectionJson.Options)!; if (value.JobId == job && value.LeaseId == lease) return true; }
         return false;
+    }
+    public string? BlockedCode(Guid job)
+    {
+        using SqliteConnection db = Open(); using SqliteCommand command = db.CreateCommand();
+        command.CommandText = """
+            SELECT last_code FROM server_outbox
+            WHERE acked=0 AND terminal_state='BlockedPermanent' AND last_code<>'Pending'
+              AND json_extract(json,'$.jobId')=$job
+            ORDER BY sequence LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$job", job.ToString());
+        return command.ExecuteScalar() as string;
+    }
+    public void ResetTransportState()
+    {
+        using SqliteConnection db = Open(); using SqliteTransaction transaction = db.BeginTransaction();
+        using (SqliteCommand recovery = Command(db, transaction, "DELETE FROM server_outbox_recovery")) recovery.ExecuteNonQuery();
+        using (SqliteCommand deliveries = Command(db, transaction, "DELETE FROM server_outbox")) deliveries.ExecuteNonQuery();
+        using (SqliteCommand work = Command(db, transaction, "DELETE FROM server_work")) work.ExecuteNonQuery();
+        transaction.Commit();
+        using SqliteCommand vacuum = db.CreateCommand(); vacuum.CommandText = "VACUUM"; vacuum.ExecuteNonQuery();
+    }
+    public void PruneJob(Guid job)
+    {
+        using SqliteConnection db = Open(); using SqliteTransaction transaction = db.BeginTransaction();
+        using (SqliteCommand recovery = Command(db, transaction,
+            "DELETE FROM server_outbox_recovery WHERE sequence IN (SELECT sequence FROM server_outbox WHERE json_extract(json,'$.jobId')=$job)",
+            ("$job", job.ToString()))) recovery.ExecuteNonQuery();
+        using (SqliteCommand deliveries = Command(db, transaction,
+            "DELETE FROM server_outbox WHERE json_extract(json,'$.jobId')=$job", ("$job", job.ToString()))) deliveries.ExecuteNonQuery();
+        transaction.Commit();
     }
     public void RecordAttempt(PendingDelivery delivery, string code, bool acknowledged, string terminalState = "",
         CollectionReceipt? receipt = null)
@@ -152,6 +185,7 @@ public sealed class ServerOutbox
     public async Task FlushAsync(ServerAdapter adapter, CancellationToken token)
     {
         RecoverRejectedPhotoPayloads();
+        RecoverObservationKeyConflicts();
         ServerDeliveryException? firstPermanent = null;
         HashSet<Guid> blockedJobs = [];
         foreach (PendingDelivery delivery in Pending())
@@ -173,12 +207,92 @@ public sealed class ServerOutbox
                     return;
                 }
                 if (exception.Retryable) throw; // A transport failure can affect every following delivery.
+                if (IsCoordinatorLifecycleError(exception.Code))
+                {
+                    blockedJobs.Add(delivery.Result.JobId);
+                    firstPermanent ??= exception;
+                    continue;
+                }
+                // Old parser versions used a local observation row id as ObservationKey. Let the next flush
+                // rewrite that one rejected packet from the exact ListingData payload, once.
+                bool repairableObservationConflict = exception.Code == CollectorErrorCodes.ObservationKeyConflict
+                    && NeedsObservationKeyRepair(delivery.Result);
+                if (!repairableObservationConflict) BlockJob(delivery.Result.JobId);
                 blockedJobs.Add(delivery.Result.JobId);
                 firstPermanent ??= exception;
             }
         }
         if (firstPermanent != null) throw firstPermanent;
     }
+    private void RecoverObservationKeyConflicts()
+    {
+        using SqliteConnection db = Open();
+        using SqliteTransaction transaction = db.BeginTransaction();
+        using SqliteCommand read = db.CreateCommand(); read.Transaction = transaction;
+        read.CommandText = "SELECT sequence,json FROM server_outbox WHERE acked=0 AND terminal_state='' AND last_code=$code";
+        read.Parameters.AddWithValue("$code", CollectorErrorCodes.ObservationKeyConflict);
+        List<(long Sequence, string Json)> rejected = [];
+        using (SqliteDataReader reader = read.ExecuteReader())
+            while (reader.Read()) rejected.Add((reader.GetInt64(0), reader.GetString(1)));
+        foreach (var item in rejected)
+        {
+            CollectionResult original = JsonSerializer.Deserialize<CollectionResult>(item.Json, CollectionJson.Options)!;
+            if (!NeedsObservationKeyRepair(original)) continue;
+            using SqliteCommand archive = Command(db, transaction,
+                "INSERT OR IGNORE INTO server_outbox_recovery VALUES($sequence,$json)",
+                ("$sequence", item.Sequence), ("$json", item.Json));
+            archive.ExecuteNonQuery();
+            CollectionResult repaired = original with
+            {
+                ResultId = Guid.CreateVersion7(),
+                Observations = original.Observations.Select(observation => observation with
+                {
+                    ObservationKey = ServerCoordinator.ObservationKey(observation.Data)
+                }).ToArray()
+            };
+            using SqliteCommand update = Command(db, transaction, """
+                UPDATE server_outbox
+                SET result_id=$id,json=$json,attempts=0,last_code='Pending',terminal_state=''
+                WHERE sequence=$sequence
+                """,
+                ("$id", repaired.ResultId.ToString()),
+                ("$json", JsonSerializer.Serialize(repaired, CollectionJson.Options)),
+                ("$sequence", item.Sequence));
+            update.ExecuteNonQuery();
+        }
+        transaction.Commit();
+    }
+    private static bool NeedsObservationKeyRepair(CollectionResult result) =>
+        result.Observations.Any(observation => !string.Equals(observation.ObservationKey,
+            ServerCoordinator.ObservationKey(observation.Data), StringComparison.Ordinal));
+
+    private void BlockJob(Guid job)
+    {
+        using SqliteConnection db = Open(); using SqliteCommand command = db.CreateCommand();
+        command.CommandText = """
+            UPDATE server_outbox SET terminal_state='BlockedPermanent'
+            WHERE acked=0 AND terminal_state='' AND json_extract(json,'$.jobId')=$job
+            """;
+        command.Parameters.AddWithValue("$job", job.ToString()); command.ExecuteNonQuery();
+    }
+    private static bool IsCoordinatorLifecycleError(string code) =>
+        code is "LEASE_EXPIRED" or "LEASE_REPLACED" or "RESULT_SUPERSEDED" or "WORK_NOT_ACTIVE"
+            || code == CollectorErrorCodes.LeaseExpiredOrReplaced;
+
+    private static void PruneAcknowledgedHistory(SqliteConnection db)
+    {
+        using SqliteCommand deliveries = db.CreateCommand();
+        deliveries.CommandText = """
+            DELETE FROM server_outbox
+            WHERE acked=1 AND json_extract(json,'$.jobId') NOT IN
+              (SELECT json_extract(json,'$.jobId') FROM server_outbox WHERE acked=0)
+            """;
+        deliveries.ExecuteNonQuery();
+        using SqliteCommand recovery = db.CreateCommand();
+        recovery.CommandText = "DELETE FROM server_outbox_recovery WHERE sequence NOT IN (SELECT sequence FROM server_outbox)";
+        recovery.ExecuteNonQuery();
+    }
+
     private void RecoverRejectedPhotoPayloads()
     {
         using SqliteConnection db = Open();

@@ -41,6 +41,25 @@ public sealed class ServerTransportTests
     }
 
     [TestMethod]
+    public void ObservationKeyIsStableForExactServerPayloadAndChangesWithPayload()
+    {
+        ListingData first = new()
+        {
+            Source = ListingSource.Cian,
+            ExternalId = "334043735",
+            Url = "https://www.cian.ru/sale/suburban/334043735/",
+            ObservedAt = new DateTimeOffset(2026, 9, 29, 11, 0, 0, TimeSpan.Zero),
+            AdapterVersion = "test",
+            Provenance = "test",
+            Title = new(FieldPresence.Present, "Участок")
+        };
+        string key = ServerCoordinator.ObservationKey(first);
+        Assert.AreEqual(64, key.Length);
+        Assert.AreEqual(key, ServerCoordinator.ObservationKey(first));
+        Assert.AreNotEqual(key, ServerCoordinator.ObservationKey(first with { Title = new(FieldPresence.Present, "Другой участок") }));
+    }
+
+    [TestMethod]
     public async Task NewActivationCodeExchangesSecretWithoutBearerAndValidatesOrigin()
     {
         Guid id = Guid.CreateVersion7();
@@ -169,6 +188,81 @@ public sealed class ServerTransportTests
     }
 
     [TestMethod]
+    public async Task LegacyObservationConflictIsRekeyedFromExactPayloadAndDelivered()
+    {
+        ServerOutbox outbox = NewOutbox(); Guid job = Guid.CreateVersion7(), lease = Guid.CreateVersion7();
+        ListingData data = new()
+        {
+            Source = ListingSource.Avito, ExternalId = "1", Url = "https://www.avito.ru/item/1",
+            ObservedAt = new DateTimeOffset(2026, 9, 29, 12, 0, 0, TimeSpan.Zero), AdapterVersion = "legacy", Provenance = "legacy"
+        };
+        CollectionResult legacy = new(Guid.CreateVersion7(), job, lease, CollectionOutcome.Success,
+            [new("local-row-id", data)], false);
+        outbox.Enqueue(legacy);
+        outbox.RecordAttempt(outbox.Pending().Single(), CollectorErrorCodes.ObservationKeyConflict, false);
+        int calls = 0; string? deliveredKey = null;
+        using HttpClient http = new(new ReplyHandler(request =>
+        {
+            CollectionResult sent = JsonSerializer.Deserialize<CollectionResult>(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult(), CollectionJson.Options)!;
+            calls++; deliveredKey = sent.Observations.Single().ObservationKey;
+            return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new CollectionReceipt(sent.ResultId, "Accepted", 1, 0), CollectionJson.Options));
+        }));
+
+        await outbox.FlushAsync(Adapter(http), CancellationToken.None);
+
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual(ServerCoordinator.ObservationKey(data), deliveredKey);
+        Assert.AreEqual(0, outbox.Pending().Length);
+    }
+
+    [TestMethod]
+    public async Task CanonicalPermanentObservationConflictIsBlockedUntilLocalReset()
+    {
+        ServerOutbox outbox = NewOutbox(); Guid job = Guid.CreateVersion7(), lease = Guid.CreateVersion7();
+        ListingData data = new()
+        {
+            Source = ListingSource.Avito, ExternalId = "2", Url = "https://www.avito.ru/item/2",
+            ObservedAt = new DateTimeOffset(2026, 9, 29, 12, 5, 0, TimeSpan.Zero), AdapterVersion = "current", Provenance = "current"
+        };
+        CollectionResult result = new(Guid.CreateVersion7(), job, lease, CollectionOutcome.Success,
+            [new(ServerCoordinator.ObservationKey(data), data)], false);
+        outbox.Enqueue(result); int calls = 0;
+        using HttpClient http = new(new ReplyHandler(_ => { calls++; return Problem(HttpStatusCode.Conflict, CollectorErrorCodes.ObservationKeyConflict); }));
+
+        ServerDeliveryException exception = await Assert.ThrowsExactlyAsync<ServerDeliveryException>(() =>
+            outbox.FlushAsync(Adapter(http), CancellationToken.None));
+
+        Assert.AreEqual(CollectorErrorCodes.ObservationKeyConflict, exception.Code);
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual(0, outbox.Pending().Length);
+        Assert.AreEqual(CollectorErrorCodes.ObservationKeyConflict, outbox.BlockedCode(job));
+        await outbox.FlushAsync(Adapter(http), CancellationToken.None);
+        Assert.AreEqual(1, calls);
+
+        outbox.ResetTransportState();
+        Assert.IsNull(outbox.BlockedCode(job)); Assert.IsNull(outbox.ReadWork());
+    }
+
+    [TestMethod]
+    public void ResetTransportStateDoesNotDeleteLocalWorkspace()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "LandErp-ResetServerState", Guid.NewGuid().ToString("N"));
+        LocalStore store = new(Path.Combine(root, "local.sqlite"));
+        store.SaveLink("Local search", "https://www.avito.ru/moskva/zemelnye_uchastki");
+        ServerOutbox outbox = new(Path.Combine(root, "outbox.sqlite"));
+        Guid job = Guid.CreateVersion7(), lease = Guid.CreateVersion7();
+        outbox.SaveWork(new(new(job, lease, DateTimeOffset.UtcNow.AddMinutes(3), ListingSource.Avito,
+            "https://www.avito.ru/moskva/zemelnye_uchastki", 1, "Server"), null));
+        outbox.Enqueue(Result(job));
+
+        outbox.ResetTransportState();
+
+        Assert.AreEqual(1, store.Links().Length);
+        Assert.AreEqual("Local search", store.Links().Single().Label);
+        Assert.IsNull(outbox.ReadWork()); Assert.AreEqual(0, outbox.Pending().Length);
+    }
+
+    [TestMethod]
     public async Task PermanentFailureOfOneJobDoesNotBlockAnotherJob()
     {
         Guid blockedJob = Guid.CreateVersion7();
@@ -188,6 +282,31 @@ public sealed class ServerTransportTests
 
         Assert.AreEqual(CollectorErrorCodes.LeaseExpiredOrReplaced, exception.Code);
         Assert.AreEqual(blockedJob, outbox.Pending().Single().Result.JobId);
+    }
+
+    [TestMethod]
+    public async Task GenericPermanentFailureBlocksOnlyItsJobAndDoesNotRetryIt()
+    {
+        Guid blockedJob = Guid.CreateVersion7(), acceptedJob = Guid.CreateVersion7();
+        int blockedCalls = 0, acceptedCalls = 0;
+        using HttpClient http = new(new ReplyHandler(request =>
+        {
+            CollectionResult result = JsonSerializer.Deserialize<CollectionResult>(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult(), CollectionJson.Options)!;
+            if (result.JobId == blockedJob) { blockedCalls++; return Problem(HttpStatusCode.BadRequest, "INVALID_PAYLOAD"); }
+            acceptedCalls++; return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new CollectionReceipt(result.ResultId, "Completed", 0, 0), CollectionJson.Options));
+        }));
+        ServerOutbox outbox = NewOutbox();
+        outbox.Enqueue(Result(blockedJob)); outbox.Enqueue(Result(acceptedJob));
+
+        ServerDeliveryException exception = await Assert.ThrowsExactlyAsync<ServerDeliveryException>(() =>
+            outbox.FlushAsync(Adapter(http), CancellationToken.None));
+
+        Assert.AreEqual("INVALID_PAYLOAD", exception.Code);
+        Assert.AreEqual(1, blockedCalls); Assert.AreEqual(1, acceptedCalls);
+        Assert.AreEqual("INVALID_PAYLOAD", outbox.BlockedCode(blockedJob));
+        Assert.AreEqual(0, outbox.Pending().Length);
+        await outbox.FlushAsync(Adapter(http), CancellationToken.None);
+        Assert.AreEqual(1, blockedCalls); Assert.AreEqual(1, acceptedCalls);
     }
 
     [TestMethod]

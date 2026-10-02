@@ -142,6 +142,8 @@ public partial class WorkspaceWindow : Window
         ConnectionText.Text = IsServer ? controller.ConnectionStatus : "Сервер не требуется";
         ServerAddressText.Text = controller.SavedServerConnection()?.Origin.ToString() ?? "Сервер пока не подключён";
         TransferButton.Visibility = ArchiveButton.Visibility = IsServer ? Visibility.Collapsed : Visibility.Visible;
+        ResetServerSyncButton.Visibility = IsServer ? Visibility.Visible : Visibility.Collapsed;
+        ResetServerSyncButton.IsEnabled = controller.SavedServerConnection() != null;
         StartButton.IsEnabled = !controller.Runner.IsRunning;
     }
     private async Task ReloadAsync() { await LoadSearchesAsync(); RefreshJobs(); offset = 0; await FindAsync(); }
@@ -362,6 +364,16 @@ public partial class WorkspaceWindow : Window
     }
     private async void ConnectClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
     { if (new ServerConnectionWindow(controller!) { Owner = this }.ShowDialog() == true) { remote = null; StatusText.Text = "Сервер подключён."; if (IsServer) await ReloadAsync(); } });
+    private async void ResetServerSyncClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
+    {
+        if (!IsServer) throw new InvalidOperationException("Переключитесь в режим «Через сервер».");
+        if (MessageBox.Show(this,
+            "Будет очищена только локальная очередь отправки и текущая серверная работа на этом компьютере.\n\nЛокальные поиски, история и результаты останутся в базе. Продолжить?",
+            "Сбросить серверную синхронизацию", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        await controller!.ResetServerSynchronizationAsync(lifetime.Token);
+        remote = null; RefreshJobs(); ShowStatus();
+        StatusText.Text = "Серверная синхронизация сброшена. Локальные поиски, история и результаты сохранены.";
+    });
     private async void SaveSettingsClick(object sender, RoutedEventArgs e) => await ActionAsync(() =>
     {
         if (!int.TryParse(MaxPagesInput.Text, out int pages) || pages is < 1 or > 100) throw new ArgumentException("Предел страниц: от 1 до 100.");

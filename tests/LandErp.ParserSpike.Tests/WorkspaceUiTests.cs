@@ -50,6 +50,7 @@ public sealed class WorkspaceUiTests
                 Assert.IsTrue(results.Columns.Any(column => Equals(column.Header, "Парсинг")));
                 Assert.IsNotNull(window.FindName("DetailsSplitter"));
                 Assert.IsNotNull(window.FindName("ResetFiltersButton"));
+                Assert.IsNotNull(window.FindName("ResetServerSyncButton"));
                 tabs.SelectedIndex = 3;
                 ((TextBox)window.FindName("MaxPagesInput")).Text = "0";
                 ((Button)window.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

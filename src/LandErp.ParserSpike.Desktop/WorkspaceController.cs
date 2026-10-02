@@ -150,13 +150,14 @@ public sealed class WorkspaceController : IAsyncDisposable
         finally { serverConnection.Release(); }
     }
     private string ServerSettingsPath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "server-connection.json");
+    private string ServerOutboxPath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "collector-server-outbox.sqlite");
     internal ServerConnection? SavedServerConnection() => ServerConnectionSettings.Load(ServerSettingsPath);
     public async Task ConnectCodeAsync(string code)
     {
         if (!code.StartsWith("LDP1.", StringComparison.Ordinal)) { await ConnectServerAsync(ServerConnection.FromConnectionCode(code)); return; }
         if (Runner.IsRunning) throw new InvalidOperationException("Сначала остановите текущий сбор.");
         ServerConnection activation = ServerAdapter.ParseActivationCode(code);
-        ServerOutbox outbox = new(Path.Combine(Path.GetDirectoryName(Store.Path)!, "collector-server-outbox.sqlite"));
+        ServerOutbox outbox = new(ServerOutboxPath);
         if (outbox.ReadWork() != null || outbox.Pending().Length > 0)
             throw new InvalidOperationException("Сначала завершите доставку прежнего задания.");
         using HttpClient client = httpClientFactory();
@@ -165,11 +166,32 @@ public sealed class WorkspaceController : IAsyncDisposable
         ServerConnectionSettings.Save(ServerSettingsPath, connection);
         await ConnectServerAsync(connection);
     }
+    public async Task ResetServerSynchronizationAsync(CancellationToken token)
+    {
+        if (Mode != ParserOperatingMode.Server) throw new InvalidOperationException("Сброс серверной синхронизации доступен только в режиме «Через сервер».");
+        SuspendNewWork = true;
+        try
+        {
+            if (Server != null) await Server.ResetLocalServerStateAsync(token).ConfigureAwait(false);
+            else
+            {
+                if (Runner.IsRunning)
+                {
+                    Runner.Stop();
+                    if (Runner.Completion is { } completion) await completion.WaitAsync(token).ConfigureAwait(false);
+                }
+                new ServerOutbox(ServerOutboxPath).ResetTransportState();
+            }
+            reconnectAt = DateTimeOffset.MinValue;
+            ConnectionStatus = "Серверная синхронизация сброшена. Локальные данные сохранены.";
+        }
+        finally { SuspendNewWork = false; }
+    }
     public async Task ConnectServerAsync(ServerConnection connection)
     {
         if (Runner.IsRunning) throw new InvalidOperationException("Сначала остановите или завершите текущий сбор.");
         ServerConnection? previous = SavedServerConnection();
-        ServerOutbox outbox = new(Path.Combine(Path.GetDirectoryName(Store.Path)!, "collector-server-outbox.sqlite"));
+        ServerOutbox outbox = new(ServerOutboxPath);
         if (previous != null && (previous.AgentId != connection.AgentId || previous.Origin != connection.Origin)
             && (outbox.ReadWork() != null || outbox.Pending().Length > 0))
             throw new InvalidOperationException("Есть незавершённое задание или результаты для прежнего сервера. Сначала завершите их доставку.");

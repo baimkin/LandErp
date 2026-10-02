@@ -1,5 +1,7 @@
 using LandErp.Collector.Contracts.V1;
 using LandErp.ParserSpike.LocalCollection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace LandErp.ParserSpike.ServerIntegration;
@@ -27,6 +29,8 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             if (runner.IsRunning) throw new InvalidOperationException("Сначала завершите или остановите текущий локальный сбор.");
             await adapter.RegisterAsync(token).ConfigureAwait(false);
             LocalServerWork? old = outbox.ReadWork();
+            if (old != null && outbox.BlockedCode(old.Work.JobId) is string blockedCode)
+                throw new InvalidOperationException($"Прежняя серверная отправка заблокирована ({blockedCode}). Сбросьте серверную синхронизацию в настройках.");
             if (old?.LocalJobId != null) PrepareResult(old);
             try { await outbox.FlushAsync(adapter, token).ConfigureAwait(false); }
             catch (ServerDeliveryException exception) when (exception.Code == CollectorErrorCodes.LeaseExpiredOrReplaced)
@@ -41,7 +45,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             {
                 LocalServerWork renewed = new(work, old.LocalJobId); outbox.SaveWork(renewed); PrepareResult(renewed);
                 await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
-                LastDelivery = outbox.Summary(work.JobId); outbox.SaveWork(null);
+                LastDelivery = outbox.Summary(work.JobId); outbox.PruneJob(work.JobId); outbox.SaveWork(null);
                 Status = LastDelivery?.Display ?? "Сохранённый результат доставлен после обновления lease."; return;
             }
             StartClaimedWork(work, token);
@@ -54,11 +58,18 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
         // A completed local run must be delivered immediately. The 45-second value is a heartbeat
         // cadence for active work, not a post-completion delay before the next server assignment.
         LocalServerWork? localSnapshot = outbox.ReadWork();
-        bool completionWaiting = localSnapshot?.LocalJobId != null && !runner.IsRunning;
+        bool blockedWaiting = localSnapshot != null && outbox.BlockedCode(localSnapshot.Work.JobId) != null;
+        bool completionWaiting = localSnapshot?.LocalJobId != null && !runner.IsRunning && !blockedWaiting;
         if ((!completionWaiting && now < nextPoll) || !await commands.WaitAsync(0, token).ConfigureAwait(false)) return;
         try
         {
             LocalServerWork? work = outbox.ReadWork();
+            if (work != null && !runner.IsRunning && outbox.BlockedCode(work.Work.JobId) is string blockedCode)
+            {
+                nextPoll = now.AddMinutes(1);
+                Status = $"Сервер отклонил сохранённый результат ({blockedCode}). Локальные данные сохранены. Для нового запуска сбросьте серверную синхронизацию в настройках.";
+                return;
+            }
             if (work == null && outbox.Pending().Length == 0 && !runner.IsRunning)
             {
                 await adapter.RegisterAsync(token).ConfigureAwait(false);
@@ -90,7 +101,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
                 // A claim that raced with Stop is completed explicitly without opening the source.
                 outbox.Enqueue(new(Guid.CreateVersion7(), work.Work.JobId, work.Work.LeaseId, CollectionOutcome.Interrupted, [], true,
                     CollectionResultReasonCodes.AgentInterrupted, [], new(0, null, false, false, 0, 0, work.Work.MaxPages)));
-                await outbox.FlushAsync(adapter, token).ConfigureAwait(false); outbox.SaveWork(null);
+                await outbox.FlushAsync(adapter, token).ConfigureAwait(false); outbox.PruneJob(work.Work.JobId); outbox.SaveWork(null);
                 nextPoll = DateTimeOffset.UtcNow;
                 Status = "Остановлено. Новые задания не запускаются."; return;
             }
@@ -105,7 +116,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
                         LocalServerWork renewed = new(reclaimed, work.LocalJobId); outbox.SaveWork(renewed);
                         PrepareResult(renewed); await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
                         LastDelivery = outbox.Summary(reclaimed.JobId);
-                        outbox.SaveWork(null); nextPoll = DateTimeOffset.UtcNow;
+                        outbox.PruneJob(reclaimed.JobId); outbox.SaveWork(null); nextPoll = DateTimeOffset.UtcNow;
                         Status = LastDelivery?.Display ?? "Сохранённый результат доставлен после обновления lease."; return;
                     }
                     PrepareResult(work); outbox.RetainLocally(work.Work.JobId, work.ResultReasonCode); outbox.SaveWork(null);
@@ -114,7 +125,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
                 }
                 PrepareResult(work); await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
                 LastDelivery = outbox.Summary(work.Work.JobId);
-                outbox.SaveWork(null); nextPoll = DateTimeOffset.UtcNow;
+                outbox.PruneJob(work.Work.JobId); outbox.SaveWork(null); nextPoll = DateTimeOffset.UtcNow;
                 Status = LastDelivery?.Display ?? "Работа и локальные наблюдения доставлены в Server.";
             }
             else
@@ -174,9 +185,17 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
                 Status = "Сервер больше не принимает это задание. Результаты сохранены на компьютере; ожидаем новое задание.";
                 return;
             }
-            nextPoll = now.AddSeconds(15 + Random.Shared.Next(0, 6));
+            LocalServerWork? rejectedWork = outbox.ReadWork();
+            bool blocked = rejectedWork != null && outbox.BlockedCode(rejectedWork.Work.JobId) != null;
+            if (exception.Code == CollectorErrorCodes.ObservationKeyConflict && !blocked)
+            {
+                nextPoll = now;
+                Status = "Обновляем старые ключи локальной очереди и повторяем доставку один раз.";
+                return;
+            }
+            nextPoll = exception.Retryable ? now.AddSeconds(15 + Random.Shared.Next(0, 6)) : now.AddMinutes(1);
             Status = exception.Retryable ? "Нет связи с сервером. Результаты сохранены; повторим подключение автоматически."
-                : "Сервер отклонил запрос: " + exception.Code + ". Результаты сохранены на компьютере.";
+                : "Сервер отклонил запрос: " + exception.Code + ". Повтор остановлен; локальные данные сохранены. При необходимости сбросьте серверную синхронизацию.";
         }
         finally { commands.Release(); }
     }
@@ -204,12 +223,38 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             await outbox.FlushAsync(adapter, token).ConfigureAwait(false);
             if (!runner.IsRunning)
             {
-                if (work != null) LastDelivery = outbox.Summary(work.Work.JobId);
+                if (work != null)
+                {
+                    LastDelivery = outbox.Summary(work.Work.JobId);
+                    outbox.PruneJob(work.Work.JobId);
+                }
                 outbox.SaveWork(null);
             }
             Status = LastDelivery?.Display ?? "Очередь доставки обработана. Локальные данные сохранены.";
         }
         finally { commands.Release(); }
+    }
+    public async Task ResetLocalServerStateAsync(CancellationToken token)
+    {
+        await commands.WaitAsync(token).ConfigureAwait(false);
+        bool resume = AcceptNewWork;
+        try
+        {
+            AcceptNewWork = false;
+            if (runner.IsRunning)
+            {
+                runner.Stop();
+                if (runner.Completion is { } completion) await completion.WaitAsync(token).ConfigureAwait(false);
+            }
+            outbox.ResetTransportState();
+            LastDelivery = null; emptyClaims = 0; nextPoll = DateTimeOffset.UtcNow;
+            Status = "Серверная синхронизация сброшена. Локальные поиски, история и результаты сохранены.";
+        }
+        finally
+        {
+            AcceptNewWork = resume;
+            commands.Release();
+        }
     }
     public async Task<CollectorWorkspace> ReadWorkspaceAsync(CancellationToken token)
     {
@@ -237,10 +282,18 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
         using MemoryStream stream = new(); store.ExportJob(job.Id, stream);
         using JsonDocument document = JsonDocument.Parse(stream.ToArray());
         ObservationEnvelope[] observations = document.RootElement.GetProperty("observations").EnumerateArray().Select(item =>
-            new ObservationEnvelope(item.GetProperty("resultId").GetString()!, Map(LocalJson.Read<ListingObservation>(item.GetProperty("observation").GetRawText())))).ToArray();
+        {
+            ListingData data = Map(LocalJson.Read<ListingObservation>(item.GetProperty("observation").GetRawText()));
+            return new ObservationEnvelope(ObservationKey(data), data);
+        }).ToArray();
         CollectionResult[] results = CollectionResultClassifier.Build(work.Work.JobId, work.Work.LeaseId, job,
             observations, store.Journal(job.Id), store.ReadMapScope(job.Id), store.Completion(job.Id), work.ResultReasonCode);
         outbox.EnqueueMany(results);
+    }
+    public static string ObservationKey(ListingData data)
+    {
+        string json = JsonSerializer.Serialize(data, CollectionJson.Options);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
     public static ListingData Map(ListingObservation observation) => new()
     {

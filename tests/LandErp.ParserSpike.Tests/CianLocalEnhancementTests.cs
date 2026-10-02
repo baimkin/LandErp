@@ -34,6 +34,22 @@ public sealed class CianLocalEnhancementTests
     }
 
     [TestMethod]
+    public void TitleAreaWinsOverConflictingDescriptionWithoutDroppingArea()
+    {
+        DateTimeOffset now = new(2026, 10, 2, 9, 13, 59, TimeSpan.FromHours(3));
+        DomCard card = new("305838101", "https://www.cian.ru/sale/suburban/305838101/", "Участок, 7 сот., ИЖС",
+            "11 200 000 ₽", null, "Московская область, Пушкино", null, "Участок 8 соток", null,
+            "Продавец", null, null, [], []);
+
+        ListingObservation item = DomSourcePage.Parse(new("SearchResults", [card], []), SourceSite.Cian, now).Listings.Single();
+
+        Assert.AreEqual(Presence.Present, item.AreaSquareMeters.Presence);
+        Assert.AreEqual(700m, item.AreaSquareMeters.Parsed);
+        Assert.AreEqual("7 сот.", item.AreaSquareMeters.Raw);
+        CollectionAssert.Contains(item.Warnings, "AREA_CONFLICT");
+    }
+
+    [TestMethod]
     public void StructuredAndTextLandTypesRemainSeparateAndCanConflict()
     {
         DateTimeOffset now = new(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);

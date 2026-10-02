@@ -1,3 +1,4 @@
+using LandErp.ParserSpike.Contracts;
 using LandErp.ParserSpike.LocalCollection;
 using Microsoft.Playwright;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -27,6 +28,34 @@ public sealed class CollectionFixesTests
             "https://www.avito.ru/korolev/zemelnye_uchastki/prodam-ASgBAgICAUSWA9oQ?drawId=one&f=filter&map=polygon",
             SourceSite.Avito));
         Assert.IsFalse(SearchUrls.SameSearch(map.Url, map.Url.Replace("zoom=12", "zoom=10", StringComparison.Ordinal), SourceSite.Cian));
+    }
+
+    [TestMethod]
+    public void AvitoTitlePrefersLandUnitAndDescriptionIsOnlyFallback()
+    {
+        DateTimeOffset now = new(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
+        DomCard titleCard = new("12345678", "https://www.avito.ru/pushkino/zemelnye_uchastki/uchastok_12345678",
+            "Участок, 67,1 м², 13,8 сот.", "5 000 000 ₽", null, "Пушкино", null, null, null,
+            "Продавец", null, null, [], []);
+        ListingObservation titleItem = DomSourcePage.Parse(new("SearchResults", [titleCard], []), SourceSite.Avito, now).Listings.Single();
+
+        Assert.AreEqual(Presence.Present, titleItem.AreaSquareMeters.Presence);
+        Assert.AreEqual(1380m, titleItem.AreaSquareMeters.Parsed);
+        Assert.AreEqual("13,8 сот.", titleItem.AreaSquareMeters.Raw);
+        CollectionAssert.DoesNotContain(titleItem.Warnings, "AREA_CONFLICT");
+
+        DomCard descriptionCard = titleCard with
+        {
+            Id = "87654321",
+            Url = "https://www.avito.ru/pushkino/zemelnye_uchastki/uchastok_87654321",
+            Title = "Участок ИЖС",
+            Description = "Площадь участка: 11,4 сот."
+        };
+        ListingObservation descriptionItem = DomSourcePage.Parse(new("SearchResults", [descriptionCard], []), SourceSite.Avito, now).Listings.Single();
+
+        Assert.AreEqual(Presence.Present, descriptionItem.AreaSquareMeters.Presence);
+        Assert.AreEqual(1140m, descriptionItem.AreaSquareMeters.Parsed);
+        Assert.AreEqual("11,4 сот.", descriptionItem.AreaSquareMeters.Raw);
     }
 
     [TestMethod]

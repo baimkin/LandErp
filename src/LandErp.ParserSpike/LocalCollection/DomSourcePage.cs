@@ -80,19 +80,27 @@ public sealed class DomSourcePage : ISourcePage
                 || !(source == SourceSite.Avito ? Regex.IsMatch(url.AbsolutePath, "_" + card.Id + "/?$") : Regex.IsMatch(url.AbsolutePath, "/sale/(?:suburban|flat)/" + card.Id + "/?$")))
             { errors.Add("INVALID_ID_OR_URL"); continue; }
             if (!ids.Add(card.Id)) continue;
-            List<string> warnings = []; List<AreaAssertion> assertions = [];
+            List<string> warnings = [];
+            List<AreaAssertion> structuredAreas = [], titleAreas = [], descriptionAreas = [];
             string? description = card.StructuredDescription ?? card.Description;
             string? location = card.StructuredLocation ?? card.Location;
-            AddStructuredArea(assertions, card.StructuredArea, card.StructuredAreaUnit, warnings);
-            AddAreas(assertions, card.Title, "Title");
+            AddStructuredArea(structuredAreas, card.StructuredArea, card.StructuredAreaUnit, warnings);
+            AddAreas(titleAreas, card.Title, "Title");
             // Description contributes only an explicit plot-area statement, never an arbitrary number near a road or house.
             foreach (Match match in Regex.Matches(description ?? "", @"(?:площадь(?:\s+участка)?\s*[:—-]\s*|участок\s+)(\d+(?:[.,]\d+)?\s*(?:сот(?:ок|ки|ка|\.)?|га\b|м[²2]))", RegexOptions.IgnoreCase))
-                AddAreas(assertions, match.Groups[1].Value, "Description");
-            decimal? canonical = assertions.Count == 0 ? null : assertions[0].SquareMeters;
-            if (assertions.Any(a => Math.Abs(a.SquareMeters - canonical!.Value) > 1)) { canonical = null; warnings.Add("AREA_CONFLICT"); }
+                AddAreas(descriptionAreas, match.Groups[1].Value, "Description");
+            AreaAssertion[] assertions = [.. structuredAreas, .. titleAreas, .. descriptionAreas];
+            AreaAssertion? selectedArea = SelectArea(titleAreas)
+                ?? SelectArea(structuredAreas)
+                ?? SelectArea(descriptionAreas);
+            AreaAssertion[] comparableAreas = [.. PlotAreaCandidates(titleAreas), .. structuredAreas, .. PlotAreaCandidates(descriptionAreas)];
+            if ((selectedArea != null && comparableAreas.Any(area => Math.Abs(area.SquareMeters - selectedArea.SquareMeters) > 1))
+                || (selectedArea == null && comparableAreas.Length > 1
+                    && comparableAreas.Any(area => Math.Abs(area.SquareMeters - comparableAreas[0].SquareMeters) > 1)))
+                warnings.Add("AREA_CONFLICT");
             NumberValue price = NumberValue.Read(card.Price ?? card.StructuredPrice), unit = NumberValue.Read(card.UnitPrice);
             if (price.Presence != Presence.Present) warnings.Add("PRICE_" + price.Presence);
-            if (assertions.Count == 0) warnings.Add("AREA_ABSENT");
+            if (assertions.Length == 0) warnings.Add("AREA_ABSENT");
             string? assignment = Regex.Match(card.Title ?? "", @"\b(?:ИЖС|СНТ|ДНП|ЛПХ)\b", RegexOptions.IgnoreCase) is { Success: true } use ? use.Value : null;
             LandType[] declaredLandTypes = CianDeclaredLandTypes(source, card.DeclaredLandTypes, warnings);
             LandType[] inferredLandTypes = LandTypeClassifier.Infer(card.Title, description);
@@ -124,10 +132,12 @@ public sealed class DomSourcePage : ISourcePage
                 Title = TextValue.Read(card.Title),
                 Price = price,
                 UnitPrice = unit,
-                AreaSquareMeters = new(assertions.Count == 0 ? Presence.Absent : canonical.HasValue ? Presence.Present : Presence.ParseFailed,
-                    assertions.Count == 0 ? null : string.Join("; ", assertions.Select(x => x.Raw)), canonical),
-                Areas = assertions.ToArray(),
-                DerivedPricePerSotka = canonical > 0 && price.Parsed.HasValue ? price.Parsed / (canonical / 100) : null,
+                AreaSquareMeters = new(assertions.Length == 0 ? Presence.Absent : selectedArea != null ? Presence.Present : Presence.ParseFailed,
+                    assertions.Length == 0 ? null : selectedArea?.Raw ?? string.Join("; ", assertions.Select(x => x.Raw)),
+                    selectedArea?.SquareMeters),
+                Areas = assertions,
+                DerivedPricePerSotka = selectedArea?.SquareMeters > 0 && price.Parsed.HasValue
+                    ? price.Parsed / (selectedArea.SquareMeters / 100) : null,
                 Assignment = TextValue.Read(assignment),
                 Location = TextValue.Read(location),
                 Transport = TextValue.Read(card.Transport),
@@ -208,6 +218,20 @@ public sealed class DomSourcePage : ISourcePage
         }
         return result.Distinct().ToArray();
     }
+    private static AreaAssertion? SelectArea(IReadOnlyList<AreaAssertion> areas)
+    {
+        AreaAssertion[] candidates = PlotAreaCandidates(areas);
+        if (candidates.Length == 0) return null;
+        AreaAssertion first = candidates[0];
+        return candidates.Any(area => Math.Abs(area.SquareMeters - first.SquareMeters) > 1) ? null : first;
+    }
+
+    private static AreaAssertion[] PlotAreaCandidates(IReadOnlyList<AreaAssertion> areas)
+    {
+        AreaAssertion[] landUnits = areas.Where(area => Regex.IsMatch(area.Raw, @"(?:сот|\bга\b)", RegexOptions.IgnoreCase)).ToArray();
+        return landUnits.Length > 0 ? landUnits : areas.ToArray();
+    }
+
     private static void AddAreas(List<AreaAssertion> result, string? text, string origin)
     {
         foreach (Match match in Regex.Matches(text ?? "", @"(\d+(?:[.,]\d+)?)\s*(сот(?:ок|ки|ка|\.)?|га\b|м[²2])", RegexOptions.IgnoreCase))

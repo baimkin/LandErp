@@ -127,7 +127,13 @@ public sealed record MapDiagnostic(MapBatchDiagnostic[] Batches, int? ExpectedCo
     string[] DomNotCollected, bool ZoneConfirmed, bool Loading, double? ScrollTop = null,
     double? ClientHeight = null, double? ScrollHeight = null, string? ScrollError = null);
 
-public sealed record PageObservation(PageKind Kind, ListingObservation[] Listings, string[] Warnings, bool Loading = false, string? Layout = null, MapScope? Map = null, ListingObservation[]? Changes = null, MapDiagnostic? Diagnostic = null, int? SourceCountHint = null);
+public sealed record ListingDataQualityDiagnostic(string ExternalId, string? Title, string[] MissingFields,
+    Presence PricePresence, Presence AreaPresence, Presence LocationPresence,
+    string? PriceRaw, string? AreaRaw, string? LocationRaw,
+    string[] LocationCandidates, string? StructuredLocationCandidate, bool? StructuredLocationHidden,
+    decimal? Latitude, decimal? Longitude, string Provenance, string AdapterVersion, string[] Warnings);
+
+public sealed record PageObservation(PageKind Kind, ListingObservation[] Listings, string[] Warnings, bool Loading = false, string? Layout = null, MapScope? Map = null, ListingObservation[]? Changes = null, MapDiagnostic? Diagnostic = null, int? SourceCountHint = null, ListingDataQualityDiagnostic[]? DataQuality = null);
 public sealed record Pagination(NextKind Kind, string? Url = null, string? Selector = null, string? Reason = null);
 public sealed record SearchLink(string Id, string Label, string Url, SourceSite Source, bool Selected, bool Enabled, int Revision, bool Archived = false);
 public sealed record CollectionJob(string Id, string BatchId, string LinkId, int Revision, SourceSite Source,

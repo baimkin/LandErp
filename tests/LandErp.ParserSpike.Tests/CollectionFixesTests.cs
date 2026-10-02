@@ -59,6 +59,24 @@ public sealed class CollectionFixesTests
     }
 
     [TestMethod]
+    public void MissingLocationCarriesDiagnosticCandidatesWithoutChangingBusinessLocation()
+    {
+        DateTimeOffset now = new(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
+        DomCard card = new("7570874093", "https://www.avito.ru/dedovsk/zemelnye_uchastki/uchastok_7570874093",
+            "Участок 8 сот.", "7 000 000 ₽", null, null, null, null, null,
+            "Продавец", null, null, [], [], LocationCandidates:
+            ["data-marker=item-address: Истринский р-н, г. Дедовск"]);
+
+        PageObservation page = DomSourcePage.Parse(new("SearchResults", [card], []), SourceSite.Avito, now);
+        ListingObservation item = page.Listings.Single();
+        ListingDataQualityDiagnostic diagnostic = page.DataQuality!.Single();
+
+        Assert.AreEqual(Presence.Absent, item.Location.Presence);
+        CollectionAssert.Contains(diagnostic.MissingFields, "Location");
+        CollectionAssert.Contains(diagnostic.LocationCandidates, "data-marker=item-address: Истринский р-н, г. Дедовск");
+    }
+
+    [TestMethod]
     public void DiagnosticsKeepOperationalContextAndRedactOpaqueUrls()
     {
         string root = Path.Combine(Path.GetTempPath(), "LandErp-Diagnostics", Guid.NewGuid().ToString("N"));
@@ -82,6 +100,33 @@ public sealed class CollectionFixesTests
         string errors = File.ReadAllText(journal.ErrorsPath);
         StringAssert.Contains(errors, "Пагинация не распознана");
         Assert.IsFalse(errors.Contains("private-value", StringComparison.Ordinal));
+
+        ListingObservation incomplete = new()
+        {
+            Source = SourceSite.Avito,
+            ExternalId = "7570874093",
+            Url = "https://www.avito.ru/dedovsk/zemelnye_uchastki/uchastok_7570874093",
+            ObservedAtUtc = DateTimeOffset.UtcNow,
+            Title = TextValue.Read("Участок 8 сот."),
+            Price = NumberValue.Read("7 000 000 ₽"),
+            AreaSquareMeters = new(Presence.Present, "8 сот.", 800),
+            Location = TextValue.Read(null),
+            Latitude = NumberValue.Read("55.8"),
+            Longitude = NumberValue.Read("37.1")
+        };
+        Dictionary<string, ListingDataQualityDiagnostic> captured = new()
+        {
+            [incomplete.ExternalId] = new(incomplete.ExternalId, incomplete.Title.Raw, ["Location"],
+                incomplete.Price.Presence, incomplete.AreaSquareMeters.Presence, incomplete.Location.Presence,
+                incomplete.Price.Raw, incomplete.AreaSquareMeters.Raw, incomplete.Location.Raw,
+                ["data-marker=item-address: Истринский р-н, г. Дедовск"], null, null,
+                incomplete.Latitude.Parsed, incomplete.Longitude.Parsed, incomplete.Provenance, incomplete.AdapterVersion, [])
+        };
+        journal.WriteDataQuality(job, 2, job.Url, [incomplete], captured);
+        Assert.IsTrue(File.Exists(journal.DataQualityPath));
+        string quality = File.ReadAllText(journal.DataQualityPath);
+        StringAssert.Contains(quality, "7570874093");
+        StringAssert.Contains(quality, "item-address");
     }
 
     [TestMethod]

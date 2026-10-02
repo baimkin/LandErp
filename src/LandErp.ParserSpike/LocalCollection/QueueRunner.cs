@@ -133,6 +133,7 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
         while (number <= job.Limit)
         {
             Dictionary<string, ListingObservation> gathered = new(StringComparer.Ordinal);
+            Dictionary<string, ListingDataQualityDiagnostic> qualityDiagnostics = new(StringComparer.Ordinal);
             HashSet<string> pageWarnings = new(StringComparer.Ordinal);
             MapScope? map = null;
             string? lastMapDiagnostic = null;
@@ -144,6 +145,8 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
             {
                 await ReadyAsync(job.Source, token).ConfigureAwait(false);
                 PageObservation snapshot = await ActionAsync(job, page, number, "Чтение выдачи", () => page.ReadAsync(token), token).ConfigureAwait(false);
+                foreach (ListingDataQualityDiagnostic item in snapshot.DataQuality ?? [])
+                    qualityDiagnostics[item.ExternalId] = item;
                 if (snapshot.SourceCountHint is int hint)
                 {
                     if (sourceCountHint is int previous && previous != hint) jobWarnings.Add("SOURCE_COUNT_HINT_CHANGED");
@@ -255,6 +258,8 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
             }
             await ReadyAsync(job.Source, token).ConfigureAwait(false);
             PageObservation final = await ActionAsync(job, page, number, "Контроль выдачи", () => page.ReadAsync(token), token).ConfigureAwait(false);
+            foreach (ListingDataQualityDiagnostic item in final.DataQuality ?? [])
+                qualityDiagnostics[item.ExternalId] = item;
             if (final.SourceCountHint is int finalHint)
             {
                 if (sourceCountHint is int previous && previous != finalHint) jobWarnings.Add("SOURCE_COUNT_HINT_CHANGED");
@@ -293,6 +298,7 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                 Finish(job, JobState.Failed, CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSourceResponse,
                     "Ошибки карточек: " + string.Join("; ", pageWarnings), pageWarnings, false, true, stableRounds); return;
             }
+            diagnostics?.WriteDataQuality(job, number, page.CurrentUrl, gathered.Values, qualityDiagnostics);
             Pagination next = await ActionAsync(job, page, number, "Поиск следующей страницы", () => page.NextAsync(token), token).ConfigureAwait(false);
             if (next.Kind == NextKind.UnknownInvalid)
             {

@@ -14,6 +14,13 @@ public sealed record DiagnosticError(string ErrorId, DateTimeOffset TimeUtc, str
     string? ErrorType, string CurrentUrl, string CandidateUrl, int Count, string? Screenshot,
     SourcePageDiagnostic? PageDiagnostic, DiagnosticEvent[] RecentEvents);
 
+public sealed record DataQualityEvent(DateTimeOffset TimeUtc, string JobId, string BatchId, SourceSite Source,
+    string Worker, int Page, string PageUrl, string ExternalId, string? Title, string[] MissingFields,
+    Presence PricePresence, Presence AreaPresence, Presence LocationPresence,
+    string? PriceRaw, string? AreaRaw, string? LocationRaw, string[] LocationCandidates,
+    string? StructuredLocationCandidate, bool? StructuredLocationHidden,
+    decimal? Latitude, decimal? Longitude, string Provenance, string AdapterVersion, string[] Warnings);
+
 /// <summary>
 /// Compact daily operational log plus rich, separate error diagnostics.
 /// Legacy collection.jsonl is intentionally no longer appended to.
@@ -23,12 +30,15 @@ public sealed class DiagnosticJournal
     private const int RecentPerJob = 30;
     private const int EventRetentionDays = 30;
     private const int ErrorRetentionDays = 90;
+    private const int DataQualityRetentionDays = 30;
     private readonly object sync = new();
     private readonly Dictionary<string, Queue<DiagnosticEvent>> recent = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> lastDetailedError = new(StringComparer.Ordinal);
+    private readonly HashSet<string> dataQualityWritten = new(StringComparer.Ordinal);
     public string RootPath { get; }
     public string Path => DailyPath("events", DateTimeOffset.Now, ".jsonl");
     public string ErrorsPath => DailyPath("errors", DateTimeOffset.Now, ".jsonl");
+    public string DataQualityPath => DailyPath("data-quality", DateTimeOffset.Now, ".jsonl");
 
     public DiagnosticJournal(string path)
     {
@@ -39,6 +49,7 @@ public sealed class DiagnosticJournal
         Directory.CreateDirectory(RootPath);
         Directory.CreateDirectory(System.IO.Path.Combine(RootPath, "events"));
         Directory.CreateDirectory(System.IO.Path.Combine(RootPath, "errors"));
+        Directory.CreateDirectory(System.IO.Path.Combine(RootPath, "data-quality"));
         Directory.CreateDirectory(System.IO.Path.Combine(RootPath, "attachments"));
         Cleanup();
     }
@@ -117,6 +128,38 @@ public sealed class DiagnosticJournal
         }
     }
 
+    public void WriteDataQuality(CollectionJob job, int page, string pageUrl,
+        IEnumerable<ListingObservation> listings, IReadOnlyDictionary<string, ListingDataQualityDiagnostic> captured)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        lock (sync)
+        {
+            foreach (ListingObservation item in listings)
+            {
+                List<string> missing = [];
+                if (item.Price.Parsed is null) missing.Add("Price");
+                if (item.AreaSquareMeters.Parsed is null) missing.Add("Area");
+                if (item.Location.Presence != Presence.Present || string.IsNullOrWhiteSpace(item.Location.Raw)) missing.Add("Location");
+                if (missing.Count == 0) continue;
+
+                string key = job.Id + "|" + page.ToString(CultureInfo.InvariantCulture) + "|" + item.ExternalId;
+                if (!dataQualityWritten.Add(key)) continue;
+                captured.TryGetValue(item.ExternalId, out ListingDataQualityDiagnostic? diagnostic);
+                DataQualityEvent entry = new(now, job.Id, job.BatchId, job.Source, job.Owner ?? "", page,
+                    SearchUrls.DiagnosticUrl(pageUrl), item.ExternalId, CompactDetail(item.Title.Raw, 300),
+                    missing.ToArray(), item.Price.Presence, item.AreaSquareMeters.Presence, item.Location.Presence,
+                    CompactDetail(item.Price.Raw, 300), CompactDetail(item.AreaSquareMeters.Raw, 300),
+                    CompactDetail(item.Location.Raw, 500),
+                    (diagnostic?.LocationCandidates ?? []).Where(value => !string.IsNullOrWhiteSpace(value))
+                        .Select(value => CompactDetail(value, 500)).Take(12).ToArray(),
+                    CompactDetail(diagnostic?.StructuredLocationCandidate, 500), diagnostic?.StructuredLocationHidden,
+                    item.Latitude.Parsed, item.Longitude.Parsed, item.Provenance, item.AdapterVersion,
+                    item.Warnings.Where(value => value.Length <= 80).Take(30).ToArray());
+                Append(DailyPath("data-quality", now.ToLocalTime(), ".jsonl"), entry);
+            }
+        }
+    }
+
     public DiagnosticEvent[] Read(string? jobId = null, int limit = 300)
     {
         Queue<DiagnosticEvent> tail = new();
@@ -143,6 +186,7 @@ public sealed class DiagnosticJournal
             DateTimeOffset now = DateTimeOffset.Now;
             AddIfExists(zip, DailyPath("events", now, ".jsonl"), "events.jsonl");
             AddIfExists(zip, DailyPath("errors", now, ".jsonl"), "errors.jsonl");
+            AddIfExists(zip, DailyPath("data-quality", now, ".jsonl"), "data-quality.jsonl");
             string attachments = System.IO.Path.Combine(RootPath, "attachments", now.ToString("yyyy-MM", CultureInfo.InvariantCulture),
                 now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             if (Directory.Exists(attachments))
@@ -223,6 +267,7 @@ public sealed class DiagnosticJournal
     {
         CleanupFiles(System.IO.Path.Combine(RootPath, "events"), EventRetentionDays);
         CleanupFiles(System.IO.Path.Combine(RootPath, "errors"), ErrorRetentionDays);
+        CleanupFiles(System.IO.Path.Combine(RootPath, "data-quality"), DataQualityRetentionDays);
         CleanupFiles(System.IO.Path.Combine(RootPath, "attachments"), ErrorRetentionDays);
     }
 

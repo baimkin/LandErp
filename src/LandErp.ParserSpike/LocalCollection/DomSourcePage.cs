@@ -12,7 +12,7 @@ public sealed record DomCard(string Id, string Url, string? Title, string? Price
     string? StructuredPrice = null, string? StructuredArea = null, string? StructuredAreaUnit = null,
     string? StructuredLocation = null, string? StructuredDescription = null, string[]? StructuredPhotos = null,
     string? CadastralNumber = null, long? SourcePublishedUnix = null, decimal? Latitude = null, decimal? Longitude = null,
-    string[]? DeclaredLandTypes = null);
+    string[]? DeclaredLandTypes = null, string[]? LocationCandidates = null, bool? StructuredLocationHidden = null);
 public sealed record DomSnapshot(string Kind, DomCard[] Cards, string[] Warnings, bool Loading = false, string? Layout = null,
     int? SourceCountHint = null);
 
@@ -55,7 +55,8 @@ public sealed class DomSourcePage : ISourcePage
         mapLayout = snapshot.Layout == "AVITO_MAP";
         if (mapLayout && snapshot.Kind == "SearchResults" && mapCapture is not null)
         {
-            PageObservation result = mapCapture.Read(CurrentUrl, snapshot.Loading, Parse(snapshot, Source, DateTimeOffset.UtcNow).Listings);
+            PageObservation parsed = Parse(snapshot, Source, DateTimeOffset.UtcNow);
+            PageObservation result = mapCapture.Read(CurrentUrl, snapshot.Loading, parsed.Listings);
             // Geometry is measured only; this diagnostic read never scrolls or changes collection.
             string state = await page.EvaluateAsync<string>("() => {try {const s=(" + MapScrollScript + ")();return JSON.stringify({top:s.scrollTop,client:s.clientHeight,height:s.scrollHeight});} catch {return JSON.stringify({error:'MAP_SCROLL_CONTAINER_UNKNOWN'});}}")
                 .WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
@@ -65,7 +66,8 @@ public sealed class DomSourcePage : ISourcePage
                 ScrollTop = root.TryGetProperty("top",out JsonElement top) ? top.GetDouble() : null,
                 ClientHeight = root.TryGetProperty("client",out JsonElement client) ? client.GetDouble() : null,
                 ScrollHeight = root.TryGetProperty("height",out JsonElement height) ? height.GetDouble() : null,
-                ScrollError = root.TryGetProperty("error",out JsonElement error) ? error.GetString() : null } };
+                ScrollError = root.TryGetProperty("error",out JsonElement error) ? error.GetString() : null },
+                DataQuality = parsed.DataQuality };
         }
         return Parse(snapshot, Source, DateTimeOffset.UtcNow);
     }
@@ -73,7 +75,8 @@ public sealed class DomSourcePage : ISourcePage
     {
         if (!Enum.TryParse(snapshot.Kind, out PageKind kind)) kind = PageKind.Unknown;
         if (kind != PageKind.SearchResults) return new(kind, [], snapshot.Warnings);
-        List<ListingObservation> items = []; List<string> errors = new(snapshot.Warnings); HashSet<string> ids = new(StringComparer.Ordinal);
+        List<ListingObservation> items = []; List<ListingDataQualityDiagnostic> quality = [];
+        List<string> errors = new(snapshot.Warnings); HashSet<string> ids = new(StringComparer.Ordinal);
         foreach (DomCard card in snapshot.Cards)
         {
             if (!Regex.IsMatch(card.Id, @"^\d{5,20}$") || !Uri.TryCreate(card.Url, UriKind.Absolute, out Uri? url) || !SearchUrls.IsPublic(url, source)
@@ -123,7 +126,7 @@ public sealed class DomSourcePage : ISourcePage
                 || card.StructuredLocation != null || card.SourcePublishedUnix != null || card.Latitude != null
                 || card.Longitude != null || card.CadastralNumber != null || (card.DeclaredLandTypes?.Length ?? 0) > 0
                 || (card.StructuredPhotos?.Length ?? 0) > 0);
-            items.Add(new()
+            ListingObservation observation = new()
             {
                 Source = source,
                 ExternalId = card.Id,
@@ -159,9 +162,23 @@ public sealed class DomSourcePage : ISourcePage
                 Warnings = warnings.ToArray(),
                 Provenance = structured ? "DOM+Structured" : "DOM",
                 AdapterVersion = structured ? "1.1" : "1.0"
-            });
+            };
+            items.Add(observation);
+            List<string> missing = [];
+            if (observation.Price.Parsed is null) missing.Add("Price");
+            if (observation.AreaSquareMeters.Parsed is null) missing.Add("Area");
+            if (observation.Location.Presence != Presence.Present || string.IsNullOrWhiteSpace(observation.Location.Raw)) missing.Add("Location");
+            if (missing.Count > 0)
+                quality.Add(new(observation.ExternalId, observation.Title.Raw, missing.ToArray(),
+                    observation.Price.Presence, observation.AreaSquareMeters.Presence, observation.Location.Presence,
+                    observation.Price.Raw, observation.AreaSquareMeters.Raw, observation.Location.Raw,
+                    (card.LocationCandidates ?? []).Where(value => !string.IsNullOrWhiteSpace(value)).Take(12).ToArray(),
+                    card.StructuredLocation, card.StructuredLocationHidden,
+                    observation.Latitude.Parsed, observation.Longitude.Parsed,
+                    observation.Provenance, observation.AdapterVersion, observation.Warnings));
         }
-        return new(kind, items.ToArray(), errors.ToArray(), snapshot.Loading, snapshot.Layout, SourceCountHint: snapshot.SourceCountHint);
+        return new(kind, items.ToArray(), errors.ToArray(), snapshot.Loading, snapshot.Layout,
+            SourceCountHint: snapshot.SourceCountHint, DataQuality: quality.ToArray());
     }
     private static void AddStructuredArea(List<AreaAssertion> result, string? raw, string? unit, List<string> warnings)
     {
@@ -402,6 +419,15 @@ public sealed class DomSourcePage : ISourcePage
             const stats = avito ? read(e,'[data-marker="seller-info/summary"],[class*="userInfoStep"] > span') : null;
             const badges = avito ? [...e.querySelectorAll('[data-marker*="badge-title"],[data-marker="item-badge"]')].filter(visible).map(x=>x.innerText.trim()).filter(Boolean) : [];
             const address = avito ? read(e,'[data-marker="item-address"],[data-marker="item-location"]') : null;
+            const locationNodes = [...e.querySelectorAll(avito
+              ? '[data-marker="item-address"],[data-marker="item-location"],[data-marker*="address"],[data-marker*="location"]'
+              : '[data-name="GeoLabel"],[data-name*="Geo"],[data-name*="Location"]')].filter(visible).slice(0,12);
+            const locationCandidates = locationNodes.map(x => {
+              const marker=x.getAttribute('data-marker'), name=x.getAttribute('data-name');
+              const label=marker ? 'data-marker='+marker : name ? 'data-name='+name : x.tagName.toLowerCase();
+              const text=(x.innerText||x.textContent||'').replace(/\s+/g,' ').trim().slice(0,300);
+              return text ? label+': '+text : null;
+            }).filter(Boolean);
             const loc = avito ? address?.split('\n').filter(t=>!/(?:шоссе|МКАД).*\d+\s*км/i.test(t)).join(', ') || null
               : [...e.querySelectorAll('[data-name="GeoLabel"]')].filter(visible).map(x=>x.innerText.trim()).filter(Boolean).join(', ') || null;
             const transport = avito ? read(e,'[data-marker="item-transport"],[data-marker="item-address"] [class*="distance"]')
@@ -420,7 +446,8 @@ public sealed class DomSourcePage : ISourcePage
               CadastralNumber:typeof structured?.cadastralNumber==='string'&&structured.cadastralNumber.trim()?structured.cadastralNumber.trim():null,
               SourcePublishedUnix:Number.isSafeInteger(structured?.addedTimestamp)?structured.addedTimestamp:null,
               Latitude:Number.isFinite(coordinates?.lat)?coordinates.lat:null,Longitude:Number.isFinite(coordinates?.lng)?coordinates.lng:null,
-              DeclaredLandTypes:declaredLandTypes};
+              DeclaredLandTypes:declaredLandTypes,LocationCandidates:locationCandidates,
+              StructuredLocationHidden:!avito&&typeof structured?.isNeedHideExactAddress==='boolean'?structured.isNeedHideExactAddress:null};
           });
           const loadingSelector='[data-marker*="loader"],[data-name="Loader"],[data-name="Loading"],[aria-busy="true"]';
           const loading = map ? [...main.querySelectorAll(loadingSelector)].some(visible) : has(loadingSelector);

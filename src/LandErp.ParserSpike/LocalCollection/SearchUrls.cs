@@ -83,22 +83,18 @@ public static class SearchUrls
     private static string[] CianSemanticTerms(Uri uri)
     {
         static string BaseKey(string key) => System.Text.RegularExpressions.Regex.Replace(key, @"\[\d+\]$", "[]");
-        static bool PresentationOnly(string key) => key.Equals("center", StringComparison.OrdinalIgnoreCase)
-            || key.Equals("zoom", StringComparison.OrdinalIgnoreCase)
-            || key.Equals("polygon_name", StringComparison.OrdinalIgnoreCase)
-            || key.Equals("polygon_name[]", StringComparison.OrdinalIgnoreCase);
+        static bool IdentityKey(string key) => key.Equals("in_polygon[]", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("object_type[]", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("deal_type", StringComparison.OrdinalIgnoreCase);
         List<(string Key, string Value)> terms = [];
         foreach (string term in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             string[] parts = term.Split('=', 2);
             string key = BaseKey(Uri.UnescapeDataString(parts[0].Replace('+', ' ')));
-            if (PresentationOnly(key)) continue;
+            if (!IdentityKey(key)) continue;
             string value = parts.Length == 2 ? Uri.UnescapeDataString(parts[1].Replace('+', ' ')) : "";
             terms.Add((key, value));
         }
-        string? region = terms.FirstOrDefault(x => x.Key.Equals("region", StringComparison.OrdinalIgnoreCase)).Value;
-        if (!string.IsNullOrEmpty(region))
-            terms.RemoveAll(x => x.Key.Equals("location[]", StringComparison.OrdinalIgnoreCase) && x.Value == region);
         return terms.OrderBy(x => x.Key, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal)
             .Select(x => Uri.EscapeDataString(x.Key) + "=" + Uri.EscapeDataString(x.Value)).ToArray();
     }

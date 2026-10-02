@@ -50,6 +50,15 @@ public sealed class CianLocalEnhancementTests
     }
 
     [TestMethod]
+    public void CianPaginationIgnoresPresentationAndDynamicQueryTerms()
+    {
+        string first = FirstPage + "&foo=first&sort=creation_date_desc";
+        string second = SecondPage + "&foo=second&sort=price_object_order";
+
+        Assert.IsTrue(SearchUrls.SameSearch(first, second, SourceSite.Cian));
+    }
+
+    [TestMethod]
     public void StructuredAndTextLandTypesRemainSeparateAndCanConflict()
     {
         DateTimeOffset now = new(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);

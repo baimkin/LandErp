@@ -262,7 +262,7 @@ public sealed class DomSourcePage : ISourcePage
         try
         {
             string safe = SearchUrls.SafePage(pagination.Url, Source);
-            if (!SearchUrls.SameSearch(CurrentUrl, safe, Source)) return new(NextKind.UnknownInvalid, Reason: "Пагинация меняет фильтры поиска");
+            if (!SearchUrls.SameSearch(CurrentUrl, safe, Source)) return new(NextKind.UnknownInvalid, pagination.Url, pagination.Selector, "Пагинация меняет фильтры поиска");
             if (SearchUrls.PageNumber(safe) != SearchUrls.PageNumber(CurrentUrl) + 1) return new(NextKind.UnknownInvalid, Reason: "Неверный номер следующей страницы");
             return pagination;
         }
@@ -302,6 +302,31 @@ public sealed class DomSourcePage : ISourcePage
         }
         throw new InvalidOperationException("NEXT_LINK_DISAPPEARED");
     }
+    public async Task<SourcePageDiagnostic?> CaptureDiagnosticAsync(string? candidateUrl, CancellationToken cancellationToken)
+    {
+        string paginationJson = await page.EvaluateAsync<string>("site => JSON.stringify((" + PaginationScript + ")(site))", Source.ToString())
+            .WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
+        Pagination pagination = LocalJson.Read<Pagination>(paginationJson);
+        string elementsJson = await page.EvaluateAsync<string>("""() => {
+            const visible=e=>!!e&&!!e.getClientRects().length;
+            const roots=[...document.querySelectorAll('[data-name*="Pagination"],[data-marker*="pagination"],[class*="pagination" i]')].filter(visible).slice(0,8);
+            const nodes=[...new Set(roots.flatMap(root=>[root,...root.querySelectorAll('a,button,span')]))].filter(visible).slice(0,30);
+            return JSON.stringify(nodes.map(e=>({tag:e.tagName.toLowerCase(),text:(e.innerText||e.textContent||'').trim().slice(0,120),
+              href:e.href||null,dataName:e.getAttribute('data-name'),dataMarker:e.getAttribute('data-marker'),className:String(e.className||'').slice(0,200)})));
+        }""").WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
+        PaginationElementDiagnostic[] elements = LocalJson.Read<PaginationElementDiagnostic[]>(elementsJson);
+        string? candidate = candidateUrl ?? pagination.Url;
+        return new(CurrentUrl, candidate, pagination.Kind.ToString(), pagination.Reason ?? "",
+            elements, SearchUrls.DiagnosticIdentityDiff(CurrentUrl, candidate, Source));
+    }
+
+    public async Task<bool> CaptureScreenshotAsync(string path, CancellationToken cancellationToken)
+    {
+        await page.ScreenshotAsync(new() { Path = path, FullPage = false })
+            .WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
+        return File.Exists(path);
+    }
+
     public Task ActivateAsync(CancellationToken cancellationToken) => page.BringToFrontAsync().WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken);
     public async ValueTask DisposeAsync()
     {

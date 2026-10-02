@@ -66,7 +66,7 @@ public sealed class CollectionFixesTests
         store.SaveLink("Search", "https://www.avito.ru/pushkino/zemelnye_uchastki?q=земля");
         string batch = store.StartBatch(new());
         CollectionJob job = store.Claim(batch, SourceSite.Avito, "Avito 1")!;
-        DiagnosticJournal journal = new(Path.Combine(root, "events.jsonl"));
+        DiagnosticJournal journal = new(Path.Combine(root, "collection.jsonl"));
         journal.Write(job, 2, "Переход", "Ошибка", 123,
             expectedUrl: job.Url + "&opaque=private-value", actualUrl: job.Url + "&token=secret-value", errorType: "TimeoutException");
         DiagnosticEvent entry = journal.Read().Single();
@@ -76,6 +76,12 @@ public sealed class CollectionFixesTests
         Assert.IsFalse(text.Contains("secret-value", StringComparison.Ordinal));
         StringAssert.Contains(entry.ExpectedUrl, "REDACTED");
         StringAssert.Contains(entry.ActualUrl, "URL_REDACTED");
+        StringAssert.Contains(journal.Path, Path.Combine("events", DateTime.Now.ToString("yyyy-MM")));
+        journal.WriteFailure(job, 2, "Пагинация не распознана", "LAYOUT_CHANGED", 12);
+        Assert.IsTrue(File.Exists(journal.ErrorsPath));
+        string errors = File.ReadAllText(journal.ErrorsPath);
+        StringAssert.Contains(errors, "Пагинация не распознана");
+        Assert.IsFalse(errors.Contains("private-value", StringComparison.Ordinal));
     }
 
     [TestMethod]

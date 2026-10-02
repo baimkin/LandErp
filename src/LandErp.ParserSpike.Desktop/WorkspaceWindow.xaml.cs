@@ -533,6 +533,24 @@ public partial class WorkspaceWindow : Window
         }
         StatusText.Text = "Таблица сохранена.";
     });
+    private void OpenDiagnosticsClick(object sender, RoutedEventArgs e)
+    {
+        if (controller == null) return;
+        Directory.CreateDirectory(controller.Diagnostics.RootPath);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{controller.Diagnostics.RootPath}\"") { UseShellExecute = true });
+    }
+
+    private async void ExportTodayDiagnosticsClick(object sender, RoutedEventArgs e) => await ActionAsync(() =>
+    {
+        SaveFileDialog dialog = new() { Filter = "ZIP-архив|*.zip", FileName = $"LandErp-диагностика-{DateTime.Now:yyyy-MM-dd}.zip" };
+        if (DuringDialog(() => dialog.ShowDialog(this)) != true) return Task.CompletedTask;
+        string summary = $"LandErp Parser{Environment.NewLine}Дата: {DateTimeOffset.Now:O}{Environment.NewLine}Версия: {typeof(WorkspaceWindow).Assembly.GetName().Version}{Environment.NewLine}Режим: {(IsServer ? "Сервер" : "Локально")}{Environment.NewLine}Авторабота: {controller!.AutomationEnabled}{Environment.NewLine}Сбор активен: {controller.Runner.IsRunning}{Environment.NewLine}" +
+            string.Join(Environment.NewLine, controller.Store.Jobs().GroupBy(x => x.State).Select(x => $"{x.Key}: {x.Count()}"));
+        controller.Diagnostics.ExportToday(dialog.FileName, summary);
+        StatusText.Text = "Диагностика за сегодня сохранена.";
+        return Task.CompletedTask;
+    });
+
     private async void DiagnosticsClick(object sender, RoutedEventArgs e) => await ActionAsync(async () =>
     {
         SaveFileDialog dialog = new() { Filter = "Текстовый отчёт|*.txt", FileName = "Parser-диагностика.txt" };

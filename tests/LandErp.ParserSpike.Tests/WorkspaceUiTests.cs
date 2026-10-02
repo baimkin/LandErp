@@ -51,6 +51,8 @@ public sealed class WorkspaceUiTests
                 Assert.IsNotNull(window.FindName("DetailsSplitter"));
                 Assert.IsNotNull(window.FindName("ResetFiltersButton"));
                 Assert.IsNotNull(window.FindName("ResetServerSyncButton"));
+                Assert.IsNotNull(window.FindName("OpenDiagnosticsButton"));
+                Assert.IsNotNull(window.FindName("ExportTodayDiagnosticsButton"));
                 tabs.SelectedIndex = 3;
                 ((TextBox)window.FindName("MaxPagesInput")).Text = "0";
                 ((Button)window.FindName("SaveSettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

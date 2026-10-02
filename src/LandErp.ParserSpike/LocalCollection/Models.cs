@@ -240,6 +240,10 @@ public static class LocalJson
 }
 
 /// <summary>UI, browser and SQL depend on these boundaries, rather than on another source's adapter.</summary>
+public sealed record PaginationElementDiagnostic(string Tag, string Text, string? Href, string? DataName, string? DataMarker, string ClassName);
+public sealed record SourcePageDiagnostic(string CurrentUrl, string? CandidateUrl, string PaginationKind, string PaginationReason,
+    PaginationElementDiagnostic[] PaginationElements, string[] IdentityDifferences);
+
 public interface ISourcePage : IAsyncDisposable
 {
     SourceSite Source { get; }
@@ -250,6 +254,10 @@ public interface ISourcePage : IAsyncDisposable
     Task<Pagination> NextAsync(CancellationToken cancellationToken);
     Task FollowAsync(Pagination pagination, CancellationToken cancellationToken);
     Task ActivateAsync(CancellationToken cancellationToken);
+    Task<SourcePageDiagnostic?> CaptureDiagnosticAsync(string? candidateUrl, CancellationToken cancellationToken)
+        => Task.FromResult<SourcePageDiagnostic?>(null);
+    Task<bool> CaptureScreenshotAsync(string path, CancellationToken cancellationToken)
+        => Task.FromResult(false);
 }
 public interface ISourceSessions : IAsyncDisposable
 {

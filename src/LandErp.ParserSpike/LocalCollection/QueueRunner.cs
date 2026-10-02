@@ -151,7 +151,7 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                 }
                 if (snapshot.Diagnostic is not null)
                 {
-                    string detail = LocalJson.Write(snapshot.Diagnostic);
+                    string detail = MapDiagnosticSummary(snapshot.Diagnostic);
                     if (detail != lastMapDiagnostic) diagnostics?.Write(job, number, "Диагностика карты", "Снимок", detail: detail, count: snapshot.Listings.Length);
                     lastMapDiagnostic = detail;
                 }
@@ -260,7 +260,7 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                 if (sourceCountHint is int previous && previous != finalHint) jobWarnings.Add("SOURCE_COUNT_HINT_CHANGED");
                 sourceCountHint = finalHint;
             }
-            if (final.Diagnostic is not null) diagnostics?.Write(job, number, "Диагностика карты", "Итог", detail: LocalJson.Write(final.Diagnostic), count: final.Listings.Length);
+            if (final.Diagnostic is not null) diagnostics?.Write(job, number, "Диагностика карты", "Итог", detail: MapDiagnosticSummary(final.Diagnostic), count: final.Listings.Length);
             if (final.Loading)
             {
                 CollectionCompletionKind kind = gathered.Count > 0 ? CollectionCompletionKind.Partial : CollectionCompletionKind.SourceError;
@@ -294,8 +294,14 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
                     "Ошибки карточек: " + string.Join("; ", pageWarnings), pageWarnings, false, true, stableRounds); return;
             }
             Pagination next = await ActionAsync(job, page, number, "Поиск следующей страницы", () => page.NextAsync(token), token).ConfigureAwait(false);
-            if (next.Kind == NextKind.UnknownInvalid) { Finish(job, JobState.Failed, CollectionCompletionKind.SourceError,
-                CollectionResultReasonCodes.LayoutChanged, next.Reason ?? "Пагинация не распознана", jobWarnings, false, true, stableRounds); return; }
+            if (next.Kind == NextKind.UnknownInvalid)
+            {
+                if (diagnostics is not null)
+                    await diagnostics.WriteErrorAsync(job, page, number, "Поиск следующей страницы",
+                        next.Reason ?? "Пагинация не распознана", "Pagination", next.Url, gathered.Count, token).ConfigureAwait(false);
+                Finish(job, JobState.Failed, CollectionCompletionKind.SourceError,
+                    CollectionResultReasonCodes.LayoutChanged, next.Reason ?? "Пагинация не распознана", jobWarnings, false, true, stableRounds); return;
+            }
             if (next.Kind == NextKind.Next && (next.Url is null || !visited.Add(next.Url))) { Finish(job, JobState.Failed,
                 CollectionCompletionKind.SourceError, CollectionResultReasonCodes.InvalidSourceResponse, "PAGINATION_CYCLE", jobWarnings, false, true, stableRounds); return; }
             await ReadyAsync(job.Source, token).ConfigureAwait(false);
@@ -323,6 +329,9 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
         string[] safeWarnings = warnings.Where(IsMachineCode).Distinct(StringComparer.Ordinal).Take(20).ToArray();
         bool finished = store.Finish(job, state, message,
             new(kind, endReached, loadingCompleted, Math.Max(0, stableRounds), code, safeWarnings, sourceCountHint));
+        if (finished && state == JobState.Failed)
+            diagnostics?.WriteFailure(job, store.Jobs(job.BatchId).FirstOrDefault(x => x.Id == job.Id)?.Page ?? job.Page,
+                message, string.IsNullOrWhiteSpace(code) ? null : code, store.Journal(job.Id).Sum(x => x.Count));
         Changed?.Invoke(this, EventArgs.Empty); return finished;
     }
     private static bool IsMachineCode(string value) => value.Length is > 0 and <= 64
@@ -336,6 +345,16 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
         if (cause is IOException or PlaywrightException) return CollectionResultReasonCodes.SourceUnavailable;
         return CollectionResultReasonCodes.InvalidSourceResponse;
     }
+    private static string MapDiagnosticSummary(MapDiagnostic value)
+    {
+        MapBatchDiagnostic? last = value.Batches.LastOrDefault();
+        return $"карта: собрано={value.Collected}; источник={value.ExpectedCount?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"}; " +
+            $"порций={value.Batches.Length}; json={value.JsonUnique}; loading={value.Loading}; zone={value.ZoneConfirmed}; " +
+            $"последняя порция={(last is null ? "нет" : $"получено {last.Received}, новых {last.NewIds}, повторов {last.Repeated}")}; " +
+            $"scroll={value.ScrollTop?.ToString("0", System.Globalization.CultureInfo.InvariantCulture) ?? "?"}/" +
+            $"{value.ScrollHeight?.ToString("0", System.Globalization.CultureInfo.InvariantCulture) ?? "?"}";
+    }
+
     private async Task<bool> SaveAsync(CollectionJob job, int number, string url, ListingObservation[] listings,
         bool completed, Pagination? pagination, string reason, MapScope? map = null, ListingObservation[]? changes = null)
     {
@@ -373,6 +392,9 @@ public sealed class QueueRunner(LocalStore store, ISourceSessions sessions, Diag
         {
             diagnostics?.Write(job, number, action, "Ошибка", duration: timer.ElapsedMilliseconds,
                 expectedUrl: expectedUrl, actualUrl: page?.CurrentUrl, errorType: ex.GetType().Name);
+            if (diagnostics is not null)
+                await diagnostics.WriteErrorAsync(job, page, number, action, ex.GetType().Name,
+                    ex.GetType().Name, expectedUrl, store.Journal(job.Id).Sum(x => x.Count), token).ConfigureAwait(false);
             throw new CollectionActionException(action, ex);
         }
     }

@@ -99,6 +99,42 @@ public static class SearchUrls
             .Select(x => Uri.EscapeDataString(x.Key) + "=" + Uri.EscapeDataString(x.Value)).ToArray();
     }
 
+    public static string[] DiagnosticIdentityDiff(string current, string? candidate, SourceSite source)
+    {
+        if (string.IsNullOrWhiteSpace(candidate)) return [];
+        try
+        {
+            Uri a = new(Normalize(current, source).Url), b = new(Normalize(candidate, source).Url);
+            if (source != SourceSite.Cian)
+                return SameSearch(current, candidate, source) ? [] : ["Нормализованные фильтры поиска различаются"];
+            static Dictionary<string, string[]> Values(Uri uri)
+            {
+                static string BaseKey(string key) => System.Text.RegularExpressions.Regex.Replace(key, @"\[\d+\]$", "[]");
+                Dictionary<string, List<string>> result = new(StringComparer.OrdinalIgnoreCase);
+                foreach (string term in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string[] parts = term.Split('=', 2);
+                    string key = BaseKey(Uri.UnescapeDataString(parts[0].Replace('+', ' ')));
+                    if (key is not ("in_polygon[]" or "object_type[]" or "deal_type")) continue;
+                    string value = parts.Length == 2 ? Uri.UnescapeDataString(parts[1].Replace('+', ' ')) : "";
+                    if (!result.TryGetValue(key, out List<string>? list)) result[key] = list = [];
+                    list.Add(key == "in_polygon[]" ? Fingerprint(value) : value);
+                }
+                return result.ToDictionary(x => x.Key, x => x.Value.Order(StringComparer.Ordinal).ToArray(), StringComparer.OrdinalIgnoreCase);
+            }
+            static string Fingerprint(string value)
+            {
+                byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value));
+                return Convert.ToHexString(hash.AsSpan(0, 6));
+            }
+            Dictionary<string, string[]> left = Values(a), right = Values(b);
+            string[] keys = left.Keys.Concat(right.Keys).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            return keys.Where(key => !left.GetValueOrDefault(key, []).SequenceEqual(right.GetValueOrDefault(key, []), StringComparer.Ordinal))
+                .Select(key => $"{key}: [{string.Join(",", left.GetValueOrDefault(key, []))}] -> [{string.Join(",", right.GetValueOrDefault(key, []))}]").ToArray();
+        }
+        catch (ArgumentException) { return ["Не удалось безопасно нормализовать одну из ссылок"]; }
+    }
+
     private static bool AvitoCategoryAlias(string first, string second)
     {
         string[] a = first.Trim('/').Split('/'), b = second.Trim('/').Split('/');

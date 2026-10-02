@@ -59,6 +59,51 @@ public sealed class CianLocalEnhancementTests
     }
 
     [TestMethod]
+    public void CianSeoRouteCanContinueOnCatPhpWhenSemanticIdentityMatches()
+    {
+        string seo = FirstPage.Replace("/cat.php", "/kupit-zemelniy-uchastok/", StringComparison.Ordinal)
+            .Replace("noginsk.cian.ru", "mytishchi.cian.ru", StringComparison.Ordinal);
+        string cat = SecondPage.Replace("55.6%2C37.5%2C55.9%2C38.4", "55.6%2C37.5%2C55.9%2C38.4", StringComparison.Ordinal);
+
+        Assert.IsTrue(SearchUrls.SameSearch(seo, cat, SourceSite.Cian));
+        Assert.AreEqual(0, SearchUrls.DiagnosticIdentityDiff(seo, cat, SourceSite.Cian).Length);
+
+        string changed = cat.Replace(Uri.EscapeDataString(Polygon),
+            Uri.EscapeDataString("37.1 55.1,37.25 55.25,37.1 55.1"), StringComparison.Ordinal);
+        Assert.IsFalse(SearchUrls.SameSearch(seo, changed, SourceSite.Cian));
+    }
+
+    [TestMethod]
+    public async Task CianExportSectionIsNotMistakenForUnknownPagination()
+    {
+        const string html = """
+            <main data-name="Offers">
+              <article data-name="CardComponent">
+                <a href="https://www.cian.ru/sale/suburban/334043735/"></a>
+                <span data-name="TitleComponent">Участок 8 сот.</span>
+                <span data-name="Price">12 000 000 ₽</span>
+              </article>
+            </main>
+            <div data-name="PaginationSection" class="x--pagination-section">
+              <button>Сохранить файл Excel</button>
+              <button>Распечатать объявления</button>
+            </div>
+            """;
+        using IPlaywright playwright = await Playwright.CreateAsync();
+        await using IBrowser browser = await playwright.Chromium.LaunchAsync(new() { Channel = "chrome", Headless = false, ChromiumSandbox = true });
+        await using IBrowserContext context = await browser.NewContextAsync();
+        await context.RouteAsync("https://www.cian.ru/**", route => route.FulfillAsync(new() { ContentType = "text/html; charset=utf-8", Body = html }));
+        IPage page = await context.NewPageAsync();
+        await using DomSourcePage adapter = new(page, SourceSite.Cian, operationTimeoutSeconds: 3);
+
+        await adapter.OpenAsync("https://www.cian.ru/cat.php?deal_type=sale&object_type%5B0%5D=3", CancellationToken.None);
+        Pagination next = await adapter.NextAsync(CancellationToken.None);
+
+        Assert.AreEqual(NextKind.End, next.Kind);
+        Assert.AreEqual("Основная выдача без пагинации", next.Reason);
+    }
+
+    [TestMethod]
     public void StructuredAndTextLandTypesRemainSeparateAndCanConflict()
     {
         DateTimeOffset now = new(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);

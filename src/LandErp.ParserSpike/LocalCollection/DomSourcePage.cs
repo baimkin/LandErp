@@ -447,8 +447,16 @@ public sealed class DomSourcePage : ISourcePage
             if(disabledNext) return {kind:'End',reason:'Следующая страница отключена'};
             return {kind:'UnknownInvalid',reason:'Пагинация есть, но следующий переход не распознан'};
           }
-          const suspicious=document.querySelector('[class*="pagination"],[data-name*="Pagination"],[data-marker*="pagination"]');
-          return suspicious ? {kind:'UnknownInvalid',reason:'Неизвестная разметка пагинации'} : {kind:'End',reason:'Основная выдача без пагинации'};
+          const suspiciousRoots=[...document.querySelectorAll('[class*="pagination"],[data-name*="Pagination"],[data-marker*="pagination"]')].filter(visible);
+          const paginationLike=suspiciousRoots.find(root => [...root.querySelectorAll('a,button,[role="button"]')].filter(visible).some(e => {
+            const text=(e.textContent||'').trim();
+            const aria=(e.getAttribute('aria-label')||'').trim();
+            return /^\d+$/.test(text)
+              || /^(следующая|дальше|далее|назад|предыдущая|next|prev|previous|›|‹|→|←)$/i.test(text)
+              || /(следующ|предыдущ|next|prev)/i.test(aria)
+              || e.rel==='next' || e.rel==='prev';
+          }));
+          return paginationLike ? {kind:'UnknownInvalid',reason:'Неизвестная разметка пагинации'} : {kind:'End',reason:'Основная выдача без пагинации'};
         }
         """;
 }

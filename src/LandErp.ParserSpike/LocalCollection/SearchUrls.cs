@@ -60,9 +60,20 @@ public static class SearchUrls
     public static bool SameSearch(string current, string next, SourceSite source)
     {
         Uri a = new(Normalize(current, source).Url), b = new(Normalize(next, source).Url);
-        if (a.AbsolutePath != b.AbsolutePath && !(source == SourceSite.Avito && AvitoCategoryAlias(a.AbsolutePath, b.AbsolutePath))) return false;
+        if (source == SourceSite.Cian)
+        {
+            string[] leftSemantic = CianSemanticTerms(a);
+            string[] rightSemantic = CianSemanticTerms(b);
+            // Cian commonly moves a polygon search from a city SEO route to /cat.php for page 2.
+            // When semantic search identity is present, the path is presentation only.
+            if (leftSemantic.Length > 0 || rightSemantic.Length > 0)
+                return leftSemantic.SequenceEqual(rightSemantic, StringComparer.Ordinal);
+            return a.AbsolutePath == b.AbsolutePath;
+        }
+
+        if (a.AbsolutePath != b.AbsolutePath && !AvitoCategoryAlias(a.AbsolutePath, b.AbsolutePath)) return false;
         static string Host(Uri uri) => uri.Host.StartsWith("www.", StringComparison.Ordinal) ? uri.Host[4..] : uri.Host;
-        if (source == SourceSite.Avito && Host(a) != Host(b)) return false;
+        if (Host(a) != Host(b)) return false;
         static string[] Terms(Uri uri) => uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
         static bool AvitoPresentationOnly(string term)
         {
@@ -71,13 +82,8 @@ public static class SearchUrls
             // They do not change the selected polygon or the membership filters.
             return term == "localPriority=0" || key.Equals("s", StringComparison.OrdinalIgnoreCase);
         }
-        string[] left = Terms(a).Where(x => source != SourceSite.Avito || !AvitoPresentationOnly(x)).ToArray();
-        string[] right = Terms(b).Where(x => source != SourceSite.Avito || !AvitoPresentationOnly(x)).ToArray();
-        if (source == SourceSite.Cian)
-        {
-            left = CianSemanticTerms(a);
-            right = CianSemanticTerms(b);
-        }
+        string[] left = Terms(a).Where(x => !AvitoPresentationOnly(x)).ToArray();
+        string[] right = Terms(b).Where(x => !AvitoPresentationOnly(x)).ToArray();
         return left.SequenceEqual(right, StringComparer.Ordinal);
     }
     private static string[] CianSemanticTerms(Uri uri)

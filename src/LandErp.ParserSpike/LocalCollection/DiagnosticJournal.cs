@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
+using LandErp.ParserSpike.Contracts;
 
 namespace LandErp.ParserSpike.LocalCollection;
 

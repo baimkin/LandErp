@@ -13,7 +13,7 @@ public static class PhotoFingerprintMatching
         IReadOnlyDictionary<long, int>? commonCounts = null,
         int commonPhotoMaxListings = int.MaxValue)
     {
-        if (maxHammingDistance < 0) throw new ArgumentOutOfRangeException(nameof(maxHammingDistance));
+        ArgumentOutOfRangeException.ThrowIfNegative(maxHammingDistance);
         if (left.Count == 0 || right.Count == 0) return [];
 
         List<PhotoFingerprintPair> candidates = [];

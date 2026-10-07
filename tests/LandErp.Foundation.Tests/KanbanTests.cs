@@ -185,10 +185,21 @@ public sealed class KanbanTests
             new("Менеджер 2", "Москва", null, 2_000_000m, 1000m, "kanban manager filter", Guid.CreateVersion7()),
             "kanban-manager-2", Ct)).CaseId;
 
+        Guid secondEmployee = f.EmployeeId("manager2-phase1@test.invalid");
+        await using (var db = f.Sandbox.Context())
+        {
+            WorkTask[] managerCaseTasks = await db.WorkTasks
+                .Where(task => task.ObjectType == "PropertyCase" && task.ObjectId == managerCase && !task.Completed && !task.Deleted)
+                .ToArrayAsync();
+            foreach (WorkTask task in managerCaseTasks) task.EmployeeId = secondEmployee;
+            await db.SaveChangesAsync();
+        }
+
         var all = await k.ReadBoardAsync(f.Owner, pipeline.Id, null, Ct);
         var managerOnly = await k.ReadBoardAsync(f.Owner, pipeline.Id, f.ManagerEmployeeId, null, Ct);
-        Guid secondEmployee = f.EmployeeId("manager2-phase1@test.invalid");
         var secondOnly = await k.ReadBoardAsync(f.Owner, pipeline.Id, secondEmployee, null, Ct);
+        var queue = await new ProcurementQueueV2ReadService(f.Factory, TimeProvider.System)
+            .ReadPageAsync(f.Owner, new(PipelineId: pipeline.Id), Ct);
 
         Assert.AreEqual(2, all.Total);
         Assert.AreEqual(1, managerOnly.Total);
@@ -197,6 +208,7 @@ public sealed class KanbanTests
         Assert.AreEqual(secondCase, secondOnly.Columns.SelectMany(column => column.Cards).Single().Membership.PropertyCaseId);
         Assert.AreEqual(1, managerOnly.Columns.Sum(column => column.Total));
         Assert.AreEqual(1, secondOnly.Columns.Sum(column => column.Total));
+        CollectionAssert.AreEquivalent(new[] { f.ManagerEmployeeId, secondEmployee }, queue.Assignees.Select(item => item.Id).ToArray());
     }
 
     [TestMethod]

@@ -120,11 +120,13 @@ public sealed partial class ProcurementQueueV2ReadService(
             .Select(item => new CheckDb(item.PropertyCaseId, item.Level, item.Status, item.Blocker, item.ResponsibleEmployeeId)).ToArrayAsync(cancellationToken);
         ContactDb[] contacts = pageIds.Length == 0 ? [] : await LatestContacts(db, pageIds).ToArrayAsync(cancellationToken);
 
-        Guid[] assigneeIds = await (from task in db.WorkTasks.AsNoTracking()
-            join row in visible on task.ObjectId equals row.Case.Id
-            where task.OrganizationId == context.OrganizationId && task.ObjectType == "PropertyCase"
-                && !task.Completed && !task.Deleted && row.Case.StageId != "rejected" && row.Case.StageId != "acquired"
-            select task.EmployeeId).Distinct().ToArrayAsync(cancellationToken);
+        Guid[] assigneeIds = filter.PipelineId != null
+            ? await visible.Select(row => row.Assignment.EmployeeId).Distinct().ToArrayAsync(cancellationToken)
+            : await (from task in db.WorkTasks.AsNoTracking()
+                join row in visible on task.ObjectId equals row.Case.Id
+                where task.OrganizationId == context.OrganizationId && task.ObjectType == "PropertyCase"
+                    && !task.Completed && !task.Deleted && row.Case.StageId != "rejected" && row.Case.StageId != "acquired"
+                select task.EmployeeId).Distinct().ToArrayAsync(cancellationToken);
         ProcurementQueueV2Assignee[] assignees = await db.Employees.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId && assigneeIds.Contains(item.Id))
             .OrderBy(item => item.DisplayName).Select(item => new ProcurementQueueV2Assignee(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);

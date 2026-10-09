@@ -6,7 +6,7 @@ namespace LandErp.Application.Modules.Procurement.Contracts;
 public sealed record KanbanConfiguration(IReadOnlyList<KanbanPipeline> Pipelines, IReadOnlyList<KanbanStage> Stages,
     IReadOnlyList<KanbanTunnel> Tunnels, bool CanConfigureKanban, bool CanManageCards);
 public sealed record KanbanStageDraft(Guid Id, string Name, string Description, string ColorKey,
-    bool IsInitial, KanbanStageKind Kind, bool IsHiddenOnBoard);
+    bool IsInitial, KanbanStageKind Kind, bool IsHiddenOnBoard, bool IsRejectionTarget);
 public sealed record KanbanTunnelDraft(Guid SourceStageId, Guid TargetPipelineId, KanbanTunnelMode Mode);
 // One draft is committed atomically; closing either editor never writes partial settings.
 public sealed record SaveKanbanPipeline(Guid PipelineId, long ExpectedVersion, string Name, int SortOrder,

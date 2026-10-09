@@ -54,11 +54,13 @@ public sealed partial class KanbanWorkspace(IDbContextFactory<LandErpDbContext> 
         else
         {
             if (c.Stages.Count == 0 || c.Stages.Count(s => s.IsInitial) != 1
+                || c.Stages.Count(s => s.IsRejectionTarget) != 1
                 || c.Stages.Any(s => s.Id == Guid.Empty || !Enum.IsDefined(s.Kind) || s.IsInitial && s.Kind != KanbanStageKind.Working
+                    || s.IsRejectionTarget && s.Kind != KanbanStageKind.NegativeFinal
                     || string.IsNullOrWhiteSpace(s.Name) || s.Name.Trim().Length > 120 || s.Description.Length > 2000
                     || !new[] { "info", "accent", "success", "warning", "danger", "purple" }.Contains(s.ColorKey))
                 || c.Stages.Select(s => s.Id).Distinct().Count() != c.Stages.Count)
-                throw new ArgumentException("Нужна одна начальная рабочая стадия, уникальные стадии и заполненные названия (до 120 символов).");
+                throw new ArgumentException("Нужны одна начальная рабочая стадия и одна отрицательная цель системного отклонения, уникальные стадии и заполненные названия (до 120 символов).");
             var oldStages = stages.Where(s => s.PipelineId == p.Id && s.IsActive).ToArray();
             foreach (var removed in oldStages.Where(s => !c.Stages.Any(d => d.Id == s.Id)))
             {
@@ -73,6 +75,9 @@ public sealed partial class KanbanWorkspace(IDbContextFactory<LandErpDbContext> 
             // Release filtered unique slots within this transaction before assigning a different initial/default.
             var initial = oldStages.SingleOrDefault(s => s.IsInitial);
             if (initial != null && initial.Id != c.Stages.Single(s => s.IsInitial).Id) initial.IsInitial = false;
+            var rejectionTarget = oldStages.SingleOrDefault(s => s.IsRejectionTarget);
+            if (rejectionTarget != null && rejectionTarget.Id != c.Stages.Single(s => s.IsRejectionTarget).Id)
+                rejectionTarget.IsRejectionTarget = false;
             if (c.IsDefault) foreach (var other in pipelines.Where(x => x.IsDefault && x.Id != p.Id)) other.IsDefault = false;
             else if (p.IsDefault) throw new ArgumentException("Назначьте другую основную воронку; организация не может остаться без основной.");
             await db.SaveChangesAsync(ct);
@@ -86,6 +91,7 @@ public sealed partial class KanbanWorkspace(IDbContextFactory<LandErpDbContext> 
                 if (s == null) { s = new() { Id = d.Id, OrganizationId = a.OrganizationId, PipelineId = p.Id }; stages.Add(s); db.KanbanStages.Add(s); }
                 s.Name = d.Name.Trim(); s.Description = d.Description.Trim(); s.ColorKey = d.ColorKey; s.SortOrder = i;
                 s.Kind = d.Kind; s.IsInitial = d.IsInitial; s.IsHiddenOnBoard = d.IsHiddenOnBoard;
+                s.IsRejectionTarget = d.IsRejectionTarget;
             }
             ApplyTunnels(db, a.OrganizationId, p, c.Tunnels, pipelines, stages, tunnels);
         }

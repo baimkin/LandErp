@@ -3,7 +3,8 @@ namespace LandErp.Application.Modules.Procurement.Domain;
 public enum KanbanStageKind { Working, PositiveFinal, NegativeFinal }
 public enum KanbanTunnelMode { Transfer, Parallel }
 
-// These positions are deliberately independent of PropertyCase.StageId and workflow tasks.
+// Kanban remains a distinct user-managed position model. Explicit business commands may
+// coordinate it atomically without turning arbitrary stage moves into workflow decisions.
 public sealed class KanbanPipeline
 {
     public Guid Id { get; set; }
@@ -25,6 +26,7 @@ public sealed class KanbanStage
     public int SortOrder { get; set; }
     public bool IsInitial { get; set; }
     public KanbanStageKind Kind { get; set; }
+    public bool IsRejectionTarget { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsHiddenOnBoard { get; set; }
     public long Version { get; set; } = 1;

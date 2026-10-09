@@ -1,3 +1,4 @@
+using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
@@ -15,6 +16,39 @@ namespace LandErp.Foundation.Tests;
 [TestClass, TestCategory("PostgreSQL")]
 public sealed class KanbanTests
 {
+    [TestMethod]
+    public async Task RejectionTargetMigrationBackfillsExistingAndIncompletePipelines()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        Guid pipelineId = Guid.CreateVersion7();
+        Guid initialStageId = Guid.CreateVersion7();
+        await using (LandErpDbContext db = f.Sandbox.Context())
+        {
+            IMigrator migrator = db.Database.GetService<IMigrator>();
+            await migrator.MigrateAsync("20261002093000_MinorProcurementCollectorAdjustments");
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO procurement.kanban_pipelines
+                    (id, organization_id, name, sort_order, is_default, is_active, version)
+                VALUES ({pipelineId}, {f.OrganizationId}, {"Неполная воронка"}, 50, FALSE, TRUE, 1);
+                INSERT INTO procurement.kanban_stages
+                    (id, organization_id, pipeline_id, name, description, color_key, sort_order,
+                     is_initial, kind, is_active, is_hidden_on_board, version)
+                VALUES ({initialStageId}, {f.OrganizationId}, {pipelineId}, {"Старт"}, {""}, {"info"}, 0,
+                        TRUE, {"Working"}, TRUE, FALSE, 1);
+                """);
+            await migrator.MigrateAsync();
+        }
+
+        await using LandErpDbContext verify = f.Sandbox.Context();
+        Guid[] activePipelines = await verify.KanbanPipelines.Where(item => item.IsActive)
+            .Select(item => item.Id).ToArrayAsync();
+        foreach (Guid activePipelineId in activePipelines)
+            Assert.AreEqual(1, await verify.KanbanStages.CountAsync(item => item.PipelineId == activePipelineId
+                && item.IsActive && item.IsRejectionTarget && item.Kind == KanbanStageKind.NegativeFinal));
+        Assert.AreEqual("Не подходит", (await verify.KanbanStages.SingleAsync(item => item.PipelineId == pipelineId
+            && item.IsRejectionTarget)).Name);
+    }
+
     [TestMethod]
     public async Task ProductionUpgradeImportsOnlyUnpositionedActiveCasesAndPreservesRepeatedRuns()
     {
@@ -92,20 +126,22 @@ public sealed class KanbanTests
     private static SaveKanbanPipeline Draft(KanbanConfiguration cfg, Guid id)
     {
         var p=cfg.Pipelines.Single(x=>x.Id==id);
-        return new(id,p.Version,p.Name,p.SortOrder,p.IsDefault,true,cfg.Stages.Where(s=>s.PipelineId==id).Select(s=>new KanbanStageDraft(s.Id,s.Name,s.Description,s.ColorKey,s.IsInitial,s.Kind,s.IsHiddenOnBoard)).ToArray(),cfg.Tunnels.Where(t=>cfg.Stages.Any(s=>s.Id==t.SourceStageId&&s.PipelineId==id)).Select(t=>new KanbanTunnelDraft(t.SourceStageId,t.TargetPipelineId,t.Mode)).ToArray());
+        return new(id,p.Version,p.Name,p.SortOrder,p.IsDefault,true,cfg.Stages.Where(s=>s.PipelineId==id).Select(s=>new KanbanStageDraft(s.Id,s.Name,s.Description,s.ColorKey,s.IsInitial,s.Kind,s.IsHiddenOnBoard,s.IsRejectionTarget)).ToArray(),cfg.Tunnels.Where(t=>cfg.Stages.Any(s=>s.Id==t.SourceStageId&&s.PipelineId==id)).Select(t=>new KanbanTunnelDraft(t.SourceStageId,t.TargetPipelineId,t.Mode)).ToArray());
     }
     private static async Task<Guid> Create(ProcurementTests.Phase1Fixture f,decimal? price=1000000m)=>(await f.Workspace.CreateManualCaseAsync(f.Manager,new("Канбан объект","Москва",null,price,900m,"Серверный тест канбана",Guid.CreateVersion7()),"kanban-test",Ct)).CaseId;
     private static async Task<KanbanCardView> Card(KanbanWorkspace k,Subject actor,Guid pipeline,Guid id)=>(await k.ReadBoardAsync(actor,pipeline,null,Ct)).Columns.SelectMany(c=>c.Cards).Single(c=>c.Membership.PropertyCaseId==id);
     private static async Task<MoveKanbanCard> Move(KanbanWorkspace k,Subject actor,Guid pipeline,Guid id,Guid stage)
     {var b=await k.ReadBoardAsync(actor,pipeline,null,Ct);var m=b.Columns.SelectMany(c=>c.Cards).Single(c=>c.Membership.PropertyCaseId==id).Membership;return new(Guid.CreateVersion7(),m.Id,m.Version,stage,b.Pipeline.Version);}
     private static async Task<Guid> SecondPipeline(KanbanWorkspace k,Subject owner)
-    {return await k.SavePipelineAsync(owner,new(Guid.Empty,0,"Подготовка участка",1,false,true,[new(Guid.CreateVersion7(),"Межевание","","info",true,KanbanStageKind.Working,false),new(Guid.CreateVersion7(),"Готово","","success",false,KanbanStageKind.PositiveFinal,false)],[]),"new",Ct);}
+    {return await k.SavePipelineAsync(owner,new(Guid.Empty,0,"Подготовка участка",1,false,true,[new(Guid.CreateVersion7(),"Межевание","","info",true,KanbanStageKind.Working,false,false),new(Guid.CreateVersion7(),"Проверка участка","","accent",false,KanbanStageKind.Working,false,false),new(Guid.CreateVersion7(),"Готово","","success",false,KanbanStageKind.PositiveFinal,false,false),new(Guid.CreateVersion7(),"Не подходит","","danger",false,KanbanStageKind.NegativeFinal,false,true)],[]),"new",Ct);}
 
     [TestMethod]
     public async Task ConfigurationRolesOccupiedStageVisibilityAndIsolation()
     {
         await using var f=await ProcurementTests.Phase1Fixture.CreateAsync(false,false);var k=Service(f);var cfg=await Config(k,f.Owner);var p=cfg.Pipelines.Single();
         Assert.AreEqual(12,cfg.Stages.Count);Assert.AreEqual("Взят в работу",cfg.Stages.Single(s=>s.IsInitial).Name);
+        Assert.AreEqual("Не подходит",cfg.Stages.Single(s=>s.IsRejectionTarget).Name);
+        Assert.AreEqual(KanbanStageKind.NegativeFinal,cfg.Stages.Single(s=>s.IsRejectionTarget).Kind);
         Assert.IsFalse((await Config(k,f.Manager)).CanConfigureKanban);Assert.IsTrue((await Config(k,f.Head)).CanConfigureKanban);
         await using(var db=await f.Factory.CreateDbContextAsync()){var a=await db.EmployeeAccessSettings.SingleAsync(x=>x.EmployeeId==f.ManagerEmployeeId);a.CanManageTemplates=true;await db.SaveChangesAsync();}
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(()=>k.SavePipelineAsync(f.Manager,Draft(cfg,p.Id),"denied",Ct));
@@ -114,6 +150,8 @@ public sealed class KanbanTests
         Guid id=await Create(f);var final=cfg.Stages.Single(s=>s.Kind==KanbanStageKind.PositiveFinal);
         var command=await Move(k,f.Manager,p.Id,id,final.Id);await k.MoveAsync(f.Manager,command,"final",Ct);
         var before=await Card(k,f.Manager,p.Id,id);var draft=Draft(cfg,p.Id);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(()=>k.SavePipelineAsync(f.Head,draft with{Stages=draft.Stages.Select(s=>s with{IsRejectionTarget=false}).ToArray()},"missing-rejection-target",Ct));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(()=>k.SavePipelineAsync(f.Head,draft with{Stages=draft.Stages.Select(s=>s with{IsRejectionTarget=s.Id==final.Id}).ToArray()},"invalid-rejection-target",Ct));
         await Assert.ThrowsExactlyAsync<ArgumentException>(()=>k.SavePipelineAsync(f.Head,draft with{Stages=draft.Stages.Where(s=>s.Id!=final.Id).ToArray()},"occupied",Ct));
         await k.SavePipelineAsync(f.Head,draft with{Stages=draft.Stages.Reverse().Select(s=>s with{IsHiddenOnBoard=s.Id==final.Id}).ToArray()},"hide-order",Ct);
         var board=await k.ReadBoardAsync(f.Manager,p.Id,null,Ct);Assert.AreEqual(1,board.HiddenCount);Assert.AreEqual(1,board.Total);
@@ -126,7 +164,7 @@ public sealed class KanbanTests
     }
 
     [TestMethod]
-    public async Task MovesNoOpReplayConcurrentCommandsAndBusinessIndependence()
+    public async Task MovesNoOpReplayConcurrentCommandsAndBusinessRejectionTarget()
     {
         await using var f=await ProcurementTests.Phase1Fixture.CreateAsync(false,false);var k=Service(f);var cfg=await Config(k,f.Owner);var p=cfg.Pipelines.Single();Guid id=await Create(f);var original=await f.ReadCaseAsync(id);var card=await Card(k,f.Manager,p.Id,id);
         var noop=await Move(k,f.Manager,p.Id,id,card.Membership.StageId);await k.MoveAsync(f.Manager,noop,"noop",Ct);Assert.AreEqual(card.Membership.StageEnteredAt,(await Card(k,f.Manager,p.Id,id)).Membership.StageEnteredAt);
@@ -141,10 +179,102 @@ public sealed class KanbanTests
         var unchanged=await f.ReadCaseAsync(id);Assert.AreEqual(original.Version,unchanged.Version);Assert.AreEqual(original.StageId,unchanged.StageId);Assert.AreEqual(original.AssignmentId,unchanged.AssignmentId);Assert.AreEqual(original.WorkTaskId,unchanged.WorkTaskId);
         var before=await Card(k,f.Manager,p.Id,id);var detail=await f.Workspace.ReadCardAsync(f.Manager,id,Ct);
         await f.Workspace.DecideAsync(f.Manager,new(id,detail.Item.CaseVersion,detail.Item.SourceRevision,ProcurementAction.Reject,"Не подходит","",null,null),"reject",Ct);
-        var after=await Card(k,f.Manager,p.Id,id);Assert.AreEqual("rejected",after.BusinessStage);Assert.AreEqual(before.Membership.StageId,after.Membership.StageId);Assert.AreEqual(before.Membership.StageEnteredAt,after.Membership.StageEnteredAt);
+        var after=await Card(k,f.Manager,p.Id,id);var rejectionTarget=(await Config(k,f.Owner)).Stages.Single(s=>s.PipelineId==p.Id&&s.IsRejectionTarget);
+        Assert.AreEqual("rejected",after.BusinessStage);Assert.AreEqual(rejectionTarget.Id,after.Membership.StageId);Assert.AreNotEqual(before.Membership.StageId,after.Membership.StageId);Assert.AreNotEqual(before.Membership.StageEnteredAt,after.Membership.StageEnteredAt);
         Assert.AreEqual(1,(await new ProcurementQueueV2ReadService(f.Factory,TimeProvider.System).ReadPageAsync(f.Manager,new(PipelineId:p.Id),Ct)).Total);
         await using var db=await f.Factory.CreateDbContextAsync();Assert.AreEqual(1,await db.KanbanTransitions.CountAsync(t=>t.PropertyCaseId==id&&t.Kind=="Move"));
+        Assert.AreEqual(1,await db.KanbanTransitions.CountAsync(t=>t.PropertyCaseId==id&&t.Kind=="BusinessReject"));
         Assert.AreEqual("Закупка",(await db.KanbanTransitions.SingleAsync(t=>t.PropertyCaseId==id&&t.Kind=="Move")).FromPipelineName);
+    }
+
+    [TestMethod]
+    public async Task RejectsEveryPipelineAndResumeRestoresWorkingStageOrInitialFallback()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        var kanban = Service(f);
+        var pair = await f.IngestMarketplacePairAsync();
+        TakeToWorkResult taken = await f.Workspace.TakeToWorkAsync(f.Manager,
+            new(pair.AvitoId), "kanban-resume-take", Ct);
+        KanbanConfiguration configuration = await Config(kanban, f.Owner);
+        Guid defaultPipelineId = configuration.Pipelines.Single().Id;
+        Guid secondPipelineId = await SecondPipeline(kanban, f.Owner);
+        configuration = await Config(kanban, f.Owner);
+        await kanban.AddAsync(f.Manager, new(Guid.CreateVersion7(), taken.CaseId, secondPipelineId,
+            configuration.Pipelines.Single(item => item.Id == secondPipelineId).Version), "kanban-resume-add", Ct);
+
+        Guid defaultWorkingId = configuration.Stages.First(item => item.PipelineId == defaultPipelineId
+            && !item.IsInitial && item.Kind == KanbanStageKind.Working).Id;
+        Guid secondWorkingId = configuration.Stages.Single(item => item.PipelineId == secondPipelineId
+            && item.Name == "Проверка участка").Id;
+        await kanban.MoveAsync(f.Manager,
+            await Move(kanban, f.Manager, defaultPipelineId, taken.CaseId, defaultWorkingId), "kanban-resume-default", Ct);
+        await kanban.MoveAsync(f.Manager,
+            await Move(kanban, f.Manager, secondPipelineId, taken.CaseId, secondWorkingId), "kanban-resume-second", Ct);
+
+        CaseCard detail = await f.Workspace.ReadCardAsync(f.Manager, taken.CaseId, Ct);
+        await f.Workspace.DecideAsync(f.Manager,
+            new(taken.CaseId, detail.Item.CaseVersion, detail.Item.SourceRevision,
+                ProcurementAction.Reject, "Не подходит", "", null, null), "kanban-reject-all", Ct);
+        configuration = await Config(kanban, f.Owner);
+        Assert.AreEqual(configuration.Stages.Single(item => item.PipelineId == defaultPipelineId
+            && item.IsRejectionTarget).Id, (await Card(kanban, f.Manager, defaultPipelineId, taken.CaseId)).Membership.StageId);
+        Assert.AreEqual(configuration.Stages.Single(item => item.PipelineId == secondPipelineId
+            && item.IsRejectionTarget).Id, (await Card(kanban, f.Manager, secondPipelineId, taken.CaseId)).Membership.StageId);
+
+        SaveKanbanPipeline secondDraft = Draft(configuration, secondPipelineId);
+        await kanban.SavePipelineAsync(f.Owner,
+            secondDraft with { Stages = secondDraft.Stages.Where(item => item.Id != secondWorkingId).ToArray() },
+            "kanban-remove-previous-working", Ct);
+        CatalogItemDetail source = await f.Workspace.ReadItemAsync(f.Manager, pair.AvitoId, Ct);
+        await f.Workspace.ResumeCaseAsync(f.Manager,
+            new(pair.AvitoId, source.Item.Version), "kanban-resume-rejected", Ct);
+
+        configuration = await Config(kanban, f.Owner);
+        Assert.AreEqual(defaultWorkingId,
+            (await Card(kanban, f.Manager, defaultPipelineId, taken.CaseId)).Membership.StageId);
+        Assert.AreEqual(configuration.Stages.Single(item => item.PipelineId == secondPipelineId
+            && item.IsInitial).Id, (await Card(kanban, f.Manager, secondPipelineId, taken.CaseId)).Membership.StageId);
+        Assert.AreEqual("analysis", (await f.ReadCaseAsync(taken.CaseId)).StageId);
+        await using LandErpDbContext db = await f.Factory.CreateDbContextAsync();
+        Assert.AreEqual(2, await db.KanbanTransitions.CountAsync(item => item.PropertyCaseId == taken.CaseId
+            && item.Kind == "BusinessReject"));
+        Assert.AreEqual(2, await db.KanbanTransitions.CountAsync(item => item.PropertyCaseId == taken.CaseId
+            && item.Kind == "BusinessResume"));
+    }
+
+    [TestMethod]
+    public async Task RejectionRollsBackWhenAnyPipelineHasNoConfiguredTarget()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        var kanban = Service(f);
+        KanbanConfiguration configuration = await Config(kanban, f.Owner);
+        Guid defaultPipelineId = configuration.Pipelines.Single().Id;
+        Guid secondPipelineId = await SecondPipeline(kanban, f.Owner);
+        Guid caseId = await Create(f);
+        configuration = await Config(kanban, f.Owner);
+        await kanban.AddAsync(f.Manager, new(Guid.CreateVersion7(), caseId, secondPipelineId,
+            configuration.Pipelines.Single(item => item.Id == secondPipelineId).Version), "kanban-rollback-add", Ct);
+        Guid defaultBefore = (await Card(kanban, f.Manager, defaultPipelineId, caseId)).Membership.StageId;
+        Guid secondBefore = (await Card(kanban, f.Manager, secondPipelineId, caseId)).Membership.StageId;
+        await using (LandErpDbContext db = await f.Factory.CreateDbContextAsync())
+        {
+            KanbanStage target = await db.KanbanStages.SingleAsync(item => item.PipelineId == secondPipelineId
+                && item.IsRejectionTarget);
+            target.IsRejectionTarget = false;
+            await db.SaveChangesAsync();
+        }
+
+        CaseCard detail = await f.Workspace.ReadCardAsync(f.Manager, caseId, Ct);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => f.Workspace.DecideAsync(f.Manager,
+            new(caseId, detail.Item.CaseVersion, detail.Item.SourceRevision,
+                ProcurementAction.Reject, "Не подходит", "", null, null), "kanban-rollback-reject", Ct));
+
+        Assert.AreEqual("analysis", (await f.ReadCaseAsync(caseId)).StageId);
+        Assert.AreEqual(defaultBefore, (await Card(kanban, f.Manager, defaultPipelineId, caseId)).Membership.StageId);
+        Assert.AreEqual(secondBefore, (await Card(kanban, f.Manager, secondPipelineId, caseId)).Membership.StageId);
+        await using LandErpDbContext verify = await f.Factory.CreateDbContextAsync();
+        Assert.AreEqual(0, await verify.KanbanTransitions.CountAsync(item => item.PropertyCaseId == caseId
+            && item.Kind == "BusinessReject"));
     }
 
     [TestMethod,DataRow(KanbanTunnelMode.Transfer),DataRow(KanbanTunnelMode.Parallel)]

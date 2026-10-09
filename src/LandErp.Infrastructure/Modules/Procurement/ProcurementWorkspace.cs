@@ -882,6 +882,9 @@ public sealed partial class ProcurementWorkspace(
         if (row.Case.StageId is not ("rejected" or "monitor"))
             throw new ArgumentException("Возобновить можно только отклонённый или приостановленный PropertyCase.");
         string from = row.Case.StageId;
+        DateTimeOffset now = time.GetUtcNow();
+        if (from == "rejected")
+            await KanbanDecisionCoordinator.ResumeRejectedAsync(db, row.Case, context.EmployeeId, now, cancellationToken);
         row.Case.StageId = "analysis";
         row.Case.ManagerEmployeeId = context.EmployeeId;
         row.Assignment.EmployeeId = context.EmployeeId;
@@ -894,7 +897,6 @@ public sealed partial class ProcurementWorkspace(
         catalogItem.Disposition = CatalogDisposition.InWork;
         catalogItem.AttentionRequired = false;
         db.Entry(catalogItem).Property(value => value.Version).IsModified = true;
-        DateTimeOffset now = time.GetUtcNow();
         db.WorkflowTransitions.Add(new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, ObjectType = "PropertyCase",
@@ -1136,12 +1138,15 @@ public sealed partial class ProcurementWorkspace(
             propertyCase.PendingApprovalId = null;
             if (command.Action == ProcurementAction.Return) propertyCase.ManagerEmployeeId = target;
         }
+        DateTimeOffset decisionAt = time.GetUtcNow();
+        if (command.Action == ProcurementAction.Reject)
+            await KanbanDecisionCoordinator.ApplyRejectionAsync(db, propertyCase, context.EmployeeId, decisionAt, cancellationToken);
         propertyCase.StageId = stage; propertyCase.ReviewedDataRevision = sourceRevision;
         foreach (var source in sources) source.Link.ReviewedDataRevision = source.Item.DataRevision;
         db.Entry(propertyCase).Property(value => value.Version).IsModified = true;
         // В том числе при отказе завершается только системная задача перехода.
         // Пользовательские задачи сохраняются для возможного возобновления объекта.
-        EnsureSystemTask(db, row, time.GetUtcNow());
+        EnsureSystemTask(db, row, decisionAt);
         row.Assignment.EmployeeId = target; row.Task.EmployeeId = target; row.Task.DueAt = command.DueAt;
         row.Task.Completed = stage == "rejected";
         row.Task.Title = stage switch { "pending_head" => "Рассмотреть первичный анализ", "returned" => "Исправить / уточнить первичный анализ", "clarify" => "Уточнить данные объекта", "monitor" => "Наблюдать за объектом", "negotiation" => "Переговоры и проверки", "rejected" => "Объект отклонён", _ => "Первичный анализ" };
@@ -1157,7 +1162,7 @@ public sealed partial class ProcurementWorkspace(
             Action = command.Action.ToString(),
             ActorEmployeeId = context.EmployeeId,
             ObjectVersion = propertyCase.Version + 1,
-            RecordedAt = time.GetUtcNow()
+            RecordedAt = decisionAt
         });
         db.BusinessTimeline.Add(new()
         {
@@ -1171,7 +1176,7 @@ public sealed partial class ProcurementWorkspace(
             Body = reason + (clarification.Length == 0 ? "" : "\nУточнить: " + clarification),
             TargetEmployeeId = target,
             DueAt = command.DueAt,
-            RecordedAt = time.GetUtcNow()
+            RecordedAt = decisionAt
         });
         if (target != context.EmployeeId) db.Notifications.Add(new()
         {
@@ -1181,7 +1186,7 @@ public sealed partial class ProcurementWorkspace(
             ObjectType = "PropertyCase",
             ObjectId = propertyCase.Id,
             Title = propertyCase.BusinessNumber + ": " + title,
-            RecordedAt = time.GetUtcNow()
+            RecordedAt = decisionAt
         });
         OrganizationWorkspace.AddAudit(db, context, subject, "Procurement" + command.Action, "PropertyCase", propertyCase.Id,
             new { From = from, To = stage, Target = target, command.DueAt, Reason = reason, Clarification = clarification, SourceRevision = sourceRevision }, correlationId);

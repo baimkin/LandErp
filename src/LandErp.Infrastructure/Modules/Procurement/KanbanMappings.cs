@@ -17,12 +17,15 @@ internal static class KanbanMappings
         var s = b.Entity<KanbanStage>();
         s.ToTable("kanban_stages", "procurement", t => {
             t.HasCheckConstraint("ck_kanban_stage_initial", "NOT is_initial OR (is_active AND kind = 'Working')");
+            t.HasCheckConstraint("ck_kanban_stage_rejection_target", "NOT is_rejection_target OR (is_active AND kind = 'NegativeFinal')");
             t.HasCheckConstraint("ck_kanban_stage_name", "length(btrim(name)) > 0");
         });
         s.HasAlternateKey(x => new { x.OrganizationId, x.Id });
         s.HasAlternateKey(x => new { x.OrganizationId, x.PipelineId, x.Id });
         s.HasOne<KanbanPipeline>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PipelineId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         s.HasIndex(x => new { x.OrganizationId, x.PipelineId }).IsUnique().HasFilter("is_initial AND is_active");
+        s.HasIndex(x => new { x.OrganizationId, x.PipelineId, x.IsRejectionTarget }).IsUnique()
+            .HasFilter("is_rejection_target AND is_active");
         s.Property(x => x.Kind).HasConversion<string>().HasMaxLength(32);
         s.Property(x => x.Name).HasMaxLength(120);
         s.Property(x => x.Description).HasMaxLength(2000);

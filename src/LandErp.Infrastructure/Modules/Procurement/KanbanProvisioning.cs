@@ -27,6 +27,7 @@ public static class KanbanProvisioning
         for (int i = 0; i < defaults.Length; i++) db.KanbanStages.Add(new() {
             Id = Guid.CreateVersion7(), OrganizationId = org, PipelineId = p.Id, Name = defaults[i].Name, Description = defaults[i].Description,
             IsInitial = i == 0, SortOrder = i, Kind = i == 10 ? KanbanStageKind.PositiveFinal : i == 11 ? KanbanStageKind.NegativeFinal : KanbanStageKind.Working,
+            IsRejectionTarget = i == 11,
             ColorKey = i == 10 ? "success" : i == 11 ? "danger" : i > 5 ? "purple" : "info" });
         return p;
     }

@@ -48,7 +48,7 @@ public sealed class MarketDemandTests
         Assert.IsTrue(changed.Version > original.Version);
         Assert.AreEqual(original.MedianPricePerSotka, changed.MedianPricePerSotka);
         await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => service.SaveDemandAsync(f.Head, new(group, original.Version, 500m), "m03-stale", Ct));
-        await service.SaveTargetPurchaseAsync(f.Head, new(group, changed.Version, 95_555.555m), "m03-target");
+        await service.SaveTargetPurchaseAsync(f.Head, new(group, changed.Version, 95_555.555m), "m03-target", Ct);
         var targetChanged = (await service.ReadProcurementAsync(f.Owner, group, Ct))!;
         Assert.AreEqual(95_555.56m, targetChanged.TargetPurchasePricePerSotka);
         Assert.AreEqual(123.46m, targetChanged.DemandTestPricePerSotka);

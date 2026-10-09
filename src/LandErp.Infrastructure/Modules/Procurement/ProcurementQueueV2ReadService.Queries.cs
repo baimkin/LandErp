@@ -57,6 +57,16 @@ public sealed partial class ProcurementQueueV2ReadService
 
     private static IQueryable<Row> ApplySort(IQueryable<Row> query, ProcurementQueueV2Filter filter, LandErpDbContext db) => (filter.Sort, filter.Descending) switch
     {
+        (ProcurementQueueV2Sort.Manager, false) => query
+            .OrderBy(row => db.Employees.Where(employee => employee.Id == row.Assignment.EmployeeId
+                    && employee.OrganizationId == row.Case.OrganizationId)
+                .Select(employee => employee.DisplayName).FirstOrDefault())
+            .ThenBy(row => row.Case.BusinessNumber).ThenBy(row => row.Case.Id),
+        (ProcurementQueueV2Sort.Manager, true) => query
+            .OrderByDescending(row => db.Employees.Where(employee => employee.Id == row.Assignment.EmployeeId
+                    && employee.OrganizationId == row.Case.OrganizationId)
+                .Select(employee => employee.DisplayName).FirstOrDefault())
+            .ThenBy(row => row.Case.BusinessNumber).ThenBy(row => row.Case.Id),
         (ProcurementQueueV2Sort.DueAt, false) => query.OrderBy(row => row.Task.Completed || row.Task.Deleted || row.Task.DueAt == null).ThenBy(row => row.Task.DueAt).ThenBy(row => row.Case.BusinessNumber),
         (ProcurementQueueV2Sort.DueAt, true) => query.OrderBy(row => row.Task.Completed || row.Task.Deleted || row.Task.DueAt == null).ThenByDescending(row => row.Task.DueAt).ThenBy(row => row.Case.BusinessNumber),
         (ProcurementQueueV2Sort.WorkingPrice, false) => query.OrderBy(row => row.Case.WorkingPrice).ThenBy(row => row.Case.BusinessNumber),

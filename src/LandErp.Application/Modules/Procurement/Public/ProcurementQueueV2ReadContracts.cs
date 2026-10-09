@@ -7,7 +7,7 @@ using LandErp.Application.Modules.Workflow.Domain;
 namespace LandErp.Application.Modules.Procurement.Contracts;
 
 public enum ProcurementQueueV2CheckFilter { Any, HasIssues, Incomplete, Complete }
-public enum ProcurementQueueV2Sort { RecordedAt, DueAt, WorkingPrice, Area, LastContact }
+public enum ProcurementQueueV2Sort { RecordedAt, DueAt, WorkingPrice, Area, LastContact, Manager }
 public enum ProcurementDueState { None, Normal, Today, Overdue }
 public enum ProcurementQueueV2RowState { Normal, SourceChanged, CheckIssue, DueToday, Overdue }
 

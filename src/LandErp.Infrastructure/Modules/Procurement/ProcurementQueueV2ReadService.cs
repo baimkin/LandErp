@@ -69,8 +69,11 @@ public sealed partial class ProcurementQueueV2ReadService(
         {
             if (!await db.KanbanPipelines.AnyAsync(p => p.Id == pipelineId && p.OrganizationId == context.OrganizationId && p.IsActive, cancellationToken)) throw new AccessDeniedException();
             visible = visible.Where(row => db.KanbanMemberships.Any(m => m.OrganizationId == context.OrganizationId && m.PipelineId == pipelineId && m.PropertyCaseId == row.Case.Id && m.TransferredAt == null));
-            // A pipeline view has exactly its membership set; old queue filters never silently narrow it.
-            filter = new ProcurementQueueV2Filter(Offset: filter.Offset, Size: filter.Size, PipelineId: pipelineId);
+            // A pipeline view has exactly its membership set. Its manager filter and ordering are
+            // native to both the table and the board, while unrelated legacy queue filters stay off.
+            filter = new ProcurementQueueV2Filter(AssigneeId: filter.AssigneeId,
+                Sort: filter.Sort, Descending: filter.Descending,
+                Offset: filter.Offset, Size: filter.Size, PipelineId: pipelineId);
         }
         Guid[] priceChangedCaseIds = await PriceChangedCaseIdsAsync(db, visible, cancellationToken);
         IQueryable<Row> query = filter.PipelineId != null ? visible : string.IsNullOrWhiteSpace(filter.Stage)
@@ -96,7 +99,8 @@ public sealed partial class ProcurementQueueV2ReadService(
                             || (source.SellerName != null && EF.Functions.ILike(source.SellerName, pattern))
                             || (exactId.HasValue && source.Id == exactId.Value)))));
         }
-        if (filter.AssigneeId is Guid assigneeId) query = query.Where(row => db.WorkTasks.Any(t => t.OrganizationId == row.Case.OrganizationId && t.ObjectType == "PropertyCase" && t.ObjectId == row.Case.Id && !t.Completed && !t.Deleted && t.EmployeeId == assigneeId));
+        if (filter.AssigneeId is Guid assigneeId)
+            query = query.Where(row => row.Assignment.EmployeeId == assigneeId);
         if (filter.Source is CatalogSource source)
             query = query.Where(row => db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id && link.Confirmed
                 && db.Listings.Any(item => item.Id == link.CatalogItemId && item.Source == source)));
@@ -120,13 +124,13 @@ public sealed partial class ProcurementQueueV2ReadService(
             .Select(item => new CheckDb(item.PropertyCaseId, item.Level, item.Status, item.Blocker, item.ResponsibleEmployeeId)).ToArrayAsync(cancellationToken);
         ContactDb[] contacts = pageIds.Length == 0 ? [] : await LatestContacts(db, pageIds).ToArrayAsync(cancellationToken);
 
-        Guid[] assigneeIds = filter.PipelineId != null
-            ? await visible.Select(row => row.Assignment.EmployeeId).Distinct().ToArrayAsync(cancellationToken)
-            : await (from task in db.WorkTasks.AsNoTracking()
-                join row in visible on task.ObjectId equals row.Case.Id
-                where task.OrganizationId == context.OrganizationId && task.ObjectType == "PropertyCase"
-                    && !task.Completed && !task.Deleted && row.Case.StageId != "rejected" && row.Case.StageId != "acquired"
-                select task.EmployeeId).Distinct().ToArrayAsync(cancellationToken);
+        IQueryable<Row> managerScope = filter.PipelineId != null
+            ? visible
+            : string.IsNullOrWhiteSpace(filter.Stage)
+                ? visible.Where(row => row.Case.StageId != "rejected" && row.Case.StageId != "acquired")
+                : visible.Where(row => row.Case.StageId == filter.Stage);
+        Guid[] assigneeIds = await managerScope.Select(row => row.Assignment.EmployeeId)
+            .Distinct().ToArrayAsync(cancellationToken);
         ProcurementQueueV2Assignee[] assignees = await db.Employees.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId && assigneeIds.Contains(item.Id))
             .OrderBy(item => item.DisplayName).Select(item => new ProcurementQueueV2Assignee(item.Id, item.DisplayName)).ToArrayAsync(cancellationToken);

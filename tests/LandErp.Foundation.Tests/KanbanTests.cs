@@ -184,10 +184,15 @@ public sealed class KanbanTests
         Guid secondCase = (await f.Workspace.CreateManualCaseAsync(f.SecondManager,
             new("Менеджер 2", "Москва", null, 2_000_000m, 1000m, "kanban manager filter", Guid.CreateVersion7()),
             "kanban-manager-2", Ct)).CaseId;
+        Guid managerCaseSecond = (await f.Workspace.CreateManualCaseAsync(f.Manager,
+            new("Менеджер 1 второй", "Москва", null, 3_000_000m, 1000m, "kanban manager sorting", Guid.CreateVersion7()),
+            "kanban-manager-3", Ct)).CaseId;
 
         Guid secondEmployee = f.EmployeeId("manager2-phase1@test.invalid");
         await using (var db = f.Sandbox.Context())
         {
+            (await db.Employees.SingleAsync(employee => employee.Id == f.ManagerEmployeeId)).DisplayName = "Альфа Менеджер";
+            (await db.Employees.SingleAsync(employee => employee.Id == secondEmployee)).DisplayName = "Бета Менеджер";
             WorkTask[] managerCaseTasks = await db.WorkTasks
                 .Where(task => task.ObjectType == "PropertyCase" && task.ObjectId == managerCase && !task.Completed && !task.Deleted)
                 .ToArrayAsync();
@@ -198,17 +203,41 @@ public sealed class KanbanTests
         var all = await k.ReadBoardAsync(f.Owner, pipeline.Id, null, Ct);
         var managerOnly = await k.ReadBoardAsync(f.Owner, pipeline.Id, f.ManagerEmployeeId, null, Ct);
         var secondOnly = await k.ReadBoardAsync(f.Owner, pipeline.Id, secondEmployee, null, Ct);
-        var queue = await new ProcurementQueueV2ReadService(f.Factory, TimeProvider.System)
-            .ReadPageAsync(f.Owner, new(PipelineId: pipeline.Id), Ct);
+        var read = new ProcurementQueueV2ReadService(f.Factory, TimeProvider.System);
+        var queue = await read.ReadPageAsync(f.Owner, new(PipelineId: pipeline.Id), Ct);
+        var managerQueue = await read.ReadPageAsync(f.Owner,
+            new(AssigneeId: f.ManagerEmployeeId, PipelineId: pipeline.Id), Ct);
+        var managerTable = await read.ReadPageAsync(f.Owner,
+            new(AssigneeId: f.ManagerEmployeeId), Ct);
+        var ascendingFirst = await read.ReadPageAsync(f.Owner,
+            new(Sort: ProcurementQueueV2Sort.Manager, Descending: false, Size: 2, PipelineId: pipeline.Id), Ct);
+        var ascendingNext = await read.ReadPageAsync(f.Owner,
+            new(Sort: ProcurementQueueV2Sort.Manager, Descending: false, Offset: 2, Size: 2, PipelineId: pipeline.Id), Ct);
+        var descending = await read.ReadPageAsync(f.Owner,
+            new(Sort: ProcurementQueueV2Sort.Manager, Descending: true, PipelineId: pipeline.Id), Ct);
 
-        Assert.AreEqual(2, all.Total);
-        Assert.AreEqual(1, managerOnly.Total);
+        Assert.AreEqual(3, all.Total);
+        Assert.AreEqual(2, managerOnly.Total);
         Assert.AreEqual(1, secondOnly.Total);
-        Assert.AreEqual(managerCase, managerOnly.Columns.SelectMany(column => column.Cards).Single().Membership.PropertyCaseId);
+        CollectionAssert.AreEquivalent(new[] { managerCase, managerCaseSecond }, managerOnly.Columns.SelectMany(column => column.Cards)
+            .Select(card => card.Membership.PropertyCaseId).ToArray());
         Assert.AreEqual(secondCase, secondOnly.Columns.SelectMany(column => column.Cards).Single().Membership.PropertyCaseId);
-        Assert.AreEqual(1, managerOnly.Columns.Sum(column => column.Total));
+        Assert.AreEqual(2, managerOnly.Columns.Sum(column => column.Total));
         Assert.AreEqual(1, secondOnly.Columns.Sum(column => column.Total));
         CollectionAssert.AreEquivalent(new[] { f.ManagerEmployeeId, secondEmployee }, queue.Assignees.Select(item => item.Id).ToArray());
+        Assert.AreEqual(2, managerQueue.Total);
+        Assert.AreEqual(2, managerTable.Total);
+        CollectionAssert.AreEquivalent(new[] { managerCase, managerCaseSecond }, managerQueue.Items.Select(item => item.CaseId).ToArray());
+        CollectionAssert.AreEquivalent(new[] { managerCase, managerCaseSecond }, managerTable.Items.Select(item => item.CaseId).ToArray());
+
+        ProcurementQueueV2Row[] ascending = ascendingFirst.Items.Concat(ascendingNext.Items).ToArray();
+        string[] ascendingNames = ["Альфа Менеджер", "Альфа Менеджер", "Бета Менеджер"];
+        string[] descendingNames = ["Бета Менеджер", "Альфа Менеджер", "Альфа Менеджер"];
+        CollectionAssert.AreEqual(ascendingNames, ascending.Select(item => item.AssigneeName).ToArray());
+        CollectionAssert.AreEqual(ascending.Take(2).Select(item => item.BusinessNumber).Order(StringComparer.Ordinal).ToArray(),
+            ascending.Take(2).Select(item => item.BusinessNumber).ToArray());
+        CollectionAssert.AreEqual(descendingNames, descending.Items.Select(item => item.AssigneeName).ToArray());
+        CollectionAssert.AreEqual(ascending.Take(2).Select(item => item.CaseId).ToArray(), descending.Items.Skip(1).Select(item => item.CaseId).ToArray());
     }
 
     [TestMethod]

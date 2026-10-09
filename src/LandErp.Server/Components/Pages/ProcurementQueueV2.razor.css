@@ -37,6 +37,10 @@
 .table{overflow:auto}
 table{width:100%;min-width:1100px;border-collapse:collapse}
 th{height:36px;background:#f8fafc;text-align:left;padding:0 8px;font-size: var(--text-sm);text-transform:uppercase;color:#6b7788;border-bottom:1px solid var(--b);font-weight: var(--weight-semibold)}
+.queue-sort{display:inline-flex;align-items:center;gap:var(--space-1);margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;text-transform:inherit;cursor:pointer}
+.queue-sort span{min-width:1em;color:var(--text-muted)}
+.queue-sort.active{color:var(--accent)}
+.queue-sort:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--radius-sm)}
 td{height:58px;padding:6px 8px;border-bottom:1px solid var(--b2);font-size: var(--text-ui);vertical-align:middle}
 tbody tr{cursor:pointer}
 tbody tr:hover td{background:#fbfcfe}

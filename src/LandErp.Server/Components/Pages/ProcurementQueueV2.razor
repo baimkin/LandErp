@@ -142,7 +142,7 @@
                                     <th>Следующее действие</th>
                                     <th>Проверка</th>
                                     <th>Последний контакт</th>
-                                    <th>Ответственный</th>
+                                    <th aria-sort="@ManagerSortAria"><button type="button" class="queue-sort @(sort == ProcurementQueueV2Sort.Manager ? "active" : "")" @onclick="ToggleManagerSortAsync">Ответственный <span aria-hidden="true">@ManagerSortIndicator</span></button></th>
                                     <th>Источники</th>
                                 </tr>
                             </thead>
@@ -513,6 +513,8 @@
     private string assigneeFilter = "";
     private bool dueTodayOnly;
     private bool overdueOnly;
+    private ProcurementQueueV2Sort sort = ProcurementQueueV2Sort.RecordedAt;
+    private bool descending = true;
     [Parameter, SupplyParameterFromQuery(Name="overview")] public bool FromOverview { get; set; }
     private (string? Stage,bool Mine,bool Overview)? appliedRoute;
     private bool priceChangedOnly;
@@ -567,7 +569,7 @@
     private ProcurementQueueV2Filter BuildFilter()
     {
         Guid? assignee = Guid.TryParse(assigneeFilter, out Guid assigneeId) ? assigneeId : null;
-        if(InPipeline)return new ProcurementQueueV2Filter(AssigneeId:assignee,Offset:offset,Size:PageSize,PipelineId:activePipeline);
+        if(InPipeline)return new ProcurementQueueV2Filter(AssigneeId:assignee,Sort:sort,Descending:descending,Offset:offset,Size:PageSize,PipelineId:activePipeline);
         return new ProcurementQueueV2Filter(
             Text: search,
             Stage: stageFilter,
@@ -577,8 +579,8 @@
             DueTodayOnly: dueTodayOnly,
             OverdueOnly: overdueOnly,
             Checks: ProcurementQueueV2CheckFilter.Any,
-            Sort: ProcurementQueueV2Sort.RecordedAt,
-            Descending: true,
+            Sort: sort,
+            Descending: descending,
             Offset: offset,
             Size: PageSize,
             MineOnly: MineOnly,
@@ -594,6 +596,15 @@
     private async Task SearchKeyDownAsync(KeyboardEventArgs args) { if (args.Key == "Enter") await ApplySearchAsync(); }
     private async Task StageChangedAsync(ChangeEventArgs e) { stageFilter = e.Value?.ToString() ?? ""; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }
     private async Task AssigneeChangedAsync(ChangeEventArgs e) { assigneeFilter = e.Value?.ToString() ?? ""; offset = 0; await ReloadAsync(); }
+    private async Task ToggleManagerSortAsync()
+    {
+        if (sort == ProcurementQueueV2Sort.Manager) descending = !descending;
+        else { sort = ProcurementQueueV2Sort.Manager; descending = false; }
+        offset = 0;
+        await ReloadAsync();
+    }
+    private string ManagerSortAria => sort != ProcurementQueueV2Sort.Manager ? "none" : descending ? "descending" : "ascending";
+    private string ManagerSortIndicator => sort != ProcurementQueueV2Sort.Manager ? "↕" : descending ? "↓" : "↑";
     private async Task ToggleDueTodayAsync() { dueTodayOnly = !dueTodayOnly; if (dueTodayOnly) { overdueOnly = priceChangedOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }
     private async Task ToggleOverdueAsync() { overdueOnly = !overdueOnly; if (overdueOnly) { dueTodayOnly = priceChangedOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }
     private async Task TogglePriceChangedAsync() { priceChangedOnly = !priceChangedOnly; if (priceChangedOnly) { dueTodayOnly = overdueOnly = false; stageFilter = ""; } offset = 0; await ReloadAsync(); }

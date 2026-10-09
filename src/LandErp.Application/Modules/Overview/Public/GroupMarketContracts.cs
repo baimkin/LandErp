@@ -12,6 +12,22 @@ public sealed record GroupMarketView(Guid SearchGroupId, string Name, decimal? M
 public sealed record SaveDemandTestPrice(Guid SearchGroupId, long ExpectedVersion, decimal? PricePerSotka);
 public sealed record SaveTargetPurchasePrice(Guid SearchGroupId, long ExpectedVersion, decimal? PricePerSotka);
 
+public static class LocationEconomics
+{
+    public static decimal? PricePerSotka(decimal? totalPrice, decimal? areaSquareMeters)
+    {
+        if (totalPrice == null || areaSquareMeters is null or <= 0) return null;
+        return decimal.Round(totalPrice.Value * 100m / areaSquareMeters.Value, 2, MidpointRounding.ToEven);
+    }
+
+    public static decimal? TargetPropertyPrice(decimal? targetPurchasePricePerSotka, decimal? areaSquareMeters)
+    {
+        if (targetPurchasePricePerSotka == null || areaSquareMeters is null or <= 0) return null;
+        return decimal.Round(targetPurchasePricePerSotka.Value * (areaSquareMeters.Value / 100m), 2,
+            MidpointRounding.ToEven);
+    }
+}
+
 public interface IGroupMarketService
 {
     Task<GroupMarketView?> ReadIncomingAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken);

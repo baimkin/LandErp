@@ -40,14 +40,14 @@
             <section class="overview-card market-card">
                 <div class="overview-card-head market-card-head"><div><h2>Рынок по группам поиска</h2><p>Медианная и средняя цена за сотку участников групп. Один подтверждённый участок — один участник.</p></div><button class="overview-btn small" type="button" @onclick="OpenAllGroupsAsync">Посмотреть все группы</button></div>
                 <div class="market-table">
-                    <div class="market-header"><div>Группа поиска</div><div>Медиана</div><div>Средняя</div><div>Тест спроса</div><div>Выборка</div><div></div></div>
+                    <div class="market-header"><div>Группа поиска</div><div>Медиана</div><div>Средняя</div><div>Ориентир теста спроса</div><div>Желаемая цена покупки</div><div>Выборка</div><div></div></div>
                     @if (view.Market.Items.Count == 0) { <div class="overview-empty">Активных групп поиска пока нет.</div> }
                     @foreach (MarketGroupRow row in view.Market.Items)
                     {
                         <div class="market-row" @key="row.SearchGroupId">
                             <div class="market-name"><b>@row.Name</b><small>Участники группы</small></div>
                             <div class="market-price">@Price(row.MedianPricePerSotka)<small>за сотку</small></div>
-                            <div class="market-price">@Price(row.AveragePricePerSotka)<small>за сотку</small></div><div class="market-demand">@if(row.Market != null){<DemandTestPrice Value="row.Market" Subject="CurrentSubject" Saved="MarketSavedAsync" />}<small>за сотку · ручной ориентир</small></div>
+                            <div class="market-price">@Price(row.AveragePricePerSotka)<small>за сотку</small></div><div class="market-demand">@if(row.Market != null){<DemandTestPrice Value="row.Market" Subject="CurrentSubject" Saved="MarketSavedAsync" />}<small>за сотку · ручной ориентир</small></div><div class="market-target">@if(row.Market != null){<DemandTestPrice Value="row.Market" Subject="CurrentSubject" Saved="MarketSavedAsync" PurchaseTarget="true" />}<small>за сотку · ручной ориентир</small></div>
                             <div class="market-sample">@if (row.CanReadParticipants) { <a href="@($"/incoming?participants={row.SearchGroupId}")">В расчёте: @row.IncludedCount</a> } else { <b>В расчёте: @row.IncludedCount</b> }</div>
                             <span></span>
                         </div>
@@ -107,10 +107,10 @@
                 @if (allGroupsLoading) { <div class="overview-empty">Загружаем группы…</div> }
                 else if (allGroups != null)
                 {
-                    <div class="all-groups-header"><div>Группа поиска</div><div>Состав</div><div>Медиана</div><div>Средняя</div><div>Тест спроса</div><div>Выборка</div><div></div></div>
+                    <div class="all-groups-header"><div>Группа поиска</div><div>Состав</div><div>Медиана</div><div>Средняя</div><div>Ориентир теста спроса</div><div>Желаемая цена покупки</div><div>Выборка</div><div></div></div>
                     @if (allGroups.Items.Count == 0) { <div class="overview-empty">Группы по заданному поиску не найдены.</div> }
                     @foreach (MarketGroupRow row in allGroups.Items)
-                    { <div class="all-groups-row" @key="row.SearchGroupId"><div class="market-name"><b>@row.Name</b></div><div class="config-text">Участники группы</div><div class="market-price">@Price(row.MedianPricePerSotka)<small>за сотку</small></div><div class="market-price">@Price(row.AveragePricePerSotka)<small>за сотку</small></div><div class="market-demand">@if(row.Market != null){<DemandTestPrice Value="row.Market" Subject="CurrentSubject" Saved="MarketSavedAsync" />}<small>за сотку · ручной ориентир</small></div><div class="market-sample">@if (row.CanReadParticipants) { <a href="@($"/incoming?participants={row.SearchGroupId}")">В расчёте: @row.IncludedCount</a> } else { <b>В расчёте: @row.IncludedCount</b> }</div><span></span></div> }
+                    { <div class="all-groups-row" @key="row.SearchGroupId"><div class="market-name"><b>@row.Name</b></div><div class="config-text">Участники группы</div><div class="market-price">@Price(row.MedianPricePerSotka)<small>за сотку</small></div><div class="market-price">@Price(row.AveragePricePerSotka)<small>за сотку</small></div><div class="market-demand">@if(row.Market != null){<DemandTestPrice Value="row.Market" Subject="CurrentSubject" Saved="MarketSavedAsync" />}<small>за сотку · ручной ориентир</small></div><div class="market-target">@if(row.Market != null){<DemandTestPrice Value="row.Market" Subject="CurrentSubject" Saved="MarketSavedAsync" PurchaseTarget="true" />}<small>за сотку · ручной ориентир</small></div><div class="market-sample">@if (row.CanReadParticipants) { <a href="@($"/incoming?participants={row.SearchGroupId}")">В расчёте: @row.IncludedCount</a> } else { <b>В расчёте: @row.IncludedCount</b> }</div><span></span></div> }
                     <footer class="groups-pager"><span>Показано @allGroups.Items.Count из @allGroups.Total групп</span><div><button class="overview-btn small" type="button" disabled="@(allGroups.Offset == 0)" @onclick="PreviousGroupsAsync">‹</button><button class="overview-btn small" type="button" disabled="@(allGroups.Offset + allGroups.Size >= allGroups.Total)" @onclick="NextGroupsAsync">›</button></div></footer>
                 }
             </div>

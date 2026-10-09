@@ -132,8 +132,9 @@ public sealed class ProcurementQueueV2ReadTests
             .Tasks.Single(item => item.Title == "Позвонить собственнику").Id;
         Assert.IsTrue(detail.Timeline.Any(item => item.Kind == "CaseTaskSave" && item.TaskId == savedTaskId));
 
+        // The queue assignee filter is the PropertyCase manager, not the executor of its next task.
         ProcurementQueueV2Row row = (await service.ReadPageAsync(fixture.Manager,
-            new ProcurementQueueV2Filter(AssigneeId: secondManagerId), CancellationToken.None)).Items.Single();
+            new ProcurementQueueV2Filter(AssigneeId: fixture.ManagerEmployeeId), CancellationToken.None)).Items.Single();
         Assert.AreEqual(WorkTaskType.Call, row.NextActionType);
         Assert.AreEqual(detail.NextActionDescription, row.NextActionDescription);
         await using (LandErpDbContext db = await fixture.Factory.CreateDbContextAsync())

@@ -251,26 +251,33 @@
                         <div class="fact"><label>Состояние закупки</label><b>@ProcurementLabels.Stage(detail.Stage)</b></div>
                         <div class="fact"><label>Площадь</label><b>@AreaSotki(detail.AreaSquareMeters)</b></div>
                         <div class="fact"><label>Ответственный</label><b>@detail.AssigneeName</b></div>
-                        @if(drawerMarkets.Count==0)
-                        {
-                            <div class="fact"><label>Тест спроса</label><b title="У объекта нет связанной группы поиска">—</b></div>
-                            <div class="fact"><label>Нужная цена покупки</label><b title="У объекта нет связанной группы поиска">—</b></div>
-                        }
-                        @foreach(var market in drawerMarkets)
-                        {
-                            <div class="fact"><label title="Ручной ориентир цены, не измеренный спрос">Тест спроса</label><b>@DemandTestPrice.Money(market.DemandTestPricePerSotka)@if(market.DemandTestPricePerSotka!=null){<text> / сот.</text>}</b>@if(drawerMarkets.Count>1){<small>@market.Name</small>}</div>
-                            <div class="fact"><label title="Целевая цена закупки">Нужная цена покупки</label><DemandTestPrice Value="market" Subject="CurrentSubject" Saved="ReloadAsync" PurchaseTarget="true" />@if(drawerMarkets.Count>1){<small>@market.Name</small>}</div>
-                        }
                     </div>
+                </div>
+
+                <div class="card">
+                    <div class="ct"><b>Экономика связанных зон</b><span class="muted">Желаемая цена и расчёт по рабочей площади</span></div>
+                    @if (drawerMarkets.Count == 0)
+                    {
+                        <GroupMarketPrices Value="null" Subject="CurrentSubject" Saved="ReloadAsync" EmptyText="У объекта нет связанной зоны поиска" PurchaseMode="true" AreaSquareMeters="detail.AreaSquareMeters" />
+                    }
+                    else
+                    {
+                        <div class="drawer-markets">
+                            @foreach (var market in drawerMarkets)
+                            {
+                                <div class="drawer-market"><GroupMarketPrices Value="market" Subject="CurrentSubject" Saved="ReloadAsync" PurchaseMode="true" AreaSquareMeters="detail.AreaSquareMeters" /></div>
+                            }
+                        </div>
+                    }
                 </div>
 
                 <div class="card">
                     <div class="ct"><b>Цена и торг</b><button class="btn" type="button" @onclick="OpenNegotiationsAsync">История цены и переговоров</button></div>
                     <div class="prices">
-                        <div class="p"><label>Старт</label><b>@MoneyCompact(detail.StartPrice)</b></div>
-                        <div class="p good"><label>Продавец</label><b>@MoneyCompact(detail.LatestSellerOffer ?? detail.CurrentSourceAsk)</b><small>@SellerPriceCaption(detail)</small></div>
-                        <div class="p ours"><label>Мы</label><b>@MoneyCompact(detail.LatestBuyerOffer)</b></div>
-                        <div class="p good"><label>Согласовано</label><b>@MoneyCompact(detail.LatestAgreedPrice)</b></div>
+                        <div class="p"><label>Цена объявления</label><b>@MoneyCompact(detail.CurrentSourceAsk ?? detail.WorkingPrice)</b><small>@PricePerSotkaCaption(detail.CurrentSourceAsk ?? detail.WorkingPrice, detail.AreaSquareMeters)</small>@if(detail.StartPrice!=null){<small>Старт: @MoneyCompact(detail.StartPrice)</small>}</div>
+                        <div class="p good"><label>Продавец</label><b>@MoneyCompact(detail.LatestSellerOffer)</b><small>@PricePerSotkaCaption(detail.LatestSellerOffer, detail.AreaSquareMeters)</small></div>
+                        <div class="p ours"><label>Мы</label><b>@MoneyCompact(detail.LatestBuyerOffer)</b><small>@PricePerSotkaCaption(detail.LatestBuyerOffer, detail.AreaSquareMeters)</small></div>
+                        <div class="p good"><label>Согласовано</label><b>@MoneyCompact(detail.LatestAgreedPrice)</b><small>@PricePerSotkaCaption(detail.LatestAgreedPrice, detail.AreaSquareMeters)</small></div>
                     </div>
                     @if (detail.PriceDeltaFromStart != null)
                     {
@@ -755,9 +762,12 @@
         if (Math.Abs(value.Value) >= 1_000_000m) return $"{(value.Value / 1_000_000m).ToString("0.#", Ru)} млн ₽";
         return $"{NumberFormat.Money(value.Value)} ₽";
     }
-    private static string SellerPriceCaption(ProcurementQueueV2Detail item) => item.LatestSellerOffer != null
-        ? "последняя цена в переговорах"
-        : item.CurrentSourceAsk != null ? "текущая цена объявления" : "—";
+    private static string PricePerSotkaCaption(decimal? price, decimal? areaSquareMeters)
+    {
+        if (price == null) return "Цена не указана";
+        decimal? perSotka = LocationEconomics.PricePerSotka(price, areaSquareMeters);
+        return perSotka == null ? "Нет площади для расчёта" : $"{NumberFormat.Money(perSotka.Value)} ₽ / сот.";
+    }
     private static string PriceDeltaCaption(decimal delta, decimal? percent)
     {
         if (delta == 0m) return "Без изменения от старта";

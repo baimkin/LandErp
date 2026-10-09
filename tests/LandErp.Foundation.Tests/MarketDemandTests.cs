@@ -23,6 +23,46 @@ public sealed class MarketDemandTests
         IncomingCatalogSortField.PricePerSotka, IncomingCatalogSortDirection.Ascending, SearchGroupId: group);
 
     [TestMethod]
+    public void LocationEconomicsCalculatesPerSotkaAndTargetWithoutPersistedDerivedValues()
+    {
+        Assert.AreEqual(250_000m, LocationEconomics.PricePerSotka(2_000_000m, 800m));
+        Assert.AreEqual(800_000m, LocationEconomics.TargetPropertyPrice(100_000m, 800m));
+        Assert.AreEqual(33.33m, LocationEconomics.PricePerSotka(100m, 300m));
+        Assert.AreEqual(300.03m, LocationEconomics.TargetPropertyPrice(100.01m, 300m));
+        Assert.IsNull(LocationEconomics.PricePerSotka(2_000_000m, null));
+        Assert.IsNull(LocationEconomics.PricePerSotka(2_000_000m, 0m));
+        Assert.IsNull(LocationEconomics.TargetPropertyPrice(100_000m, -1m));
+        Assert.IsNull(LocationEconomics.TargetPropertyPrice(null, 800m));
+    }
+
+    [TestMethod]
+    public void LocationEconomicsUiKeepsBothGuidesAllZonesAndExplicitUnavailableCalculations()
+    {
+        string root = FoundationTests.RepositoryRoot();
+        string prices = File.ReadAllText(Path.Combine(root, "src", "LandErp.Server", "Components",
+            "Primitives", "GroupMarketPrices.razor"));
+        string card = File.ReadAllText(Path.Combine(root, "src", "LandErp.Server", "Components",
+            "Procurement", "CaseWorkspace.razor"));
+        string drawer = File.ReadAllText(Path.Combine(root, "src", "LandErp.Server", "Components",
+            "Pages", "ProcurementQueueV2.razor"));
+        string overview = File.ReadAllText(Path.Combine(root, "src", "LandErp.Server", "Components",
+            "Pages", "Home.razor"));
+
+        StringAssert.Contains(prices, "Ориентир теста спроса");
+        StringAssert.Contains(prices, "Желаемая цена покупки");
+        StringAssert.Contains(prices, "Целевая стоимость участка");
+        StringAssert.Contains(prices, "Нет площади для расчёта");
+        StringAssert.Contains(card, "@foreach (var market in caseMarkets)");
+        StringAssert.Contains(card, "PricePerSotkaCaption");
+        StringAssert.Contains(drawer, "@foreach (var market in drawerMarkets)");
+        StringAssert.Contains(drawer, "Цена объявления");
+        StringAssert.Contains(drawer, "Согласовано");
+        StringAssert.Contains(overview, "Ориентир теста спроса");
+        StringAssert.Contains(overview, "Желаемая цена покупки");
+        StringAssert.Contains(overview, "PurchaseTarget=\"true\"");
+    }
+
+    [TestMethod]
     public async Task DemandRequiresHeadValidatesOrganizationPriceVersionAndAuditsClear()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
@@ -122,6 +162,8 @@ public sealed class MarketDemandTests
         var single = await service.ReadCaseAsync(f.Manager, caseId, Ct);
         Assert.AreEqual(a, single.Single().SearchGroupId);
         await service.SaveDemandAsync(f.Head, new(a, single[0].Version, 110000m), "m03-demand", Ct);
+        var demandChanged = (await service.ReadProcurementAsync(f.Manager, a, Ct))!;
+        await service.SaveTargetPurchaseAsync(f.Head, new(a, demandChanged.Version, 90_000m), "m03-target", Ct);
         var saved = await presets.CreateAsync(f.Manager, new(a, "Узкий фильтр", Criteria(a)), Ct);
         var ungrouped = await presets.CreateAsync(f.Manager, new(null, "Без группы", Criteria()), Ct);
         var request = new IncomingCatalogReadFilter(new("несовпадающий текст", MaxPrice: 1m), SearchGroupId: b,
@@ -132,6 +174,7 @@ public sealed class MarketDemandTests
         Assert.AreEqual(1, incoming.ParticipantCount);
         Assert.AreEqual(133333.3333m, incoming.MedianPricePerSotka);
         Assert.AreEqual(110000m, incoming.DemandTestPricePerSotka);
+        Assert.AreEqual(90_000m, incoming.TargetPurchasePricePerSotka);
         Assert.IsNull(await service.ReadIncomingAsync(f.Manager, new(new()), Ct));
         Assert.IsNull(await service.ReadIncomingAsync(f.Manager, request with { WorkingScope = new(IncomingCatalogMode.SavedFilters, ungrouped.Id) }, Ct));
         Assert.AreEqual(b, (await service.ReadIncomingAsync(f.Manager, request with { WorkingScope = new(IncomingCatalogMode.SavedFilters, saved.Id, UseDraft: true) }, Ct))!.SearchGroupId);
@@ -159,7 +202,9 @@ public sealed class MarketDemandTests
                 PayloadJson = "{}", ChangesJson = "[]", ObservedAt = DateTimeOffset.UtcNow, RecordedAt = DateTimeOffset.UtcNow });
             await db.SaveChangesAsync();
         }
-        CollectionAssert.AreEqual(new[] { a, b }, (await service.ReadCaseAsync(f.Manager, caseId, Ct)).Select(item => item.SearchGroupId).ToArray());
+        GroupMarketView[] caseMarkets = (await service.ReadCaseAsync(f.Manager, caseId, Ct)).ToArray();
+        CollectionAssert.AreEqual(new[] { a, b }, caseMarkets.Select(item => item.SearchGroupId).ToArray());
+        Assert.AreEqual(90_000m, caseMarkets.Single(item => item.SearchGroupId == a).TargetPurchasePricePerSotka);
         Assert.AreEqual(1, (await queues.ReadPageAsync(f.Manager, new(SearchGroupId: a), Ct)).Total);
         Assert.AreEqual(1, (await queues.ReadPageAsync(f.Manager, new(SearchGroupId: b), Ct)).Total);
         Assert.AreEqual(0, (await queues.ReadPageAsync(f.SecondManager, new(SearchGroupId: a), Ct)).Total);

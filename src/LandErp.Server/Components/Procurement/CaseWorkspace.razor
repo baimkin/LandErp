@@ -88,19 +88,27 @@ else if(card!=null && loaded == CaseId)
                 <div class="case-side-stack">
                     <article class="surface case-pricing">
                         <div class="section-heading"><h3>Цена и торг</h3><button class="btn quiet" @onclick='()=>tab="negotiations"'>Переговоры →</button></div>
-                        <div class="case-price-top"><div class="case-price-working"><div class="case-main-price"><span>Цена в объявлении</span><strong>@ProcurementLabels.Money(card.Item.Price)</strong></div>
+                        <div class="case-price-top"><div class="case-price-working"><div class="case-main-price"><div><span>Цена в объявлении</span><small>@PricePerSotkaCaption(card.Item.Price, card.Item.Area)</small></div><strong>@ProcurementLabels.Money(card.Item.Price)</strong></div>
                         <div class="price-grid">
-                            <div><small>Продавец</small><strong>@OptionalPrice(card.Negotiations.Select(x=>x.SellerPrice).FirstOrDefault(x=>x!=null))</strong></div>
-                            <div><small>Наше предложение</small><strong>@OptionalPrice(card.Negotiations.Select(x=>x.BuyerOffer).FirstOrDefault(x=>x!=null))</strong></div>
-                            <div><small>@(card.Item.Stage=="acquired"?"Куплено за":"Согласовано")</small><strong>@OptionalPrice(card.Item.Stage=="acquired"?card.AcquisitionPrice:card.Negotiations.Select(x=>x.AgreedPrice).FirstOrDefault(x=>x!=null))</strong></div>
+                            <div><div><small>Продавец</small><span class="price-per-sotka">@PricePerSotkaCaption(card.Negotiations.Select(x=>x.SellerPrice).FirstOrDefault(x=>x!=null), card.Item.Area)</span></div><strong>@OptionalPrice(card.Negotiations.Select(x=>x.SellerPrice).FirstOrDefault(x=>x!=null))</strong></div>
+                            <div><div><small>Наше предложение</small><span class="price-per-sotka">@PricePerSotkaCaption(card.Negotiations.Select(x=>x.BuyerOffer).FirstOrDefault(x=>x!=null), card.Item.Area)</span></div><strong>@OptionalPrice(card.Negotiations.Select(x=>x.BuyerOffer).FirstOrDefault(x=>x!=null))</strong></div>
+                            <div><div><small>@(card.Item.Stage=="acquired"?"Куплено за":"Согласовано")</small><span class="price-per-sotka">@PricePerSotkaCaption(card.Item.Stage=="acquired"?card.AcquisitionPrice:card.Negotiations.Select(x=>x.AgreedPrice).FirstOrDefault(x=>x!=null), card.Item.Area)</span></div><strong>@OptionalPrice(card.Item.Stage=="acquired"?card.AcquisitionPrice:card.Negotiations.Select(x=>x.AgreedPrice).FirstOrDefault(x=>x!=null))</strong></div>
                         </div>
                         
 </div>
                             <div class="case-group-market">
-                                <GroupMarketPrices Value="SelectedMarket" Subject="CurrentSubject" Saved="ReloadAsync" EmptyText="Для сравнения выберите группу поиска во входящих" PurchaseMode="true" />
-                                @if (caseMarkets.Count > 1)
+                                @if (caseMarkets.Count == 0)
                                 {
-                                    <details><summary>Ещё @(caseMarkets.Count - 1) групп</summary><select value="@SelectedMarket?.SearchGroupId" @onchange="ChangeMarketGroup" aria-label="Группа рынка объекта">@foreach(var group in caseMarkets){<option value="@group.SearchGroupId">@group.Name</option>}</select></details>
+                                    <GroupMarketPrices Value="null" Subject="CurrentSubject" Saved="ReloadAsync" EmptyText="У объекта нет связанной зоны поиска" PurchaseMode="true" AreaSquareMeters="card.Item.Area" />
+                                }
+                                else
+                                {
+                                    <div class="case-market-list">
+                                        @foreach (var market in caseMarkets)
+                                        {
+                                            <div class="case-market-zone"><GroupMarketPrices Value="market" Subject="CurrentSubject" Saved="ReloadAsync" PurchaseMode="true" AreaSquareMeters="card.Item.Area" /></div>
+                                        }
+                                    </div>
                                 }
                             </div>
 </div>
@@ -213,6 +221,12 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
     private void MovePhoto(int step) => photoIndex=(photoIndex+step+card!.Photos.Length)%card.Photos.Length;
     private string AreaInSotki() => card!.Item.Area is {} area ? (area/100m).ToString("0.##",System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))+" сот." : "Не указана";
     private static string OptionalPrice(decimal? price) => price is null ? "Не указано" : ProcurementLabels.Money(price);
+    private static string PricePerSotkaCaption(decimal? price, decimal? areaSquareMeters)
+    {
+        if (price == null) return "Цена не указана";
+        decimal? perSotka = LocationEconomics.PricePerSotka(price, areaSquareMeters);
+        return perSotka == null ? "Нет площади для расчёта" : $"{ProcurementLabels.Money(perSotka)} / сот.";
+    }
     [Parameter] public EventCallback OnChanged { get; set; }
     private static readonly (string Id,string Label)[] Tabs=[("overview","Основное"),("negotiations","Переговоры"),("checks","Проверки"),("inspection","Осмотр"),("documents","Документы"),("history","История"),("sources","Источники")];
     private CaseRichNoteView? RichNote(CaseNoteSection section) => card?.RichNotes.SingleOrDefault(item => item.Section == section);
@@ -220,10 +234,7 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
     private string? sourceLinkLoadError; private IReadOnlyList<CaseLinkTarget> sourceLinkTargets=[];
     private NoteInput note=new(); private CheckTemplateInput checkTemplate=new(); private AttachmentInput attachment=new(); private DocumentRequirementInput documentRequirement=new(); private PurchaseInput purchase=new(); private CorrectionInput correction=new(); private FactCorrectionInput factCorrection=new(); private SourceLinkCorrectionInput sourceLinkCorrection=new(); private IBrowserFile? selectedFile; private Guid? retryAttachmentId; private IBrowserFile? retryFile;
     private IReadOnlyList<GroupMarketView> caseMarkets = [];
-    private Guid? selectedMarketGroup;
-    private GroupMarketView? SelectedMarket => caseMarkets.FirstOrDefault(item => item.SearchGroupId == selectedMarketGroup) ?? caseMarkets.FirstOrDefault();
-    private void ChangeMarketGroup(ChangeEventArgs args) => selectedMarketGroup = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null;
-    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);caseMarkets=await Markets.ReadCaseAsync(CurrentSubject,CaseId,CancellationToken.None);if(loaded!=CaseId)selectedMarketGroup=null;photoIndex=loaded==CaseId?Math.Clamp(photoIndex,0,Math.Max(0,card.Photos.Length-1)):0;if(loaded!=CaseId){factCorrectionOpen=false;sourceLinkOpen=false;sourceLinkTargets=[];}loaded=CaseId;}
+    protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);caseMarkets=await Markets.ReadCaseAsync(CurrentSubject,CaseId,CancellationToken.None);photoIndex=loaded==CaseId?Math.Clamp(photoIndex,0,Math.Max(0,card.Photos.Length-1)):0;if(loaded!=CaseId){factCorrectionOpen=false;sourceLinkOpen=false;sourceLinkTargets=[];}loaded=CaseId;}
     protected override async Task OnParametersSetAsync()
     {
         if(loaded!=CaseId)await ReloadAsync();

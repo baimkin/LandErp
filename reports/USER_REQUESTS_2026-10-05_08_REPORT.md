@@ -172,9 +172,61 @@ Production, production-БД и рабочий сервер не изменяли
 Миграция: `20261009085314_SearchGroupOwnership`; создана, но к production не
 применялась. Новых таблиц нет, поэтому runtime grants не менялись.
 
-Коммит и push: фиксируются отдельным коммитом этапа 3; SHA будет добавлен в
+Коммит и push: `5fc74d9` (`origin/main`).
+
+## Этап 4. Экономика локаций
+
+Реализовано:
+
+- существующие независимые поля `DemandTestPricePerSotka` и
+  `TargetPurchasePricePerSotka` переиспользованы без новой модели хранения;
+- в обзоре и во входящих оба ориентира показаны рядом с однозначными подписями
+  «Ориентир теста спроса» и «Желаемая цена покупки»;
+- в полной карточке объекта и боковой карточке показаны все связанные зоны, а
+  не только одна выбранная зона;
+- для каждой связанной зоны рассчитана целевая стоимость участка по желаемой
+  цене покупки за сотку и рабочей площади объекта;
+- в блоке «Цена и торг» для цены объявления, цены продавца, нашего предложения
+  и согласованной цены добавлено вычисляемое значение за сотку;
+- производные значения не сохраняются: общие расчёты выполняются через
+  `LocationEconomics`, с округлением до двух знаков;
+- отсутствие цены и отсутствие либо нулевая площадь отображаются как разные
+  явные состояния и не подменяются нулём;
+- существующие чтение, сохранение, optimistic concurrency и аудит ручных
+  ориентиров зон сохранены без изменений.
+
+Изменённые файлы:
+
+- `src/LandErp.Application/Modules/Overview/Public/GroupMarketContracts.cs`;
+- `src/LandErp.Server/Components/Pages/Home.razor`;
+- `src/LandErp.Server/Components/Pages/Home.razor.css`;
+- `src/LandErp.Server/Components/Pages/ProcurementQueueV2.razor`;
+- `src/LandErp.Server/Components/Pages/ProcurementQueueV2.razor.css`;
+- `src/LandErp.Server/Components/Primitives/DemandTestPrice.razor`;
+- `src/LandErp.Server/Components/Primitives/GroupMarketPrices.razor`;
+- `src/LandErp.Server/Components/Primitives/GroupMarketPrices.razor.css`;
+- `src/LandErp.Server/Components/Procurement/CaseWorkspace.razor`;
+- `src/LandErp.Server/Components/Procurement/CaseWorkspace.razor.css`;
+- `tests/LandErp.Foundation.Tests/MarketDemandTests.cs`;
+- `tests/LandErp.Foundation.Tests/ProcurementQueueV2ReadTests.cs`.
+
+Проверки:
+
+- `dotnet build tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj -c Release --no-restore`
+  → успешно, 0 ошибок, 0 предупреждений;
+- Release-прогон `MarketDemandTests` и `ProcurementQueueV2ReadTests`
+  → 10/10 Passed;
+- тесты покрывают расчёт цены за сотку и целевой стоимости, округление,
+  отсутствующую/нулевую/отрицательную площадь, сохранение обоих ориентиров и
+  UI-контракты отображения всех связанных зон;
+- визуальная приёмка владельцем не выполнялась в соответствии с ограничением
+  активного Gate на Browser/CUA/Playwright.
+
+Изменений схемы и новой migration нет.
+
+Коммит и push: фиксируются отдельным коммитом этапа 4; SHA будет добавлен в
 отчёт при фиксации следующего этапа.
 
-## Этапы 4–6
+## Этапы 5–6
 
-Не начаты на момент фиксации этапа 3.
+Не начаты на момент фиксации этапа 4.

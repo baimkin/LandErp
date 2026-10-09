@@ -40,6 +40,7 @@
 .case-side-stack{display:grid;grid-template-rows:1fr auto;gap:14px;min-width:0}
 .case-main-price{display:flex;flex-direction:column;gap:8px;margin:8px 0 16px}
 .case-main-price span{color:var(--text-muted);font-size:var(--text-sm)}
+.case-main-price small,.price-per-sotka{display:block;color:var(--text-muted);font-size:var(--text-sm);font-weight:400;margin-top:2px}
 .case-main-price strong{font-size:var(--text-metric);letter-spacing:-.8px;color:var(--text-strong)}
 .price-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-2);margin:0;padding-bottom:var(--space-4);border-bottom:1px solid var(--border)}
 .price-grid>div{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:var(--space-3);padding:0;border:0;background:none}
@@ -112,7 +113,7 @@
 .correction-error{display:grid;gap:8px;justify-items:start}
 @container property-card (max-width:760px){.correction-preview{grid-template-columns:1fr}}
 
-.case-price-top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}.case-group-market{flex:1 1 220px;min-width:0;max-width:320px}.case-group-market details{font-size:var(--text-sm);margin-top:6px}.case-group-market select{max-width:100%}
+.case-price-top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}.case-group-market{flex:1 1 220px;min-width:0;max-width:420px}.case-market-list{display:grid;gap:var(--space-3)}.case-market-zone{border-bottom:1px solid var(--border);padding-bottom:var(--space-3)}.case-market-zone:last-child{border-bottom:0;padding-bottom:0}
 
 /* Hidden panels keep rich-text drafts alive while changing tabs. */
 .case-workspace > [hidden]{display:none}

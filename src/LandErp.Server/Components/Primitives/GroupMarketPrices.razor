@@ -10,14 +10,16 @@
         <div class="market-group" title="@Value.Name">@Value.Name</div>
         @if (PurchaseMode)
         {
-            <div class="price-line"><span title="Ручной ориентир цены, не измеренный спрос">Тест спроса</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" /><span>/ сот.</span></span></div>
-            <div class="price-line"><span title="Целевая цена закупки">Нужная цена покупки</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" PurchaseTarget="true" /><span>/ сот.</span></span></div>
+            <div class="price-line"><span title="Ручной ориентир цены, не измеренный спрос">Ориентир теста спроса</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" /><span>/ сот.</span></span></div>
+            <div class="price-line"><span title="Ручной ориентир желаемой цены покупки">Желаемая цена покупки</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" PurchaseTarget="true" /><span>/ сот.</span></span></div>
+            <div class="price-line target-total"><span>Целевая стоимость участка</span><b title="@TargetPropertyPriceHint">@TargetPropertyPriceText</b></div>
         }
         else
         {
             <div class="price-line"><span>Медиана</span><b>@DemandTestPrice.Money(Value.MedianPricePerSotka) / сот.</b></div>
             <div class="price-line"><span>Средняя</span><b>@DemandTestPrice.Money(Value.AveragePricePerSotka) / сот.</b></div>
-            <div class="price-line"><span title="Ручной ориентир">Тест спроса</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" /><span>/ сот.</span></span></div>
+            <div class="price-line"><span title="Ручной ориентир, не измеренный спрос">Ориентир теста спроса</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" /><span>/ сот.</span></span></div>
+            <div class="price-line"><span title="Ручной ориентир желаемой цены покупки">Желаемая цена покупки</span><span class="price-figure"><DemandTestPrice Value="Value" Subject="Subject" Saved="Saved" PurchaseTarget="true" /><span>/ сот.</span></span></div>
         }
         <div class="market-caption">@if (Value.CanReadParticipants) { <a href="@($"/incoming?participants={Value.SearchGroupId}")">В расчёте: @Value.ParticipantCount</a> } else { <span>В расчёте: @Value.ParticipantCount</span> }</div>
     }
@@ -29,4 +31,15 @@
     [Parameter] public EventCallback Saved { get; set; }
     [Parameter] public string EmptyText { get; set; } = "Выберите группу поиска или сохранённый фильтр с группой";
     [Parameter] public bool PurchaseMode { get; set; }
+    [Parameter] public decimal? AreaSquareMeters { get; set; }
+    private decimal? TargetPropertyPrice => Value == null ? null
+        : LocationEconomics.TargetPropertyPrice(Value.TargetPurchasePricePerSotka, AreaSquareMeters);
+    private string TargetPropertyPriceText => TargetPropertyPrice is { } value
+        ? DemandTestPrice.Money(value)
+        : Value?.TargetPurchasePricePerSotka == null ? "Ориентир не задан" : "Нет площади для расчёта";
+    private string TargetPropertyPriceHint => TargetPropertyPrice is not null
+        ? "Желаемая цена покупки за сотку × рабочая площадь участка"
+        : Value?.TargetPurchasePricePerSotka == null
+            ? "Сначала укажите желаемую цену покупки за сотку"
+            : "Укажите положительную рабочую площадь участка";
 }

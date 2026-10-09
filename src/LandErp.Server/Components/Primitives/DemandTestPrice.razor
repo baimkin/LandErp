@@ -36,7 +36,7 @@
     private bool editing, saving;
     private string? error;
     private decimal? CurrentValue => PurchaseTarget ? Value.TargetPurchasePricePerSotka : Value.DemandTestPricePerSotka;
-    private string FieldLabel => PurchaseTarget ? "Нужная цена покупки" : "Тест спроса";
+    private string FieldLabel => PurchaseTarget ? "Желаемая цена покупки" : "Ориентир теста спроса";
     private string FieldHint => PurchaseTarget
         ? "Ручной ориентир нужной цены покупки за сотку; не цена объявления и не цена сделки"
         : "Ручной ориентир теста спроса; не измеренный спрос и не цена сделки";

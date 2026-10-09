@@ -33,6 +33,10 @@
 .case-facts dt{color:var(--text-muted);font-size:var(--text-sm);font-weight:var(--weight-normal);margin-bottom:4px}
 .case-facts dd{margin:0;font-size:var(--text-ui);font-weight:var(--weight-medium);overflow-wrap:anywhere}
 .case-facts small{display:block;font-size:var(--text-sm);font-weight:var(--weight-normal);color:var(--text-muted);margin-top:4px}
+.case-cadastral-fact dd{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.case-fact-edit{border:0;background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:3px 9px;font:inherit;font-size:var(--text-sm);font-weight:var(--weight-medium);cursor:pointer}
+.case-fact-edit:hover{background:var(--accent);color:#fff}
+.case-fact-edit:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .case-description{border-top:1px solid var(--border);padding:16px 0 32px;margin-top:16px;position:relative;flex:1;min-height:0}
 .case-description p{font-size:var(--text-sm);color:var(--text-muted);white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:7;-webkit-box-orient:vertical;overflow:hidden;margin:8px 0 0}
 .case-description.expanded p{display:block}

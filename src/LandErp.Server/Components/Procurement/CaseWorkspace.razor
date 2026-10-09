@@ -68,7 +68,7 @@ else if(card!=null && loaded == CaseId)
                         <div class="section-heading"><h3>Об объекте</h3>@if(card.CanManageDossier){<button class="btn quiet" @onclick="OpenFactCorrection">Исправить рабочие данные</button>}</div>
                         <dl class="case-facts">
                             <div><dt>Площадь</dt><dd>@AreaInSotki()<small>@ProcurementLabels.Area(card.Item.Area)</small></dd></div>
-                            <div><dt>Кадастровый номер</dt><dd>@(string.IsNullOrWhiteSpace(card.CadastralNumber)?"Не указан":card.CadastralNumber)</dd></div>
+                            <div class="case-cadastral-fact"><dt>Кадастровый номер</dt><dd><span>@(string.IsNullOrWhiteSpace(card.CadastralNumber)?"Не указан":card.CadastralNumber)</span>@if(card.CanManageDossier){<button type="button" class="case-fact-edit" @onclick="()=>OpenFactCorrection(CaseFactField.CadastralNumber)">Исправить</button>}</dd></div>
                             
                             <div><dt>Источники</dt><dd>@SourceSummary()</dd></div>
                         </dl>
@@ -260,7 +260,8 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
     private void OpenNegotiation(){ClearFeedback();negotiationOpen=true;}
     private void OpenPurchase(){ClearFeedback();purchase=new(){Price=card!.Negotiations.Select(x=>x.AgreedPrice).FirstOrDefault(x=>x!=null)??card.Item.Price??0,Date=DateOnly.FromDateTime(DateTime.Today)};purchaseOpen=true;}
     private void OpenCorrection(){ClearFeedback();correction=new(){Price=card!.AcquisitionPrice??0,Date=card.AcquisitionDate??DateOnly.FromDateTime(DateTime.Today),Comment=card.AcquisitionComment??""};correctionOpen=true;}
-    private void OpenFactCorrection(){if(Busy||card==null)return;ClearFeedback();factCorrection=new(){Field=CaseFactField.Title,CaseVersion=card.Item.CaseVersion};UseFactCorrectionField();factCorrectionOpen=true;}
+    private void OpenFactCorrection()=>OpenFactCorrection(CaseFactField.Title);
+    private void OpenFactCorrection(CaseFactField field){if(Busy||card==null)return;ClearFeedback();factCorrection=new(){Field=field,CaseVersion=card.Item.CaseVersion};UseFactCorrectionField();factCorrectionOpen=true;}
     private void CloseFactCorrection(){if(!Busy){factCorrectionOpen=false;factCorrection=new();}}
     private void UseFactCorrectionField(){if(card==null)return;factCorrection.TextValue="";factCorrection.NumericValue=null;switch(factCorrection.Field){case CaseFactField.Title:factCorrection.TextValue=card.Item.Title;break;case CaseFactField.Price:factCorrection.NumericValue=card.Item.Price;break;case CaseFactField.AreaSquareMeters:factCorrection.NumericValue=card.Item.Area;break;case CaseFactField.Location:factCorrection.TextValue=card.Item.Location??"";break;case CaseFactField.CadastralNumber:factCorrection.TextValue=card.CadastralNumber??"";break;}}
     private bool FactUsesText()=>factCorrection.Field is CaseFactField.Title or CaseFactField.Location or CaseFactField.CadastralNumber;

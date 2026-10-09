@@ -7,6 +7,7 @@ public enum CatalogEventKind { ReviewStarted, SourceChanged, MonitoringStarted, 
 public enum DuplicateCandidateStatus { Pending, Confirmed, Rejected, Obsolete }
 public enum PhotoFingerprintStatus { Ready, Retry, Unsupported }
 public enum CatalogContactType { Phone, Email, Telegram, WhatsApp, Website, Other }
+public enum ListingCommentHistoryOperation { Update, Delete }
 
 public sealed class Listing
 {
@@ -68,6 +69,48 @@ public sealed class ListingContact
     public bool IsPrimary { get; set; }
     public DateTimeOffset FirstObservedAt { get; set; }
     public DateTimeOffset LastObservedAt { get; set; }
+}
+
+public sealed class ListingCommentType
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public string Name { get; set; } = "";
+    public string? Description { get; set; }
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public long Version { get; set; } = 1;
+}
+
+public sealed class ListingComment
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public Guid ListingId { get; set; }
+    public Guid CommentTypeId { get; set; }
+    public string Text { get; set; } = "";
+    public Guid CreatedByEmployeeId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public Guid UpdatedByEmployeeId { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public long Version { get; set; } = 1;
+}
+
+public sealed class ListingCommentHistory
+{
+    public Guid Id { get; set; }
+    public Guid OrganizationId { get; set; }
+    public Guid ListingCommentId { get; set; }
+    public Guid ListingId { get; set; }
+    public Guid CommentTypeId { get; set; }
+    public string OldText { get; set; } = "";
+    public Guid OldCreatedByEmployeeId { get; set; }
+    public DateTimeOffset OldCreatedAt { get; set; }
+    public Guid OldUpdatedByEmployeeId { get; set; }
+    public DateTimeOffset OldUpdatedAt { get; set; }
+    public Guid ChangedByEmployeeId { get; set; }
+    public DateTimeOffset ChangedAt { get; set; }
+    public ListingCommentHistoryOperation Operation { get; set; }
 }
 
 public sealed class CatalogEvent

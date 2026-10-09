@@ -60,6 +60,8 @@ public sealed class PostgresTests
             (await context.CollectorAgents.SingleAsync(item => item.Id == existingAgent)).RuntimeState);
         Assert.IsTrue(await context.RolePermissions.AnyAsync(item => item.RoleId == existingRole
             && item.PermissionId == Permissions.CollectionRead));
+        Assert.IsTrue(await context.ListingCommentTypes.AnyAsync(item => item.OrganizationId == existingOrganization
+            && item.Name == "Общий комментарий" && item.IsActive));
         Assert.IsTrue(await readiness.IsReadyAsync(CancellationToken.None));
 
         await using NpgsqlConnection connection = new(sandbox.MigratorConnection);

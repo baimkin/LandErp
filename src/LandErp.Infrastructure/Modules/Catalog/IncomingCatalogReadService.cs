@@ -117,6 +117,18 @@ public sealed class IncomingCatalogReadService(
         Listing[] items = await ordered.Skip(baseFilter.Offset).Take(baseFilter.Size).ToArrayAsync(cancellationToken);
         Guid[] ids = items.Select(item => item.Id).ToArray();
 
+        var commentRows = await (from comment in db.ListingComments.AsNoTracking()
+                                 join type in db.ListingCommentTypes.AsNoTracking() on comment.CommentTypeId equals type.Id
+                                 where comment.OrganizationId == context.OrganizationId && ids.Contains(comment.ListingId)
+                                 orderby type.SortOrder, type.Name, type.Id
+                                 select new { comment.ListingId, Comment = new ListingCommentPreview(
+                                     comment.Id, comment.CommentTypeId, type.Name, comment.Text) })
+            .ToArrayAsync(cancellationToken);
+        Dictionary<Guid, IReadOnlyList<ListingCommentPreview>> commentsByItem = commentRows
+            .GroupBy(item => item.ListingId)
+            .ToDictionary(group => group.Key,
+                group => (IReadOnlyList<ListingCommentPreview>)group.Select(item => item.Comment).ToArray());
+
         var linked = await (from link in db.PropertyCaseSourceLinks.AsNoTracking()
                             join propertyCase in db.PropertyCases.AsNoTracking() on link.PropertyCaseId equals propertyCase.Id
                             where ids.Contains(link.CatalogItemId) && link.Confirmed
@@ -181,7 +193,8 @@ public sealed class IncomingCatalogReadService(
                 landTypes, matchedField, matchedValue, Reviewed: reviewedOnPage.Contains(item.Id),
                 PossibleDuplicate: possibleDuplicatesOnPage.Contains(item.Id),
                 ObjectGroupId: item.ObjectGroupId, ObjectGroupMemberCount: objectGroupMemberCount,
-                DeclaredLandTypes: declaredLandTypes, LandTypeConflict: landTypeConflict);
+                DeclaredLandTypes: declaredLandTypes, LandTypeConflict: landTypeConflict,
+                Comments: commentsByItem.GetValueOrDefault(item.Id) ?? []);
             return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId, objectGroupMemberCount);
         }).ToArray();
 

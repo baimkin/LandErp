@@ -122,6 +122,41 @@ internal static class CollectionMappings
         builder.Entity<ListingContact>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany()
             .HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
 
+        builder.Entity<ListingCommentType>().ToTable("comment_types", "catalog");
+        builder.Entity<ListingCommentType>().Property(item => item.Name).HasMaxLength(120);
+        builder.Entity<ListingCommentType>().Property(item => item.Description).HasMaxLength(1000);
+        builder.Entity<ListingCommentType>().Property(item => item.Version).IsConcurrencyToken();
+        builder.Entity<ListingCommentType>().HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
+        builder.Entity<ListingCommentType>().HasIndex(item => new { item.OrganizationId, item.IsActive, item.SortOrder });
+        builder.Entity<ListingCommentType>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany()
+            .HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<ListingComment>().ToTable("listing_comments", "catalog");
+        builder.Entity<ListingComment>().Property(item => item.Text).HasMaxLength(4000);
+        builder.Entity<ListingComment>().Property(item => item.Version).IsConcurrencyToken();
+        builder.Entity<ListingComment>().HasIndex(item => new { item.OrganizationId, item.ListingId, item.CommentTypeId }).IsUnique();
+        builder.Entity<ListingComment>().HasIndex(item => new { item.OrganizationId, item.ListingId });
+        builder.Entity<ListingComment>().HasOne<Listing>().WithMany().HasForeignKey(item => item.ListingId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingComment>().HasOne<ListingCommentType>().WithMany().HasForeignKey(item => item.CommentTypeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingComment>().HasOne<Employee>().WithMany().HasForeignKey(item => item.CreatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingComment>().HasOne<Employee>().WithMany().HasForeignKey(item => item.UpdatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingComment>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany()
+            .HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<ListingCommentHistory>().ToTable("listing_comments_history", "catalog");
+        builder.Entity<ListingCommentHistory>().Property(item => item.OldText).HasMaxLength(4000);
+        builder.Entity<ListingCommentHistory>().Property(item => item.Operation).HasConversion<string>().HasMaxLength(16);
+        builder.Entity<ListingCommentHistory>().HasIndex(item => new
+            { item.OrganizationId, item.ListingId, item.CommentTypeId, item.ChangedAt });
+        builder.Entity<ListingCommentHistory>().HasIndex(item => item.ListingCommentId);
+        builder.Entity<ListingCommentHistory>().HasOne<Listing>().WithMany().HasForeignKey(item => item.ListingId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingCommentHistory>().HasOne<ListingCommentType>().WithMany().HasForeignKey(item => item.CommentTypeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingCommentHistory>().HasOne<Employee>().WithMany().HasForeignKey(item => item.OldCreatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingCommentHistory>().HasOne<Employee>().WithMany().HasForeignKey(item => item.OldUpdatedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingCommentHistory>().HasOne<Employee>().WithMany().HasForeignKey(item => item.ChangedByEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        builder.Entity<ListingCommentHistory>().HasOne<LandErp.Application.Modules.Organization.Domain.Organization>().WithMany()
+            .HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+
         builder.Entity<CatalogObservation>().ToTable("observations", "catalog");
         builder.Entity<CatalogObservation>().Property(item => item.PayloadJson).HasColumnType("jsonb");
         builder.Entity<CatalogObservation>().Property(item => item.ChangesJson).HasColumnType("jsonb");

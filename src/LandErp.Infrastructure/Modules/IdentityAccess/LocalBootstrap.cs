@@ -1,6 +1,7 @@
 using LandErp.Application.Foundation;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Organization.Domain;
+using LandErp.Application.Modules.Catalog.Domain;
 using LandErp.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -81,6 +82,12 @@ public static class OwnerBootstrap
         Employee employee = new() { Id = DataConventions.NewId(), OrganizationId = organization.Id,
             UserId = user.Id, DisplayName = "Владелец", Active = true };
         db.Organizations.Add(organization);
+        db.ListingCommentTypes.Add(new()
+        {
+            Id = DataConventions.NewId(), OrganizationId = organization.Id,
+            Name = "Общий комментарий", Description = "Основной рабочий комментарий к входящему объявлению.",
+            SortOrder = 10, IsActive = true
+        });
         LandErp.Infrastructure.Modules.Procurement.KanbanProvisioning.CreateDefault(db, organization.Id);
         db.Employees.Add(employee);
         db.EmployeeAssignments.Add(new() { Id = DataConventions.NewId(), EmployeeId = employee.Id,

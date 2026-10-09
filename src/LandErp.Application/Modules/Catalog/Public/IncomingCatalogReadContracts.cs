@@ -37,7 +37,8 @@ public sealed record IncomingCatalogRowRead(Guid CatalogItemId, Guid? SearchConf
     IncomingLandType[] LandTypes, IncomingCatalogMatchField? SearchMatchedField = null,
     string? SearchMatchedValue = null, bool Reviewed = false, bool PossibleDuplicate = false,
     Guid? ObjectGroupId = null, int ObjectGroupMemberCount = 0,
-    IncomingLandType[]? DeclaredLandTypes = null, bool LandTypeConflict = false);
+    IncomingLandType[]? DeclaredLandTypes = null, bool LandTypeConflict = false,
+    IReadOnlyList<ListingCommentPreview>? Comments = null);
 public sealed record IncomingCatalogReadSummary(int Incoming, int Attention, int Monitoring, int InWork, int Incomplete,
     int PriceChanged, int ReturnedFromMonitoring, int New = 0, int ProcessedToday = 0, int PossibleDuplicate = 0);
 public sealed record IncomingCatalogReadPage(IReadOnlyList<CatalogItemView> Items, int Total,

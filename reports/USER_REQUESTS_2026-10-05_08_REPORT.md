@@ -224,9 +224,87 @@ Production, production-БД и рабочий сервер не изменяли
 
 Изменений схемы и новой migration нет.
 
-Коммит и push: фиксируются отдельным коммитом этапа 4; SHA будет добавлен в
+Коммит и push: `52e08a3` (`origin/main`).
+
+## Этап 5. Комментарии входящих объявлений
+
+Реализовано:
+
+- добавлены `catalog.comment_types`, `catalog.listing_comments` и
+  `catalog.listing_comments_history` с организационной изоляцией и связями с
+  объявлениями, сотрудниками и видами комментариев;
+- для каждой пары объявления и вида действует уникальность
+  `(organization_id, listing_id, comment_type_id)`; актуальные комментарии и
+  виды защищены optimistic concurrency;
+- существующие организации получили начальный вид «Общий комментарий», а
+  bootstrap новой организации создаёт его вместе с Owner;
+- PostgreSQL-триггер сохраняет прежнее значение при содержательном UPDATE и при
+  DELETE; технический UPDATE без изменения текста историю не создаёт;
+- автор UPDATE/DELETE передаётся через транзакционный
+  `set_config('landerp.comment_actor_employee_id', ..., true)`; отсутствие
+  контекста отклоняет содержательное прямое изменение, после транзакции значение
+  не остаётся в соединении пула;
+- сотрудники с уровнем Incoming `Process` могут создавать, изменять и очищать
+  комментарии доступного объявления; ProcurementHead, Administrator и Owner
+  управляют видами;
+- вид комментария не удаляется физически: архивирование запрещает новые
+  значения, но сохраняет текущие комментарии и всю историю;
+- поиск по актуальному тексту комментариев включён в серверный предикат до
+  пагинации и использует GIN full-text index;
+- комментарии текущей страницы загружаются одним пакетным запросом, без запроса
+  на каждую строку;
+- во входящих добавлена одна компактная колонка «Комментарии» с количеством и
+  превью; редактор поддерживает добавление, изменение, очистку, просмотр истории
+  конкретного вида и управление справочником для уполномоченных ролей;
+- все записи дополнены существующим audit организации; runtime grants обновлены
+  только для трёх новых таблиц.
+
+Основные изменённые файлы:
+
+- `src/LandErp.Application/Modules/Catalog/Domain/CatalogModels.cs`;
+- `src/LandErp.Application/Modules/Catalog/Public/ListingCommentContracts.cs`;
+- `src/LandErp.Application/Modules/Catalog/Public/IncomingCatalogReadContracts.cs`;
+- `src/LandErp.Infrastructure/Modules/Catalog/ListingCommentService.cs`;
+- `src/LandErp.Infrastructure/Modules/Catalog/IncomingCatalogQuery.cs`;
+- `src/LandErp.Infrastructure/Modules/Catalog/IncomingCatalogReadService.cs`;
+- `src/LandErp.Infrastructure/Modules/Collection/CollectionMappings.cs`;
+- `src/LandErp.Infrastructure/Modules/IdentityAccess/LocalBootstrap.cs`;
+- `src/LandErp.Infrastructure/Modules/Procurement/ProcurementServices.cs`;
+- `src/LandErp.Infrastructure/Persistence/LandErpDbContext.cs`;
+- `src/LandErp.Infrastructure/Persistence/ModelConventions.cs`;
+- `src/LandErp.Infrastructure/Persistence/ProductionDatabaseInitializer.cs`;
+- `src/LandErp.Infrastructure/Migrations/20261009094850_ListingComments.cs`;
+- `src/LandErp.Infrastructure/Migrations/20261009094850_ListingComments.Designer.cs`;
+- `src/LandErp.Infrastructure/Migrations/LandErpDbContextModelSnapshot.cs`;
+- `src/LandErp.Server/Components/Pages/IncomingCatalogV2.razor`;
+- `src/LandErp.Server/Components/Pages/IncomingCatalogV2.razor.css`;
+- `tests/LandErp.Foundation.Tests/ListingCommentTests.cs`;
+- `tests/LandErp.Foundation.Tests/PostgresTests.cs`.
+
+Проверки:
+
+- `dotnet build tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj -c Release --no-restore`
+  → успешно, 0 ошибок, 0 предупреждений;
+- адресный Release-прогон комментариев, чтения/фильтров входящих, мониторинга,
+  участников расчёта и migration/runtime boundary → 30/30 Passed;
+- отдельный адресный прогон `ListingCommentTests` → 3/3 Passed;
+- отдельный migration/runtime-тест
+  `RealPostgresMigrationsCommentsRuntimeIsolationAndRecovery` → Passed;
+- `dotnet ef migrations has-pending-model-changes` в Release → модель
+  соответствует последней миграции;
+- первый черновой профиль по имени класса захватил один старый browser-тест: он
+  остановился до запуска хоста и браузера из-за отсутствующего локального пути
+  `artifacts/stage1/dotnet/dotnet.exe`; итоговый разрешённый профиль повторён с
+  явным исключением этого метода и прошёл 30/30;
+- Browser/CUA/Playwright и визуальная приёмка не выполнялись; она остаётся
+  владельцу в соответствии с активным Gate.
+
+Миграция: `20261009094850_ListingComments`; создана и проверена на изолированных
+PostgreSQL-базах, но к production не применялась.
+
+Коммит и push: фиксируются отдельным коммитом этапа 5; SHA будет добавлен в
 отчёт при фиксации следующего этапа.
 
-## Этапы 5–6
+## Этап 6
 
-Не начаты на момент фиксации этапа 4.
+Не начат на момент фиксации этапа 5.

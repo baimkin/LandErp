@@ -42,6 +42,9 @@ internal static class ModelConventions
         ["scheduler_status"] = "Текущее техническое состояние server scheduler: последний старт, успешный цикл, ошибка и число поставленных работ.",
         ["listings"] = "Универсальные входящие предложения Catalog из автоматических и ручных источников; не идентичность земельного участка.",
         ["listing_contacts"] = "Наблюдаемые публичные контакты конкретного объявления. Не являются общей CRM-карточкой продавца и не удаляются только из-за отсутствия в следующем снимке.",
+        ["comment_types"] = "Расширяемый справочник видов комментариев организации; вид является категорией, а не готовой текстовой фразой.",
+        ["listing_comments"] = "Одно актуальное значение каждого вида комментария для объявления; прежние значения сохраняются отдельной историей.",
+        ["listing_comments_history"] = "Неизменяемая история предыдущих значений и удалений комментариев, формируемая PostgreSQL-триггером с автором операции.",
         ["object_groups"] = "Подтверждённые группы объявлений одного физического объекта. Группа не имеет главного объявления и не заменяет PropertyCase.",
         ["observations"] = "Неизменяемые наблюдения публичных объявлений: Source/ExternalId, Raw/Parsed/Presence, provenance и версия адаптера. Browser state и raw HTML здесь не хранятся.",
         ["events"] = "Неизменяемая бизнес-история внимания к входящему предложению: изменения источника, мониторинг цены, классификация и возобновление кейса.",
@@ -253,6 +256,11 @@ internal static class ModelConventions
                 else if (table == "listing_contacts" && property.Name == "IsPrimary") property.SetComment("Признак основного контакта в последнем наблюдении, где этот контакт присутствовал.");
                 else if (table == "listing_contacts" && property.Name == "Source") property.SetComment("Источник объявления, в котором наблюдался контакт.");
                 else if (table == "listing_contacts" && property.Name == "Type") property.SetComment("Тип публичного контакта: телефон, email, Telegram, WhatsApp, сайт или другое.");
+                else if (table == "listing_comments" && property.Name == "CreatedByEmployeeId") property.SetComment("Сотрудник, создавший актуальный комментарий.");
+                else if (table == "listing_comments" && property.Name == "UpdatedByEmployeeId") property.SetComment("Сотрудник, последним изменивший актуальный комментарий.");
+                else if (table == "listing_comments_history" && property.Name == "ChangedByEmployeeId") property.SetComment("Автор текущей операции UPDATE или DELETE, переданный транзакционным PostgreSQL-контекстом.");
+                else if (table == "listing_comments_history" && property.Name == "Operation") property.SetComment("Тип операции, сформировавшей историю: Update или Delete.");
+                else if (table == "listing_comments_history" && property.Name == "ChangedAt") property.SetComment("UTC время срабатывания PostgreSQL-триггера истории комментариев.");
                 else if (table == "events" && property.Name == "CatalogItemId") property.SetComment("Входящий элемент Catalog, к которому относится неизменяемое событие внимания.");
                 else if (table == "events" && property.Name == "Kind") property.SetComment("Стабильный тип события: изменение источника, мониторинг, классификация или возобновление кейса.");
                 else if (table == "events" && property.Name == "Message") property.SetComment("Человекочитаемое объяснение события без секретов и raw payload источника.");

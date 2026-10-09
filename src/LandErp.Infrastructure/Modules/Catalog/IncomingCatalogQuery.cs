@@ -19,12 +19,18 @@ internal sealed class IncomingCatalogQuery(LandErpDbContext db, Guid organizatio
         foreach (string term in searchTerms)
         {
             string pattern = $"%{term}%";
+            IQueryable<Guid> commentListingIds = db.ListingComments.AsNoTracking()
+                .Where(comment => comment.OrganizationId == organizationId
+                    && EF.Functions.ToTsVector("simple", comment.Text)
+                        .Matches(EF.Functions.PlainToTsQuery("simple", term)))
+                .Select(comment => comment.ListingId);
             query = query.Where(item =>
                 EF.Functions.ILike(item.Title ?? "", pattern)
                 || EF.Functions.ILike(item.Location ?? "", pattern)
                 || EF.Functions.ILike(item.ExternalId ?? "", pattern)
                 || EF.Functions.ILike(item.CadastralNumber ?? "", pattern)
-                || EF.Functions.ILike(item.SellerName ?? "", pattern));
+                || EF.Functions.ILike(item.SellerName ?? "", pattern)
+                || commentListingIds.Contains(item.Id));
         }
         if (filter.IncludedInMedian != null) query = query.Where(item => item.IncludeInCalculation == filter.IncludedInMedian);
         if (baseFilter.Source != null) query = query.Where(item => item.Source == baseFilter.Source);

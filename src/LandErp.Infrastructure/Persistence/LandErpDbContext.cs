@@ -39,6 +39,9 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
     public DbSet<CollectionSchedulerStatus> CollectionSchedulerStatuses => Set<CollectionSchedulerStatus>();
     public DbSet<Listing> Listings => Set<Listing>();
     public DbSet<ListingContact> ListingContacts => Set<ListingContact>();
+    public DbSet<ListingCommentType> ListingCommentTypes => Set<ListingCommentType>();
+    public DbSet<ListingComment> ListingComments => Set<ListingComment>();
+    public DbSet<ListingCommentHistory> ListingCommentHistories => Set<ListingCommentHistory>();
     public DbSet<CatalogObjectGroup> CatalogObjectGroups => Set<CatalogObjectGroup>();
     public DbSet<CatalogObservation> ListingObservations => Set<CatalogObservation>();
     public DbSet<CatalogEvent> CatalogEvents => Set<CatalogEvent>();
@@ -167,6 +170,7 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
 
             if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation or CatalogEvent or WorkflowTransition or Approval
                 or KanbanTransition or BusinessTimelineEntry or CaseNegotiation or CaseAttachment or PropertyCaseFactRevision
+                or ListingCommentHistory
                 && entry.State is EntityState.Modified or EntityState.Deleted)
             {
                 throw new InvalidOperationException("Audit facts are append-only.");

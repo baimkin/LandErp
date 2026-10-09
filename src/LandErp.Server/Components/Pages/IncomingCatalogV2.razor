@@ -11,6 +11,7 @@
 @inject ICatalogWorkspace Workspace
 @inject IIncomingCatalogReadService IncomingReads
 @inject IIncomingFilterPresetService FilterPresets
+@inject IListingCommentService ListingComments
 @inject ICatalogCalculationService Calculation
 @inject IEmployeeAccessService AccessV1
 @inject NavigationManager Navigation
@@ -252,7 +253,7 @@
                             <colgroup>
                                 @if (CanManageCurrentZoneCalculation) { <col class="col-select" /> }
                                 <col class="col-object" /><col class="col-participation" /><col class="col-price" /><col class="col-unit-price" />
-                                <col class="col-area" /><col class="col-land" /><col class="col-reason" /><col class="col-quality" /><col class="col-date" /><col class="col-source" />
+                                <col class="col-area" /><col class="col-land" /><col class="col-reason" /><col class="col-comments" /><col class="col-quality" /><col class="col-date" /><col class="col-source" />
                             </colgroup>
                             <thead>
                                 <tr>
@@ -261,7 +262,7 @@
                                     <th aria-sort="@SortAria(IncomingCatalogSortField.Price)"><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.Price)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Price)">Цена <span>@SortIndicator(IncomingCatalogSortField.Price)</span></button></th>
                                     <th aria-sort="@SortAria(IncomingCatalogSortField.PricePerSotka)"><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.PricePerSotka)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.PricePerSotka)">Цена за сотку <span>@SortIndicator(IncomingCatalogSortField.PricePerSotka)</span></button></th>
                                     <th aria-sort="@SortAria(IncomingCatalogSortField.Area)"><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.Area)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Area)">Площадь <span>@SortIndicator(IncomingCatalogSortField.Area)</span></button></th>
-                                    <th>Тип участка</th><th>Почему в очереди</th><th>Данные</th><th>Найдено</th><th>Источник</th>
+                                    <th>Тип участка</th><th>Почему в очереди</th><th>Комментарии</th><th>Данные</th><th>Найдено</th><th>Источник</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -332,6 +333,20 @@
                                             }
                                         </td>
                                         <td><strong class="v2-reason">@item.QueueReason</strong><div class="v2-sub">@DispositionLabel(item.Disposition)</div></td>
+                                        <td @onclick:stopPropagation="true">
+                                            <button type="button" class="v2-comments-cell" disabled="@Busy" @onclick="() => OpenCommentsAsync(item)">
+                                                @if (row?.Comments?.Count > 0)
+                                                {
+                                                    <strong>@CommentCountLabel(row.Comments.Count)</strong>
+                                                    <span>@CommentPreview(row.Comments)</span>
+                                                }
+                                                else
+                                                {
+                                                    <strong>+ Добавить</strong>
+                                                    <span>Нет комментариев</span>
+                                                }
+                                            </button>
+                                        </td>
                                         <td>
                                             <div class="v2-completeness">
                                                 <span class="v2-badge @(completeness < 60 ? "warn" : "ok")">@completeness%</span>
@@ -854,6 +869,79 @@
     </Modal>
 }
 
+@if (commentEditor != null && commentItem != null)
+{
+    <Modal Title="@($"Комментарии · {commentItem.Title}")" OnClose="CloseComments">
+        @if (!manageCommentTypes)
+        {
+            <div class="comment-editor-head">
+                <p class="subtle">Один актуальный текст каждого вида. Очистка сохраняет прежнее значение в истории.</p>
+                @if (commentEditor.CanManageTypes)
+                {
+                    <button type="button" class="v2-btn sm quiet" @onclick="OpenCommentTypeManagement">Управление видами</button>
+                }
+            </div>
+            @foreach (ListingCommentTypeView type in commentEditor.Types)
+            {
+                ListingCommentView? current = commentEditor.Comments.FirstOrDefault(item => item.CommentTypeId == type.Id);
+                IReadOnlyList<ListingCommentHistoryView> history = commentEditor.HistoryByType.GetValueOrDefault(type.Id) ?? [];
+                <section class="comment-kind @(type.IsActive ? "" : "inactive")">
+                    <div class="comment-kind-title">
+                        <div><strong>@type.Name</strong>@if (!type.IsActive) { <span class="v2-badge">Архивный вид</span> }</div>
+                        @if (!string.IsNullOrWhiteSpace(type.Description)) { <small>@type.Description</small> }
+                    </div>
+                    <textarea value="@CommentDraft(type.Id)" disabled="@(!commentEditor.CanEdit || (!type.IsActive && current == null))"
+                        placeholder="Введите комментарий…" @oninput="eventArgs => SetCommentDraft(type.Id, eventArgs.Value?.ToString())"></textarea>
+                    @if (current != null)
+                    {
+                        <div class="comment-meta">Обновил: @current.UpdatedByName · @ProcurementLabels.Time(current.UpdatedAt)</div>
+                    }
+                    <div class="comment-actions">
+                        @if (commentEditor.CanEdit)
+                        {
+                            <button type="button" class="v2-btn sm primary" disabled="@Busy" @onclick="() => SaveCommentAsync(type.Id)">Сохранить</button>
+                            @if (current != null) { <button type="button" class="v2-btn sm danger-text" disabled="@Busy" @onclick="() => ClearCommentAsync(type.Id)">Очистить</button> }
+                        }
+                        @if (history.Count > 0)
+                        {
+                            <details class="comment-history">
+                                <summary>История · @history.Count</summary>
+                                @foreach (ListingCommentHistoryView entry in history)
+                                {
+                                    <article>
+                                        <div><strong>@(entry.Operation == ListingCommentHistoryOperation.Delete ? "Удалено" : "Изменено")</strong> · @entry.ChangedByName · @ProcurementLabels.Time(entry.ChangedAt)</div>
+                                        <p>@entry.OldText</p>
+                                        <small>Предыдущее значение: @entry.OldAuthorName · @ProcurementLabels.Time(entry.OldUpdatedAt)</small>
+                                    </article>
+                                }
+                            </details>
+                        }
+                    </div>
+                </section>
+            }
+        }
+        else
+        {
+            <div class="comment-editor-head"><p class="subtle">Архивация скрывает вид для новых значений, но не удаляет комментарии и историю.</p><button type="button" class="v2-btn sm quiet" @onclick="() => manageCommentTypes = false">← К комментариям</button></div>
+            @foreach (CommentTypeInput draft in commentTypeDrafts.OrderBy(item => item.SortOrder).ThenBy(item => item.Name))
+            {
+                <section class="comment-type-row">
+                    <label class="field"><span>Название</span><input @bind="draft.Name" /></label>
+                    <label class="field"><span>Описание</span><input @bind="draft.Description" /></label>
+                    <label class="field order"><span>Порядок</span><input type="number" @bind="draft.SortOrder" /></label>
+                    <div class="comment-actions"><button type="button" class="v2-btn sm primary" disabled="@Busy" @onclick="() => SaveCommentTypeAsync(draft)">Сохранить</button><button type="button" class="v2-btn sm" disabled="@Busy" @onclick="() => ToggleCommentTypeAsync(draft)">@(draft.IsActive ? "Архивировать" : "Восстановить")</button></div>
+                </section>
+            }
+            <section class="comment-type-row new">
+                <label class="field"><span>Новый вид</span><input @bind="newCommentType.Name" /></label>
+                <label class="field"><span>Описание</span><input @bind="newCommentType.Description" /></label>
+                <label class="field order"><span>Порядок</span><input type="number" @bind="newCommentType.SortOrder" /></label>
+                <div class="comment-actions"><button type="button" class="v2-btn sm primary" disabled="@Busy" @onclick="CreateCommentTypeAsync">Добавить вид</button></div>
+            </section>
+        }
+    </Modal>
+}
+
 @if (Success != null)
 {
     <div class="v2-toast show" role="status"><span>@Success</span> @if(takenCaseId!=null){<a href="/procurement/@takenCaseId">Открыть →</a>}<button type="button" class="btn quiet" aria-label="Закрыть уведомление" @onclick="()=>{Success=null;takenCaseId=null;}">×</button></div>
@@ -916,6 +1004,12 @@
     private const int SearchDebounceMilliseconds = 400;
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private IncomingCatalogReadPage? catalogPage;
+    private CatalogItemView? commentItem;
+    private ListingCommentEditorView? commentEditor;
+    private readonly Dictionary<Guid, string> commentDrafts = [];
+    private readonly List<CommentTypeInput> commentTypeDrafts = [];
+    private CommentTypeInput newCommentType = new() { SortOrder = 10 };
+    private bool manageCommentTypes;
     private CatalogItemDetail? detail;
     private IncomingCatalogDetailRead? detailRead;
     private readonly FilterInput filter = new();
@@ -1061,6 +1155,113 @@
     private string CalculationSwitchTitle(CatalogItemView item) => !CanManageCurrentZoneCalculation
         ? CurrentCalculationGroupId == null ? "Сначала выберите зону поиска" : "Нет права изменять медиану этой зоны"
         : item.CalculationIneligibility ?? (item.IncludeInCalculation ? "Исключить из медианы" : "Включить в медиану");
+
+    private static string CommentCountLabel(int count) => count switch
+    {
+        1 => "1 вид",
+        >= 2 and <= 4 => $"{count} вида",
+        _ => $"{count} видов"
+    };
+
+    private static string CommentPreview(IReadOnlyList<ListingCommentPreview> comments)
+    {
+        string text = comments[0].Text.ReplaceLineEndings(" ").Trim();
+        return text.Length <= 55 ? text : text[..52] + "…";
+    }
+
+    private async Task OpenCommentsAsync(CatalogItemView item)
+    {
+        try
+        {
+            commentItem = item;
+            ApplyCommentEditor(await ListingComments.ReadAsync(CurrentSubject, item.Id, CancellationToken.None));
+        }
+        catch (AccessDeniedException) { ShowValidationError("Нет доступа к комментариям объявления."); }
+        catch (Exception exception) { ShowValidationError(ReadFailure(exception, "Не удалось загрузить комментарии.")); }
+    }
+
+    private void ApplyCommentEditor(ListingCommentEditorView value)
+    {
+        commentEditor = value;
+        commentDrafts.Clear();
+        foreach (ListingCommentTypeView type in value.Types)
+            commentDrafts[type.Id] = value.Comments.FirstOrDefault(item => item.CommentTypeId == type.Id)?.Text ?? "";
+        commentTypeDrafts.Clear();
+        commentTypeDrafts.AddRange(value.Types.Select(type => new CommentTypeInput
+        {
+            Id = type.Id, Version = type.Version, Name = type.Name, Description = type.Description ?? "",
+            SortOrder = type.SortOrder, IsActive = type.IsActive
+        }));
+    }
+
+    private void CloseComments()
+    {
+        commentItem = null; commentEditor = null; commentDrafts.Clear(); commentTypeDrafts.Clear();
+        manageCommentTypes = false; newCommentType = new() { SortOrder = 10 };
+    }
+
+    private string CommentDraft(Guid typeId) => commentDrafts.GetValueOrDefault(typeId) ?? "";
+    private void SetCommentDraft(Guid typeId, string? value) => commentDrafts[typeId] = value ?? "";
+
+    private async Task SaveCommentAsync(Guid typeId)
+    {
+        if (commentItem == null || commentEditor == null) return;
+        ListingCommentView? current = commentEditor.Comments.FirstOrDefault(item => item.CommentTypeId == typeId);
+        ListingCommentEditorView? updated = null;
+        bool committed = await ExecuteConfirmedAsync(async () => updated = await ListingComments.SaveAsync(CurrentSubject,
+            new(commentItem.Id, typeId, CommentDraft(typeId), current?.Version),
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (committed && updated != null) ApplyCommentEditor(updated);
+    }
+
+    private Task ClearCommentAsync(Guid typeId)
+    {
+        commentDrafts[typeId] = "";
+        return SaveCommentAsync(typeId);
+    }
+
+    private void OpenCommentTypeManagement()
+    {
+        if (commentEditor?.CanManageTypes == true) manageCommentTypes = true;
+    }
+
+    private async Task SaveCommentTypeAsync(CommentTypeInput draft)
+    {
+        ListingCommentTypeView? saved = null;
+        bool committed = await ExecuteConfirmedAsync(async () => saved = await ListingComments.SaveTypeAsync(CurrentSubject,
+            new(draft.Id, draft.Version, draft.Name, draft.Description, draft.SortOrder),
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (committed && saved != null) await RefreshCommentEditorAsync();
+    }
+
+    private async Task ToggleCommentTypeAsync(CommentTypeInput draft)
+    {
+        ListingCommentTypeView? saved = null;
+        bool committed = await ExecuteConfirmedAsync(async () => saved = await ListingComments.SetTypeActiveAsync(CurrentSubject,
+            new(draft.Id!.Value, draft.Version!.Value, !draft.IsActive),
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (committed && saved != null) await RefreshCommentEditorAsync();
+    }
+
+    private async Task CreateCommentTypeAsync()
+    {
+        ListingCommentTypeView? saved = null;
+        bool committed = await ExecuteConfirmedAsync(async () => saved = await ListingComments.SaveTypeAsync(CurrentSubject,
+            new(null, null, newCommentType.Name, newCommentType.Description, newCommentType.SortOrder),
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (committed && saved != null)
+        {
+            newCommentType = new() { SortOrder = 10 };
+            await RefreshCommentEditorAsync();
+        }
+    }
+
+    private async Task RefreshCommentEditorAsync()
+    {
+        if (commentItem == null) return;
+        try { ApplyCommentEditor(await ListingComments.ReadAsync(CurrentSubject, commentItem.Id, CancellationToken.None)); }
+        catch (Exception exception) { ShowValidationError(ReadFailure(exception, "Изменение сохранено, но редактор не обновлён.")); }
+    }
 
     private static readonly CatalogSource[] manualSources = [CatalogSource.Telegram, CatalogSource.Referral, CatalogSource.Agent, CatalogSource.DirectOwner, CatalogSource.Manual, CatalogSource.Other];
     private static readonly ChecklistItem[] checklist =
@@ -2058,6 +2259,16 @@
     private void CancelSearchDebounce() => searchRevision++;
 
     private sealed record ChecklistItem(string Key, string Title, string Description);
+
+    private sealed class CommentTypeInput
+    {
+        public Guid? Id { get; set; }
+        public long? Version { get; set; }
+        public string Name { get; set; } = "";
+        public string Description { get; set; } = "";
+        public int SortOrder { get; set; }
+        public bool IsActive { get; set; } = true;
+    }
 
     private sealed class FilterInput
     {

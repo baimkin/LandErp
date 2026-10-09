@@ -1,5 +1,6 @@
 using LandErp.Application.Modules.Catalog.Contracts;
 using LandErp.Application.Modules.Catalog.Domain;
+using LandErp.Application.Modules.Collection.Domain;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Collector.Contracts.V1;
 using LandErp.Infrastructure.Modules.Catalog;
@@ -8,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using LandErp.Infrastructure.Modules.IdentityAccess;
+using LandErp.Infrastructure.Persistence;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Npgsql;
 
@@ -17,19 +19,76 @@ namespace LandErp.Foundation.Tests;
 [TestCategory("PostgreSQL")]
 public sealed class MedianParticipationTests
 {
+    private sealed record ZoneContext(Guid Id, Guid JobId, Guid AgentId);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, ZoneContext> Zones = new();
+
     private static IncomingFilterPresetCriteriaV1 Criteria(bool automatic = false, Guid? group = null) => new(
         2, null, null, null, CatalogAgeRange.Any, null, null, null, null, null, null, [], false,
         IncomingCatalogSortField.PricePerSotka, IncomingCatalogSortDirection.Ascending,
         SearchGroupId: group, AutoIncludeNewInCalculation: automatic);
 
-    private static Task<Guid> Manual(ProcurementTests.Phase1Fixture f, string title = "Аналог M01",
-        decimal? price = 1000m, decimal? area = 100m) => f.Workspace.CreateManualAsync(f.Manager,
-            new(CatalogSource.Manual, title, "Химки", price, area, null, null, null, null, "M01 ручной ввод"), "m01", CancellationToken.None);
+    private static async Task<Guid> Manual(ProcurementTests.Phase1Fixture f, string title = "Аналог M01",
+        decimal? price = 1000m, decimal? area = 100m)
+    {
+        Guid id = await f.Workspace.CreateManualAsync(f.Manager,
+            new(CatalogSource.Manual, title, "Химки", price, area, null, null, null, null, "M01 ручной ввод"),
+            "m01", CancellationToken.None);
+        if (Zones.TryGetValue(f.OrganizationId, out ZoneContext? zone)) await AttachAsync(f, zone, id);
+        return id;
+    }
+
+    private static async Task<ZoneContext> ZoneAsync(ProcurementTests.Phase1Fixture f)
+    {
+        await f.SetExplicitAccessAsync(f.ManagerEmployeeId,
+            ProcurementTestsHelper.ProcurementManagerAccess(AccessScope.AssignedObjects) with
+            { CanManageSearchGroups = true });
+        CollectionAdministration administration = new(f.Factory, TimeProvider.System);
+        Guid groupId = await administration.CreateGroupAsync(f.Manager, "Зона менеджера M01", 1,
+            "m01-zone", CancellationToken.None);
+        ZoneContext zone = new(groupId, Guid.CreateVersion7(), Guid.CreateVersion7());
+        await using LandErpDbContext db = f.Sandbox.Context();
+        Guid searchId = Guid.CreateVersion7();
+        db.CollectorAgents.Add(new()
+        {
+            Id = zone.AgentId, OrganizationId = f.OrganizationId, Name = "M01 fixture Parser",
+            CredentialHash = "fixture"
+        });
+        db.SearchConfigurations.Add(new()
+        {
+            Id = searchId, OrganizationId = f.OrganizationId, SearchGroupId = groupId,
+            Label = "M01 fixture search", Source = CatalogSource.Avito,
+            Url = "https://www.avito.ru/moskva/zemelnye_uchastki", Enabled = true
+        });
+        db.CollectionJobs.Add(new()
+        {
+            Id = zone.JobId, OrganizationId = f.OrganizationId, AgentId = zone.AgentId,
+            SearchId = searchId, State = CollectionJobState.Completed,
+            CreatedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+        Zones[f.OrganizationId] = zone;
+        return zone;
+    }
+
+    private static async Task AttachAsync(ProcurementTests.Phase1Fixture f, ZoneContext zone, Guid listingId)
+    {
+        await using LandErpDbContext db = f.Sandbox.Context();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Guid id = Guid.CreateVersion7();
+        db.ListingObservations.Add(new()
+        {
+            Id = id, ListingId = listingId, AgentId = zone.AgentId, JobId = zone.JobId,
+            ObservationKey = "m01-zone-" + id.ToString("N"), ContentHash = id.ToString("N"),
+            PayloadJson = "{}", ChangesJson = "[]", ObservedAt = now, RecordedAt = now
+        });
+        await db.SaveChangesAsync();
+    }
 
     [TestMethod]
     public async Task AllResultsMinusExclusionsAcrossPagesUsesSamePreviewAndApplyCohort()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        ZoneContext zone = await ZoneAsync(f);
         await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
         var access = new EmployeeAccessService(f.Factory);
         var presets = new IncomingFilterPresetService(source, access);
@@ -37,7 +96,7 @@ public sealed class MedianParticipationTests
         var reads = new IncomingCatalogReadService(f.Factory, access, f.Workspace, TimeProvider.System, presets);
         for (int i = 0; i < 5; i++) await Manual(f, "UX аналог " + i, 1000m + i);
         var request = new IncomingCatalogReadFilter(new("UX аналог", Size: 2), SortField: IncomingCatalogSortField.Price,
-            WorkingScope: new(IncomingCatalogMode.AllListings));
+            SearchGroupId: zone.Id, WorkingScope: new(IncomingCatalogMode.AllListings));
         var first = await reads.ReadAsync(f.Manager, request, CancellationToken.None);
         var second = await reads.ReadAsync(f.Manager, request with { Base = request.Base with { Offset = 2 } }, CancellationToken.None);
         Guid[] excluded = [first.Items[0].Id, second.Items[0].Id];
@@ -55,7 +114,7 @@ public sealed class MedianParticipationTests
         Assert.AreEqual(3,(await reads.ReadAsync(f.Manager,request with {IncludedInMedian=true},CancellationToken.None)).Total);
         Assert.AreEqual(2,(await reads.ReadAsync(f.Manager,request with {IncludedInMedian=false},CancellationToken.None)).Total);
         await Assert.ThrowsExactlyAsync<ArgumentException>(() => service.PreviewAsync(f.Manager,
-            new(request, [new(first.Items[0].Id, first.Items[0].Version)], excluded), true, CancellationToken.None));
+            new(request, [new(first.Items[0].Id, first.Items[0].Version, zone.Id)], excluded), true, CancellationToken.None));
         var stale = await service.PreviewAsync(f.Manager, selection, false, CancellationToken.None);
         await Manual(f, "UX аналог новый", 1009m);
         await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => service.ApplyAsync(f.Manager, selection, false, stale.Stamp, "changed", CancellationToken.None));
@@ -66,6 +125,7 @@ public sealed class MedianParticipationTests
     public async Task SavedChoiceSurvivesInvalidDataAndRecoveryButManualExclusionStaysOff()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        ZoneContext zone = await ZoneAsync(f);
         await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
         var access = new EmployeeAccessService(f.Factory);
         IncomingFilterPresetService presets = new(source, access);
@@ -73,20 +133,22 @@ public sealed class MedianParticipationTests
         IncomingCatalogReadService reads = new(f.Factory, access, f.Workspace, TimeProvider.System, presets);
         var pair = await f.IngestMarketplacePairAsync();
         Guid id = pair.AvitoId;
+        await AttachAsync(f, zone, id);
         var initial = (await f.Workspace.ReadItemAsync(f.Manager, id, CancellationToken.None)).Item;
-        await service.SetAsync(f.Manager, new(id, initial.Version), true, "m01-retain", CancellationToken.None);
+        await service.SetAsync(f.Manager, new(id, initial.Version, zone.Id), true, "m01-retain", CancellationToken.None);
 
         // Exercise the real server observation boundary: zero is delivered as known data, not Missing.
         await f.IngestChangedAsync(ListingSource.Avito, pair.Agent, pair.Administration, 0m, "m01-price-zero");
         var invalid = (await f.Workspace.ReadItemAsync(f.Manager, id, CancellationToken.None)).Item;
         Assert.IsTrue(invalid.IncludeInCalculation);
         Assert.AreEqual("Нужна положительная цена", invalid.CalculationIneligibility);
-        Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, invalid.Version), true, "m01-noop", CancellationToken.None)).AlreadySet);
-        var request = new IncomingCatalogReadFilter(new(), WorkingScope: new(IncomingCatalogMode.AllListings));
+        Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, invalid.Version, zone.Id), true, "m01-noop", CancellationToken.None)).AlreadySet);
+        var request = new IncomingCatalogReadFilter(new(), SearchGroupId: zone.Id,
+            WorkingScope: new(IncomingCatalogMode.AllListings));
         var row = (await reads.ReadAsync(f.Manager, request, CancellationToken.None)).Items.Single(item => item.Id == id);
         Assert.IsTrue(row.IncludeInCalculation);
         Assert.AreEqual(invalid.CalculationIneligibility, row.CalculationIneligibility);
-        var preview = await service.PreviewAsync(f.Manager, new(request, [new(id, row.Version)]), true, CancellationToken.None);
+        var preview = await service.PreviewAsync(f.Manager, new(request, [new(id, row.Version, zone.Id)]), true, CancellationToken.None);
         Assert.AreEqual(1, preview.AlreadySet);
         Assert.AreEqual(0, preview.WouldChange);
         Assert.AreEqual(0, preview.Ineligible);
@@ -112,7 +174,7 @@ public sealed class MedianParticipationTests
             Assert.IsNotNull(detail.CalculationIneligibility);
         }
         invalid = (await f.Workspace.ReadItemAsync(f.Manager, id, CancellationToken.None)).Item;
-        Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, invalid.Version), false, "m01-manual-off", CancellationToken.None)).Changed);
+        Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, invalid.Version, zone.Id), false, "m01-manual-off", CancellationToken.None)).Changed);
         await using (var db = f.Sandbox.Context())
         {
             var item = await db.Listings.SingleAsync(item => item.Id == id);
@@ -132,6 +194,7 @@ public sealed class MedianParticipationTests
     public async Task MigrationStartsExistingFalseAndSingleCommandsEnforceVersionsRightsAndEligibility()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        ZoneContext zone = await ZoneAsync(f);
         Guid id = await Manual(f);
         await using (var db = f.Sandbox.Context())
         {
@@ -144,19 +207,27 @@ public sealed class MedianParticipationTests
             Assert.IsFalse(db.Database.HasPendingModelChanges());
             Assert.IsFalse((await db.Listings.SingleAsync(item => item.Id == id)).IncludeInCalculation);
         }
+        await f.SetExplicitAccessAsync(f.ManagerEmployeeId,
+            ProcurementTestsHelper.ProcurementManagerAccess(AccessScope.AssignedObjects) with
+            { CanManageSearchGroups = true });
+        await using (var db = f.Sandbox.Context())
+        {
+            (await db.SearchGroups.SingleAsync(item => item.Id == zone.Id)).OwnerEmployeeId = f.ManagerEmployeeId;
+            await db.SaveChangesAsync();
+        }
         await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
         var access = new EmployeeAccessService(f.Factory);
         IncomingFilterPresetService presets = new(source, access);
         CatalogCalculationService service = new(f.Factory, access, presets, TimeProvider.System);
         var initial = (await f.Workspace.ReadItemAsync(f.Manager, id, CancellationToken.None)).Item;
-        Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, initial.Version), true, "m01", CancellationToken.None)).Changed);
+        Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, initial.Version, zone.Id), true, "m01", CancellationToken.None)).Changed);
         await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => service.SetAsync(f.Manager,
-            new(id, initial.Version), false, "m01-stale", CancellationToken.None));
+            new(id, initial.Version, zone.Id), false, "m01-stale", CancellationToken.None));
         var current = (await f.Workspace.ReadItemAsync(f.Manager, id, CancellationToken.None)).Item;
         Assert.IsTrue(current.IncludeInCalculation);
-        Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, current.Version), true, "m01-repeat", CancellationToken.None)).AlreadySet);
+        Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, current.Version, zone.Id), true, "m01-repeat", CancellationToken.None)).AlreadySet);
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.SetAsync(f.ForeignOwner,
-            new(id, current.Version), false, "foreign", CancellationToken.None));
+            new(id, current.Version, zone.Id), false, "foreign", CancellationToken.None));
         await using (var db = f.Sandbox.Context())
         {
             Assert.AreEqual(1, await db.CatalogEvents.CountAsync(item => item.CatalogItemId == id
@@ -166,7 +237,7 @@ public sealed class MedianParticipationTests
         }
         Guid invalid = await Manual(f, price: null);
         var invalidItem = (await f.Workspace.ReadItemAsync(f.Manager, invalid, CancellationToken.None)).Item;
-        var rejected = await service.SetAsync(f.Manager, new(invalid, invalidItem.Version), true, "m01", CancellationToken.None);
+        var rejected = await service.SetAsync(f.Manager, new(invalid, invalidItem.Version, zone.Id), true, "m01", CancellationToken.None);
         Assert.AreEqual(1, rejected.Ineligible);
         Assert.IsNotNull(invalidItem.CalculationIneligibility);
         foreach (var values in new[] { (Price: 0m, Area: 100m, Currency: "RUB"), (Price: 100m, Area: -1m, Currency: "RUB"), (Price: 100m, Area: 100m, Currency: "USD") })
@@ -179,7 +250,7 @@ public sealed class MedianParticipationTests
                 await db.SaveChangesAsync();
             }
             var bad = (await f.Workspace.ReadItemAsync(f.Manager, badId, CancellationToken.None)).Item;
-            Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(badId, bad.Version), true, "m01", CancellationToken.None)).Ineligible);
+            Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(badId, bad.Version, zone.Id), true, "m01", CancellationToken.None)).Ineligible);
         }
         await using (var connection = new NpgsqlConnection(f.Sandbox.RuntimeConnection))
         {
@@ -187,11 +258,12 @@ public sealed class MedianParticipationTests
             await using var metadata = new NpgsqlCommand("SELECT col_description('catalog.listings'::regclass, attnum) FROM pg_attribute WHERE attrelid='catalog.listings'::regclass AND attname='include_in_calculation'", connection);
             StringAssert.Contains((string)(await metadata.ExecuteScalarAsync())!, "Общая для организации");
         }
-        CatalogCalculationSelection all = new(new(new(), WorkingScope: new(IncomingCatalogMode.AllListings)));
+        CatalogCalculationSelection all = new(new(new(), SearchGroupId: zone.Id,
+            WorkingScope: new(IncomingCatalogMode.AllListings)));
         var authorizedPreview = await service.PreviewAsync(f.Manager, all, false, CancellationToken.None);
         await f.SetExplicitAccessAsync(f.ManagerEmployeeId, EmployeeAccessRules.NoAccess with { IncomingAccess = IncomingAccessLevel.Read });
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.SetAsync(f.Manager,
-            new(id, current.Version), false, "m01", CancellationToken.None));
+            new(id, current.Version, zone.Id), false, "m01", CancellationToken.None));
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.PreviewAsync(f.Manager, all, true, CancellationToken.None));
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.ApplyAsync(f.Manager, all, false, authorizedPreview.Stamp, "m01", CancellationToken.None));
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => presets.CreateAsync(f.Manager,
@@ -199,9 +271,35 @@ public sealed class MedianParticipationTests
     }
 
     [TestMethod]
+    public async Task MedianChangesRequireOwnedZoneAndListingProvenanceWhileOwnerCanUseAnyZone()
+    {
+        await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        ZoneContext owned = await ZoneAsync(f);
+        Guid listingId = await Manual(f, "Проверка владения зоной");
+        CollectionAdministration administration = new(f.Factory, TimeProvider.System);
+        Guid unrelated = await administration.CreateGroupAsync(f.Owner, "Другая зона", 2,
+            "m01-unrelated", CancellationToken.None);
+        await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
+        var access = new EmployeeAccessService(f.Factory);
+        IncomingFilterPresetService presets = new(source, access);
+        CatalogCalculationService service = new(f.Factory, access, presets, TimeProvider.System);
+        var item = (await f.Workspace.ReadItemAsync(f.Manager, listingId, CancellationToken.None)).Item;
+
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.SetAsync(f.Manager,
+            new(listingId, item.Version, unrelated), true, "m01-wrong-owner", CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.SetAsync(f.Owner,
+            new(listingId, item.Version, unrelated), true, "m01-wrong-provenance", CancellationToken.None));
+        Assert.AreEqual(1, (await service.SetAsync(f.Owner,
+            new(listingId, item.Version, owned.Id), true, "m01-elevated", CancellationToken.None)).Changed);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => service.PreviewAsync(f.Owner,
+            new(new(new(), WorkingScope: new(IncomingCatalogMode.AllListings))), false, CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task BulkUsesWholeSharedSelectionPreviewConflictsArchiveAndHonestCounts()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        ZoneContext zone = await ZoneAsync(f);
         await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
         var access = new EmployeeAccessService(f.Factory);
         IncomingFilterPresetService presets = new(source, access);
@@ -210,9 +308,10 @@ public sealed class MedianParticipationTests
         for (int i = 0; i < 5; i++) await Manual(f, "Аналог " + i, 1000m + i);
         await Manual(f, "Аналог без площади", area: null);
         await Manual(f, "Вне отбора", price: 9000m);
-        var first = await presets.CreateAsync(f.Manager, new(null, "Первый", Criteria() with { MaxTotalPrice = 1002m }), CancellationToken.None);
-        await presets.CreateAsync(f.Manager, new(null, "Пересечение", Criteria() with { MinTotalPrice = 1001m, MaxTotalPrice = 1004m }), CancellationToken.None);
-        var request = new IncomingCatalogReadFilter(new("Аналог", Size: 2), SortField: IncomingCatalogSortField.PricePerSotka, SortDirection: IncomingCatalogSortDirection.Ascending, WorkingScope: new());
+        var first = await presets.CreateAsync(f.Manager, new(zone.Id, "Первый", Criteria(group: zone.Id) with { MaxTotalPrice = 1002m }), CancellationToken.None);
+        await presets.CreateAsync(f.Manager, new(zone.Id, "Пересечение", Criteria(group: zone.Id) with { MinTotalPrice = 1001m, MaxTotalPrice = 1004m }), CancellationToken.None);
+        var request = new IncomingCatalogReadFilter(new("Аналог", Size: 2), SearchGroupId: zone.Id,
+            SortField: IncomingCatalogSortField.PricePerSotka, SortDirection: IncomingCatalogSortDirection.Ascending, WorkingScope: new());
         var page = await reads.ReadAsync(f.Manager, request, CancellationToken.None);
         Assert.AreEqual(6, page.Total);
         Assert.AreEqual(2, page.Items.Count);
@@ -228,7 +327,7 @@ public sealed class MedianParticipationTests
         var again = await service.PreviewAsync(f.Manager, all, true, CancellationToken.None);
         Assert.AreEqual(5, again.AlreadySet);
         page = await reads.ReadAsync(f.Manager, request, CancellationToken.None);
-        CatalogCalculationSelection selected = new(request, page.Items.Select(item => new CatalogCalculationTarget(item.Id, item.Version)).ToArray());
+        CatalogCalculationSelection selected = new(request, page.Items.Select(item => new CatalogCalculationTarget(item.Id, item.Version, zone.Id)).ToArray());
         var selectedPreview = await service.PreviewAsync(f.Manager, selected, false, CancellationToken.None);
         Assert.AreEqual(2, selectedPreview.Total);
         Assert.AreEqual(2, (await service.ApplyAsync(f.Manager, selected, false, selectedPreview.Stamp, "m01", CancellationToken.None)).Changed);
@@ -242,30 +341,35 @@ public sealed class MedianParticipationTests
         Assert.AreEqual(3, await f.CountAsync(db => db.Listings.CountAsync(item => item.IncludeInCalculation)));
         var remaining = (await reads.ReadAsync(f.Manager, request, CancellationToken.None)).Items[0];
         await f.Workspace.SetDispositionAsync(f.Manager, new(remaining.Id, remaining.Version, CatalogDisposition.Sold, "Продано M01"), "m01", CancellationToken.None);
-        var archive = new IncomingCatalogReadFilter(new("Аналог", MaxPrice: 1m), WorkingScope: new(IncomingCatalogMode.Archive));
+        var archive = new IncomingCatalogReadFilter(new("Аналог", MaxPrice: 1m), SearchGroupId: zone.Id,
+            WorkingScope: new(IncomingCatalogMode.Archive));
         var archivePage = await reads.ReadAsync(f.Manager, archive, CancellationToken.None);
         var archivePreview = await service.PreviewAsync(f.Manager, new(archive), true, CancellationToken.None);
         Assert.AreEqual(1, archivePage.Total);
         Assert.AreEqual(archivePage.Total, archivePreview.Total);
         Assert.AreEqual(0, archivePreview.Ineligible);
         await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.PreviewAsync(new(Guid.NewGuid(), false), all, true, CancellationToken.None));
-        await Assert.ThrowsExactlyAsync<DbUpdateConcurrencyException>(() => service.PreviewAsync(f.ForeignOwner, selected, false, CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => service.PreviewAsync(f.ForeignOwner, selected, false, CancellationToken.None));
     }
 
     [TestMethod]
     public async Task SavingAutomaticFilterIncludesExistingMatchesAndNewIngressPreservesManualExclusion()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        ZoneContext zone = await ZoneAsync(f);
         await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
         var access = new EmployeeAccessService(f.Factory);
         IncomingFilterPresetService presets = new(source, access);
         CatalogCalculationService service = new(f.Factory, access, presets, TimeProvider.System);
         var pair = await f.IngestMarketplacePairAsync();
-        Guid group = await pair.Administration.CreateGroupAsync(f.Owner, "Автоматический M01", 10, "m01", CancellationToken.None);
+        Guid group = zone.Id;
         Guid searchId;
         await using (var db = await f.Factory.CreateDbContextAsync())
         {
-            var search = await db.SearchConfigurations.SingleAsync(item => item.Source == CatalogSource.Avito);
+            Guid fixtureSearchId = await db.CollectionJobs.Where(item => item.Id == zone.JobId)
+                .Select(item => item.SearchId).SingleAsync();
+            var search = await db.SearchConfigurations.SingleAsync(item =>
+                item.Source == CatalogSource.Avito && item.Id != fixtureSearchId);
             search.SearchGroupId = group;
             searchId = search.Id;
             await db.SaveChangesAsync();
@@ -303,7 +407,7 @@ public sealed class MedianParticipationTests
                 join search in db.SearchConfigurations on job.SearchId equals search.Id
                 where observation.ListingId == created.Id select search.SearchGroupId).SingleAsync();
             Assert.IsTrue(created.IncludeInCalculation, $"Auto={currentPresets.Single(p => p.Id == saved.Id).Criteria.AutoIncludeNewInCalculation}; Issue={currentPresets.Single(p => p.Id == saved.Id).CompatibilityIssue}; Eligible={CatalogCalculationEligibility.Reason(created)}; InSelection={matches.Items.Any(p => p.Id == created.Id)}; GroupMatches={actualGroup == group}");
-            await service.SetAsync(f.Manager, new(id, created.Version), false, "m01", CancellationToken.None);
+            await service.SetAsync(f.Manager, new(id, created.Version, group), false, "m01", CancellationToken.None);
         }
         await gateway.AcceptAsync(pair.Agent, delivery, CancellationToken.None);
         await pair.Administration.EnqueueAsync(f.Owner, searchId, "m01", CancellationToken.None);
@@ -340,6 +444,7 @@ public sealed class MedianParticipationTests
     public async Task ExcludingStatesClearParticipationSoldDismissedRemainAndUnlinkCanOptIn()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
+        ZoneContext zone = await ZoneAsync(f);
         await using var source = NpgsqlDataSource.Create(f.Sandbox.RuntimeConnection);
         var access = new EmployeeAccessService(f.Factory);
         IncomingFilterPresetService presets = new(source, access);
@@ -348,24 +453,24 @@ public sealed class MedianParticipationTests
         {
             Guid id = await Manual(f);
             var item = (await f.Workspace.ReadItemAsync(f.Manager, id, CancellationToken.None)).Item;
-            await service.SetAsync(f.Manager, new(id, item.Version), true, "m01", CancellationToken.None);
+            await service.SetAsync(f.Manager, new(id, item.Version, zone.Id), true, "m01", CancellationToken.None);
             item = (await f.Workspace.ReadItemAsync(f.Manager, id, CancellationToken.None)).Item;
             await f.Workspace.SetDispositionAsync(f.Manager, new(id, item.Version, state, "M01 состояние"), "m01", CancellationToken.None);
             item = (await f.Workspace.ReadItemAsync(f.Manager, id, CancellationToken.None)).Item;
             bool eligible = state is CatalogDisposition.Sold or CatalogDisposition.Dismissed;
             Assert.AreEqual(eligible, item.IncludeInCalculation);
-            if (!eligible) Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, item.Version), true, "m01", CancellationToken.None)).Ineligible);
+            if (!eligible) Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, item.Version, zone.Id), true, "m01", CancellationToken.None)).Ineligible);
             else
             {
-                await service.SetAsync(f.Manager, new(id, item.Version), false, "m01", CancellationToken.None);
+                await service.SetAsync(f.Manager, new(id, item.Version, zone.Id), false, "m01", CancellationToken.None);
                 item = (await f.Workspace.ReadItemAsync(f.Manager, id, CancellationToken.None)).Item;
-                Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, item.Version), true, "m01", CancellationToken.None)).Changed);
+                Assert.AreEqual(1, (await service.SetAsync(f.Manager, new(id, item.Version, zone.Id), true, "m01", CancellationToken.None)).Changed);
             }
         }
         Guid left = await Manual(f, "Один объект слева");
         Guid right = await Manual(f, "Один объект справа");
         var listing = (await f.Workspace.ReadItemAsync(f.Manager, left, CancellationToken.None)).Item;
-        await service.SetAsync(f.Manager, new(left, listing.Version), true, "m01", CancellationToken.None);
+        await service.SetAsync(f.Manager, new(left, listing.Version, zone.Id), true, "m01", CancellationToken.None);
         listing = (await f.Workspace.ReadItemAsync(f.Manager, left, CancellationToken.None)).Item;
         await f.Workspace.LinkCatalogItemsAsSameObjectAsync(f.Manager, new(left, listing.Version, right, "M01 дубль"), "m01", CancellationToken.None);
         listing = (await f.Workspace.ReadItemAsync(f.Manager, left, CancellationToken.None)).Item;

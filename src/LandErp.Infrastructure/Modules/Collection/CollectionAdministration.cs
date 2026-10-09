@@ -27,12 +27,54 @@ public sealed class CollectionAdministration(
         if (manage ? !effective.CanManageCollection : !effective.CanReadCollection) throw new AccessDeniedException();
         return effective.OrganizationContext;
     }
+
+    private async Task<EffectiveEmployeeAccess> RequireGroupCreationAsync(Subject subject,
+        CancellationToken cancellationToken)
+    {
+        EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        if (!effective.CanManageSearchGroups) throw new AccessDeniedException();
+        return effective;
+    }
+
+    private static void RequireGroupManagement(EffectiveEmployeeAccess effective, SearchGroup group)
+    {
+        if (!effective.CanManageAllSearchGroups
+            && (!effective.Settings.CanManageSearchGroups || group.OwnerEmployeeId != effective.EmployeeId))
+            throw new AccessDeniedException();
+    }
+
     public async Task<CollectionAdminView> ReadAsync(Subject subject, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, manage: false, cancellationToken);
+        EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        if (!effective.CanReadCollection && !effective.CanManageSearchGroups) throw new AccessDeniedException();
+        AccessContext context = effective.OrganizationContext;
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         DateTimeOffset now = time.GetUtcNow();
         DateTimeOffset onlineSince = now.AddMinutes(-3);
+        IQueryable<SearchGroup> groupQuery = db.SearchGroups.Where(item => item.OrganizationId == context.OrganizationId);
+        if (!effective.CanReadCollection && !effective.CanManageAllSearchGroups)
+            groupQuery = groupQuery.Where(item => item.OwnerEmployeeId == effective.EmployeeId);
+        var groupRows = await groupQuery.OrderBy(item => item.SortOrder).ThenBy(item => item.Name)
+            .Select(item => new
+            {
+                Group = item,
+                SearchCount = db.SearchConfigurations.Count(search => search.SearchGroupId == item.Id),
+                OwnerName = item.OwnerEmployeeId == null ? null : db.Employees
+                    .Where(employee => employee.Id == item.OwnerEmployeeId && employee.OrganizationId == context.OrganizationId)
+                    .Select(employee => employee.DisplayName).SingleOrDefault()
+            }).ToArrayAsync(cancellationToken);
+        SearchGroupView[] groups = groupRows.Select(item => new SearchGroupView(item.Group.Id, item.Group.Name,
+            item.Group.SortOrder, item.Group.Active, item.Group.Version, item.SearchCount,
+            item.Group.OwnerEmployeeId, item.OwnerName, effective.CanManageAllSearchGroups
+                || effective.Settings.CanManageSearchGroups && item.Group.OwnerEmployeeId == effective.EmployeeId)).ToArray();
+        string businessTimeZone = await db.Organizations.Where(item => item.Id == context.OrganizationId)
+            .Select(item => item.BusinessTimeZone).SingleAsync(cancellationToken);
+        if (!effective.CanReadCollection)
+            return new([], groups, [], [], 0, 0, 0, 0, 0, 0,
+                new("Недоступно", null, null, null, 0, ""), businessTimeZone,
+                CanReadCollection: false, CanManageCollection: false,
+                CanManageSearchGroups: effective.CanManageSearchGroups);
+
         var rawAgents = await db.CollectorAgents.Where(item => item.OrganizationId == context.OrganizationId).OrderBy(item => item.Name).ToArrayAsync(cancellationToken);
         var activeJobs = await (from job in db.CollectionJobs join search in db.SearchConfigurations on job.SearchId equals search.Id
             where job.OrganizationId == context.OrganizationId && job.State == CollectionJobState.Leased && job.LeaseExpiresAt > now
@@ -41,9 +83,6 @@ public sealed class CollectionAdministration(
             return new AgentView(item.Id, item.Name, item.Enabled, online, item.CanManageSearches, item.VersionText, item.Capabilities, item.LastHeartbeatAt, item.Version,
                 AgentStatus(item, current != null, online), current?.Label, item.RuntimeState, item.AttentionCode,
                 item.ProgressProcessed, item.ProgressTotal, item.ProgressCurrentPage, item.ProgressMaxPages, item.LastActivityAt); }).ToArray();
-        var groups = await db.SearchGroups.Where(item => item.OrganizationId == context.OrganizationId).OrderBy(item => item.SortOrder).ThenBy(item => item.Name)
-            .Select(item => new SearchGroupView(item.Id, item.Name, item.SortOrder, item.Active, item.Version,
-                db.SearchConfigurations.Count(search => search.SearchGroupId == item.Id))).ToArrayAsync(cancellationToken);
         var rawSearches = await db.SearchConfigurations.Where(item => item.OrganizationId == context.OrganizationId).OrderBy(item => item.Label).ToArrayAsync(cancellationToken);
         var lastResults = await (from job in db.CollectionJobs
             join agentValue in db.CollectorAgents on job.AgentId equals (Guid?)agentValue.Id into agentValues
@@ -68,10 +107,10 @@ public sealed class CollectionAdministration(
         int attention = lastBySearch.Values.Count(item => item.Job.RequiresOperatorAttention);
         CollectionSchedulerStatus? scheduler = await db.CollectionSchedulerStatuses.AsNoTracking().SingleOrDefaultAsync(item => item.Id == 1, cancellationToken);
         CollectionSchedulerHealthView schedulerView = Scheduler(scheduler, now);
-        string businessTimeZone = await db.Organizations.Where(item => item.Id == context.OrganizationId)
-            .Select(item => item.BusinessTimeZone).SingleAsync(cancellationToken);
         return new(agents, groups, searches, jobs, searches.Count(item => item.Enabled), pending, expiredLeases, attention,
-            agents.Count(item => item.Online), activeJobs.Length, schedulerView, businessTimeZone);
+            agents.Count(item => item.Online), activeJobs.Length, schedulerView, businessTimeZone,
+            CanReadCollection: true, CanManageCollection: effective.CanManageCollection,
+            CanManageSearchGroups: effective.CanManageSearchGroups);
     }
     public async Task<AgentCredential> CreateAgentAsync(Subject subject, string name, bool canManageSearches, string correlationId, CancellationToken cancellationToken)
     {
@@ -212,24 +251,52 @@ public sealed class CollectionAdministration(
     }
     public async Task<Guid> CreateGroupAsync(Subject subject, string name, int sortOrder, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
+        EffectiveEmployeeAccess effective = await RequireGroupCreationAsync(subject, cancellationToken);
+        AccessContext context = effective.OrganizationContext;
         if (sortOrder is < 0 or > 10000) throw new ArgumentException("Порядок группы должен быть от 0 до 10000.");
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
-        SearchGroup group = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, Name = OrganizationWorkspace.ValidateName(name), SortOrder = sortOrder, RecordedAt = time.GetUtcNow() };
+        SearchGroup group = new() { Id = DataConventions.NewId(), OrganizationId = context.OrganizationId,
+            OwnerEmployeeId = effective.EmployeeId, Name = OrganizationWorkspace.ValidateName(name),
+            SortOrder = sortOrder, RecordedAt = time.GetUtcNow() };
         db.SearchGroups.Add(group);
         db.SearchGroupMarketSettings.Add(new()
         {
             Id = DataConventions.NewId(), OrganizationId = context.OrganizationId, SearchGroupId = group.Id,
             PeriodDays = 30, AllowedPropertyTypes = Enum.GetNames<IncomingLandType>()
         });
-        OrganizationWorkspace.AddAudit(db, context, subject, "CollectionSearchGroupCreated", "SearchGroup", group.Id, new { group.Name, group.SortOrder }, correlationId);
+        OrganizationWorkspace.AddAudit(db, context, subject, "CollectionSearchGroupCreated", "SearchGroup", group.Id,
+            new { group.Name, group.SortOrder, group.OwnerEmployeeId }, correlationId);
         await db.SaveChangesAsync(cancellationToken); return group.Id;
     }
+
+    public async Task UpdateGroupAsync(Subject subject, Guid groupId, long expectedVersion, string name,
+        int sortOrder, string correlationId, CancellationToken cancellationToken)
+    {
+        EffectiveEmployeeAccess effective = await RequireGroupCreationAsync(subject, cancellationToken);
+        if (sortOrder is < 0 or > 10000) throw new ArgumentException("Порядок группы должен быть от 0 до 10000.");
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        SearchGroup group = await db.SearchGroups.SingleOrDefaultAsync(item => item.Id == groupId
+            && item.OrganizationId == effective.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
+        RequireGroupManagement(effective, group);
+        if (group.Version != expectedVersion) throw new DbUpdateConcurrencyException();
+        string previousName = group.Name;
+        int previousSortOrder = group.SortOrder;
+        group.Name = OrganizationWorkspace.ValidateName(name);
+        group.SortOrder = sortOrder;
+        OrganizationWorkspace.AddAudit(db, effective.OrganizationContext, subject,
+            "CollectionSearchGroupUpdated", "SearchGroup", group.Id,
+            new { PreviousName = previousName, group.Name, PreviousSortOrder = previousSortOrder, group.SortOrder },
+            correlationId);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task ArchiveGroupAsync(Subject subject, Guid groupId, long expectedVersion, string correlationId, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireAsync(subject, manage: true, cancellationToken);
+        EffectiveEmployeeAccess effective = await RequireGroupCreationAsync(subject, cancellationToken);
+        AccessContext context = effective.OrganizationContext;
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         SearchGroup group = await db.SearchGroups.SingleOrDefaultAsync(item => item.Id == groupId && item.OrganizationId == context.OrganizationId, cancellationToken) ?? throw new AccessDeniedException();
+        RequireGroupManagement(effective, group);
         if (group.Version != expectedVersion) throw new DbUpdateConcurrencyException();
         if (await db.SearchConfigurations.AnyAsync(item => item.SearchGroupId == groupId && item.Enabled, cancellationToken)) throw new ArgumentException("Сначала приостановите активные поиски группы.");
         group.Active = false; OrganizationWorkspace.AddAudit(db, context, subject, "CollectionSearchGroupArchived", "SearchGroup", group.Id, new { group.Name }, correlationId);

@@ -109,6 +109,7 @@
                                 <option value="@group.Id">@group.Name</option>
                             }
                         </select>
+                        <a class="v2-btn sm quiet" href="/collectors">Управление зонами</a>
                         @if (!IsArchive && !IsParticipants)
                         {
                         <select value="@(selectedSavedPresetId?.ToString() ?? "")" @onchange="SavedPresetChangedAsync" aria-label="Сохранённые фильтры">
@@ -214,7 +215,7 @@
                 </div>
 
                 }
-                @if (CanProcessIncoming && CalculationCount > 0)
+                @if (CanManageCurrentZoneCalculation && CalculationCount > 0)
                 {
                     <div class="v2-presets selection-actions" role="group" aria-label="Действия с выбранными">
                         <strong>Выбрано: @CalculationCount</strong>
@@ -249,13 +250,13 @@
                     <div class="v2-table-wrap">
                         <table class="v2-table">
                             <colgroup>
-                                @if (CanProcessIncoming) { <col class="col-select" /> }
+                                @if (CanManageCurrentZoneCalculation) { <col class="col-select" /> }
                                 <col class="col-object" /><col class="col-participation" /><col class="col-price" /><col class="col-unit-price" />
                                 <col class="col-area" /><col class="col-land" /><col class="col-reason" /><col class="col-quality" /><col class="col-date" /><col class="col-source" />
                             </colgroup>
                             <thead>
                                 <tr>
-                                    @if (CanProcessIncoming) { <th class="selection-head"><label class="selection-hit"><input type="checkbox" class="page-selection" aria-label="Выбрать страницу" aria-checked="@(PageAllSelected ? "true" : PageSomeSelected ? "mixed" : "false")" data-indeterminate="@(PageSomeSelected && !PageAllSelected ? "true" : "false")" checked="@PageAllSelected" disabled="@Busy" @onchange="ToggleCalculationPage" /></label></th> }
+                                    @if (CanManageCurrentZoneCalculation) { <th class="selection-head"><label class="selection-hit"><input type="checkbox" class="page-selection" aria-label="Выбрать страницу" aria-checked="@(PageAllSelected ? "true" : PageSomeSelected ? "mixed" : "false")" data-indeterminate="@(PageSomeSelected && !PageAllSelected ? "true" : "false")" checked="@PageAllSelected" disabled="@Busy" @onchange="ToggleCalculationPage" /></label></th> }
                                     <th>Объявление</th><th>В медиане</th>
                                     <th aria-sort="@SortAria(IncomingCatalogSortField.Price)"><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.Price)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Price)">Цена <span>@SortIndicator(IncomingCatalogSortField.Price)</span></button></th>
                                     <th aria-sort="@SortAria(IncomingCatalogSortField.PricePerSotka)"><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.PricePerSotka)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.PricePerSotka)">Цена за сотку <span>@SortIndicator(IncomingCatalogSortField.PricePerSotka)</span></button></th>
@@ -269,7 +270,7 @@
                                     IncomingCatalogRowRead? row = Row(item.Id);
                                     int completeness = Math.Clamp(row?.CompletenessPercent ?? 0, 0, 100);
                                     <tr class="@RowTone(row) @(IsCalculationSelected(item.Id) ? "selected" : "")" @onclick="() => OpenDetailAsync(item.Id)">
-                                        @if (CanProcessIncoming)
+                                        @if (CanManageCurrentZoneCalculation)
                                         {
                                             <td class="selection-cell" @onclick:stopPropagation="true"><label class="selection-hit"><input type="checkbox" aria-label="@($"Выбрать {item.Title}")" checked="@IsCalculationSelected(item.Id)" disabled="@Busy" @onchange="e => SelectCalculationItem(item, e.Value is true)" /></label></td>
                                         }
@@ -311,8 +312,8 @@
                                         </td>
                                         <td @onclick:stopPropagation="true">
                                             <button type="button" role="switch" class="median-switch" aria-checked="@(item.IncludeInCalculation ? "true" : "false")"
-                                                aria-label="@($"Участие в медиане: {item.Title}")" title="@(item.CalculationIneligibility ?? (item.IncludeInCalculation ? "Исключить из медианы" : "Включить в медиану"))"
-                                                disabled="@(!CanProcessIncoming || Busy || (!item.IncludeInCalculation && item.CalculationIneligibility != null))"
+                                                aria-label="@($"Участие в медиане: {item.Title}")" title="@(CalculationSwitchTitle(item))"
+                                                disabled="@(!CanManageCurrentZoneCalculation || Busy || (!item.IncludeInCalculation && item.CalculationIneligibility != null))"
                                                 @onclick="() => ToggleCalculationAsync(item)"><span></span></button>
                                             @if (item.CalculationIneligibility != null) { <details class="median-reason"><summary>Недоступно</summary>@item.CalculationIneligibility</details> }
                                         </td>
@@ -956,20 +957,27 @@
 
     private async Task ToggleCalculationAsync(CatalogItemView item)
     {
+        if (!CanManageCurrentZoneCalculation || CurrentCalculationGroupId is not Guid searchGroupId)
+        {
+            ShowValidationError("Выберите доступную зону поиска для изменения медианы.");
+            return;
+        }
         CatalogCalculationResult? result = null;
         bool saved = await ExecuteConfirmedAsync(async () => result = await Calculation.SetAsync(CurrentSubject,
-            new(item.Id, item.Version), !item.IncludeInCalculation, Guid.CreateVersion7().ToString(), CancellationToken.None));
+            new(item.Id, item.Version, searchGroupId), !item.IncludeInCalculation,
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
         if (saved && result != null) Success = result.Ineligible>0?"Объявление не подходит для расчёта медианы.":null;
     }
 
     private async Task PreviewCalculationAsync(bool include)
     {
-        if (renderedCalculationFilter == null || calculationPreviewBusy || Busy) return;
+        if (renderedCalculationFilter == null || calculationPreviewBusy || Busy
+            || !CanManageCurrentZoneCalculation || CurrentCalculationGroupId is not Guid searchGroupId) return;
         calculationPreviewBusy = true;
         try
         {
             calculationSelection = new(renderedCalculationFilter, allCalculationResults ? null
-                : calculationSelected.Select(item => new CatalogCalculationTarget(item.Key, item.Value)).ToArray(),
+                : calculationSelected.Select(item => new CatalogCalculationTarget(item.Key, item.Value, searchGroupId)).ToArray(),
                 allCalculationResults ? calculationExcluded.ToArray() : null);
             calculationInclude = include;
             calculationPreview = await Calculation.PreviewAsync(CurrentSubject, calculationSelection, include, CancellationToken.None);
@@ -1046,6 +1054,13 @@
     private bool CanProcessIncoming => effectiveAccess?.CanProcessIncoming == true;
     private bool CanManageProcurement => effectiveAccess?.CanManageProcurement == true;
     private bool CanReadProcurement => effectiveAccess?.CanReadProcurement == true;
+    private Guid? CurrentCalculationGroupId => Guid.TryParse(searchGroupKey, out Guid value) ? value : null;
+    private IncomingSearchGroupView? CurrentCalculationGroup => catalogPage?.SearchGroups
+        .FirstOrDefault(item => item.Id == CurrentCalculationGroupId);
+    private bool CanManageCurrentZoneCalculation => CurrentCalculationGroup?.CanManageCalculation == true;
+    private string CalculationSwitchTitle(CatalogItemView item) => !CanManageCurrentZoneCalculation
+        ? CurrentCalculationGroupId == null ? "Сначала выберите зону поиска" : "Нет права изменять медиану этой зоны"
+        : item.CalculationIneligibility ?? (item.IncludeInCalculation ? "Исключить из медианы" : "Включить в медиану");
 
     private static readonly CatalogSource[] manualSources = [CatalogSource.Telegram, CatalogSource.Referral, CatalogSource.Agent, CatalogSource.DirectOwner, CatalogSource.Manual, CatalogSource.Other];
     private static readonly ChecklistItem[] checklist =

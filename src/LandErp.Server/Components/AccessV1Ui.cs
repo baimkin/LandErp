@@ -39,7 +39,8 @@ public static class AccessV1Ui
         access == null
             ? new(false, false, false, false, false)
             : new(access.CanReadIncoming, access.CanReadProcurement,
-                access.Settings.CanPerformInspections, access.CanReadCollection, access.CanReadAudit);
+                access.Settings.CanPerformInspections, access.CanReadCollection || access.CanManageSearchGroups,
+                access.CanReadAudit);
 
     public static string IncomingLabel(IncomingAccessLevel value) => value switch
     {
@@ -77,7 +78,7 @@ public static class AccessV1Ui
     };
 
     public static IReadOnlyList<string> Summary(EmployeeAccessConfiguration settings,
-        EmployeeAccessSource source = EmployeeAccessSource.Configured)
+        EmployeeAccessSource source = EmployeeAccessSource.Configured, bool isAdministrator = false)
     {
         if (source == EmployeeAccessSource.SystemOwner)
             return ["Системный полный доступ Owner. Обычные настройки Access V1 его не ограничивают."];
@@ -116,6 +117,12 @@ public static class AccessV1Ui
             _ => "Поиски и парсеры недоступны."
         });
 
+        result.Add(isAdministrator || settings.ProcurementAccess >= ProcurementAccessLevel.Head
+            ? "Может управлять всеми зонами поиска организации."
+            : settings.CanManageSearchGroups
+                ? "Может создавать зоны поиска и управлять собственными зонами."
+                : "Не может создавать зоны поиска.");
+
         if (settings.CanAssignInspections && settings.CanPerformInspections)
             result.Add("Может назначать и выполнять осмотры.");
         else if (settings.CanAssignInspections)
@@ -143,6 +150,7 @@ public static class AccessV1Ui
             result.Add("Закупка: " + ProcurementLabel(settings.ProcurementAccess));
         if (settings.CollectionAccess != CollectionAccessLevel.None)
             result.Add("Парсеры: " + CollectionLabel(settings.CollectionAccess));
+        if (settings.CanManageSearchGroups) result.Add("Свои зоны поиска");
         if (settings.CanPerformInspections) result.Add("Осмотры");
         else if (settings.CanAssignInspections) result.Add("Назначает осмотры");
         if (settings.CanConfirmPurchase) result.Add("Покупка");

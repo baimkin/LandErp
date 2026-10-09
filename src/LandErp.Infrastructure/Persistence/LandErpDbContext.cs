@@ -161,7 +161,8 @@ public sealed class LandErpDbContext(DbContextOptions<LandErpDbContext> options)
                     accessSettings.ProcurementReadScope, accessSettings.ProcurementWorkScope,
                     accessSettings.CollectionAccess, accessSettings.CanAssignInspections,
                     accessSettings.CanPerformInspections, accessSettings.CanConfirmPurchase,
-                    accessSettings.CanManageTemplates, accessSettings.CanReadAudit));
+                    accessSettings.CanManageTemplates, accessSettings.CanReadAudit,
+                    accessSettings.CanManageSearchGroups));
             }
 
             if (entry.Entity is AuditEvent or CollectionDelivery or CatalogObservation or CatalogEvent or WorkflowTransition or Approval

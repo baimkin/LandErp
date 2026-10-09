@@ -168,14 +168,6 @@ public sealed class EmployeeAccessSettingsTests
             bootstrap, "access-v1-cutover-owner", "Access V1 cutover organization");
         await IdentityOrganizationTests.EnableMfaAsync(bootstrap, ownerUserId);
 
-        // Bootstrap uses the current schema (including Kanban); only the access
-        // backfill under test is exercised against the historical schema below.
-        await using (LandErpDbContext preCutover = sandbox.Context())
-        {
-            IMigrator migrator = preCutover.Database.GetService<IMigrator>();
-            await migrator.MigrateAsync("20260921183000_EmployeeAccessSettings");
-        }
-
         Guid managerEmployeeId;
         Guid headEmployeeId;
         Guid inspectorEmployeeId;
@@ -239,7 +231,10 @@ public sealed class EmployeeAccessSettingsTests
             Assert.IsFalse(await db.EmployeeAccessSettings.AnyAsync(item => item.EmployeeId == secondOwnerEmployeeId));
             await db.SaveChangesAsync();
 
+            // Create fixture rows with the current application model, then exercise the historical
+            // access cutover without asking current code to query a schema that predates new columns.
             IMigrator migrator = db.Database.GetService<IMigrator>();
+            await migrator.MigrateAsync("20260921183000_EmployeeAccessSettings");
             await migrator.MigrateAsync();
         }
 
@@ -257,6 +252,7 @@ public sealed class EmployeeAccessSettingsTests
             Assert.IsFalse(manager.CanConfirmPurchase);
             Assert.IsTrue(manager.CanManageTemplates);
             Assert.IsFalse(manager.CanReadAudit);
+            Assert.IsFalse(manager.CanManageSearchGroups);
 
             EmployeeAccessSettings head = await verified.EmployeeAccessSettings.AsNoTracking()
                 .SingleAsync(item => item.EmployeeId == headEmployeeId);
@@ -270,6 +266,7 @@ public sealed class EmployeeAccessSettingsTests
             Assert.IsTrue(head.CanConfirmPurchase);
             Assert.IsTrue(head.CanManageTemplates);
             Assert.IsFalse(head.CanReadAudit);
+            Assert.IsFalse(head.CanManageSearchGroups);
 
             EmployeeAccessSettings inspector = await verified.EmployeeAccessSettings.AsNoTracking()
                 .SingleAsync(item => item.EmployeeId == inspectorEmployeeId);
@@ -283,6 +280,7 @@ public sealed class EmployeeAccessSettingsTests
             Assert.IsFalse(inspector.CanConfirmPurchase);
             Assert.IsFalse(inspector.CanManageTemplates);
             Assert.IsFalse(inspector.CanReadAudit);
+            Assert.IsFalse(inspector.CanManageSearchGroups);
 
             EmployeeAccessSettings administrator = await verified.EmployeeAccessSettings.AsNoTracking()
                 .SingleAsync(item => item.EmployeeId == administratorEmployeeId);
@@ -296,6 +294,7 @@ public sealed class EmployeeAccessSettingsTests
             Assert.IsFalse(administrator.CanConfirmPurchase);
             Assert.IsFalse(administrator.CanManageTemplates);
             Assert.IsTrue(administrator.CanReadAudit);
+            Assert.IsFalse(administrator.CanManageSearchGroups);
 
             Assert.IsFalse(await verified.EmployeeAccessSettings.AsNoTracking()
                 .AnyAsync(item => item.EmployeeId == secondOwnerEmployeeId));
@@ -312,6 +311,7 @@ public sealed class EmployeeAccessSettingsTests
             Assert.AreEqual(preserved.CanConfirmPurchase, explicitStored.CanConfirmPurchase);
             Assert.AreEqual(preserved.CanManageTemplates, explicitStored.CanManageTemplates);
             Assert.AreEqual(preserved.CanReadAudit, explicitStored.CanReadAudit);
+            Assert.AreEqual(preserved.CanManageSearchGroups, explicitStored.CanManageSearchGroups);
 
             Assert.IsFalse(verified.Database.HasPendingModelChanges());
         }

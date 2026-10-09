@@ -239,14 +239,19 @@ public sealed class CollectionSchedulingTests
             return new(sandbox, services, ownerId, new Clock(now));
         }
 
-        public async Task<Subject> CreateCollectionEmployeeAsync(string login, CollectionAccessLevel level)
+        public async Task<Subject> CreateCollectionEmployeeAsync(string login, CollectionAccessLevel level,
+            bool canManageSearchGroups = false)
         {
             IOrganizationWorkspace organization = services.GetRequiredService<IOrganizationWorkspace>();
             OrganizationView view = await organization.ReadAsync(Owner, CancellationToken.None);
             Guid roleId = view.Roles.Single(item => item.Name == "ProcurementManager").Id;
             TemporaryCredential created = await organization.CreateEmployeeAsync(Owner,
                 new(login, login, null, null, null, null, roleId, AccessScope.Own, true,
-                    EmployeeAccessRules.NoAccess with { CollectionAccess = level }),
+                    EmployeeAccessRules.NoAccess with
+                    {
+                        CollectionAccess = level,
+                        CanManageSearchGroups = canManageSearchGroups
+                    }),
                 "collection-access-test", CancellationToken.None);
             await using LandErpDbContext db = await Factory.CreateDbContextAsync();
             Guid userId = await db.Employees.Where(item => item.Id == created.EmployeeId)
@@ -323,7 +328,8 @@ public sealed class CollectionSchedulingTests
         await using var f = await SchedulingFixture.CreateAsync("department-collection@test.invalid",
             new(2026, 9, 17, 5, 0, 0, TimeSpan.Zero));
         CollectionAdministration administration = new(f.Factory, f.Clock);
-        Subject subject = await f.CreateCollectionEmployeeAsync("collection.manager@test.invalid", CollectionAccessLevel.Manage);
+        Subject subject = await f.CreateCollectionEmployeeAsync("collection.manager@test.invalid",
+            CollectionAccessLevel.Manage, canManageSearchGroups: true);
 
         Assert.AreEqual(0, (await administration.ReadAsync(subject, default)).Searches.Count);
         Guid groupId = await administration.CreateGroupAsync(subject, "Руководитель закупки", 0, "group", default);
@@ -331,6 +337,51 @@ public sealed class CollectionSchedulingTests
 
         Assert.AreNotEqual(Guid.Empty, groupId);
         Assert.AreNotEqual(Guid.Empty, code.AgentId);
+    }
+
+    [TestMethod]
+    public async Task ZoneOnlyPermissionShowsAndChangesOnlyOwnedZonesWhileOwnerCanManageAll()
+    {
+        await using var f = await SchedulingFixture.CreateAsync("zone-owner@test.invalid",
+            new(2026, 10, 9, 9, 0, 0, TimeSpan.Zero));
+        Subject first = await f.CreateCollectionEmployeeAsync("zone.first@test.invalid",
+            CollectionAccessLevel.None, canManageSearchGroups: true);
+        Subject second = await f.CreateCollectionEmployeeAsync("zone.second@test.invalid",
+            CollectionAccessLevel.None, canManageSearchGroups: true);
+        Guid administrative = await f.Admin.CreateGroupAsync(f.Owner, "Административная зона", 1,
+            "zone-admin", default);
+        Guid owned = await f.Admin.CreateGroupAsync(first, "Своя зона", 2, "zone-first", default);
+        _ = await f.Admin.CreateGroupAsync(second, "Чужая зона", 3, "zone-second", default);
+
+        CollectionAdminView view = await f.Admin.ReadAsync(first, default);
+        Assert.IsFalse(view.CanReadCollection);
+        Assert.IsFalse(view.CanManageCollection);
+        Assert.IsTrue(view.CanManageSearchGroups);
+        Assert.HasCount(1, view.Groups);
+        SearchGroupView own = view.Groups.Single();
+        Assert.AreEqual(owned, own.Id);
+        Assert.IsTrue(own.CanManage);
+        Assert.IsNotNull(own.OwnerEmployeeId);
+        Assert.HasCount(0, view.Searches);
+        Assert.HasCount(0, view.Agents);
+
+        await f.Admin.UpdateGroupAsync(first, owned, own.Revision, "Своя зона изменена", 20,
+            "zone-update", default);
+        CollectionAdminView ownerView = await f.Admin.ReadAsync(f.Owner, default);
+        SearchGroupView administrativeView = ownerView.Groups.Single(item => item.Id == administrative);
+        SearchGroupView ownedView = ownerView.Groups.Single(item => item.Id == owned);
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => f.Admin.UpdateGroupAsync(first,
+            administrative, administrativeView.Revision, "Нельзя", 1, "zone-denied", default));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => f.Admin.UpdateGroupAsync(second,
+            owned, ownedView.Revision, "Нельзя", 2, "zone-denied-other", default));
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(() => f.Admin.CreateSearchAsync(first,
+            new("Нельзя создать поиск", CatalogSource.Avito,
+                "https://www.avito.ru/moskva/zemelnye_uchastki", 1, owned), "zone-search-denied", default));
+
+        await f.Admin.UpdateGroupAsync(f.Owner, owned, ownedView.Revision, "Изменено владельцем системы", 30,
+            "zone-owner-update", default);
+        Assert.AreEqual("Изменено владельцем системы",
+            (await f.Admin.ReadAsync(f.Owner, default)).Groups.Single(item => item.Id == owned).Name);
     }
 
     [TestMethod]

@@ -26,15 +26,16 @@ public sealed class IncomingCatalogReadService(
         ICatalogWorkspace catalogWorkspace, TimeProvider time)
         : this(factory, new EmployeeAccessService(factory), catalogWorkspace, time) { }
 
-    private async Task<AccessContext> RequireReadAsync(Subject subject, CancellationToken cancellationToken)
+    private async Task<EffectiveEmployeeAccess> RequireReadAsync(Subject subject, CancellationToken cancellationToken)
     {
         EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
         if (!effective.CanReadIncoming) throw new AccessDeniedException();
-        return effective.OrganizationContext;
+        return effective;
     }
     public async Task<IncomingCatalogReadPage> ReadAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireReadAsync(subject, cancellationToken);
+        EffectiveEmployeeAccess effective = await RequireReadAsync(subject, cancellationToken);
+        AccessContext context = effective.OrganizationContext;
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         IReadOnlyList<IncomingFilterPresetView> presets = filter.WorkingScope == null || filter.WorkingScope.Mode is IncomingCatalogMode.Archive or IncomingCatalogMode.Participants ? []
             : await (filterPresets ?? throw new InvalidOperationException("Saved-filter service is required."))
@@ -187,7 +188,9 @@ public sealed class IncomingCatalogReadService(
         IncomingSearchGroupView[] groups = await db.SearchGroups.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId && item.Active)
             .OrderBy(item => item.SortOrder).ThenBy(item => item.Name).ThenBy(item => item.Id)
-            .Select(item => new IncomingSearchGroupView(item.Id, item.Name, item.SortOrder))
+            .Select(item => new IncomingSearchGroupView(item.Id, item.Name, item.SortOrder,
+                item.OwnerEmployeeId, effective.CanManageAllSearchGroups
+                    || effective.Settings.CanManageSearchGroups && item.OwnerEmployeeId == effective.EmployeeId))
             .ToArrayAsync(cancellationToken);
         IncomingSearchConfigurationView[] searches = await db.SearchConfigurations.AsNoTracking()
             .Where(item => item.OrganizationId == context.OrganizationId && item.Enabled)
@@ -201,7 +204,7 @@ public sealed class IncomingCatalogReadService(
     public async Task<IncomingCatalogDetailRead> ReadDetailAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken)
     {
         CatalogItemDetail detail = await catalogWorkspace.ReadItemAsync(subject, catalogItemId, cancellationToken);
-        AccessContext context = await RequireReadAsync(subject, cancellationToken);
+        AccessContext context = (await RequireReadAsync(subject, cancellationToken)).OrganizationContext;
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         Listing item = await db.Listings.AsNoTracking().SingleAsync(value => value.Id == catalogItemId
             && value.OrganizationId == context.OrganizationId, cancellationToken);
@@ -285,7 +288,7 @@ public sealed class IncomingCatalogReadService(
     public async Task<IReadOnlyList<IncomingDuplicateLinkTargetView>> SearchDuplicateTargetsAsync(
         Subject subject, Guid catalogItemId, string text, CancellationToken cancellationToken)
     {
-        AccessContext context = await RequireReadAsync(subject, cancellationToken);
+        AccessContext context = (await RequireReadAsync(subject, cancellationToken)).OrganizationContext;
         string search = text.Trim();
         if (search.Length > 200) throw new ArgumentException("Поиск ограничен 200 символами.");
 

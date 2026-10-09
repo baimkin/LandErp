@@ -27,6 +27,7 @@ public sealed class EmployeeAccessSettings
     public bool CanConfirmPurchase { get; set; }
     public bool CanManageTemplates { get; set; }
     public bool CanReadAudit { get; set; }
+    public bool CanManageSearchGroups { get; set; }
     public long Version { get; set; } = 1;
 }
 

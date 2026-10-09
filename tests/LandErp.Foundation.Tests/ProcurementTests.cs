@@ -406,6 +406,7 @@ public sealed class ProcurementTests
             row.CanConfirmPurchase = settings.CanConfirmPurchase;
             row.CanManageTemplates = settings.CanManageTemplates;
             row.CanReadAudit = settings.CanReadAudit;
+            row.CanManageSearchGroups = settings.CanManageSearchGroups;
             await db.SaveChangesAsync();
         }
 

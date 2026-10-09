@@ -2,7 +2,7 @@ using LandErp.Application.Modules.IdentityAccess.Contracts;
 
 namespace LandErp.Application.Modules.Catalog.Contracts;
 
-public sealed record CatalogCalculationTarget(Guid Id, long ExpectedVersion);
+public sealed record CatalogCalculationTarget(Guid Id, long ExpectedVersion, Guid SearchGroupId);
 // Null Selected means every result of Filter except ExcludedIds, across pages.
 // A non-null list means only explicitly selected rows and cannot be combined with exclusions.
 public sealed record CatalogCalculationSelection(IncomingCatalogReadFilter Filter,

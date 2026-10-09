@@ -28,7 +28,8 @@ public sealed record IncomingCatalogReadFilter(IncomingCatalogFilter Base, Guid?
     IncomingCatalogSortDirection SortDirection = IncomingCatalogSortDirection.Descending,
     Guid? SearchGroupId = null, decimal? MinPricePerSotka = null, decimal? MaxPricePerSotka = null,
     IReadOnlyList<IncomingLandType>? LandTypes = null, IncomingCatalogWorkingScope? WorkingScope = null, bool? IncludedInMedian = null);
-public sealed record IncomingSearchGroupView(Guid Id, string Name, int SortOrder);
+public sealed record IncomingSearchGroupView(Guid Id, string Name, int SortOrder,
+    Guid? OwnerEmployeeId = null, bool CanManageCalculation = false);
 public sealed record IncomingSearchConfigurationView(Guid Id, string Label, CatalogSource Source, Guid? SearchGroupId);
 public sealed record IncomingCatalogRowRead(Guid CatalogItemId, Guid? SearchConfigurationId,
     string? SearchConfigurationLabel, int CompletenessPercent, IncomingCatalogRowState RowState,

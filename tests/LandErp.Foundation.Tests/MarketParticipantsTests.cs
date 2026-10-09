@@ -108,9 +108,9 @@ public sealed class MarketParticipantsTests
         var search = await reads.ReadAsync(f.Manager, Request(a, sold.ToString()), CancellationToken.None);
         Assert.AreEqual(1, search.Total);
         Assert.AreEqual(3, search.ParticipantTotal);
-        var preview = await commands.PreviewAsync(f.Manager, new(Request(b)), false, CancellationToken.None);
+        var preview = await commands.PreviewAsync(f.Owner, new(Request(b)), false, CancellationToken.None);
         Assert.AreEqual(2, preview.Total);
-        await commands.ApplyAsync(f.Manager, new(Request(b)), false, preview.Stamp, "m02-exclude", CancellationToken.None);
+        await commands.ApplyAsync(f.Owner, new(Request(b)), false, preview.Stamp, "m02-exclude", CancellationToken.None);
         market = await overview.ReadMarketGroupsAsync(f.Owner, new(), CancellationToken.None);
         Assert.AreEqual(0, market.Items.Single(item => item.SearchGroupId == b).IncludedCount);
         Assert.AreEqual(1, market.Items.Single(item => item.SearchGroupId == a).IncludedCount);
@@ -186,7 +186,7 @@ public sealed class MarketParticipantsTests
         Assert.AreEqual(1, market.Items.Single(item => item.SearchGroupId == a).IncludedCount);
         Assert.AreEqual(participant.PricePerSotka, market.Items.Single(item => item.SearchGroupId == a).MedianPricePerSotka);
         Assert.AreEqual(100m, market.Items.Single(item => item.SearchGroupId == b).AveragePricePerSotka);
-        await commands.SetAsync(f.Manager, new(participant.Id, participant.Version), false, "m02", CancellationToken.None);
+        await commands.SetAsync(f.Owner, new(participant.Id, participant.Version, a), false, "m02", CancellationToken.None);
         Guid replacement = expected == fresher ? tie : fresher;
         Assert.AreEqual(replacement, (await reads.ReadAsync(f.Manager, Request(a), CancellationToken.None)).Items.Single().Id);
         market = await overview.ReadMarketGroupsAsync(f.Owner, new(), CancellationToken.None);

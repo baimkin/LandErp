@@ -21,7 +21,8 @@ public sealed record CollectionRunView(Guid JobId, string? Agent, string State, 
 public sealed record SearchView(Guid Id, string Label, CatalogSource Source, string Url, int MaxPages,
     Guid? GroupId, string Group, string Schedule, CollectionScheduleKind ScheduleKind, int? IntervalMinutes,
     string[] FixedTimes, bool Enabled, DateTimeOffset? NextRunAt, long Revision, CollectionRunView? LastRun);
-public sealed record SearchGroupView(Guid Id, string Name, int SortOrder, bool Active, long Revision, int SearchCount);
+public sealed record SearchGroupView(Guid Id, string Name, int SortOrder, bool Active, long Revision, int SearchCount,
+    Guid? OwnerEmployeeId = null, string? OwnerName = null, bool CanManage = false);
 public sealed record CollectionJobView(Guid Id, Guid SearchId, string Label, string? Agent, string State,
     DateTimeOffset CreatedAt, DateTimeOffset? ScheduledFor, DateTimeOffset? LeaseExpiresAt, DateTimeOffset? CompletedAt,
     string ResultCode, int ProcessedCount, int AcceptedCount, int NewListingsCount, int ChangedListingsCount,
@@ -32,7 +33,8 @@ public sealed record CollectionSchedulerHealthView(string State, DateTimeOffset?
 public sealed record CollectionAdminView(IReadOnlyList<AgentView> Agents, IReadOnlyList<SearchGroupView> Groups,
     IReadOnlyList<SearchView> Searches, IReadOnlyList<CollectionJobView> Jobs, int ActiveSearches, int PendingJobs,
     int ExpiredLeases, int AttentionJobs, int OnlineAgents, int BusyAgents, CollectionSchedulerHealthView Scheduler,
-    string BusinessTimeZone = "Europe/Moscow");
+    string BusinessTimeZone = "Europe/Moscow", bool CanReadCollection = true,
+    bool CanManageCollection = false, bool CanManageSearchGroups = false);
 public sealed record CollectionSchedule(CollectionScheduleKind Kind, int? IntervalMinutes = null, string[]? FixedTimes = null);
 public sealed record CreateSearch(string Label, CatalogSource Source, string Url, int MaxPages,
     Guid? SearchGroupId = null, CollectionSchedule? Schedule = null, bool RunImmediately = false);
@@ -51,6 +53,8 @@ public interface ICollectionAdministration
     Task CreateSearchAsync(Subject subject, CreateSearch command, string correlationId, CancellationToken cancellationToken);
     Task UpdateSearchAsync(Subject subject, UpdateSearch command, string correlationId, CancellationToken cancellationToken);
     Task<Guid> CreateGroupAsync(Subject subject, string name, int sortOrder, string correlationId, CancellationToken cancellationToken);
+    Task UpdateGroupAsync(Subject subject, Guid groupId, long expectedVersion, string name, int sortOrder,
+        string correlationId, CancellationToken cancellationToken);
     Task ArchiveGroupAsync(Subject subject, Guid groupId, long expectedVersion, string correlationId, CancellationToken cancellationToken);
     Task EnqueueAsync(Subject subject, Guid searchId, string correlationId, CancellationToken cancellationToken);
 }

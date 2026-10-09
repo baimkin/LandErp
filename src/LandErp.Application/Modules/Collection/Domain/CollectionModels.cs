@@ -48,6 +48,7 @@ public sealed class SearchGroup
 {
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
+    public Guid? OwnerEmployeeId { get; set; }
     public string Name { get; set; } = "";
     public int SortOrder { get; set; }
     public bool Active { get; set; } = true;

@@ -17,7 +17,8 @@ public sealed record EmployeeAccessConfiguration(
     bool CanPerformInspections,
     bool CanConfirmPurchase,
     bool CanManageTemplates,
-    bool CanReadAudit);
+    bool CanReadAudit,
+    bool CanManageSearchGroups = false);
 
 public static class EmployeeAccessRules
 {
@@ -76,6 +77,7 @@ public sealed record EffectiveEmployeeAccess(
     EmployeeAccessConfiguration Settings,
     EmployeeAccessSource Source)
 {
+    public bool IsAdministrator { get; init; }
     public bool IsSystemOwner => Source == EmployeeAccessSource.SystemOwner;
     public bool CanReadIncoming => Settings.IncomingAccess >= IncomingAccessLevel.Read;
     public bool CanProcessIncoming => Settings.IncomingAccess >= IncomingAccessLevel.Process;
@@ -84,6 +86,8 @@ public sealed record EffectiveEmployeeAccess(
     public bool CanHeadProcurement => Settings.ProcurementAccess >= ProcurementAccessLevel.Head;
     public bool CanReadCollection => Settings.CollectionAccess >= CollectionAccessLevel.Read;
     public bool CanManageCollection => Settings.CollectionAccess >= CollectionAccessLevel.Manage;
+    public bool CanManageAllSearchGroups => IsSystemOwner || IsAdministrator || CanHeadProcurement;
+    public bool CanManageSearchGroups => Settings.CanManageSearchGroups || CanManageAllSearchGroups;
     public bool CanReadAudit => Settings.CanReadAudit;
     public AccessContext OrganizationContext =>
         new(EmployeeId, OrganizationId, DepartmentId, TeamId, AccessScope.Organization);

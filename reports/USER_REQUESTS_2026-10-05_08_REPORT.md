@@ -94,6 +94,87 @@ Production, production-БД и рабочий сервер не изменяли
 Миграция: `20261009083422_KanbanRejectionTarget`; создана, но к production не
 применялась.
 
-## Этапы 3–6
+Коммит и push: `5a23790` (`origin/main`).
 
-Не начаты на момент фиксации этапа 2.
+## Этап 3. Зоны поиска и участие в медиане
+
+Реализовано:
+
+- `SearchGroup` представлен пользователю как зона поиска, а право создавать и
+  управлять своими зонами отделено от управления Parser и поисками;
+- новая зона получает владельца-сотрудника; обычный владелец может изменять и
+  архивировать только свои зоны, а старые зоны без владельца остаются
+  административными;
+- ProcurementHead, Administrator и Owner могут управлять всеми зонами своей
+  организации; проверка организации и владения выполняется сервером;
+- сотрудник только с правом на зоны открывает страницу «Поиски и парсинг», но
+  видит на ней лишь собственные зоны без парсеров, поисков, очереди и истории;
+- страница управления поисками получила отдельный блок зон, создание,
+  переименование, порядок и архивирование; терминология интерфейса приведена к
+  «зонам», а во входящих сохранена ссылка на эту страницу;
+- одиночное и массовое изменение участия в медиане обязательно получает зону,
+  проверяет право на неё и фактическое происхождение объявления из её поиска;
+  выбранные строки, весь результат и исключения не обходят эту проверку;
+- владелец зоны меняет медиану только для результатов своей зоны, а
+  ProcurementHead, Administrator и Owner — для результатов любой зоны
+  организации;
+- сохранён единый `Listing.IncludeInCalculation`: изменение сразу учитывается
+  во всех зонах объявления, отдельное хранение медианы по зонам не добавлялось;
+- идентификатор зоны включён в аудит пользовательского изменения медианы;
+- добавлена миграция nullable-владельца зоны и отдельного права сотрудника;
+  существующие зоны остаются с `NULL` и требуют повышенной роли для управления.
+
+Изменённые файлы:
+
+- `src/LandErp.Application/Modules/Catalog/Public/CatalogCalculationContracts.cs`;
+- `src/LandErp.Application/Modules/Catalog/Public/IncomingCatalogReadContracts.cs`;
+- `src/LandErp.Application/Modules/Collection/Domain/CollectionModels.cs`;
+- `src/LandErp.Application/Modules/Collection/Public/CollectionServices.cs`;
+- `src/LandErp.Application/Modules/IdentityAccess/Domain/PermissionModels.cs`;
+- `src/LandErp.Application/Modules/IdentityAccess/Public/AccessContracts.cs`;
+- `src/LandErp.Infrastructure/Modules/Catalog/CatalogCalculationService.cs`;
+- `src/LandErp.Infrastructure/Modules/Catalog/IncomingCatalogReadService.cs`;
+- `src/LandErp.Infrastructure/Modules/Collection/CollectionAdministration.cs`;
+- `src/LandErp.Infrastructure/Modules/Collection/CollectionMappings.cs`;
+- `src/LandErp.Infrastructure/Modules/IdentityAccess/EmployeeAccessService.cs`;
+- `src/LandErp.Infrastructure/Modules/Organization/OrganizationWorkspace.cs`;
+- `src/LandErp.Infrastructure/Persistence/LandErpDbContext.cs`;
+- `src/LandErp.Infrastructure/Persistence/ModelConventions.cs`;
+- `src/LandErp.Infrastructure/Migrations/20261009085314_SearchGroupOwnership.cs`;
+- `src/LandErp.Infrastructure/Migrations/20261009085314_SearchGroupOwnership.Designer.cs`;
+- `src/LandErp.Infrastructure/Migrations/LandErpDbContextModelSnapshot.cs`;
+- `src/LandErp.Server/Components/AccessV1Ui.cs`;
+- `src/LandErp.Server/Components/Pages/Collectors.razor`;
+- `src/LandErp.Server/Components/Pages/Collectors.razor.cs`;
+- `src/LandErp.Server/Components/Pages/IncomingCatalogV2.razor`;
+- `src/LandErp.Server/Components/Pages/OrganizationPage.razor`;
+- `tests/LandErp.Foundation.Tests/CollectionSchedulingTests.cs`;
+- `tests/LandErp.Foundation.Tests/EmployeeAccessSettingsTests.cs`;
+- `tests/LandErp.Foundation.Tests/MarketParticipantsTests.cs`;
+- `tests/LandErp.Foundation.Tests/MedianParticipationTests.cs`;
+- `tests/LandErp.Foundation.Tests/ProcurementTests.cs`.
+
+Проверки:
+
+- `dotnet build tests/LandErp.Foundation.Tests/LandErp.Foundation.Tests.csproj -c Release --no-restore`
+  → успешно, 0 ошибок, 0 предупреждений;
+- профильный Release-прогон `MedianParticipationTests`,
+  `MarketParticipantsTests`, `CollectionSchedulingTests`,
+  `EmployeeAccessSettingsTests` и `AccessV1Ap03UiTests` → 30/30 Passed;
+- в прогон входят владение и изоляция зон, запрет управления Parser для
+  zone-only сотрудника, принадлежность объявления зоне, повышенные роли,
+  одиночные и массовые операции, общий флаг расчёта и migration round-trip;
+- после финальной правки подписей и отображения Administrator/ProcurementHead
+  повторный адресный Release-прогон прав зон, медианы и UI-контрактов → 10/10 Passed;
+- `dotnet ef migrations has-pending-model-changes --project src/LandErp.Infrastructure --startup-project src/LandErp.Infrastructure --configuration Release --no-build`
+  → модель соответствует последней миграции.
+
+Миграция: `20261009085314_SearchGroupOwnership`; создана, но к production не
+применялась. Новых таблиц нет, поэтому runtime grants не менялись.
+
+Коммит и push: фиксируются отдельным коммитом этапа 3; SHA будет добавлен в
+отчёт при фиксации следующего этапа.
+
+## Этапы 4–6
+
+Не начаты на момент фиксации этапа 3.

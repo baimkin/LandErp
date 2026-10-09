@@ -307,6 +307,7 @@ public sealed class OrganizationWorkspace(
         row.CanConfirmPurchase = command.Settings.CanConfirmPurchase;
         row.CanManageTemplates = command.Settings.CanManageTemplates;
         row.CanReadAudit = command.Settings.CanReadAudit;
+        row.CanManageSearchGroups = command.Settings.CanManageSearchGroups;
 
         AddAudit(db, context, subject, "EmployeeAccessChanged", "Employee", command.EmployeeId,
             new
@@ -796,13 +797,14 @@ public sealed class OrganizationWorkspace(
             CanPerformInspections = settings.CanPerformInspections,
             CanConfirmPurchase = settings.CanConfirmPurchase,
             CanManageTemplates = settings.CanManageTemplates,
-            CanReadAudit = settings.CanReadAudit
+            CanReadAudit = settings.CanReadAudit,
+            CanManageSearchGroups = settings.CanManageSearchGroups
         };
 
     private static EmployeeAccessConfiguration ToConfiguration(EmployeeAccessSettings value) =>
         new(value.IncomingAccess, value.ProcurementAccess, value.ProcurementReadScope, value.ProcurementWorkScope,
             value.CollectionAccess, value.CanAssignInspections, value.CanPerformInspections,
-            value.CanConfirmPurchase, value.CanManageTemplates, value.CanReadAudit);
+            value.CanConfirmPurchase, value.CanManageTemplates, value.CanReadAudit, value.CanManageSearchGroups);
 
     private static void ValidateAccessScopeReferences(
         Guid? departmentId, Guid? teamId, EmployeeAccessConfiguration settings)

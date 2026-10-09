@@ -16,11 +16,13 @@ public partial class Collectors : IAsyncDisposable
     private CollectionAdminView? view;
     private EffectiveEmployeeAccess? effectiveAccess;
     private bool CanManageCollection => effectiveAccess?.CanManageCollection == true;
+    private bool CanManageSearchGroups => effectiveAccess?.CanManageSearchGroups == true;
     private AgentConnectionCode? connectionCode;
     private AgentCredential? credential;
     private AgentView? selectedAgent;
     private CollectionJobView? selectedJob;
     private SearchView? editingSearch;
+    private SearchGroupView? editingGroup;
     private AgentInput agentInput = new();
     private CollectionSearchForm searchInput = new();
     private GroupInput groupInput = new();
@@ -175,8 +177,15 @@ public partial class Collectors : IAsyncDisposable
     private void CloseSearch() { if (Busy) return; showSearchModal = false; editingSearch = null; }
     private void OpenConnection() { agentInput = new(); connectionCode = null; showConnectionModal = true; }
     private void CloseConnection() { if (Busy) return; showConnectionModal = false; connectionCode = null; }
-    private void OpenGroups() { groupInput = new(); showGroupsModal = true; }
-    private void CloseGroups() { if (!Busy) showGroupsModal = false; }
+    private void OpenGroups() { editingGroup = null; groupInput = new(); showGroupsModal = true; }
+    private void EditGroup(SearchGroupView group)
+    {
+        editingGroup = group;
+        groupInput = new() { Name = group.Name, SortOrder = group.SortOrder };
+        showGroupsModal = true;
+    }
+    private void CancelGroupEdit() { editingGroup = null; groupInput = new(); }
+    private void CloseGroups() { if (!Busy) { showGroupsModal = false; editingGroup = null; } }
     private void OpenAgent(AgentView agent) { credential = null; selectedAgent = agent; }
     private void CloseAgent() { if (Busy) return; credential = null; selectedAgent = null; }
     private void ResetFilters() { query = ""; groupFilter = "all"; statusFilter = "all"; groupVisibility = "active"; }
@@ -217,9 +226,14 @@ public partial class Collectors : IAsyncDisposable
             showQuickGroup = false; quickGroupName = "";
         });
     }
-    private Task CreateGroupAsync() => ExecuteAsync(async () =>
+    private Task SaveGroupAsync() => ExecuteAsync(async () =>
     {
-        await Administration.CreateGroupAsync(CurrentSubject, groupInput.Name, groupInput.SortOrder, Correlation(), lifetime.Token);
+        if (editingGroup is null)
+            await Administration.CreateGroupAsync(CurrentSubject, groupInput.Name, groupInput.SortOrder, Correlation(), lifetime.Token);
+        else
+            await Administration.UpdateGroupAsync(CurrentSubject, editingGroup.Id, editingGroup.Revision,
+                groupInput.Name, groupInput.SortOrder, Correlation(), lifetime.Token);
+        editingGroup = null;
         groupInput = new();
     });
     private Task ArchiveGroupAsync(SearchGroupView group) => ExecuteAsync(() =>

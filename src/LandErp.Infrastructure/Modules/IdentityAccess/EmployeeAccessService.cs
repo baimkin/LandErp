@@ -76,7 +76,7 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
             if (string.Equals(row.RoleName, "Owner", StringComparison.Ordinal))
             {
                 result.Add(Effective(row.Id, row.OrganizationId, row.DepartmentId, row.TeamId,
-                    OwnerConfiguration(), EmployeeAccessSource.SystemOwner));
+                    OwnerConfiguration(), EmployeeAccessSource.SystemOwner, row.RoleName));
                 continue;
             }
 
@@ -86,25 +86,28 @@ public sealed class EmployeeAccessService(IDbContextFactory<LandErpDbContext> fa
             EmployeeAccessConfiguration settings = ToConfiguration(explicitSettings);
             Validate(settings);
             result.Add(Effective(row.Id, row.OrganizationId, row.DepartmentId, row.TeamId,
-                settings, EmployeeAccessSource.Configured));
+                settings, EmployeeAccessSource.Configured, row.RoleName));
         }
 
         return result;
     }
 
     private static EffectiveEmployeeAccess Effective(Guid employeeId, Guid organizationId, Guid? departmentId,
-        Guid? teamId, EmployeeAccessConfiguration settings, EmployeeAccessSource source) =>
-        new(employeeId, organizationId, departmentId, teamId, settings, source);
+        Guid? teamId, EmployeeAccessConfiguration settings, EmployeeAccessSource source, string roleName) =>
+        new(employeeId, organizationId, departmentId, teamId, settings, source)
+        {
+            IsAdministrator = string.Equals(roleName, "Administrator", StringComparison.Ordinal)
+        };
 
     private static EmployeeAccessConfiguration ToConfiguration(EmployeeAccessSettings value) =>
         new(value.IncomingAccess, value.ProcurementAccess, value.ProcurementReadScope, value.ProcurementWorkScope,
             value.CollectionAccess, value.CanAssignInspections, value.CanPerformInspections,
-            value.CanConfirmPurchase, value.CanManageTemplates, value.CanReadAudit);
+            value.CanConfirmPurchase, value.CanManageTemplates, value.CanReadAudit, value.CanManageSearchGroups);
 
     private static EmployeeAccessConfiguration OwnerConfiguration() =>
         new(IncomingAccessLevel.Process, ProcurementAccessLevel.Head,
             AccessScope.Organization, AccessScope.Organization, CollectionAccessLevel.Manage,
             CanAssignInspections: true, CanPerformInspections: true, CanConfirmPurchase: true,
-            CanManageTemplates: true, CanReadAudit: true);
+            CanManageTemplates: true, CanReadAudit: true, CanManageSearchGroups: true);
 
 }

@@ -154,12 +154,13 @@ else if(view!=null)
                                                     <label class="check-field"><InputCheckbox @bind-Value="accessInput.CanConfirmPurchase" /> Фиксировать покупку</label>
                                                     <label class="check-field"><InputCheckbox @bind-Value="accessInput.CanManageTemplates" /> Управлять общими шаблонами</label>
                                                     <label class="check-field"><InputCheckbox @bind-Value="accessInput.CanReadAudit" /> Читать полный аудит</label>
+                                                    <label class="check-field"><InputCheckbox @bind-Value="accessInput.CanManageSearchGroups" /> Создавать и управлять своими зонами поиска</label>
                                                 </div>
                                             </div>
                                         </div>
                                         <div class="organization-notice">
                                             <strong>Итог доступа</strong>
-                                            @foreach(string line in AccessV1Ui.Summary(accessInput.ToConfiguration(), EmployeeAccessSource.Configured)){<div>@line</div>}
+                                            @foreach(string line in AccessV1Ui.Summary(accessInput.ToConfiguration(), EmployeeAccessSource.Configured, SelectedRoleIsAdministrator)){<div>@line</div>}
                                         </div>
                                         @if(editingAccess!=null){<p class="subtle">@EmployeeAccessSourceLabel(editingAccess)</p>}
                                         @if(editingEmployee!=null)
@@ -183,7 +184,7 @@ else if(view!=null)
                                     <div class="section-heading"><div><h3>Доступ</h3><p class="subtle">Только просмотр effective Access V1.</p></div></div>
                                     @if(editingAccess!=null)
                                     {
-                                        @foreach(string line in AccessV1Ui.Summary(editingAccess.Settings,editingAccess.Source)){<p class="subtle">@line</p>}
+                                        @foreach(string line in AccessV1Ui.Summary(editingAccess.Settings,editingAccess.Source, editingEmployee?.Role=="Administrator")){<p class="subtle">@line</p>}
                                     }
                                 </section>
                             </NotAuthorized>
@@ -259,6 +260,7 @@ else if(view!=null)
     private IReadOnlyList<EmployeeView> FilteredEmployees=>view!.Employees.Where(x=>(employeeSearch.Length==0||x.Name.Contains(employeeSearch,StringComparison.OrdinalIgnoreCase)||x.Login.Contains(employeeSearch,StringComparison.OrdinalIgnoreCase))&&(employeeDepartment.Length==0||x.DepartmentId?.ToString()==employeeDepartment)&&(employeeState.Length==0||x.State.ToString()==employeeState)).ToArray();
     private IReadOnlyList<PositionView> FilteredPositions=>view!.Positions.Where(x=>(showArchivedPositions||x.Active)&&(positionSearch.Length==0||x.Name.Contains(positionSearch,StringComparison.OrdinalIgnoreCase))).ToArray();
     private bool SelectedRoleIsOwner=>view?.Roles.FirstOrDefault(x=>x.Id==employeeInput.RoleId)?.Name=="Owner";
+    private bool SelectedRoleIsAdministrator=>view?.Roles.FirstOrDefault(x=>x.Id==employeeInput.RoleId)?.Name=="Administrator";
     [SupplyParameterFromQuery(Name="tab")] public string? RequestedTab{get;set;}
     protected override async Task OnInitializedAsync(){string path=Navigation.ToBaseRelativePath(Navigation.Uri).Split('?',2)[0];activeTab=path.Equals("employees",StringComparison.OrdinalIgnoreCase)?"employees":"structure";await base.OnInitializedAsync();}
     protected override void OnParametersSet(){if(RequestedTab!=null&&Tabs.Any(item=>item.Id==RequestedTab))activeTab=RequestedTab;}
@@ -386,9 +388,10 @@ else if(view!=null)
         public bool CanConfirmPurchase{get;set;}
         public bool CanManageTemplates{get;set;}
         public bool CanReadAudit{get;set;}
+        public bool CanManageSearchGroups{get;set;}
         public EmployeeAccessConfiguration ToConfiguration()=>new(IncomingAccess,ProcurementAccess,ProcurementReadScope,
             ProcurementWorkScope,CollectionAccess,CanAssignInspections,CanPerformInspections,CanConfirmPurchase,
-            CanManageTemplates,CanReadAudit);
+            CanManageTemplates,CanReadAudit,CanManageSearchGroups);
         public static EmployeeAccessInput From(EmployeeAccessView value)=>From(value.Settings);
         public static EmployeeAccessInput From(EmployeeAccessConfiguration value)=>new()
         {
@@ -396,7 +399,8 @@ else if(view!=null)
             ProcurementReadScope=value.ProcurementReadScope,ProcurementWorkScope=value.ProcurementWorkScope,
             CollectionAccess=value.CollectionAccess,CanAssignInspections=value.CanAssignInspections,
             CanPerformInspections=value.CanPerformInspections,CanConfirmPurchase=value.CanConfirmPurchase,
-            CanManageTemplates=value.CanManageTemplates,CanReadAudit=value.CanReadAudit
+            CanManageTemplates=value.CanManageTemplates,CanReadAudit=value.CanReadAudit,
+            CanManageSearchGroups=value.CanManageSearchGroups
         };
     }
     private sealed record ActiveTarget(string Kind,Guid Id,long Version,bool Active,string Title);

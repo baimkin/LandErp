@@ -14,23 +14,50 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
     IEmployeeAccessService employeeAccess, IIncomingFilterPresetService presets, TimeProvider time)
     : ICatalogCalculationService
 {
-    private async Task<Guid> RequireAsync(Subject subject, CancellationToken cancellationToken)
+    private async Task<EffectiveEmployeeAccess> RequireAsync(Subject subject, CancellationToken cancellationToken)
     {
-        var access = await employeeAccess.ResolveAsync(subject, cancellationToken);
-        if (!access.CanProcessIncoming) throw new AccessDeniedException();
-        return access.OrganizationContext.OrganizationId;
+        EffectiveEmployeeAccess access = await employeeAccess.ResolveAsync(subject, cancellationToken);
+        if (!access.CanReadIncoming) throw new AccessDeniedException();
+        return access;
     }
+
+    private static async Task RequireZoneAsync(LandErpDbContext db, EffectiveEmployeeAccess access,
+        Guid searchGroupId, CancellationToken cancellationToken)
+    {
+        var group = await db.SearchGroups.AsNoTracking().Where(item => item.Id == searchGroupId
+                && item.OrganizationId == access.OrganizationId)
+            .Select(item => new { item.OwnerEmployeeId }).SingleOrDefaultAsync(cancellationToken)
+            ?? throw new AccessDeniedException();
+        if (!access.CanManageAllSearchGroups
+            && (!access.Settings.CanManageSearchGroups || group.OwnerEmployeeId != access.EmployeeId))
+            throw new AccessDeniedException();
+    }
+
+    private static Task<bool> BelongsToZoneAsync(LandErpDbContext db, Guid organizationId,
+        Guid listingId, Guid searchGroupId, CancellationToken cancellationToken) =>
+        (from observation in db.ListingObservations.AsNoTracking()
+         join job in db.CollectionJobs.AsNoTracking() on observation.JobId equals job.Id
+         join search in db.SearchConfigurations.AsNoTracking() on job.SearchId equals search.Id
+         where observation.ListingId == listingId && job.OrganizationId == organizationId
+             && search.OrganizationId == organizationId
+             && search.SearchGroupId == searchGroupId
+         select observation.Id).AnyAsync(cancellationToken);
 
     public async Task<CatalogCalculationResult> SetAsync(Subject subject, CatalogCalculationTarget target,
         bool include, string correlationId, CancellationToken cancellationToken)
     {
-        Guid organizationId = await RequireAsync(subject, cancellationToken);
+        EffectiveEmployeeAccess access = await RequireAsync(subject, cancellationToken);
+        Guid organizationId = access.OrganizationId;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await RequireZoneAsync(db, access, target.SearchGroupId, cancellationToken);
         Listing item = await db.Listings.SingleOrDefaultAsync(item => item.Id == target.Id
             && item.OrganizationId == organizationId, cancellationToken) ?? throw new AccessDeniedException();
+        if (!await BelongsToZoneAsync(db, organizationId, item.Id, target.SearchGroupId, cancellationToken))
+            throw new AccessDeniedException();
         if (item.Version != target.ExpectedVersion) throw Conflict();
         var result = Summarize([item], include);
-        if (result.Changed > 0) Change(db, item, include, subject.UserId, "Ручное действие", correlationId, time.GetUtcNow());
+        if (result.Changed > 0) Change(db, item, include, subject.UserId, "Ручное действие",
+            correlationId, time.GetUtcNow(), target.SearchGroupId);
         await db.SaveChangesAsync(cancellationToken);
         return result;
     }
@@ -38,9 +65,11 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
     public async Task<CatalogCalculationPreview> PreviewAsync(Subject subject, CatalogCalculationSelection selection,
         bool include, CancellationToken cancellationToken)
     {
-        Guid organizationId = await RequireAsync(subject, cancellationToken);
+        EffectiveEmployeeAccess access = await RequireAsync(subject, cancellationToken);
+        Guid organizationId = access.OrganizationId;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        Listing[] items = await SelectAsync(db, subject, organizationId, selection, cancellationToken);
+        Guid searchGroupId = await RequireSelectionZoneAsync(db, access, selection, cancellationToken);
+        Listing[] items = await SelectAsync(db, subject, organizationId, searchGroupId, selection, cancellationToken);
         var result = Summarize(items, include);
         return new(Stamp(items, include), result.Total, result.Changed, result.AlreadySet, result.Ineligible, result.Reasons);
     }
@@ -48,10 +77,12 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
     public async Task<CatalogCalculationResult> ApplyAsync(Subject subject, CatalogCalculationSelection selection,
         bool include, string expectedStamp, string correlationId, CancellationToken cancellationToken)
     {
-        Guid organizationId = await RequireAsync(subject, cancellationToken);
+        EffectiveEmployeeAccess access = await RequireAsync(subject, cancellationToken);
+        Guid organizationId = access.OrganizationId;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        Listing[] selected = await SelectAsync(db, subject, organizationId, selection, cancellationToken);
+        Guid searchGroupId = await RequireSelectionZoneAsync(db, access, selection, cancellationToken);
+        Listing[] selected = await SelectAsync(db, subject, organizationId, searchGroupId, selection, cancellationToken);
         Guid[] ids = selected.Select(item => item.Id).ToArray();
         // Lock in stable order, then compare the actual versions with the preview. Never overwrite
         // a concurrent user decision, even when the cohort has the same size as before.
@@ -62,14 +93,26 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
         var result = Summarize(items, include);
         foreach (Listing item in items)
             if (item.IncludeInCalculation != include && (!include || CatalogCalculationEligibility.Reason(item) == null))
-                Change(db, item, include, subject.UserId, "Массовое действие", correlationId, time.GetUtcNow());
+                Change(db, item, include, subject.UserId, "Массовое действие", correlationId,
+                    time.GetUtcNow(), searchGroupId);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return result;
     }
 
+    private static async Task<Guid> RequireSelectionZoneAsync(LandErpDbContext db,
+        EffectiveEmployeeAccess access, CatalogCalculationSelection selection, CancellationToken cancellationToken)
+    {
+        Guid searchGroupId = selection.Filter.SearchGroupId ?? throw new ArgumentException(
+            "Для изменения медианы выберите зону поиска.");
+        await RequireZoneAsync(db, access, searchGroupId, cancellationToken);
+        if (selection.Selected?.Any(item => item.SearchGroupId != searchGroupId) == true)
+            throw new AccessDeniedException();
+        return searchGroupId;
+    }
+
     private async Task<Listing[]> SelectAsync(LandErpDbContext db, Subject subject, Guid organizationId,
-        CatalogCalculationSelection selection, CancellationToken cancellationToken)
+        Guid searchGroupId, CatalogCalculationSelection selection, CancellationToken cancellationToken)
     {
         var saved = selection.Filter.WorkingScope == null || selection.Filter.WorkingScope.Mode is IncomingCatalogMode.Archive or IncomingCatalogMode.Participants
             ? Array.Empty<IncomingFilterPresetView>() : await presets.ReadAsync(subject, cancellationToken);
@@ -117,7 +160,7 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
         "Объявления или состав отбора изменились. Обновите список и проверьте количество заново.");
 
     internal static void Change(LandErpDbContext db, Listing item, bool include, Guid? actorId,
-        string reason, string correlationId, DateTimeOffset now)
+        string reason, string correlationId, DateTimeOffset now, Guid? searchGroupId = null)
     {
         if (item.IncludeInCalculation == include) return;
         bool previous = item.IncludeInCalculation;
@@ -132,7 +175,7 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
         {
             Id = Guid.CreateVersion7(), OrganizationId = item.OrganizationId, ActorId = actorId ?? Guid.Empty,
             Action = "CatalogCalculationParticipationChanged", ObjectType = "CatalogItem", ObjectId = item.Id,
-            Changes = JsonSerializer.Serialize(new { Previous = previous, Current = include, Reason = reason }),
+            Changes = JsonSerializer.Serialize(new { Previous = previous, Current = include, Reason = reason, SearchGroupId = searchGroupId }),
             RecordedAt = now, CorrelationId = correlationId.Length <= 64 ? correlationId : Guid.CreateVersion7().ToString()
         });
     }

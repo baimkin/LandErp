@@ -227,7 +227,7 @@
         else if (detail != null)
         {
             <div class="dh">
-                <div class="grow"><b>@detail.Title</b><div class="sub">@detail.BusinessNumber@if (!string.IsNullOrWhiteSpace(detail.CadastralNumber)) { <text> · @detail.CadastralNumber</text> }</div></div>
+                <div class="grow"><b>@detail.Title</b><div class="sub">@detail.BusinessNumber@if (!string.IsNullOrWhiteSpace(detail.CadastralNumber)) { <text> · @detail.CadastralNumber</text> }@if (drawerMarkets.Count > 0) { <text> · @string.Join(", ", drawerMarkets.Select(market => market.Name))</text> }</div></div>
                 <button class="btn" type="button" @onclick="OpenFullCase">Открыть полную карточку ↗</button>
                 <button class="btn" type="button" @onclick="CloseDrawer">×</button>
             </div>
@@ -251,25 +251,21 @@
                         <div class="fact"><label>Состояние закупки</label><b>@ProcurementLabels.Stage(detail.Stage)</b></div>
                         <div class="fact"><label>Площадь</label><b>@AreaSotki(detail.AreaSquareMeters)</b></div>
                         <div class="fact"><label>Ответственный</label><b>@detail.AssigneeName</b></div>
+                        @if (drawerMarkets.Count == 0)
+                        {
+                            <div class="drawer-zone-facts"><div class="drawer-zone-row"><span>Тест спроса</span><span>—</span></div><div class="drawer-zone-row"><span>Желаемая цена</span><span>—</span></div></div>
+                        }
+                        @foreach (var market in drawerMarkets)
+                        {
+                            <div class="drawer-zone-facts">
+                                @if (drawerMarkets.Count > 1) { <span class="drawer-zone-name">@market.Name</span> }
+                                <div class="drawer-zone-row"><span>Тест спроса</span><div class="drawer-zone-values"><DemandTestPrice Value="market" Subject="CurrentSubject" Saved="ReloadAsync" UnitSuffix="/сот." /></div></div>
+                                <div class="drawer-zone-row"><span>Желаемая цена</span><div class="drawer-zone-values"><DemandTestPrice Value="market" Subject="CurrentSubject" Saved="ReloadAsync" PurchaseTarget="true" UnitSuffix="/сот." /><span class="drawer-zone-total" title="Желаемая цена участка">@TargetPropertyPriceCaption(market, detail.AreaSquareMeters)@(LocationEconomics.TargetPropertyPrice(market.TargetPurchasePricePerSotka, detail.AreaSquareMeters) != null ? "/уч." : "")</span></div></div>
+                            </div>
+                        }
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="ct"><b>Экономика связанных зон</b><span class="muted">Желаемая цена и расчёт по рабочей площади</span></div>
-                    @if (drawerMarkets.Count == 0)
-                    {
-                        <GroupMarketPrices Value="null" Subject="CurrentSubject" Saved="ReloadAsync" EmptyText="У объекта нет связанной зоны поиска" PurchaseMode="true" AreaSquareMeters="detail.AreaSquareMeters" />
-                    }
-                    else
-                    {
-                        <div class="drawer-markets">
-                            @foreach (var market in drawerMarkets)
-                            {
-                                <div class="drawer-market"><GroupMarketPrices Value="market" Subject="CurrentSubject" Saved="ReloadAsync" PurchaseMode="true" AreaSquareMeters="detail.AreaSquareMeters" /></div>
-                            }
-                        </div>
-                    }
-                </div>
 
                 <div class="card">
                     <div class="ct"><b>Цена и торг</b><button class="btn" type="button" @onclick="OpenNegotiationsAsync">История цены и переговоров</button></div>
@@ -627,7 +623,7 @@
     {
         if (Busy) return;
         selectedCaseId = caseId; detail = null; drawerCard = null; drawerMarkets = []; drawerError = null; drawerLoading = true;
-        try { detail = await ReadModel.ReadDetailAsync(CurrentSubject, caseId, CancellationToken.None); drawerCard = await Workspace.ReadCardAsync(CurrentSubject, caseId, CancellationToken.None); }
+        try { detail = await ReadModel.ReadDetailAsync(CurrentSubject, caseId, CancellationToken.None); drawerCard = await Workspace.ReadCardAsync(CurrentSubject, caseId, CancellationToken.None); drawerMarkets = await Markets.ReadCaseAsync(CurrentSubject, caseId, CancellationToken.None); }
         catch (AccessDeniedException exception) { drawerError = ReadFailure(exception, "Нет доступа к этому объекту."); }
         catch (Exception exception) { drawerError = ReadFailure(exception, "Не удалось загрузить объект. Повторите после восстановления соединения."); }
         finally { drawerLoading = false; }
@@ -768,6 +764,10 @@
         decimal? perSotka = LocationEconomics.PricePerSotka(price, areaSquareMeters);
         return perSotka == null ? "Нет площади для расчёта" : $"{NumberFormat.Money(perSotka.Value)} ₽ / сот.";
     }
+    private static string TargetPropertyPriceCaption(GroupMarketView market, decimal? areaSquareMeters) =>
+        LocationEconomics.TargetPropertyPrice(market.TargetPurchasePricePerSotka, areaSquareMeters) is { } value
+            ? DemandTestPrice.Money(value)
+            : market.TargetPurchasePricePerSotka == null ? "Ориентир не задан" : "Нет площади для расчёта";
     private static string PriceDeltaCaption(decimal delta, decimal? percent)
     {
         if (delta == 0m) return "Без изменения от старта";

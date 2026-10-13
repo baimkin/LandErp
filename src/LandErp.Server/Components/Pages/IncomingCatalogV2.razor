@@ -337,7 +337,7 @@
                                             <button type="button" class="v2-comments-cell" disabled="@Busy" @onclick="() => OpenCommentsAsync(item)">
                                                 @if (row?.Comments?.Count > 0)
                                                 {
-                                                    <strong>@CommentCountLabel(row.Comments.Count)</strong>
+                                                    @if (row.Comments.Count > 1) { <strong>@CommentCountLabel(row.Comments.Count)</strong> }
                                                     <span>@CommentPreview(row.Comments)</span>
                                                 }
                                                 else
@@ -875,7 +875,7 @@
         @if (!manageCommentTypes)
         {
             <div class="comment-editor-head">
-                <p class="subtle">Один актуальный текст каждого вида. Очистка сохраняет прежнее значение в истории.</p>
+                <p class="subtle">Добавьте или измените комментарий. Предыдущий текст останется в истории, даже если его очистить.</p>
                 @if (commentEditor.CanManageTypes)
                 {
                     <button type="button" class="v2-btn sm quiet" @onclick="OpenCommentTypeManagement">Управление видами</button>
@@ -1156,11 +1156,12 @@
         ? CurrentCalculationGroupId == null ? "Сначала выберите зону поиска" : "Нет права изменять медиану этой зоны"
         : item.CalculationIneligibility ?? (item.IncludeInCalculation ? "Исключить из медианы" : "Включить в медиану");
 
-    private static string CommentCountLabel(int count) => count switch
+    private static string CommentCountLabel(int count) => (count % 100, count % 10) switch
     {
-        1 => "1 вид",
-        >= 2 and <= 4 => $"{count} вида",
-        _ => $"{count} видов"
+        (>= 11 and <= 14, _) => $"{count} комментариев",
+        (_, 1) => $"{count} комментарий",
+        (_, >= 2 and <= 4) => $"{count} комментария",
+        _ => $"{count} комментариев"
     };
 
     private static string CommentPreview(IReadOnlyList<ListingCommentPreview> comments)

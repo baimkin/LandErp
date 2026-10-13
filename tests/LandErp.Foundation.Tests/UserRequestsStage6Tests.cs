@@ -27,7 +27,7 @@ public sealed class UserRequestsStage6Tests
         Assert.IsTrue(propertyCase.Contains("OpenFactCorrection(CaseFactField.CadastralNumber)", StringComparison.Ordinal));
         Assert.AreEqual(1, Regex.Count(propertyCase, "Workspace\\.CorrectCaseFactAsync"),
             "The dedicated cadastral action must reuse the existing correction command and history.");
-        Assert.IsTrue(propertyCase.Contains("Значения исходных источников не переписываются", StringComparison.Ordinal));
+        Assert.IsTrue(propertyCase.Contains("В исходных объявлениях значения останутся прежними", StringComparison.Ordinal));
 
         Assert.IsTrue(organization.Contains("x.Name==\"Viewer\"", StringComparison.Ordinal));
         Assert.IsTrue(organization.Contains("ФИО *", StringComparison.Ordinal));

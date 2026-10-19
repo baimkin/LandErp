@@ -23,6 +23,7 @@ public static class ProcurementServices
         services.AddScoped<IIncomingFilterPresetService, IncomingFilterPresetService>();
         services.AddScoped<IListingCommentService, ListingCommentService>();
         services.AddScoped<ICatalogCalculationService, CatalogCalculationService>();
+        services.AddScoped<ICatalogArchiveService, CatalogArchiveService>();
         services.AddScoped<IProcurementQueueV2ReadService, ProcurementQueueV2ReadService>();
         services.AddScoped<IOverviewService, OverviewService>();
         services.AddScoped<IGroupMarketService, GroupMarketService>();

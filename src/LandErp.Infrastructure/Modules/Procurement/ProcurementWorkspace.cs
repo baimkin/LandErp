@@ -270,9 +270,19 @@ public sealed partial class ProcurementWorkspace(
             ?? throw new AccessDeniedException();
         if (item.Version != command.ExpectedVersion) throw new DbUpdateConcurrencyException();
         string reason = Required(command.Reason, 3, 4000, "Укажите причину решения.");
-        item.Disposition = command.Disposition;
-        if (command.Disposition is CatalogDisposition.Fake or CatalogDisposition.RemovedAtSource)
-            CatalogCalculationService.Change(db, item, false, subject.UserId, "Исключающее состояние", correlationId, time.GetUtcNow());
+        ApplyCatalogDisposition(db, item, command.Disposition, reason, context, subject, correlationId, time.GetUtcNow());
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    // Single-item and bulk decisions share the same catalog lifecycle and history.
+    // Classifying a source does not reject or move its independently linked PropertyCase.
+    internal static void ApplyCatalogDisposition(LandErpDbContext db, Listing item,
+        CatalogDisposition disposition, string reason, AccessContext context, Subject subject,
+        string correlationId, DateTimeOffset now)
+    {
+        item.Disposition = disposition;
+        if (disposition is CatalogDisposition.Fake or CatalogDisposition.RemovedAtSource)
+            CatalogCalculationService.Change(db, item, false, subject.UserId, "Исключающее состояние", correlationId, now);
         item.QueueReason = reason;
         item.AttentionRequired = false;
         item.TargetTotalPrice = null;
@@ -280,10 +290,9 @@ public sealed partial class ProcurementWorkspace(
         item.MonitoringStartedAt = null;
         db.Entry(item).Property(value => value.Version).IsModified = true;
         db.CatalogEvents.Add(CatalogEvent(item, CatalogEventKind.Classified,
-            $"{DispositionLabel(command.Disposition)}: {reason}", time.GetUtcNow()));
+            $"{DispositionLabel(disposition)}: {reason}", now));
         OrganizationWorkspace.AddAudit(db, context, subject, "CatalogDispositionChanged", "CatalogItem", item.Id,
-            new { command.Disposition, Reason = reason }, correlationId);
-        await db.SaveChangesAsync(cancellationToken);
+            new { Disposition = disposition, Reason = reason }, correlationId);
     }
 
     public async Task SetMonitoringAsync(Subject subject, SetCatalogMonitoring command, string correlationId, CancellationToken cancellationToken)

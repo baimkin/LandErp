@@ -21,7 +21,7 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
         return access;
     }
 
-    private static async Task RequireZoneAsync(LandErpDbContext db, EffectiveEmployeeAccess access,
+    internal static async Task RequireZoneAsync(LandErpDbContext db, EffectiveEmployeeAccess access,
         Guid searchGroupId, CancellationToken cancellationToken)
     {
         var group = await db.SearchGroups.AsNoTracking().Where(item => item.Id == searchGroupId
@@ -112,29 +112,10 @@ public sealed class CatalogCalculationService(IDbContextFactory<LandErpDbContext
     }
 
     private async Task<Listing[]> SelectAsync(LandErpDbContext db, Subject subject, Guid organizationId,
-        Guid searchGroupId, CatalogCalculationSelection selection, CancellationToken cancellationToken)
-    {
-        var saved = selection.Filter.WorkingScope == null || selection.Filter.WorkingScope.Mode is IncomingCatalogMode.Archive or IncomingCatalogMode.Participants
-            ? Array.Empty<IncomingFilterPresetView>() : await presets.ReadAsync(subject, cancellationToken);
-        var prepared = await IncomingCatalogSelection.PrepareAsync(db, organizationId, time.GetUtcNow(),
-            selection.Filter, saved, cancellationToken);
-        var query = db.Listings.AsNoTracking().Where(item => item.OrganizationId == organizationId).Where(prepared.Current);
-        if (selection.Selected is { } targets)
-        {
-            if (selection.ExcludedIds is { Count: > 0 }) throw new ArgumentException("Исключения доступны только при выборе всех результатов.");
-            Guid[] ids = targets.Select(item => item.Id).Distinct().ToArray();
-            if (ids.Length != targets.Count) throw new ArgumentException("Объявление выбрано несколько раз.");
-            var items = await query.Where(item => ids.Contains(item.Id)).ToArrayAsync(cancellationToken);
-            if (items.Length != targets.Count) throw Conflict();
-            var versions = targets.ToDictionary(item => item.Id, item => item.ExpectedVersion);
-            if (items.Any(item => item.Version != versions[item.Id])) throw Conflict();
-            return items;
-        }
-        // Both preview and apply use this same server-side cohort, independent of pagination.
-        if (selection.ExcludedIds is { Count: > 0 } excluded)
-            query = query.Where(item => !excluded.Contains(item.Id));
-        return await query.ToArrayAsync(cancellationToken);
-    }
+        Guid searchGroupId, CatalogCalculationSelection selection, CancellationToken cancellationToken) =>
+        await CatalogBulkSelectionReader.ReadAsync(db, presets, subject, organizationId, time.GetUtcNow(),
+            new(selection.Filter, selection.Selected?.Select(item => new CatalogBulkTarget(item.Id, item.ExpectedVersion)).ToArray(),
+                selection.ExcludedIds), cancellationToken);
 
     private static CatalogCalculationResult Summarize(Listing[] items, bool include)
     {

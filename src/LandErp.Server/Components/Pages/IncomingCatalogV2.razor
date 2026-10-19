@@ -13,6 +13,7 @@
 @inject IIncomingFilterPresetService FilterPresets
 @inject IListingCommentService ListingComments
 @inject ICatalogCalculationService Calculation
+@inject ICatalogArchiveService Archive
 @inject IEmployeeAccessService AccessV1
 @inject NavigationManager Navigation
 @using LandErp.Application.Modules.Overview.Contracts
@@ -216,13 +217,20 @@
                 </div>
 
                 }
-                @if (CanManageCurrentZoneCalculation && CalculationCount > 0)
+                @if (CanSelectRows && CalculationCount > 0)
                 {
                     <div class="v2-presets selection-actions" role="group" aria-label="Действия с выбранными">
                         <strong>Выбрано: @CalculationCount</strong>
                         @if (!allCalculationResults) { <button type="button" class="v2-btn sm quiet" @onclick="SelectAllCalculation">Выбрать все @catalogPage.Total результатов</button> }
-                        <button class="v2-btn sm" type="button" disabled="@(Busy || calculationPreviewBusy)" @onclick="() => PreviewCalculationAsync(true)">Включить в медиану…</button>
-                        <button class="v2-btn sm" type="button" disabled="@(Busy || calculationPreviewBusy)" @onclick="() => PreviewCalculationAsync(false)">@(allCalculationResults && calculationExcluded.Count==0?"Исключить найденные из расчёта…":"Исключить выбранные из расчёта…")</button>
+                        @if (CanArchiveSelection)
+                        {
+                            <button class="v2-btn sm danger" type="button" disabled="@(Busy || archivePreviewBusy)" @onclick="OpenArchiveAsync">В архив…</button>
+                        }
+                        @if (CanManageCurrentZoneCalculation)
+                        {
+                            <button class="v2-btn sm" type="button" disabled="@(Busy || calculationPreviewBusy)" @onclick="() => PreviewCalculationAsync(true)">Включить в медиану…</button>
+                            <button class="v2-btn sm" type="button" disabled="@(Busy || calculationPreviewBusy)" @onclick="() => PreviewCalculationAsync(false)">@(allCalculationResults && calculationExcluded.Count==0?"Исключить найденные из расчёта…":"Исключить выбранные из расчёта…")</button>
+                        }
                         <button class="v2-btn sm quiet" type="button" @onclick="ClearCalculationSelection">Снять выбор</button>
                     </div>
                 }
@@ -251,13 +259,13 @@
                     <div class="v2-table-wrap">
                         <table class="v2-table">
                             <colgroup>
-                                @if (CanManageCurrentZoneCalculation) { <col class="col-select" /> }
+                                @if (CanSelectRows) { <col class="col-select" /> }
                                 <col class="col-object" /><col class="col-participation" /><col class="col-price" /><col class="col-unit-price" />
                                 <col class="col-area" /><col class="col-land" /><col class="col-reason" /><col class="col-comments" /><col class="col-quality" /><col class="col-date" /><col class="col-source" />
                             </colgroup>
                             <thead>
                                 <tr>
-                                    @if (CanManageCurrentZoneCalculation) { <th class="selection-head"><label class="selection-hit"><input type="checkbox" class="page-selection" aria-label="Выбрать страницу" aria-checked="@(PageAllSelected ? "true" : PageSomeSelected ? "mixed" : "false")" data-indeterminate="@(PageSomeSelected && !PageAllSelected ? "true" : "false")" checked="@PageAllSelected" disabled="@Busy" @onchange="ToggleCalculationPage" /></label></th> }
+                                    @if (CanSelectRows) { <th class="selection-head"><label class="selection-hit"><input type="checkbox" class="page-selection" aria-label="Выбрать страницу" aria-checked="@(PageAllSelected ? "true" : PageSomeSelected ? "mixed" : "false")" data-indeterminate="@(PageSomeSelected && !PageAllSelected ? "true" : "false")" checked="@PageAllSelected" disabled="@Busy" @onchange="ToggleCalculationPage" /></label></th> }
                                     <th>Объявление</th><th>В медиане</th>
                                     <th aria-sort="@SortAria(IncomingCatalogSortField.Price)"><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.Price)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.Price)">Цена <span>@SortIndicator(IncomingCatalogSortField.Price)</span></button></th>
                                     <th aria-sort="@SortAria(IncomingCatalogSortField.PricePerSotka)"><button type="button" class="v2-sort @SortClass(IncomingCatalogSortField.PricePerSotka)" @onclick="() => ToggleSortAsync(IncomingCatalogSortField.PricePerSotka)">Цена за сотку <span>@SortIndicator(IncomingCatalogSortField.PricePerSotka)</span></button></th>
@@ -271,7 +279,7 @@
                                     IncomingCatalogRowRead? row = Row(item.Id);
                                     int completeness = Math.Clamp(row?.CompletenessPercent ?? 0, 0, 100);
                                     <tr class="@RowTone(row) @(IsCalculationSelected(item.Id) ? "selected" : "")" @onclick="() => OpenDetailAsync(item.Id)">
-                                        @if (CanManageCurrentZoneCalculation)
+                                        @if (CanSelectRows)
                                         {
                                             <td class="selection-cell" @onclick:stopPropagation="true"><label class="selection-hit"><input type="checkbox" aria-label="@($"Выбрать {item.Title}")" checked="@IsCalculationSelected(item.Id)" disabled="@Busy" @onchange="e => SelectCalculationItem(item, e.Value is true)" /></label></td>
                                         }
@@ -363,8 +371,29 @@
                 }
 
                 <div class="v2-table-footer">
-                    <span>@PageRangeText()</span>
-                    <div><button type="button" class="v2-btn sm quiet" disabled="@(page == 0)" @onclick="PreviousAsync">Назад</button><button type="button" class="v2-btn sm quiet" disabled="@((page + 1) * PageSize >= catalogPage.Total)" @onclick="NextAsync">Далее</button></div>
+                    <div class="v2-page-info">
+                        <span>@PageRangeText()</span>
+                        @if (catalogPage.Total > 0) { <span>Страница @(page + 1) из @TotalPages</span> }
+                        <label class="v2-page-size">На странице
+                            <select value="@pageSize" disabled="@(Busy || Loading)" @onchange="PageSizeChangedAsync" aria-label="Объявлений на странице">
+                                <option value="25">25</option><option value="50">50</option><option value="100">100</option>
+                            </select>
+                        </label>
+                    </div>
+                    <nav class="v2-pagination" aria-label="Страницы объявлений">
+                        <button type="button" class="v2-btn sm quiet" disabled="@(Busy || Loading || page == 0)" @onclick="() => GoToPageAsync(0)">В начало</button>
+                        <button type="button" class="v2-btn sm quiet" disabled="@(Busy || Loading || page == 0)" @onclick="PreviousAsync">Назад</button>
+                        @foreach (int? number in PageLinks())
+                        {
+                            if (number is int index)
+                            {
+                                <button type="button" class="v2-btn sm v2-page-number @(index == page ? "current" : "")" aria-current="@(index == page ? "page" : null)" aria-label="@($"Страница {index + 1}")" disabled="@(Busy || Loading || index == page)" @onclick="() => GoToPageAsync(index)">@(index + 1)</button>
+                            }
+                            else { <span class="v2-page-gap" aria-hidden="true">…</span> }
+                        }
+                        <button type="button" class="v2-btn sm quiet" disabled="@(Busy || Loading || page + 1 >= TotalPages)" @onclick="NextAsync">Далее</button>
+                        <button type="button" class="v2-btn sm quiet" disabled="@(Busy || Loading || page + 1 >= TotalPages)" @onclick="() => GoToPageAsync(TotalPages - 1)">В конец</button>
+                    </nav>
                 </div>
             </section>
         }
@@ -947,6 +976,33 @@
     <div class="v2-toast show" role="status"><span>@Success</span> @if(takenCaseId!=null){<a href="/procurement/@takenCaseId">Открыть →</a>}<button type="button" class="btn quiet" aria-label="Закрыть уведомление" @onclick="()=>{Success=null;takenCaseId=null;}">×</button></div>
 }
 
+@if (archiveOpen)
+{
+    <Modal Title="Отправить объявления в архив" OnClose="CloseArchive">
+        <p>Это действие «Не подходит». Объявления уйдут в архив первичного отбора; данные и история сохранятся.</p>
+        <label class="field"><span>Причина</span><select @bind="archiveCategory" disabled="@Busy"><option>Цена</option><option>Площадь</option><option>Локация</option><option>Пропорции</option><option>Категория / ВРИ</option><option>Технические проблемы</option><option>Другое</option></select></label>
+        <label class="field"><span>Комментарий (необязательно)</span><textarea @bind="archiveComment" maxlength="3900" disabled="@Busy"></textarea></label>
+        <label class="v2-check"><input type="checkbox" checked="@archiveExcludeFromMedian" disabled="@(Busy || archivePreviewBusy || !CanManageCurrentZoneCalculation)" @onchange="ArchiveMedianChangedAsync" /> <span>Также исключить из медианы</span></label>
+        @if (!CanManageCurrentZoneCalculation)
+        {
+            <p class="subtle">Для исключения из медианы выберите зону, расчётом которой вы можете управлять.</p>
+        }
+        else if (archiveExcludeFromMedian)
+        {
+            <p class="subtle">Исключение снимет отметку этих объявлений во всех зонах.</p>
+        }
+        @if (archivePreviewBusy) { <p role="status">Проверяем объявления…</p> }
+        @if (archivePreview is { } preview)
+        {
+            <p role="status">Выбрано: <strong>@preview.Total</strong>. Будут отправлены в архив: <strong>@preview.WouldArchive</strong>. Уже в архиве: @preview.AlreadyArchived.</p>
+            @if (archiveExcludeFromMedian) { <p>Будут исключены из медианы: <strong>@preview.WouldExcludeFromMedian</strong>.</p> }
+        }
+        @if (archiveError != null) { <p role="alert">@archiveError</p> }
+        @if (Error != null) { <p role="alert">@Error</p> }
+        <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="CloseArchive" /><ActionButton Label="Отправить в архив" Tone="danger" Busy="Busy" Disabled="@(archivePreviewBusy || archivePreview == null || archivePreview.Total == 0)" OnClick="ApplyArchiveAsync" /></div>
+    </Modal>
+}
+
 @if (calculationPreview != null)
 {
     <Modal Title="@(calculationInclude ? "Включить в расчёт" : "Исключить из расчёта")" OnClose="() => calculationPreview = null">
@@ -1000,7 +1056,7 @@
     private Guid? participantRoute;
     private bool IsParticipants => incomingMode == IncomingCatalogMode.Participants;
     [Parameter, SupplyParameterFromQuery(Name = "manual")] public bool OpenManual { get; set; }
-    private const int PageSize = 25;
+    private int pageSize = 25;
     private const int SearchDebounceMilliseconds = 400;
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private IncomingCatalogReadPage? catalogPage;
@@ -1047,6 +1103,84 @@
         if (allCalculationResults) { selectedCohortStamp = null; if (selected) calculationExcluded.Remove(item.Id); else calculationExcluded.Add(item.Id); return; }
         if (selected) calculationSelected[item.Id] = item.Version;
         else calculationSelected.Remove(item.Id);
+    }
+
+    private bool archiveOpen;
+    private bool archivePreviewBusy;
+    private bool archiveExcludeFromMedian;
+    private string archiveCategory = "Другое";
+    private string archiveComment = "";
+    private string? archiveError;
+    private CatalogBulkSelection? archiveSelection;
+    private CatalogArchivePreview? archivePreview;
+
+    private CatalogBulkSelection CurrentBulkSelection() => new(renderedCalculationFilter!,
+        allCalculationResults ? null : calculationSelected.Select(item => new CatalogBulkTarget(item.Key, item.Value)).ToArray(),
+        allCalculationResults ? calculationExcluded.ToArray() : null);
+
+    private async Task OpenArchiveAsync()
+    {
+        if (!CanArchiveSelection || Busy || archivePreviewBusy || renderedCalculationFilter == null || CalculationCount == 0) return;
+        archiveSelection = CurrentBulkSelection();
+        archiveExcludeFromMedian = CanManageCurrentZoneCalculation;
+        archiveCategory = "Другое";
+        archiveComment = "";
+        archiveOpen = true;
+        ClearFeedback();
+        await RefreshArchivePreviewAsync();
+    }
+
+    private void CloseArchive()
+    {
+        if (Busy || archivePreviewBusy) return;
+        archiveOpen = false;
+        archivePreview = null;
+        archiveSelection = null;
+    }
+
+    private async Task ArchiveMedianChangedAsync(ChangeEventArgs args)
+    {
+        if (Busy || archivePreviewBusy || !CanManageCurrentZoneCalculation) return;
+        archiveExcludeFromMedian = args.Value is true;
+        await RefreshArchivePreviewAsync();
+    }
+
+    private async Task RefreshArchivePreviewAsync()
+    {
+        if (archiveSelection == null) return;
+        archivePreviewBusy = true;
+        archivePreview = null;
+        archiveError = null;
+        try
+        {
+            archivePreview = await Archive.PreviewAsync(CurrentSubject, archiveSelection,
+                archiveExcludeFromMedian, CancellationToken.None);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        { archiveError = "Объявления или состав отбора изменились. Закройте окно, обновите список и выберите строки заново."; }
+        catch (AccessDeniedException) { archiveError = "Нет права архивировать выбранные объявления или изменять медиану этой зоны."; }
+        catch (ArgumentException exception) { archiveError = exception.Message; }
+        catch (Exception exception) { archiveError = ReadFailure(exception, "Не удалось проверить объявления."); }
+        finally { archivePreviewBusy = false; }
+    }
+
+    private async Task ApplyArchiveAsync()
+    {
+        if (!CanArchiveSelection || archiveSelection == null || archivePreview == null || archivePreviewBusy) return;
+        CatalogArchiveResult? result = null;
+        string reason = string.IsNullOrWhiteSpace(archiveComment) ? archiveCategory : $"{archiveCategory}: {archiveComment.Trim()}";
+        bool saved = await ExecuteConfirmedAsync(async () => result = await Archive.ApplyAsync(CurrentSubject,
+            archiveSelection, archiveExcludeFromMedian, reason, archivePreview.Stamp,
+            Guid.CreateVersion7().ToString(), CancellationToken.None));
+        if (saved && result != null)
+        {
+            CloseArchive();
+            ClearCalculationSelection();
+            CloseDetail();
+            if (!RefreshRequired) Success = $"Отправлено в архив: {result.Archived}. Уже в архиве: {result.AlreadyArchived}."
+                + (archiveExcludeFromMedian ? $" Исключено из медианы: {result.ExcludedFromMedian}." : " Участие в медиане сохранено.");
+        }
+        else archivePreview = null;
     }
 
     private async Task ToggleCalculationAsync(CatalogItemView item)
@@ -1146,6 +1280,8 @@
     private string transferTargetKey = "";
     private IReadOnlyList<IncomingProcurementTarget> procurementTargets = [];
     private bool CanProcessIncoming => effectiveAccess?.CanProcessIncoming == true;
+    private bool CanArchiveSelection => CanProcessIncoming && !IsArchive && !IsParticipants;
+    private bool CanSelectRows => CanArchiveSelection || CanManageCurrentZoneCalculation;
     private bool CanManageProcurement => effectiveAccess?.CanManageProcurement == true;
     private bool CanReadProcurement => effectiveAccess?.CanReadProcurement == true;
     private Guid? CurrentCalculationGroupId => Guid.TryParse(searchGroupKey, out Guid value) ? value : null;
@@ -1313,22 +1449,47 @@
         Guid? groupId = Guid.TryParse(searchGroupKey, out Guid parsed) ? parsed : null;
         IncomingCatalogFilter baseFilter = new(filter.Text.Trim(), filter.Source, filter.Disposition, filter.Age,
             filter.MinPrice, filter.MaxPrice, ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki),
-            filter.AttentionOnly, page * PageSize, PageSize);
+            filter.AttentionOnly, page * pageSize, pageSize);
         renderedCalculationFilter = new(baseFilter, null, criteriaPreset, sortField, sortDirection, groupId,
             filter.MinPricePerSotka, filter.MaxPricePerSotka, filter.LandTypes.Order().ToArray(),
             new(incomingMode, selectedSavedPresetId, UseDraft: true, Slice: preset, ArchiveState: archiveState), filter.IncludedInMedian);
         catalogPage = await IncomingReads.ReadAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
+        // A bulk decision or another user's edit can remove the page we were on.
+        // Clamp to the last available page and read it instead of showing an empty, invalid range.
+        if (page >= TotalPages)
+        {
+            page = TotalPages - 1;
+            baseFilter = baseFilter with { Offset = page * pageSize };
+            renderedCalculationFilter = renderedCalculationFilter with { Base = baseFilter };
+            catalogPage = await IncomingReads.ReadAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
+        }
         groupMarket = await Markets.ReadIncomingAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
-        string scope = System.Text.Json.JsonSerializer.Serialize(renderedCalculationFilter with { Base = baseFilter with { Offset = 0 } });
+        // Page and page size change presentation only; neither changes the selected cohort.
+        string scope = System.Text.Json.JsonSerializer.Serialize(renderedCalculationFilter with { Base = baseFilter with { Offset = 0, Size = 25 } });
         if (calculationScope != scope) ClearCalculationSelection();
         calculationScope = scope;
         if (allCalculationResults && calculationTotal != catalogPage.Total) { ClearCalculationSelection(); Success = "Состав выдачи изменился — выберите строки заново."; }
         if (allCalculationResults)
         {
-            var current = await Calculation.PreviewAsync(CurrentSubject, new(renderedCalculationFilter, ExcludedIds: calculationExcluded.ToArray()), true, CancellationToken.None);
-            if (selectedCohortStamp != null && selectedCohortStamp != current.Stamp)
+            string currentStamp;
+            int currentTotal;
+            if (CanArchiveSelection)
+            {
+                var current = await Archive.PreviewAsync(CurrentSubject,
+                    new(renderedCalculationFilter, ExcludedIds: calculationExcluded.ToArray()), false, CancellationToken.None);
+                currentStamp = current.Stamp;
+                currentTotal = current.Total;
+            }
+            else
+            {
+                var current = await Calculation.PreviewAsync(CurrentSubject,
+                    new(renderedCalculationFilter, ExcludedIds: calculationExcluded.ToArray()), true, CancellationToken.None);
+                currentStamp = current.Stamp;
+                currentTotal = current.Total;
+            }
+            if (selectedCohortStamp != null && selectedCohortStamp != currentStamp)
             { ClearCalculationSelection(); Success = "Выбранные объявления изменились — выберите строки заново."; }
-            else { selectedCohortStamp = current.Stamp; calculationTotal = current.Total + calculationExcluded.Count; }
+            else { selectedCohortStamp = currentStamp; calculationTotal = currentTotal + calculationExcluded.Count; }
         }
         savedPresets = catalogPage.FilterCounts?.Presets ?? [];
     }
@@ -1394,8 +1555,42 @@
     private string SortAria(IncomingCatalogSortField field) => sortField != field ? "none" : sortDirection == IncomingCatalogSortDirection.Ascending ? "ascending" : "descending";
     private string SortDirectionLabel(IncomingCatalogSortField field) => sortField != field ? "выбрать"
         : sortDirection == IncomingCatalogSortDirection.Ascending ? "по возрастанию" : "по убыванию";
-    private Task PreviousAsync() { page--; return ReloadAsync(); }
-    private Task NextAsync() { page++; return ReloadAsync(); }
+    private int TotalPages => catalogPage is not { Total: > 0 } ? 1 : (catalogPage.Total - 1) / pageSize + 1;
+
+    private IEnumerable<int?> PageLinks()
+    {
+        if (catalogPage is not { Total: > 0 }) yield break;
+        var visible = new SortedSet<int> { 0, TotalPages - 1 };
+        int first = TotalPages <= 9 ? 0 : Math.Max(0, page - 2);
+        int last = TotalPages <= 9 ? TotalPages - 1 : Math.Min(TotalPages - 1, page + 2);
+        for (int index = first; index <= last; index++) visible.Add(index);
+        int previous = -1;
+        foreach (int index in visible)
+        {
+            if (previous >= 0 && index - previous > 1) yield return null;
+            yield return index;
+            previous = index;
+        }
+    }
+
+    private Task GoToPageAsync(int target)
+    {
+        if (Busy || Loading || target < 0 || target >= TotalPages || target == page) return Task.CompletedTask;
+        page = target;
+        return ReloadAsync();
+    }
+
+    private Task PreviousAsync() => GoToPageAsync(page - 1);
+    private Task NextAsync() => GoToPageAsync(page + 1);
+
+    private Task PageSizeChangedAsync(ChangeEventArgs args)
+    {
+        if (Busy || Loading || !int.TryParse(args.Value?.ToString(), out int size)
+            || size is not (25 or 50 or 100) || size == pageSize) return Task.CompletedTask;
+        pageSize = size;
+        page = 0;
+        return ReloadAsync();
+    }
 
     private Task SelectMetricAsync(IncomingCatalogPreset value) => SelectPresetAsync(value);
 
@@ -2161,8 +2356,8 @@
     private string PageRangeText()
     {
         if (catalogPage == null || catalogPage.Total == 0) return "0 предложений";
-        int from = page * PageSize + 1;
-        int to = Math.Min((page + 1) * PageSize, catalogPage.Total);
+        int from = page * pageSize + 1;
+        int to = Math.Min((page + 1) * pageSize, catalogPage.Total);
         return $"{from}–{to} из {catalogPage.Total}";
     }
 

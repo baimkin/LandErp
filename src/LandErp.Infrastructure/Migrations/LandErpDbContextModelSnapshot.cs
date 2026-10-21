@@ -3416,6 +3416,11 @@ namespace LandErp.Infrastructure.Migrations
                         .HasColumnName("manager_employee_id")
                         .HasComment("Менеджер, ответственный за первичный анализ объекта; получатель возврата руководителя по умолчанию.");
 
+                    b.Property<Guid?>("ManualSearchGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("manual_search_group_id")
+                        .HasComment("Явная группа поиска объекта закупки. NULL: группы определяются по подтверждённым источникам. Архивирование группы не снимает назначение. Не влияет на состав медианы.");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid")
                         .HasColumnName("organization_id")
@@ -3510,6 +3515,9 @@ namespace LandErp.Infrastructure.Migrations
 
                     b.HasIndex("ManagerEmployeeId")
                         .HasDatabaseName("ix_property_cases_manager_employee_id");
+
+                    b.HasIndex("ManualSearchGroupId")
+                        .HasDatabaseName("ix_property_cases_manual_search_group_id");
 
                     b.HasIndex("StageId")
                         .HasDatabaseName("ix_property_cases_stage_id");
@@ -5464,6 +5472,12 @@ namespace LandErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_property_cases_manager_employee_id");
+
+                    b.HasOne("LandErp.Application.Modules.Collection.Domain.SearchGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ManualSearchGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_property_cases_manual_search_group_id");
 
                     b.HasOne("LandErp.Application.Modules.Workflow.Domain.WorkflowStage", null)
                         .WithMany()

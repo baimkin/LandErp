@@ -69,18 +69,29 @@ public sealed class GroupMarketService(IDbContextFactory<LandErpDbContext> facto
         public Guid CaseId { get; init; }
         public Guid GroupId { get; init; }
     }
-    // Только подтверждённые источники и фактические наблюдения. ListingId карточки не является связью группы.
-    internal static IQueryable<CaseGroup> CaseGroups(LandErpDbContext db, Guid organizationId) =>
+    // Ручной выбор заменяет вывод по источникам. Архивная явная группа НЕ включает
+    // fallback: связь сохраняется до осознанного снятия выбора пользователем.
+    internal static IQueryable<CaseGroup> CaseGroups(LandErpDbContext db, Guid organizationId)
+    {
+        var manual = from propertyCase in db.PropertyCases.AsNoTracking()
+            join groupItem in db.SearchGroups.AsNoTracking() on propertyCase.ManualSearchGroupId equals (Guid?)groupItem.Id
+            where propertyCase.OrganizationId == organizationId && groupItem.OrganizationId == organizationId && groupItem.Active
+            select new CaseGroup { CaseId = propertyCase.Id, GroupId = groupItem.Id };
+        var inherited =
         from link in db.PropertyCaseSourceLinks.AsNoTracking()
+        join propertyCase in db.PropertyCases.AsNoTracking() on link.PropertyCaseId equals propertyCase.Id
         join listing in db.Listings.AsNoTracking() on link.CatalogItemId equals listing.Id
         join observation in db.ListingObservations.AsNoTracking() on listing.Id equals observation.ListingId
         join job in db.CollectionJobs.AsNoTracking() on observation.JobId equals job.Id
         join search in db.SearchConfigurations.AsNoTracking() on job.SearchId equals search.Id
         join groupItem in db.SearchGroups.AsNoTracking() on search.SearchGroupId equals groupItem.Id
-        where link.OrganizationId == organizationId && link.Confirmed && listing.OrganizationId == organizationId
+        where propertyCase.OrganizationId == organizationId && propertyCase.ManualSearchGroupId == null
+            && link.OrganizationId == organizationId && link.Confirmed && listing.OrganizationId == organizationId
             && job.OrganizationId == organizationId && search.OrganizationId == organizationId
             && groupItem.OrganizationId == organizationId && groupItem.Active
         select new CaseGroup { CaseId = link.PropertyCaseId, GroupId = groupItem.Id };
+        return manual.Concat(inherited);
+    }
 
     internal static async Task<GroupMarketView[]> ReadCoreAsync(LandErpDbContext db, EffectiveEmployeeAccess effective,
         Guid[] groupIds, CancellationToken cancellationToken)

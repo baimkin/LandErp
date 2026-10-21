@@ -61,6 +61,10 @@ internal static class ProcurementMappings
         builder.Entity<InternalNotification>().HasIndex(item => new { item.EmployeeId, item.ReadAt });
         builder.Entity<InternalNotification>().HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCase>().ToTable("property_cases", "procurement");
+        builder.Entity<PropertyCase>().Property(item => item.ManualSearchGroupId)
+            .HasComment("Явная группа поиска объекта закупки. NULL: группы определяются по подтверждённым источникам. Архивирование группы не снимает назначение. Не влияет на состав медианы.");
+        builder.Entity<PropertyCase>().HasOne<LandErp.Application.Modules.Collection.Domain.SearchGroup>().WithMany()
+            .HasForeignKey(item => item.ManualSearchGroupId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<PropertyCase>().HasIndex(item => item.ListingId).IsUnique().HasFilter("listing_id IS NOT NULL");
         builder.Entity<PropertyCase>().HasIndex(item => item.BusinessNumber).IsUnique();
         builder.Entity<PropertyCase>().HasOne<Listing>().WithMany().HasForeignKey(item => item.ListingId).OnDelete(DeleteBehavior.Restrict);

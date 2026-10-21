@@ -273,7 +273,8 @@
 .incoming-v2 .v2-price { font-weight:var(--weight-semibold); font-variant-numeric:tabular-nums; }
 .incoming-v2 .v2-completeness { min-width:0; flex-wrap:wrap; }
 .incoming-v2 .v2-stat { padding:var(--panel-pad); }
-.incoming-v2 .v2-stat span { display:block; margin:4px 0 0; }
+/* Подпись самого KPI; вложенные редакторы цен управляют своей раскладкой. */
+.incoming-v2 .v2-stat > span { display:block; margin:4px 0 0; }
 .incoming-v2 .v2-presets { flex-wrap:wrap; }
 .incoming-v2 .v2-preset { height:auto; min-height:var(--control-sm-h); padding-block:5px; }
 .incoming-v2 .v2-table-footer { flex-wrap:wrap; }

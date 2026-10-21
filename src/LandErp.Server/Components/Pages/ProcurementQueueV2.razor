@@ -251,6 +251,10 @@
                         <div class="fact"><label>Состояние закупки</label><b>@ProcurementLabels.Stage(detail.Stage)</b></div>
                         <div class="fact"><label>Площадь</label><b>@AreaSotki(detail.AreaSquareMeters)</b></div>
                         <div class="fact"><label>Ответственный</label><b>@detail.AssigneeName</b></div>
+                        @if (drawerCard != null)
+                        {
+                            <div class="drawer-zone-facts"><CaseSearchGroupPicker @key="detail.CaseId" Card="drawerCard" Subject="CurrentSubject" Saved="ReloadAsync" /></div>
+                        }
                         @if (drawerMarkets.Count == 0)
                         {
                             <div class="drawer-zone-facts"><div class="drawer-zone-row"><span>Тест спроса</span><span>—</span></div><div class="drawer-zone-row"><span>Желаемая цена</span><span>—</span></div></div>
@@ -384,6 +388,7 @@
                         <div class="field"><label>Кадастровый номер</label><input @bind="manualCase.CadastralNumber" maxlength="128" /></div>
                         <div class="field"><label>Рабочая цена, ₽</label><NumberInput @bind-Value="manualCase.Price"  Money="true" /></div>
                         <div class="field"><label>Площадь, м²</label><NumberInput @bind-Value="manualCase.AreaSquareMeters"  /></div>
+                        <div class="field full"><label for="manual-case-group">Группа поиска</label><select id="manual-case-group" class="ui-select" @bind="manualCase.SearchGroupId"><option value="">Не задана</option>@foreach (var group in marketGroups) { <option value="@group.Id">@group.Name</option> }</select></div>
                         <div class="field full"><label>Как узнали об объекте / контекст</label><textarea @bind="manualCase.Comment" maxlength="900" placeholder="Звонок собственника, Telegram, рекомендация директора…"></textarea></div>
                     </div>
                 </div>
@@ -685,7 +690,7 @@
         ManualPropertyCaseResult? result = null;
         bool committed = await ExecuteConfirmedAsync(async () => result = await Workspace.CreateManualCaseAsync(CurrentSubject,
             new CreateManualPropertyCase(manualCase.Title, manualCase.Location, manualCase.CadastralNumber,
-                manualCase.Price, manualCase.AreaSquareMeters, manualCase.Comment, manualCase.CommandId), OperationId, CancellationToken.None));
+                manualCase.Price, manualCase.AreaSquareMeters, manualCase.Comment, manualCase.CommandId, manualCase.SearchGroupId), OperationId, CancellationToken.None));
         if (committed && result != null)
         {
             manualCaseOpen = false;
@@ -893,6 +898,7 @@
         [MaxLength(128)] public string? CadastralNumber { get; set; }
         public decimal? Price { get; set; }
         public decimal? AreaSquareMeters { get; set; }
+        public Guid? SearchGroupId { get; set; }
         [Required, MinLength(3), MaxLength(900)] public string Comment { get; set; } = "";
     }
 }

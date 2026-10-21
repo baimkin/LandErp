@@ -4,6 +4,8 @@ public sealed class PropertyCase
 {
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
+    /// <summary>Явная зона объекта; null возвращает определение зон по подтверждённым источникам.</summary>
+    public Guid? ManualSearchGroupId { get; set; }
     /// <summary>Compatibility-only pointer retained until Phase 9. New business code uses source links.</summary>
     public Guid? ListingId { get; set; }
     public string BusinessNumber { get; set; } = "";

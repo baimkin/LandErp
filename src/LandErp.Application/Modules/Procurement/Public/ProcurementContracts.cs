@@ -4,6 +4,7 @@ using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
 using LandErp.Application.Modules.Workflow.Domain;
 using LandErp.Collector.Contracts.V1;
+using System.Text.Json.Serialization;
 
 namespace LandErp.Application.Modules.Procurement.Contracts;
 
@@ -26,6 +27,7 @@ public sealed record ObservationView(Guid Id, Guid CatalogItemId, DateTimeOffset
 public sealed record CaseSourceView(Guid CatalogItemId, CatalogSource Source, string? ExternalId, string? Url, string Title,
     decimal? Price, decimal? AreaSquareMeters, string? Location, string Provenance, DateTimeOffset? LastObservedAt);
 public sealed record DecisionTarget(Guid EmployeeId, string Name);
+public sealed record CaseSearchGroupView(Guid Id, string Name, bool Active);
 public sealed record NegotiationView(Guid Id, decimal? SellerPrice, decimal? BuyerOffer, decimal? AgreedPrice, string Currency,
     string Channel, string Contact, string Outcome, string Conditions, string Comment, string NextStep, DateTimeOffset? NextStepDueAt,
     string Author, DateTimeOffset EffectiveAt, DateTimeOffset RecordedAt)
@@ -83,6 +85,7 @@ public sealed record CaseCard(QueueItem Item, string? Description, string? Selle
     public string ManagerName { get; init; } = "";
     public bool CanAssignInspections { get; init; }
     public bool CanPerformInspections { get; init; }
+    public CaseSearchGroupView? ManualSearchGroup { get; init; }
 }
 public sealed record DecisionCommand(Guid CaseId, long ExpectedCaseVersion, long ExpectedSourceRevision,
     ProcurementAction Action, string Reason, string Clarification, Guid? TargetEmployeeId, DateTimeOffset? DueAt);
@@ -124,7 +127,10 @@ public sealed record CorrectPropertyCaseFact(Guid CaseId, long ExpectedCaseVersi
 public sealed record SaveNextAction(Guid CaseId, long ExpectedCaseVersion, long ExpectedTaskVersion,
     WorkTaskType Type, string Title, string Description, DateTimeOffset? DueAt, Guid AssigneeEmployeeId);
 public sealed record CreateManualPropertyCase(string Title, string? Location, string? CadastralNumber,
-    decimal? Price, decimal? AreaSquareMeters, string Comment, Guid? CommandId = null);
+    decimal? Price, decimal? AreaSquareMeters, string Comment, Guid? CommandId = null,
+    // Не менять отпечатки ранее сохранённых команд создания без выбранной группы.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? SearchGroupId = null);
+public sealed record SetCaseSearchGroup(Guid CaseId, long ExpectedCaseVersion, Guid? SearchGroupId);
 public sealed record ManualPropertyCaseResult(Guid CaseId, string BusinessNumber);
 public sealed record NotificationView(Guid Id, Guid CaseId, string Title, DateTimeOffset RecordedAt, bool Read);
 public interface IProcurementWorkspace
@@ -163,6 +169,7 @@ public interface IProcurementWorkspace
     Task<CaseTasksView> ReadTasksAsync(Subject subject, Guid caseId, CancellationToken cancellationToken);
     Task<Guid> ChangeTaskAsync(Subject subject, ChangeCaseTask command, string correlationId, CancellationToken cancellationToken);
     Task<ManualPropertyCaseResult> CreateManualCaseAsync(Subject subject, CreateManualPropertyCase command, string correlationId, CancellationToken cancellationToken);
+    Task SetSearchGroupAsync(Subject subject, SetCaseSearchGroup command, string correlationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<NotificationView>> ReadNotificationsAsync(Subject subject, CancellationToken cancellationToken);
     Task MarkNotificationReadAsync(Subject subject, Guid id, CancellationToken cancellationToken);
 }

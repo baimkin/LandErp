@@ -5,4 +5,4 @@
 .market-caption,.market-empty{font-size:var(--text-sm);color:var(--text-muted);font-weight:400}.market-caption{margin-top:5px}
 .target-total{margin-top:4px;padding-top:6px;border-top:1px solid var(--border)}
 
-.price-figure{display:flex;align-items:center;gap:var(--space-1);white-space:nowrap}.price-line{flex-wrap:wrap}
+.price-figure{display:flex;align-items:center;gap:var(--space-1);white-space:nowrap;flex:none}.price-line{flex-wrap:wrap}

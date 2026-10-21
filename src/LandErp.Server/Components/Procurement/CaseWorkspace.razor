@@ -97,6 +97,7 @@ else if(card!=null && loaded == CaseId)
                         
 </div>
                             <div class="case-group-market">
+                                <CaseSearchGroupPicker @key="CaseId" Card="card" Subject="CurrentSubject" Saved="SearchGroupSavedAsync" />
                                 @if (caseMarkets.Count == 0)
                                 {
                                     <GroupMarketPrices Value="null" Subject="CurrentSubject" Saved="ReloadAsync" EmptyText="У объекта нет связанной зоны поиска" PurchaseMode="true" AreaSquareMeters="card.Item.Area" />
@@ -235,6 +236,7 @@ else { <PageState Kind="error" Title="Карточку не удалось за�
     private NoteInput note=new(); private CheckTemplateInput checkTemplate=new(); private AttachmentInput attachment=new(); private DocumentRequirementInput documentRequirement=new(); private PurchaseInput purchase=new(); private CorrectionInput correction=new(); private FactCorrectionInput factCorrection=new(); private SourceLinkCorrectionInput sourceLinkCorrection=new(); private IBrowserFile? selectedFile; private Guid? retryAttachmentId; private IBrowserFile? retryFile;
     private IReadOnlyList<GroupMarketView> caseMarkets = [];
     protected override async Task ReadAsync(){card=await Workspace.ReadCardAsync(CurrentSubject,CaseId,CancellationToken.None);caseMarkets=await Markets.ReadCaseAsync(CurrentSubject,CaseId,CancellationToken.None);photoIndex=loaded==CaseId?Math.Clamp(photoIndex,0,Math.Max(0,card.Photos.Length-1)):0;if(loaded!=CaseId){factCorrectionOpen=false;sourceLinkOpen=false;sourceLinkTargets=[];}loaded=CaseId;}
+    private async Task SearchGroupSavedAsync() { await ReloadAsync(); await OnChanged.InvokeAsync(); }
     protected override async Task OnParametersSetAsync()
     {
         if(loaded!=CaseId)await ReloadAsync();

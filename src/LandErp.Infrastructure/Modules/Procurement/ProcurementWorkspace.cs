@@ -698,8 +698,10 @@ public sealed partial class ProcurementWorkspace(
             await transaction.CommitAsync(cancellationToken);
             return new(existing.Id, existing.BusinessNumber);
         }
+        var manualGroup = await RequireActiveCaseSearchGroupAsync(db, context.OrganizationId, command.SearchGroupId, cancellationToken);
         PropertyCase propertyCase = await CreatePropertyCaseAsync(db, context, context, title, command.Price, command.AreaSquareMeters,
             location, cadastralNumber, "Прямое создание PropertyCase: " + comment, "CreateManual", cancellationToken);
+        propertyCase.ManualSearchGroupId = manualGroup?.Id;
         DateTimeOffset now = time.GetUtcNow();
         db.BusinessTimeline.Add(new()
         {
@@ -709,7 +711,7 @@ public sealed partial class ProcurementWorkspace(
         });
         replay.Record(db, context, subject, propertyCase.Id, propertyCase.Id,
             new { propertyCase.BusinessNumber, Title = title, Location = location, CadastralNumber = cadastralNumber,
-                command.Price, command.AreaSquareMeters, Comment = comment }, correlationId, now);
+                command.Price, command.AreaSquareMeters, Comment = comment, command.SearchGroupId }, correlationId, now);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new(propertyCase.Id, propertyCase.BusinessNumber);
@@ -1023,6 +1025,10 @@ public sealed partial class ProcurementWorkspace(
         }
         var timelineFileIds=timeline.ToDictionary(e=>e.Id,e=>CaseTimelineAttachment.Find(e,attachments.Select(a=>a.Link)));
         Listing? primary = sources.OrderBy(item => item.Link.RecordedAt).Select(item => item.Item).FirstOrDefault();
+        CaseSearchGroupView? manualGroup = row.Case.ManualSearchGroupId is Guid groupId
+            ? await db.SearchGroups.AsNoTracking().Where(item => item.Id == groupId && item.OrganizationId == context.OrganizationId)
+                .Select(item => new CaseSearchGroupView(item.Id, item.Name, item.Active)).SingleOrDefaultAsync(cancellationToken)
+            : null;
         string[] photos = sources.SelectMany(item => JsonSerializer.Deserialize<string[]>(item.Item.PhotosJson) ?? []).Distinct().ToArray();
         return new(Item(row, names, sources), primary?.Description, primary?.SellerName, photos,
             sources.Select(value => new CaseSourceView(value.Item.Id, value.Item.Source, value.Item.ExternalId, value.Item.Url,
@@ -1065,7 +1071,8 @@ public sealed partial class ProcurementWorkspace(
             ManagerName = names.GetValueOrDefault(row.Case.ManagerEmployeeId, "Сотрудник"),
             RichNotes = richNotes.Select(item => NoteView(item, names.GetValueOrDefault(item.UpdatedByEmployeeId, "Сотрудник"))).ToArray(),
             CanAssignInspections = canAssignInspections,
-            CanPerformInspections = canPerformInspections
+            CanPerformInspections = canPerformInspections,
+            ManualSearchGroup = manualGroup
         };
     }
 

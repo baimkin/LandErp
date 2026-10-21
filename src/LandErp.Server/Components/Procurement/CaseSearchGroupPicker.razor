@@ -1,0 +1,105 @@
+@using LandErp.Application.Modules.Catalog.Contracts
+@using LandErp.Application.Modules.Overview.Contracts
+@using LandErp.Application.Modules.Procurement.Contracts
+@using Microsoft.EntityFrameworkCore
+@inject IProcurementWorkspace Workspace
+@inject IGroupMarketService Markets
+
+<div class="case-search-group">
+    <span>Группа поиска</span>
+    @if (editing)
+    {
+        <select class="ui-select" @bind="draft" disabled="@saving" aria-label="Группа поиска объекта">
+            <option value="">По связанным источникам / не задана</option>
+            @if (Card.ManualSearchGroup is { Active: false } archived)
+            {
+                <option value="@archived.Id" disabled>@archived.Name (архив)</option>
+            }
+            @foreach (var group in groups) { <option value="@group.Id">@group.Name</option> }
+        </select>
+        <div class="form-actions">
+            <button type="button" class="btn secondary" disabled="@(saving || draft == Card.ManualSearchGroup?.Id)" @onclick="SaveAsync">Сохранить</button>
+            <button type="button" class="btn quiet" disabled="@saving" @onclick="Cancel">Отмена</button>
+        </div>
+        <small>Ручной выбор имеет приоритет. Снимите его, чтобы использовать группы источников.</small>
+    }
+    else
+    {
+        <div class="group-value">
+            <strong>@(Card.ManualSearchGroup?.Name ?? "По связанным источникам / не задана")</strong>
+            @if (Card.CanManageDossier)
+            {
+                <button type="button" class="btn quiet" disabled="@(saving || loading)" @onclick="EditAsync">@(loading ? "Загрузка…" : "Изменить")</button>
+            }
+        </div>
+        @if (Card.ManualSearchGroup is { Active: false })
+        {
+            <small>Группа в архиве. Назначение сохранено; выберите другую группу или снимите ручной выбор.</small>
+        }
+    }
+    @if (error != null) { <small class="group-error" role="alert">@error</small> }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CaseCard Card { get; set; } = default!;
+    [Parameter, EditorRequired] public Subject Subject { get; set; } = default!;
+    [Parameter] public EventCallback Saved { get; set; }
+    private IReadOnlyList<IncomingSearchGroupView> groups = [];
+    private Guid? draft;
+    private Guid caseId;
+    private long version;
+    private bool editing, saving, loading;
+    private string? error;
+
+    protected override void OnParametersSet()
+    {
+        if (caseId == Card.Item.CaseId && version == Card.Item.CaseVersion) return;
+        caseId = Card.Item.CaseId; version = Card.Item.CaseVersion;
+        editing = false; error = null;
+    }
+
+    private async Task EditAsync()
+    {
+        if (saving || loading || !Card.CanManageDossier) return;
+        var snapshot = Card;
+        loading = true; error = null;
+        try
+        {
+            var available = await Markets.ReadProcurementGroupsAsync(Subject, CancellationToken.None);
+            if (Card.Item.CaseId != snapshot.Item.CaseId || Card.Item.CaseVersion != snapshot.Item.CaseVersion) return;
+            groups = available; draft = snapshot.ManualSearchGroup?.Id; editing = true;
+        }
+        catch (Exception) { if (Card.Item.CaseId == snapshot.Item.CaseId) error = "Не удалось загрузить группы. Обновите карточку и повторите."; }
+        finally { loading = false; }
+    }
+
+    private void Cancel() { editing = false; error = null; }
+
+    private async Task SaveAsync()
+    {
+        if (saving || !editing || !Card.CanManageDossier) return;
+        // Идентичность и версия фиксируются до await: ответ не относится к другой открытой карточке.
+        var command = new SetCaseSearchGroup(Card.Item.CaseId, version, draft);
+        var subject = Subject;
+        saving = true; error = null;
+        bool committed = false;
+        try
+        {
+            await Workspace.SetSearchGroupAsync(subject, command, Guid.CreateVersion7().ToString(), CancellationToken.None);
+            committed = true;
+            if (Card.Item.CaseId != command.CaseId) return;
+            editing = false;
+            await Saved.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            if (Card.Item.CaseId != command.CaseId) return;
+            error = committed ? "Группа сохранена. Обновите карточку для актуальных данных."
+                : exception is DbUpdateConcurrencyException ? "Объект уже изменён. Обновите карточку и повторите выбор."
+                : exception is AccessDeniedException ? "Недостаточно прав или группа недоступна."
+                : exception is ArgumentException argument ? argument.Message
+                : "Не удалось подтвердить сохранение. Обновите карточку перед повтором.";
+        }
+        finally { saving = false; }
+    }
+}

@@ -23,11 +23,12 @@ public sealed class StoredFile
 
 public static class FileUploadLimits
 {
-    public const int MaxRawFileMegabytes = 8;
+    public const int MaxRawFileMegabytes = 50;
     public const int MaxRawFileBytes = MaxRawFileMegabytes * 1024 * 1024;
-    // 8 MiB raw becomes ~10.67 MiB as base64 before JSON fields/escaping.
-    public const long MaxJsonRequestBodyBytes = 12L * 1024 * 1024;
-    public const string TooLargeMessage = "Файл не должен превышать 8 МБ.";
+    // 50 MiB raw becomes ~66.67 MiB as base64, plus bounded JSON metadata.
+    public const long MaxJsonRequestBodyBytes = 68L * 1024 * 1024;
+    public const int MaxBatchFiles = 20;
+    public const string TooLargeMessage = "Файл не должен превышать 50 МБ.";
 
     public static bool IsRawFileSizeAllowed(long sizeBytes) => sizeBytes is > 0 and <= MaxRawFileBytes;
 

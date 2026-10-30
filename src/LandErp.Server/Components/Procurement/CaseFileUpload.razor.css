@@ -1,0 +1,6 @@
+.upload { display:grid; gap:8px; padding:16px; border:1px dashed var(--border); border-radius:var(--radius-md); cursor:pointer; }
+.upload small { color:var(--text-muted); }
+.upload input { max-width:100%; }
+ul { margin:0; padding-left:20px; overflow-wrap:anywhere; }
+li { padding:4px 0; }
+button { justify-self:start; }

@@ -126,7 +126,10 @@ public sealed record ProcurementQueueV2Attachment(
     string ContentType,
     long SizeBytes,
     StoredFileStatus Status,
-    DateTimeOffset RecordedAt);
+    DateTimeOffset RecordedAt)
+{
+    public bool CanDownloadDeleted { get; init; }
+}
 
 public sealed record ProcurementNegotiationHistoryItem(
     Guid Id,

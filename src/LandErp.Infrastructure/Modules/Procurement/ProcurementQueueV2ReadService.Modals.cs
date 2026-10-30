@@ -88,11 +88,11 @@ public sealed partial class ProcurementQueueV2ReadService
             inspector, inspection.StartedAt, inspection.CompletedAt, items, general);
     }
 
-    private static IQueryable<AttachmentDb> AttachmentRows(LandErpDbContext db, Guid organizationId, Guid caseId) =>
+    private static IQueryable<AttachmentDb> AttachmentRows(LandErpDbContext db, Guid organizationId, Guid caseId, bool includeDeleted = false) =>
         from attachment in db.CaseAttachments.AsNoTracking()
         join file in db.StoredFiles.AsNoTracking() on attachment.StoredFileId equals file.Id
         where attachment.OrganizationId == organizationId && file.OrganizationId == organizationId
-            && attachment.PropertyCaseId == caseId
+            && attachment.PropertyCaseId == caseId && (includeDeleted || file.Status != StoredFileStatus.Deleted)
         select new AttachmentDb(attachment.Id, attachment.OwnerType, attachment.NegotiationId,
             attachment.InspectionId, attachment.InspectionItemId, attachment.Kind, attachment.Label,
             attachment.Description, file.OriginalName, file.ContentType, file.SizeBytes, file.Status, attachment.RecordedAt);

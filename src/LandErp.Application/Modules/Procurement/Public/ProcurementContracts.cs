@@ -109,6 +109,7 @@ public sealed record AddCaseAttachment(Guid CaseId, CaseAttachmentOwner OwnerTyp
 public sealed record SaveDocumentRequirement(Guid CaseId, Guid RequirementId, long ExpectedCaseVersion,
     long ExpectedRequirementVersion, CaseDocumentStatus Status, DateTimeOffset? DueAt, string Note);
 public sealed record RetryCaseAttachment(Guid CaseId, Guid AttachmentId, string OriginalName, string ContentType, byte[] Content);
+public sealed record DeleteCaseAttachment(Guid CaseId, Guid AttachmentId);
 public sealed record SaveInspectionTemplate(Guid? Id, long? ExpectedVersion, string Key, string Title, int SortOrder,
     InspectionAnswerType AnswerType, string[] Options, string Unit, string NormalAnswer, bool AllowAttachments, bool Required, bool Active);
 public sealed record InspectionAnswer(Guid ItemId, long ExpectedItemVersion, InspectionItemStatus Status, string Answer, string Note);
@@ -155,6 +156,7 @@ public interface IProcurementWorkspace
     Task<Guid> AddAttachmentAsync(Subject subject, AddCaseAttachment command, string correlationId, CancellationToken cancellationToken);
     Task SaveDocumentRequirementAsync(Subject subject, SaveDocumentRequirement command, string correlationId, CancellationToken cancellationToken);
     Task RetryAttachmentAsync(Subject subject, RetryCaseAttachment command, string correlationId, CancellationToken cancellationToken);
+    Task DeleteAttachmentAsync(Subject subject, DeleteCaseAttachment command, string correlationId, CancellationToken cancellationToken);
     Task SaveInspectionTemplateAsync(Subject subject, SaveInspectionTemplate command, string correlationId, CancellationToken cancellationToken);
     Task<InspectionTaskPage> ReadMyInspectionsAsync(Subject subject, CancellationToken cancellationToken);
     Task<InspectionWorkspaceView> ReadInspectionAsync(Subject subject, Guid caseId, CancellationToken cancellationToken);

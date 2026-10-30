@@ -35,6 +35,7 @@ internal static class ProcurementEndpoints
             Results.Ok(new { id = await workspace.AddAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token) })).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/documents/requirements", async (SaveDocumentRequirement command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.SaveDocumentRequirementAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/attachments/retry", async (RetryCaseAttachment command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.RetryAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapPost("/attachments/delete", async (DeleteCaseAttachment command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.DeleteAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapGet("/attachments/{id:guid}/image", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
         {
             // Reuse the same visibility and integrity boundary as downloads; never redirect inline images.
@@ -46,6 +47,8 @@ internal static class ProcurementEndpoints
         });
         group.MapGet("/attachments/{id:guid}", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
         {
+            http.Response.Headers.CacheControl = "no-store";
+            http.Response.Headers.XContentTypeOptions = "nosniff";
             AttachmentContent attachment = await workspace.ReadAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), id, token);
             return attachment.ExternalUrl != null ? Results.Redirect(attachment.ExternalUrl) : Results.File(attachment.Content!, attachment.ContentType, attachment.OriginalName);
         });
@@ -53,6 +56,8 @@ internal static class ProcurementEndpoints
 
         app.MapGet("/api/inspection/attachments/{id:guid}", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
         {
+            http.Response.Headers.CacheControl = "no-store";
+            http.Response.Headers.XContentTypeOptions = "nosniff";
             AttachmentContent attachment = await workspace.ReadAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), id, token);
             return attachment.ExternalUrl != null ? Results.Redirect(attachment.ExternalUrl) : Results.File(attachment.Content!, attachment.ContentType, attachment.OriginalName);
         }).RequireAuthorization();

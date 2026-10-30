@@ -115,9 +115,12 @@ else if(data!=null)
     }
     @if(mediaOpen)
     {
-        <CaseModal Title="Добавить материал осмотра" Error="@Error" Busy="Busy" OnClose="()=>mediaOpen=false">
-            <label class="upload"><strong>@(selectedFile?.Name??"＋ Выберите или сделайте фото")</strong><small>Фото, видео, аудио или документ · до @FileUploadLimits.MaxRawFileMegabytes МБ</small><InputFile OnChange="SelectMedia" accept="image/*,video/*,audio/*,.pdf" capture="environment"/>@if(UploadFileTooLarge(selectedFile)){<small class="case-problem">@FileUploadLimits.TooLargeMessage</small>}</label>
-            <div class="form-grid"><label class="field dossier-wide"><span>Название</span><input @bind="media.Label"/></label><label class="field"><span>Тип</span><select @bind="media.Kind"><option value="Photo">Фото</option><option value="Video">Видео</option><option value="Audio">Аудио</option><option value="Document">Документ</option></select></label><label class="field dossier-wide"><span>Комментарий</span><textarea @bind="media.Description"/></label><div class="form-actions"><ActionButton Label="Загрузить материал" OnClick="UploadMediaAsync" Busy="Busy" Disabled="@(selectedFile==null||UploadFileTooLarge(selectedFile)||inspectionConflict)"/></div></div>
+        <CaseModal Title="Добавить материалы осмотра" Error="@Error" Busy="@(Busy||mediaUploading)" OnClose="CloseMedia">
+            <fieldset disabled="@(mediaUploading||mediaBatchStarted)" style="border:0;padding:0;margin:0">
+                <label class="field"><span>Общее название (необязательно)</span><input @bind="media.Label"/></label>
+                <label class="field"><span>Общий комментарий (необязательно)</span><textarea @bind="media.Description"/></label>
+            </fieldset>
+            <CaseFileUpload Camera="true" Disabled="@(Busy||inspectionConflict)" OnUpload="UploadMediaFileAsync" OnBusyChanged="SetMediaUploadBusy" />
         </CaseModal>
     }
     @if(finishOpen)
@@ -133,9 +136,9 @@ else if(data!=null)
 @code {
     [Parameter] public Guid CaseId { get; set; }
     private InspectionWorkspaceView? data; private IJSObjectReference? draftModule;
-    private bool mediaOpen,finishOpen,assignOpen,hasLocalDraft,localSaved,inspectionConflict,acceptServerInspectionRead;
+    private bool mediaUploading,mediaBatchStarted; private bool mediaOpen,finishOpen,assignOpen,hasLocalDraft,localSaved,inspectionConflict,acceptServerInspectionRead;
     private int section; private bool onlyUnanswered; private Guid loaded,draftInspectionId; private long draftVersion;
-    private string conclusion="",decision=""; private List<AnswerDraft> answers=[]; private IBrowserFile? selectedFile;
+    private string conclusion="",decision=""; private List<AnswerDraft> answers=[];
     private MediaDraft media=new(); private AssignmentInput assignment=new(); private bool localChecked;
     private InspectionView? Inspection=>data?.Inspection;
     private bool Editable=>data?.CanPerform==true&&Inspection?.StartedAt!=null&&Inspection.Status!=InspectionStatus.Completed&&!inspectionConflict&&!RefreshRequired;
@@ -186,7 +189,7 @@ else if(data!=null)
     private async Task SetAnswerAsync(AnswerDraft item,string value){item.Answer=value;item.Status=value.Length==0?InspectionItemStatus.Unanswered:InspectionItemStatus.Answered;await MarkLocalDraftAsync();}
     private async Task SetNoteAsync(AnswerDraft item,string value){item.Note=value;await MarkLocalDraftAsync();}
     private async Task NotCheckedAsync(AnswerDraft item){item.Answer="";item.Status=InspectionItemStatus.NotChecked;await MarkLocalDraftAsync();}
-    private void PrepareItemMedia(AnswerDraft item){ClearFeedback();mediaOpen=true;media.Owner=item.Id.ToString();media.Label="Материал · "+item.Title;}
+    private void PrepareItemMedia(AnswerDraft item){ClearFeedback();media=new(){Owner=item.Id.ToString()};mediaOpen=true;}
     private async Task SaveLocalSoon(){await MarkLocalDraftAsync();}
     private async Task MarkLocalDraftAsync(){hasLocalDraft=true;await SaveLocalAsync();}
     private async ValueTask SaveLocalAsync(){if(draftInspectionId==Guid.Empty||draftModule==null)return;try{await draftModule.InvokeVoidAsync("save",StorageKey,CurrentDraft());localSaved=true;}catch(JSException){localSaved=false;}}
@@ -200,14 +203,28 @@ else if(data!=null)
         if(committed&&!RefreshRequired&&draftModule!=null){await draftModule.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;finishOpen=false;}
         else if(LastWriteWasConflict){inspectionConflict=true;hasLocalDraft=true;await SaveLocalAsync();}
     }
-    private void SelectMedia(InputFileChangeEventArgs args){selectedFile=args.File;media.Kind=selectedFile.ContentType.StartsWith("image/")?CaseAttachmentKind.Photo:selectedFile.ContentType.StartsWith("video/")?CaseAttachmentKind.Video:selectedFile.ContentType.StartsWith("audio/")?CaseAttachmentKind.Audio:CaseAttachmentKind.Document;media.Label=selectedFile.Name;}
-    private static bool UploadFileTooLarge(IBrowserFile? file)=>file?.Size>FileUploadLimits.MaxRawFileBytes;
-    private static async Task<byte[]> ReadUploadAsync(IBrowserFile file){FileUploadLimits.EnsureRawFileSize(file.Size);await using Stream input=file.OpenReadStream(FileUploadLimits.MaxRawFileBytes);using MemoryStream buffer=new();await input.CopyToAsync(buffer);return buffer.ToArray();}
-    private async Task UploadMediaAsync()
+    private void SetMediaUploadBusy(bool value){mediaUploading=value;if(value)mediaBatchStarted=true;}
+    private void CloseMedia(){if(!mediaUploading){mediaOpen=false;media=new();mediaBatchStarted=false;}}
+    private async Task UploadMediaFileAsync(IBrowserFile file, Guid uploadId)
     {
-        if(inspectionConflict||Inspection==null)return;if(hasLocalDraft)await SaveLocalAsync();
-        await ExecuteAsync(async()=>{if(selectedFile==null)throw new ArgumentException("Выберите файл.");if(string.IsNullOrWhiteSpace(media.Label))throw new ArgumentException("Укажите название материала.");byte[] content=await ReadUploadAsync(selectedFile);Guid owner=string.IsNullOrWhiteSpace(media.Owner)?Inspection.Id:Guid.Parse(media.Owner);CaseAttachmentOwner type=string.IsNullOrWhiteSpace(media.Owner)?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,media.Kind,media.Label,media.Description,selectedFile.Name,selectedFile.ContentType,content,null),OperationId,CancellationToken.None);},"Материал осмотра добавлен");
-        if(Success!=null){selectedFile=null;media=new();mediaOpen=false;}
+        // Keep authentication refresh, write confirmation and read-after-commit handling
+        // on the same boundary as the existing single-file/card operations.
+        bool committed=await ExecuteConfirmedAsync(async()=>
+        {
+        if(inspectionConflict||Inspection==null)throw new ArgumentException("Обновите осмотр перед загрузкой.");
+        if(hasLocalDraft)await SaveLocalAsync();
+        FileUploadLimits.EnsureRawFileSize(file.Size);
+        await using Stream input=file.OpenReadStream(FileUploadLimits.MaxRawFileBytes);
+        using MemoryStream buffer=new();await input.CopyToAsync(buffer);
+        CaseAttachmentKind kind=file.ContentType.StartsWith("image/",StringComparison.OrdinalIgnoreCase)?CaseAttachmentKind.Photo
+            :file.ContentType.StartsWith("video/",StringComparison.OrdinalIgnoreCase)?CaseAttachmentKind.Video
+            :file.ContentType.StartsWith("audio/",StringComparison.OrdinalIgnoreCase)?CaseAttachmentKind.Audio:CaseAttachmentKind.Document;
+        Guid owner=string.IsNullOrWhiteSpace(media.Owner)?Inspection.Id:Guid.Parse(media.Owner);
+        CaseAttachmentOwner type=string.IsNullOrWhiteSpace(media.Owner)?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;
+        string label=string.IsNullOrWhiteSpace(media.Label)?file.Name:media.Label;
+        await Workspace.AddAttachmentAsync(CurrentSubject,new(CaseId,type,owner,kind,label,media.Description,file.Name,file.ContentType,buffer.ToArray(),null,UploadId:uploadId),OperationId,CancellationToken.None);
+        });
+        if(!committed)throw new ArgumentException(Error??"Загрузка не подтверждена. Повторите этот файл.");
     }
     private static string AnswerLabel(AnswerDraft item)=>item.Status==InspectionItemStatus.NotChecked?"Не удалось проверить":(item.AnswerType==InspectionAnswerType.Boolean?(item.Answer=="true"?"Да":"Нет"):item.Answer)+(item.Unit.Length==0?"":" "+item.Unit);
     private sealed class AnswerDraft{public Guid Id{get;set;}public long Version{get;set;}public string Title{get;set;}="";public int SortOrder{get;set;}public InspectionAnswerType AnswerType{get;set;}public string[] Options{get;set;}=[];public string Unit{get;set;}="";public bool AllowAttachments{get;set;}public bool Required{get;set;}public InspectionItemStatus Status{get;set;}public string Answer{get;set;}="";public string Note{get;set;}="";public AnswerDraft(){}public AnswerDraft(InspectionItemView value){Id=value.Id;Version=value.Version;Title=value.Title;SortOrder=value.SortOrder;AnswerType=value.AnswerType;Options=value.Options;Unit=value.Unit;AllowAttachments=value.AllowAttachments;Required=value.Required;Status=value.Status;Answer=value.Answer;Note=value.Note;}}

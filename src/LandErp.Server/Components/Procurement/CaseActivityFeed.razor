@@ -13,7 +13,7 @@
                     else{<a href="/procurement/@row.CaseId?task=@taskId">@(row.TaskTitle??"Открыть задачу") →</a>}
                 }
                 @if(row.Attachments.Count>0){<div class="feed-materials">@foreach(var material in row.Attachments){
-                    @if(material.Status==StoredFileStatus.Available){<a href="/api/procurement/attachments/@material.Id" target="_blank" rel="noopener noreferrer">@material.Label ↗</a>}
+                    @if(material.Status==StoredFileStatus.Available||material.CanDownloadDeleted){<a href="/api/procurement/attachments/@material.Id" target="_blank" rel="noopener noreferrer">@(material.CanDownloadDeleted ? "Скачать удалённый файл: " : "")@material.Label ↗</a>}
                     else{<span>@material.Label · @ProcurementLabels.FileStatus(material.Status)</span>}
                 }</div>}
             </div>

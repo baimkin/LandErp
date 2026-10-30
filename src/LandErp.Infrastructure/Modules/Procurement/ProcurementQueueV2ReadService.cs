@@ -216,6 +216,13 @@ public sealed partial class ProcurementQueueV2ReadService(
             && await VisibleCases(db, effective.ProcurementWorkContext)
                 .AnyAsync(item => item.Case.Id == caseId, cancellationToken);
         bool managerPermission = workVisible;
+        timeline = timeline.Select(entry => entry with
+        {
+            Attachments = entry.Attachments.Select(file => file with
+            {
+                CanDownloadDeleted = workVisible && file.Status == LandErp.Application.Foundation.Files.StoredFileStatus.Deleted && (file.SizeBytes > 0 || file.Kind == CaseAttachmentKind.Link)
+            }).ToArray()
+        }).ToArray();
         bool headPermission = workVisible && effective.CanHeadProcurement;
         bool canManagerDecide = managerPermission && row.Assignment.EmployeeId == context.EmployeeId
             && row.Case.StageId is not ("pending_head" or "acquired")

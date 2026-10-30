@@ -1,5 +1,6 @@
 using System.Text.Json;
 using LandErp.Application.Foundation;
+using LandErp.Application.Foundation.Files;
 using LandErp.Application.Modules.IdentityAccess.Contracts;
 using LandErp.Application.Modules.Procurement.Contracts;
 using LandErp.Application.Modules.Procurement.Domain;
@@ -45,9 +46,11 @@ public sealed partial class ProcurementQueueV2ReadService
         if (inspection == null) return new(false, null, null, null, "", 0, 0, 0, 0, 0, 0, 0);
         InspectionItemDb[] items = await db.SiteInspectionItems.AsNoTracking().Where(item => item.InspectionId == inspection.Id)
             .Select(item => new InspectionItemDb(item.Status, item.Answer, item.NormalAnswerSnapshot)).ToArrayAsync(cancellationToken);
-        CaseAttachmentKind[] materialKinds = await db.CaseAttachments.AsNoTracking().Where(item => item.PropertyCaseId == caseId
-            && (item.OwnerType == CaseAttachmentOwner.Inspection || item.OwnerType == CaseAttachmentOwner.InspectionItem))
-            .Select(item => item.Kind).ToArrayAsync(cancellationToken);
+        CaseAttachmentKind[] materialKinds = await (from item in db.CaseAttachments.AsNoTracking()
+            join file in db.StoredFiles.AsNoTracking() on item.StoredFileId equals file.Id
+            where item.PropertyCaseId == caseId && file.Status != StoredFileStatus.Deleted
+                && (item.OwnerType == CaseAttachmentOwner.Inspection || item.OwnerType == CaseAttachmentOwner.InspectionItem)
+            select item.Kind).ToArrayAsync(cancellationToken);
         int checkedItems = items.Count(item => item.Status != InspectionItemStatus.Unanswered);
         int problems = items.Count(item => item.Status == InspectionItemStatus.Answered && item.NormalAnswer.Length > 0
             && !string.Equals(item.Answer, item.NormalAnswer, StringComparison.OrdinalIgnoreCase));
@@ -70,7 +73,7 @@ public sealed partial class ProcurementQueueV2ReadService
         CaseNegotiation[] negotiations = times.Length == 0 ? [] : await db.CaseNegotiations.AsNoTracking()
             .Where(item => item.OrganizationId == organizationId && item.PropertyCaseId == caseId && times.Contains(item.RecordedAt))
             .ToArrayAsync(cancellationToken);
-        var files = await AttachmentRows(db, organizationId, caseId).ToArrayAsync(cancellationToken);
+        var files = await AttachmentRows(db, organizationId, caseId, includeDeleted: true).ToArrayAsync(cancellationToken);
         var attachmentLinks=await db.CaseAttachments.AsNoTracking().Where(a=>a.OrganizationId==organizationId && a.PropertyCaseId==caseId).ToArrayAsync(cancellationToken);
         var tasks = await db.WorkTasks.AsNoTracking().Where(t=>t.OrganizationId==organizationId && t.ObjectType=="PropertyCase" && t.ObjectId==caseId && t.SourceNegotiationId!=null && !t.Deleted).ToArrayAsync(cancellationToken);
         NegotiationView? Communication(BusinessTimelineEntry entry)
@@ -78,7 +81,7 @@ public sealed partial class ProcurementQueueV2ReadService
             var n=CaseTimelineCommunication.Find(entry,negotiations,id=>actors.GetValueOrDefault(id,"Сотрудник"));
             if(n==null)return null;
             var task=tasks.FirstOrDefault(t=>t.SourceNegotiationId==n.Id);
-            return n with {CaseId=caseId,TaskId=task?.Id,TaskTitle=task?.Title,Attachments=files.Where(f=>f.NegotiationId==n.Id).Select(ProjectAttachment).ToArray()};
+            return n with {CaseId=caseId,TaskId=task?.Id,TaskTitle=task?.Title,Attachments=files.Where(f=>f.Status!=StoredFileStatus.Deleted&&f.NegotiationId==n.Id).Select(ProjectAttachment).ToArray()};
         }
         var timelineFileIds=entries.ToDictionary(e=>e.Id,e=>CaseTimelineAttachment.Find(e,attachmentLinks));
         return entries.Select(item => new ProcurementTimelineSummary(item.Id, item.Kind, item.Title, item.Body,

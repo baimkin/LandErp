@@ -15,7 +15,7 @@ namespace LandErp.Foundation.Tests;
 public sealed class ReleasePackageB302Tests
 {
     [TestMethod]
-    public void EightMiBRawAttachmentFitsConfiguredJsonEnvelope()
+    public void MaximumRawAttachmentFitsConfiguredJsonEnvelope()
     {
         byte[] content = new byte[FileUploadLimits.MaxRawFileBytes];
         AddCaseAttachment add = new(Guid.NewGuid(), CaseAttachmentOwner.Case, null, CaseAttachmentKind.Document,
@@ -28,7 +28,7 @@ public sealed class ReleasePackageB302Tests
         int retryBytes = JsonSerializer.SerializeToUtf8Bytes(retry, options).Length;
 
         Assert.IsTrue(addBytes > FileUploadLimits.MaxRawFileBytes,
-            "Base64 JSON must demonstrate why an 8 MiB HTTP limit was insufficient.");
+            "Base64 JSON requires an envelope larger than the raw file limit.");
         Assert.IsTrue(addBytes <= FileUploadLimits.MaxJsonRequestBodyBytes);
         Assert.IsTrue(retryBytes <= FileUploadLimits.MaxJsonRequestBodyBytes);
     }

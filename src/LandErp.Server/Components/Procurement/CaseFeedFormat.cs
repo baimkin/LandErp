@@ -52,7 +52,7 @@ public static class CaseFeedFormat
         string type = value.Kind switch {
             "Note" => "Заметка", "Contact" or "Negotiation" => "Общение",
             "CaseTaskSave" or "CaseTaskComplete" or "CaseTaskDelete" or "NextActionChanged" => "Задача",
-            "Check" => "Проверка", "Document" or "Attachment" => "Документы",
+            "Check" => "Проверка", "Document" or "Attachment" or "AttachmentDeleted" => "Документы",
             "Inspection" or "InspectionAssigned" => "Осмотр",
             "SourceLinked" or "SourceUnlinked" or "SourceRelinked" => "Источник",
             "FactVerified" or "FactCorrected" => "Сведения", _ => "Статус" };

@@ -9,6 +9,11 @@ public static class CaseTimelineAttachment
     // instant and actor. Never infer a link from a filename alone or choose among ties.
     public static Guid? Find(BusinessTimelineEntry entry, IEnumerable<CaseAttachment> attachments)
     {
+        // Deletion is a single terminal event per attachment. Its ID reuses the attachment
+        // ID (different tables) for an exact durable link without a new schema or label matching.
+        if (entry.Kind == "AttachmentDeleted" && entry.ObjectType == "PropertyCase")
+            return attachments.Where(a => a.Id == entry.Id && a.OrganizationId == entry.OrganizationId
+                && a.PropertyCaseId == entry.ObjectId).Select(a => (Guid?)a.Id).SingleOrDefault();
         if(entry.Kind!="Attachment" || entry.ObjectType!="PropertyCase")return null;
         var candidates=attachments.Where(a=>a.OrganizationId==entry.OrganizationId && a.PropertyCaseId==entry.ObjectId
             && a.ActorEmployeeId==entry.ActorEmployeeId && a.RecordedAt==entry.RecordedAt && a.Label==entry.Body).Take(2).ToArray();

@@ -1020,7 +1020,7 @@ public sealed partial class ProcurementWorkspace(
             var task = linkedTasks.FirstOrDefault(t => t.SourceNegotiationId == n.Id);
             return CaseTimelineCommunication.View(n, names.GetValueOrDefault(n.AuthorEmployeeId, "Сотрудник")) with {
                 CaseId = caseId, TaskId = task?.Id, TaskTitle = task?.Title,
-                Attachments = attachments.Where(a => a.Link.NegotiationId == n.Id).Select(a => new ProcurementQueueV2Attachment(a.Link.Id,a.Link.Kind,a.Link.Label,a.Link.Description,a.File.OriginalName,a.File.ContentType,a.File.SizeBytes,a.File.Status,a.Link.RecordedAt)).ToArray()
+                Attachments = attachments.Where(a => a.File.Status != StoredFileStatus.Deleted && a.Link.NegotiationId == n.Id).Select(a => new ProcurementQueueV2Attachment(a.Link.Id,a.Link.Kind,a.Link.Label,a.Link.Description,a.File.OriginalName,a.File.ContentType,a.File.SizeBytes,a.File.Status,a.Link.RecordedAt)).ToArray()
             };
         }
         var timelineFileIds=timeline.ToDictionary(e=>e.Id,e=>CaseTimelineAttachment.Find(e,attachments.Select(a=>a.Link)));
@@ -1036,7 +1036,7 @@ public sealed partial class ProcurementWorkspace(
                 value.Item.Provenance, value.Item.LastObservedAt)).ToArray(),
             timeline.Select(item => new TimelineItem(item.Id, item.Kind, item.Title, item.Body, names.GetValueOrDefault(item.ActorEmployeeId, "Сотрудник"),
                 item.TargetEmployeeId == null ? null : names.GetValueOrDefault(item.TargetEmployeeId.Value, "Сотрудник"), item.RecordedAt, item.EffectiveAt, item.DueAt)
-                { Communication = negotiations.FirstOrDefault(n => n.Id == item.NegotiationId) is { } n ? CommunicationView(n) : null, TaskId = item.TaskId, CaseId = caseId, Attachments=attachments.Where(a=>a.Link.Id==timelineFileIds[item.Id]).Select(a=>new ProcurementQueueV2Attachment(a.Link.Id,a.Link.Kind,a.Link.Label,a.Link.Description,a.File.OriginalName,a.File.ContentType,a.File.SizeBytes,a.File.Status,a.Link.RecordedAt)).ToArray() }).ToArray(),
+                { Communication = negotiations.FirstOrDefault(n => n.Id == item.NegotiationId) is { } n ? CommunicationView(n) : null, TaskId = item.TaskId, CaseId = caseId, Attachments=attachments.Where(a=>a.Link.Id==timelineFileIds[item.Id]).Select(a=>new ProcurementQueueV2Attachment(a.Link.Id,a.Link.Kind,a.Link.Label,a.Link.Description,a.File.OriginalName,a.File.ContentType,a.File.SizeBytes,a.File.Status,a.Link.RecordedAt) { CanDownloadDeleted = workVisible && a.File.Status == StoredFileStatus.Deleted && (a.File.SizeBytes > 0 || a.Link.Kind == CaseAttachmentKind.Link) }).ToArray() }).ToArray(),
             observations.Select(item => new ObservationView(item.Id, item.ListingId, item.ObservedAt, item.RecordedAt,
                 JsonSerializer.Deserialize<ListingData>(item.PayloadJson, CollectionJson.Options)!, JsonSerializer.Deserialize<string[]>(item.ChangesJson)!)).ToArray(),
             heads.Where(item => item.EmployeeId != context.EmployeeId).ToArray(), managers, assignees,
@@ -1047,13 +1047,13 @@ public sealed partial class ProcurementWorkspace(
                 item.ResponsibleEmployeeId == null ? null : names.GetValueOrDefault(item.ResponsibleEmployeeId.Value, "Сотрудник"),
                 item.DueAt, item.Cost, item.Currency, item.Result, item.Blocker, item.Version, item.DescriptionSnapshot,
                 item.TemplateItemId, item.TemplateItemVersion) { ResultDocumentJson = item.ResultDocumentJson }).ToArray(),
-            attachments.Select(item => new AttachmentView(item.Link.Id, item.Link.OwnerType,
+            attachments.Where(item => item.File.Status != StoredFileStatus.Deleted).Select(item => new AttachmentView(item.Link.Id, item.Link.OwnerType,
                 AttachmentOwnerId(item.Link), item.Link.Kind, item.Link.Label, item.Link.Description,
                 AttachmentOwnerLabel(item.Link, negotiations, checks, inspectionItems), item.File.OriginalName, item.File.ContentType, item.File.SizeBytes,
                 item.File.Status, item.File.ExternalUrl != null, item.Link.RecordedAt, item.Link.DocumentRequirementId)).ToArray(),
             documentRequirements.Select(item => new DocumentRequirementView(item.Id, item.Code, item.Title, item.Description,
                 item.ExpectedSource, item.Status, item.DueAt, item.Note, names.GetValueOrDefault(item.UpdatedByEmployeeId, "Сотрудник"),
-                item.UpdatedAt, item.Version, attachments.Where(value => value.Link.DocumentRequirementId == item.Id)
+                item.UpdatedAt, item.Version, attachments.Where(value => value.File.Status != StoredFileStatus.Deleted && value.Link.DocumentRequirementId == item.Id)
                     .Select(value => value.Link.Id).ToArray())).ToArray(),
             Discrepancies(row.Case, sources),
             checkTemplates.Select(item => new CheckTemplateView(item.Id, item.Title, item.Level, item.Description, item.SortOrder, item.Active, item.Version)).ToArray(),
@@ -1561,7 +1561,7 @@ public sealed partial class ProcurementWorkspace(
             .ToArrayAsync(cancellationToken);
         var attachments = await (from link in db.CaseAttachments.AsNoTracking()
                                  join file in db.StoredFiles.AsNoTracking() on link.StoredFileId equals file.Id
-                                 where link.PropertyCaseId == caseId
+                                 where link.PropertyCaseId == caseId && file.Status != StoredFileStatus.Deleted
                                      && (link.OwnerType == CaseAttachmentOwner.Inspection
                                          || link.OwnerType == CaseAttachmentOwner.InspectionItem)
                                  orderby link.RecordedAt descending
@@ -1615,7 +1615,7 @@ public sealed partial class ProcurementWorkspace(
                 : names.GetValueOrDefault(inspection.RequestedByEmployeeId.Value, "Сотрудник"),
             inspection.RequestedAt, inspection.DueAt, inspection.Instructions);
 
-        AttachmentView[] attachmentViews = attachments.Select(item => new AttachmentView(item.Link.Id,
+        AttachmentView[] attachmentViews = attachments.Where(item => item.File.Status != StoredFileStatus.Deleted).Select(item => new AttachmentView(item.Link.Id,
             item.Link.OwnerType, AttachmentOwnerId(item.Link), item.Link.Kind, item.Link.Label, item.Link.Description,
             AttachmentOwnerLabel(item.Link, Array.Empty<CaseNegotiation>(), Array.Empty<CaseCheck>(), inspectionItems),
             item.File.OriginalName, item.File.ContentType, item.File.SizeBytes, item.File.Status,
@@ -1983,8 +1983,15 @@ public sealed partial class ProcurementWorkspace(
                 throw;
             }
         }
+        await using var finalizeTransaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // Serialize checklist changes with deletion after the durable provider step.
+        await db.PropertyCases.FromSqlInterpolated(
+            $"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .LoadAsync(cancellationToken);
+        await db.Entry(row.Case).ReloadAsync(cancellationToken);
         if (documentRequirement != null)
         {
+            await db.Entry(documentRequirement).ReloadAsync(cancellationToken);
             documentRequirement.Status = CaseDocumentStatus.Received;
             documentRequirement.Note = Optional(command.Description, 2000) ?? documentRequirement.Note;
             documentRequirement.UpdatedByEmployeeId = context.EmployeeId;
@@ -1999,6 +2006,7 @@ public sealed partial class ProcurementWorkspace(
             ActorEmployeeId = context.EmployeeId, Kind = "Attachment", Title = "Добавлено вложение", Body = command.Label, RecordedAt = now
         });
         await db.SaveChangesAsync(cancellationToken);
+        await finalizeTransaction.CommitAsync(cancellationToken);
         return attachmentId;
     }
 
@@ -2061,7 +2069,15 @@ public sealed partial class ProcurementWorkspace(
                 && item.OrganizationId == context.OrganizationId && item.InspectorEmployeeId == context.EmployeeId,
                 cancellationToken);
         if (!procurementReader && !inspectorReader) throw new AccessDeniedException();
-        if (value.File.Status != StoredFileStatus.Available) throw new InvalidOperationException("Вложение ещё не доступно.");
+        if (value.File.Status == StoredFileStatus.Deleted)
+        {
+            // A deleted file stays recoverable from history only for existing dossier editors.
+            // Apply work scope afresh even if the caller can still read the case or perform an inspection.
+            if (!effective.CanManageProcurement || !await VisibleCases(db, effective.ProcurementWorkContext)
+                .AnyAsync(item => item.Case.Id == value.Link.PropertyCaseId, cancellationToken))
+                throw new AccessDeniedException();
+        }
+        else if (value.File.Status != StoredFileStatus.Available) throw new InvalidOperationException("Вложение ещё не доступно.");
         if (value.File.ExternalUrl != null) return new(value.File.OriginalName, value.File.ContentType, null, value.File.ExternalUrl);
         if (value.File.StorageKey == null) throw new InvalidOperationException("Вложение повреждено.");
         byte[] content = await fileStorage.ReadAsync(value.File.StorageKey, cancellationToken);
@@ -2079,6 +2095,11 @@ public sealed partial class ProcurementWorkspace(
         AccessContext context = effective.OrganizationContext;
         FileUploadLimits.EnsureRawFileSize(command.Content.LongLength);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // Match deletion's case/file lock order so a late retry cannot resurrect a tombstone.
+        await db.PropertyCases.FromSqlInterpolated(
+            $"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .LoadAsync(cancellationToken);
         var value = await (from link in db.CaseAttachments join file in db.StoredFiles on link.StoredFileId equals file.Id
                            where link.Id == command.AttachmentId && link.PropertyCaseId == command.CaseId && link.OrganizationId == context.OrganizationId
                            select new { Link = link, File = file }).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
@@ -2101,6 +2122,10 @@ public sealed partial class ProcurementWorkspace(
             propertyCase = await VisibleCases(db, context).Where(item => item.Case.Id == command.CaseId)
                 .Select(item => item.Case).SingleOrDefaultAsync(cancellationToken) ?? throw new AccessDeniedException();
         }
+        await db.StoredFiles.FromSqlInterpolated(
+            $"SELECT * FROM foundation.stored_files WHERE id={value.File.Id} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .LoadAsync(cancellationToken);
+        await db.Entry(value.File).ReloadAsync(cancellationToken);
         if (value.File.Status is not (StoredFileStatus.UploadFailed or StoredFileStatus.PendingUpload)) throw new ArgumentException("Повторная загрузка этому вложению не требуется.");
         string contentType = Required(command.ContentType, 3, 256, "Укажите MIME-тип файла.");
         if (!AllowedContentType(value.Link.Kind, contentType)) throw new ArgumentException("Тип файла не разрешён для выбранного вложения.");
@@ -2136,6 +2161,7 @@ public sealed partial class ProcurementWorkspace(
         OrganizationWorkspace.AddAudit(db, context, subject, "CaseAttachmentUploadRetried", "PropertyCase", command.CaseId,
             new { command.AttachmentId, value.Link.OwnerType }, correlationId);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task ApplySourceFactAsync(Subject subject, ApplySourceFact command, string correlationId, CancellationToken cancellationToken)

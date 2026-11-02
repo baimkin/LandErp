@@ -22,7 +22,11 @@ public sealed partial class KanbanWorkspace
         IReadOnlyDictionary<Guid, string>? cursors, CancellationToken ct) =>
         ReadBoardAsync(subject, pipelineId, null, cursors, ct);
 
-    public async Task<KanbanBoardView> ReadBoardAsync(Subject subject, Guid pipelineId, Guid? assigneeId,
+    public Task<KanbanBoardView> ReadBoardAsync(Subject subject, Guid pipelineId, Guid? assigneeId,
+        IReadOnlyDictionary<Guid, string>? cursors, CancellationToken ct) =>
+        ReadBoardAsync(subject, pipelineId, assigneeId, "", cursors, ct);
+
+    public async Task<KanbanBoardView> ReadBoardAsync(Subject subject, Guid pipelineId, Guid? assigneeId, string text,
         IReadOnlyDictionary<Guid, string>? cursors, CancellationToken ct)
     {
         var a = await access.ResolveAsync(subject, ct);
@@ -32,6 +36,7 @@ public sealed partial class KanbanWorkspace
         var p = await db.KanbanPipelines.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == a.OrganizationId && x.Id == pipelineId && x.IsActive, ct) ?? throw new AccessDeniedException();
         var stages = await db.KanbanStages.AsNoTracking().Where(x => x.OrganizationId == a.OrganizationId && x.PipelineId == p.Id && x.IsActive).OrderBy(x => x.SortOrder).ThenBy(x => x.Id).ToArrayAsync(ct);
         var readable = ProcurementVisibility.ApplyRead(db.PropertyCases.AsNoTracking(), db, a);
+        readable = ProcurementCaseSearch.Apply(readable, db, text);
         var rows = await (from m in db.KanbanMemberships.AsNoTracking()
                           join item in readable on m.PropertyCaseId equals item.Id
                           join assignment in db.WorkAssignments.AsNoTracking() on item.AssignmentId equals assignment.Id

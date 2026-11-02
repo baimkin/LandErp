@@ -1,4 +1,33 @@
-# Активная задача — INSPECTION-FILE-IMPROVEMENTS
+# Активная задача — PROCUREMENT-PIPELINE-SEARCH
+
+02.11.2026 владелец утвердил поиск по выбранной воронке закупки в канбане и
+таблице. Gate: `GATE-PROCUREMENT-PIPELINE-SEARCH.md`. Работа в текущей ветке
+`codex/inspection-file-improvements`; накопленные изменения сохранить.
+Required reading: README → START_HERE → ACTIVE_TASK → этот Gate →
+FP-004 §§3, 9, 14–15 → AGENT_UI_INSTRUCTIONS → GATE-UI-CONSISTENCY →
+UI-kit tokens → screen 02/reference HTML → KANBAN_PLAN (контекст/пагинация) → код.
+Прежнее отсутствие поиска на доске отменено текущим запросом владельца.
+Без новых пакетов/ролей/миграций, production, commit/push/merge и изменений Collector.
+Проверки: Release build, адресные PostgreSQL/HtmlRenderer tests, git diff --check.
+Отчёт: `reports/PROCUREMENT_PIPELINE_SEARCH_REPORT.md`. Статус: реализовано.
+Release build — 0 warnings/errors; итоговый адресный PostgreSQL/HtmlRenderer
+прогон — 7/7 Passed. Evidence: `artifacts/procurement-pipeline-search/tests/pipeline-search-verified.trx`.
+Браузер/визуальная приёмка, production и commit/push не выполнялись.
+Следующий Gate не активирован.
+
+
+## Публикация исходников — 02.11.2026
+
+Прямым запросом владелец поручил commit/push поиска в `origin/main`.
+Публикуется только 13 файлов этого Gate: поиск, адресные тесты, спецификация и
+документы этапа. Накопленные изменения Collector/README и локальная история
+его неопубликованных Gate исключены. Публикация — один коммит поверх проверенного
+head `main`, fast-forward с expected SHA без force через подключённый GitHub.
+Локальная ветка/индекс и production не изменяются. Итоговый SHA подтверждается
+отдельным чтением `main`; evidence — `artifacts/procurement-pipeline-search/publication/verification.json`.
+
+---
+# История — INSPECTION-FILE-IMPROVEMENTS
 
 29.10.2026 владелец утвердил реализацию пунктов 1–4 обращений Telegram:
 пакетная последовательная загрузка, 50 МБ на файл, галерея/камера,

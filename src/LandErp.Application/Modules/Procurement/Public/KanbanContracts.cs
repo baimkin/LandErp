@@ -39,5 +39,10 @@ public interface IKanbanWorkspace
         assigneeId == null
             ? ReadBoardAsync(subject, pipelineId, cursors, ct)
             : throw new NotSupportedException("Фильтр менеджера не поддержан реализацией канбана.");
+    Task<KanbanBoardView> ReadBoardAsync(Subject subject, Guid pipelineId, Guid? assigneeId, string text,
+        IReadOnlyDictionary<Guid, string>? cursors, CancellationToken ct) =>
+        string.IsNullOrWhiteSpace(text)
+            ? ReadBoardAsync(subject, pipelineId, assigneeId, cursors, ct)
+            : throw new NotSupportedException("Поиск не поддержан реализацией канбана.");
 }
 

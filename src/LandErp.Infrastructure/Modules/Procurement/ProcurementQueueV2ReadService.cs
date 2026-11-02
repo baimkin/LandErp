@@ -69,9 +69,9 @@ public sealed partial class ProcurementQueueV2ReadService(
         {
             if (!await db.KanbanPipelines.AnyAsync(p => p.Id == pipelineId && p.OrganizationId == context.OrganizationId && p.IsActive, cancellationToken)) throw new AccessDeniedException();
             visible = visible.Where(row => db.KanbanMemberships.Any(m => m.OrganizationId == context.OrganizationId && m.PipelineId == pipelineId && m.PropertyCaseId == row.Case.Id && m.TransferredAt == null));
-            // A pipeline view has exactly its membership set. Its manager filter and ordering are
-            // native to both the table and the board, while unrelated legacy queue filters stay off.
-            filter = new ProcurementQueueV2Filter(AssigneeId: filter.AssigneeId,
+            // Both pipeline views share search/manager filters and their membership scope;
+            // unrelated legacy queue filters stay off.
+            filter = new ProcurementQueueV2Filter(Text: filter.Text, AssigneeId: filter.AssigneeId,
                 Sort: filter.Sort, Descending: filter.Descending,
                 Offset: filter.Offset, Size: filter.Size, PipelineId: pipelineId);
         }
@@ -81,23 +81,13 @@ public sealed partial class ProcurementQueueV2ReadService(
             : visible.Where(row => row.Case.StageId == filter.Stage);
         if (filter.MineOnly) query = query.Where(row => row.Assignment.EmployeeId == context.EmployeeId);
 
-        string text = filter.Text.Trim();
-        if (text.Length > 0)
+        if (!string.IsNullOrWhiteSpace(filter.Text))
         {
-            string pattern = $"%{text}%";
-            Guid? exactId = Guid.TryParse(text, out Guid parsedId) ? parsedId : null;
-            query = query.Where(row => EF.Functions.ILike(row.Case.BusinessNumber, pattern)
-                || EF.Functions.ILike(row.Case.WorkingTitle, pattern)
-                || (row.Case.WorkingLocation != null && EF.Functions.ILike(row.Case.WorkingLocation, pattern))
-                || (row.Case.CadastralNumber != null && EF.Functions.ILike(row.Case.CadastralNumber, pattern))
-                || (exactId.HasValue && row.Case.Id == exactId.Value)
-                || db.CaseNegotiations.Any(contact => contact.PropertyCaseId == row.Case.Id && EF.Functions.ILike(contact.Contact, pattern))
-                || db.PropertyCaseSourceLinks.Any(link => link.PropertyCaseId == row.Case.Id && link.Confirmed
-                    && db.Listings.Any(source => source.Id == link.CatalogItemId
-                        && ((source.ExternalId != null && EF.Functions.ILike(source.ExternalId, pattern))
-                            || (source.Title != null && EF.Functions.ILike(source.Title, pattern))
-                            || (source.SellerName != null && EF.Functions.ILike(source.SellerName, pattern))
-                            || (exactId.HasValue && source.Id == exactId.Value)))));
+            // Search case facts directly; the outer row query enforces visibility/membership.
+            // Reusing its nearest-task projection here would duplicate that work inside the subquery.
+            var searchCases = db.PropertyCases.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId);
+            var matchingIds = ProcurementCaseSearch.Apply(searchCases, db, filter.Text).Select(item => item.Id);
+            query = query.Where(row => matchingIds.Contains(row.Case.Id));
         }
         if (filter.AssigneeId is Guid assigneeId)
             query = query.Where(row => row.Assignment.EmployeeId == assigneeId);

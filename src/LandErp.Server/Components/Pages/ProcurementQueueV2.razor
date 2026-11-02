@@ -12,6 +12,7 @@
 @using LandErp.Application.Modules.Workflow.Domain
 @using LandErp.Server.Components.Procurement
 @inherits WorkspaceComponent
+@implements IDisposable
 @inject IProcurementQueueV2ReadService ReadModel
 @inject IProcurementWorkspace Workspace
 @inject NavigationManager Navigation
@@ -42,6 +43,21 @@
                 @if(InPipeline&&kanbanConfig.CanManageCards){<button type="button" class="btn" @onclick="OpenAddExisting">Добавить существующий объект</button>}
                 @if(InPipeline){<button type="button" class="btn primary" disabled="@(queuePage?.CanCreateManualCase!=true||Busy)" @onclick="OpenManualCase">+ Создать объект вручную</button>}
             </div>
+            @if(InPipeline && queuePage!=null && !Forbidden)
+            {
+                <div class="pipeline-search" role="search" aria-label="Поиск в воронке закупки">
+                    <label for="pipeline-search">Поиск объектов</label>
+                    <input id="pipeline-search" type="search" class="ui-input" value="@searchDraft"
+                           @oninput="PipelineSearchInputAsync" @onkeydown="SearchKeyDownAsync"
+                           placeholder="Адрес, название, PC, кадастровый номер, продавец…"
+                           disabled="@(Busy || kanbanBusy)" />
+                    @if(searchDraft.Length>0 || search.Length>0)
+                    {
+                        <button type="button" class="btn" @onclick="ClearPipelineSearchAsync" disabled="@(Busy || kanbanBusy)">Сбросить поиск</button>
+                    }
+                    @if(!Loading && Error==null){<span class="search-count" role="status">Найдено: @queuePage.Total</span>}
+                </div>
+            }
             @if(!InPipeline){<p class="kanban-scope-hint">Общая очередь: доступные объекты закупки из всех воронок и без воронки. По умолчанию — кроме купленных и отклонённых. Канбан показывает одну выбранную воронку.</p>}
             <KanbanToast Message="@kanbanMessage" AutoDismiss="kanbanSuccess" Sequence="kanbanNoticeVersion" />
             @if(pendingMove!=null&&!kanbanBusy){<button type="button" class="btn" @onclick="RetryKanbanMove">Проверить результат переноса</button>}
@@ -577,7 +593,7 @@
     private ProcurementQueueV2Filter BuildFilter()
     {
         Guid? assignee = Guid.TryParse(assigneeFilter, out Guid assigneeId) ? assigneeId : null;
-        if(InPipeline)return new ProcurementQueueV2Filter(AssigneeId:assignee,Sort:sort,Descending:descending,Offset:offset,Size:PageSize,PipelineId:activePipeline);
+        if(InPipeline)return new ProcurementQueueV2Filter(Text:search,AssigneeId:assignee,Sort:sort,Descending:descending,Offset:offset,Size:PageSize,PipelineId:activePipeline);
         return new ProcurementQueueV2Filter(
             Text: search,
             Stage: stageFilter,
@@ -599,7 +615,37 @@
     private bool HasOperationalFilter => stageFilter.Length > 0 || dueTodayOnly || overdueOnly || priceChangedOnly;
     private string PageCaption => queuePage == null || queuePage.Total == 0 ? "Показано 0 объектов" : $"Показано {queuePage.Offset + 1}–{Math.Min(queuePage.Offset + queuePage.Size, queuePage.Total)} из {queuePage.Total} объектов";
 
-    private async Task ApplySearchAsync() { search = searchDraft.Trim(); offset = 0; await ReloadAsync(); }
+    private CancellationTokenSource? pendingSearch;
+    private bool searchDisposed;
+    private async Task PipelineSearchInputAsync(ChangeEventArgs e)
+    {
+        searchDraft = e.Value?.ToString() ?? "";
+        await ApplySearchAfterDelayAsync(350);
+    }
+    private Task ApplySearchAsync() => ApplySearchAfterDelayAsync(0);
+    private async Task ClearPipelineSearchAsync() { searchDraft = ""; await ApplySearchAsync(); }
+    private async Task ApplySearchAfterDelayAsync(int delay)
+    {
+        if (searchDisposed) return;
+        pendingSearch?.Cancel();
+        using var request = new CancellationTokenSource();
+        pendingSearch = request;
+        try
+        {
+            await Task.Delay(delay, request.Token);
+            // Serialize with existing reads/moves: ReloadAsync deliberately ignores overlapping reads.
+            // Waiting here ensures the latest typed query is applied even during a slow prior read.
+            while (Loading || Busy || kanbanBusy) await Task.Delay(50, request.Token);
+            request.Token.ThrowIfCancellationRequested();
+            string next = searchDraft.Trim();
+            if (search == next) return;
+            search = next; offset = 0;
+            await ReloadAsync(); // Reload replaces all column slices, never reuses a previous query's cursor.
+        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested) { }
+        finally { if (ReferenceEquals(pendingSearch, request)) pendingSearch = null; }
+    }
+    public void Dispose() { searchDisposed = true; pendingSearch?.Cancel(); }
     private async Task SearchChangedAsync(ChangeEventArgs e) { searchDraft = e.Value?.ToString() ?? ""; await ApplySearchAsync(); }
     private async Task SearchKeyDownAsync(KeyboardEventArgs args) { if (args.Key == "Enter") await ApplySearchAsync(); }
     private async Task StageChangedAsync(ChangeEventArgs e) { stageFilter = e.Value?.ToString() ?? ""; dueTodayOnly = overdueOnly = priceChangedOnly = false; offset = 0; await ReloadAsync(); }

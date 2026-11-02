@@ -1,3 +1,32 @@
+# Активная задача — MEDIA-LARGE-UPLOAD
+
+02.11.2026 владелец разрешил проверить прямую браузерную загрузку на Яндекс Диск
+и реализовать выбранный по evidence путь: direct либо потоковый через Server.
+Лимит 500 МиБ. Gate: GATE-MEDIA-LARGE-UPLOAD.md. Текущая ветка
+`codex/inspection-file-improvements`; накопленные изменения сохраняются.
+Required reading: README → START_HERE → ACTIVE_TASK → этот Gate → FP-004
+§§3, 9, 14–15 → ADR-005 → YANDEX_DISK_SETUP → прежний inspection Gate →
+UI instructions/consistency/tokens → затрагиваемые contracts/adapters/forms/tests.
+Разрешён opt-in live probe на синтетическом файле; токены/URL не раскрывать.
+Без сжатия, галереи, production, новых пакетов/миграций/ролей, commit/push/merge.
+Отчёт: reports/MEDIA_LARGE_UPLOAD_REPORT.md. Статус: реализация direct завершена. Release build — 0 warnings/errors; адресные проверки прошли (39 core + 1 исправленный component, 2 browser), включая native 500 МиБ и прежний осмотр. Production обновляет/проверяет владелец; в приватной конфигурации требуется MaxFileBytes=524288000. Новых migrations нет. Рабочий токен и iPhone/Safari ещё не проверены. Commit/push не выполнялись.
+
+
+## Публикация исходников — 02.11.2026
+
+Владелец прямо разрешил commit/push в main и запросил скрипт обновления.
+Снимок текущего Gate публикуется одним коммитом после проверенного
+31c0c88b0a675f021afdfcb4b9c7a3fc2a123be2, fast-forward без force.
+Предыдущие локальные изменения Collector/README и его история исключены.
+ACTIVE_TASK для публикации сохраняет историю удалённого main, добавляя этот этап.
+Локальные ветка/индекс сохраняются; рабочий сервер агентом не обновляется.
+Добавлен scripts/Update-ProductionMedia.ps1: pin reviewed SHA, clean tracked tree,
+ff-only main, versioned publish, private config backup, MaxFileBytes=524288000,
+штатный deploy. Секреты/подключение не выводятся и не меняются. Миграций нет.
+Синтаксис PowerShell проверен; production-выполнение скрипта выполняет владелец.
+Итоговый SHA и совпадение snapshot подтверждаются отдельно в
+artifacts/media-large-upload/publication/verification.json.
+---
 # Активная задача — PROCUREMENT-PIPELINE-SEARCH
 
 02.11.2026 владелец утвердил поиск по выбранной воронке закупки в канбане и

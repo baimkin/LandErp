@@ -8,7 +8,7 @@ namespace LandErp.Infrastructure.Foundation.Files;
 
 /// <summary>Private app-folder storage. OAuth is sent only to the fixed API origin.
 /// Download/upload URLs and raw provider errors must never escape this adapter.</summary>
-public sealed class YandexDiskFileStorage : IFileStorage, IFileStorageHealth, IDisposable
+public sealed partial class YandexDiskFileStorage : IFileStorage, IFileStorageHealth, IDirectFileStorage, IDisposable
 {
     private const string Api = "https://cloud-api.yandex.net/v1/disk/resources";
     private readonly HttpClient http;
@@ -298,7 +298,7 @@ public sealed class YandexDiskFileStorage : IFileStorage, IFileStorageHealth, ID
         if (!layout || parts.Length != 2 || !Guid.TryParseExact(parts[0], "N", out _) || parts[1].Length != 64
             || !parts[1].All(char.IsAsciiHexDigit) || !segments[..^1].All(YandexDiskOptions.ValidSegment)
             || file.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '_' or '.'))
-            || Path.GetExtension(file) is not (".jpg" or ".png" or ".gif" or ".webp" or ".pdf" or ".txt" or ".csv" or ".docx" or ".xlsx" or ".mp4" or ".mp3" or ".bin"))
+            || Path.GetExtension(file) is not (".jpg" or ".png" or ".gif" or ".webp" or ".pdf" or ".txt" or ".csv" or ".docx" or ".xlsx" or ".mp4" or ".mov" or ".webm" or ".mp3" or ".bin"))
             throw Error("STORAGE_KEY_INVALID", false, "Некорректный ключ файлового хранилища.");
         return relative;
     }
@@ -315,7 +315,7 @@ public sealed class YandexDiskFileStorage : IFileStorage, IFileStorageHealth, ID
         "application/pdf" => ".pdf", "text/plain" => ".txt", "text/csv" => ".csv",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => ".docx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => ".xlsx",
-        "video/mp4" => ".mp4", "audio/mpeg" => ".mp3", _ => ".bin"
+        "video/mp4" => ".mp4", "video/quicktime" => ".mov", "video/webm" => ".webm", "audio/mpeg" => ".mp3", _ => ".bin"
     };
 
     private static FileStorageException Error(string code, bool retryable, string message) => new(code, retryable, message);

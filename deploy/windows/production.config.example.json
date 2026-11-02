@@ -8,7 +8,7 @@
       "Token": "REPLACE_WITH_YANDEX_OAUTH_TOKEN",
       "ConnectionId": "REPLACE_WITH_32_HEX_CONNECTION_ID",
       "Root": "app:/LandErp/production",
-      "MaxFileBytes": 8388608
+      "MaxFileBytes": 524288000
     }
   },
   "Security": {

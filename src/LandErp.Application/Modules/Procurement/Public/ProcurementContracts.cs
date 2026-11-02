@@ -110,6 +110,11 @@ public sealed record SaveDocumentRequirement(Guid CaseId, Guid RequirementId, lo
     long ExpectedRequirementVersion, CaseDocumentStatus Status, DateTimeOffset? DueAt, string Note);
 public sealed record RetryCaseAttachment(Guid CaseId, Guid AttachmentId, string OriginalName, string ContentType, byte[] Content);
 public sealed record DeleteCaseAttachment(Guid CaseId, Guid AttachmentId);
+public sealed record BeginCaseAttachmentUpload(AddCaseAttachment Attachment, long SizeBytes, string Sha256);
+public sealed record BeginCaseAttachmentRetry(Guid CaseId, Guid AttachmentId, string OriginalName, string ContentType, long SizeBytes, string Sha256);
+public sealed record CompleteCaseAttachmentUpload(Guid CaseId, Guid AttachmentId);
+public sealed record CaseAttachmentUploadTicket(Guid AttachmentId, string? UploadUrl, bool Available)
+{ public override string ToString() => $"CaseAttachmentUploadTicket {AttachmentId} [capability redacted]"; }
 public sealed record SaveInspectionTemplate(Guid? Id, long? ExpectedVersion, string Key, string Title, int SortOrder,
     InspectionAnswerType AnswerType, string[] Options, string Unit, string NormalAnswer, bool AllowAttachments, bool Required, bool Active);
 public sealed record InspectionAnswer(Guid ItemId, long ExpectedItemVersion, InspectionItemStatus Status, string Answer, string Note);
@@ -153,6 +158,11 @@ public interface IProcurementWorkspace
     Task<Guid> SaveCheckWithIdAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken);
     Task SaveCheckAsync(Subject subject, SaveCaseCheck command, string correlationId, CancellationToken cancellationToken);
     Task SaveCheckTemplateAsync(Subject subject, SaveCheckTemplate command, string correlationId, CancellationToken cancellationToken);
+    bool SupportsDirectAttachmentUploads => false;
+    Task<CaseAttachmentUploadTicket> BeginAttachmentUploadAsync(Subject subject, BeginCaseAttachmentUpload command, string correlationId, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<CaseAttachmentUploadTicket> BeginAttachmentRetryAsync(Subject subject, BeginCaseAttachmentRetry command, string correlationId, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task CompleteAttachmentUploadAsync(Subject subject, CompleteCaseAttachmentUpload command, string correlationId, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task CancelAttachmentUploadAsync(Subject subject, CompleteCaseAttachmentUpload command, string correlationId, CancellationToken cancellationToken) => throw new NotSupportedException();
     Task<Guid> AddAttachmentAsync(Subject subject, AddCaseAttachment command, string correlationId, CancellationToken cancellationToken);
     Task SaveDocumentRequirementAsync(Subject subject, SaveDocumentRequirement command, string correlationId, CancellationToken cancellationToken);
     Task RetryAttachmentAsync(Subject subject, RetryCaseAttachment command, string correlationId, CancellationToken cancellationToken);

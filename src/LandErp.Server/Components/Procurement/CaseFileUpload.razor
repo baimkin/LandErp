@@ -1,55 +1,133 @@
 @using LandErp.Application.Foundation.Files
+@using LandErp.Application.Modules.Procurement.Contracts
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
 
 <div class="stack" aria-busy="@batch.Busy">
-    @* Keep InputFile mounted: IBrowserFile streams depend on this DOM element during every retry. *@
-        <label class="upload"><strong>＋ Выбрать файлы</strong><small>Галерея или файлы · до @FileUploadLimits.MaxBatchFiles файлов по @FileUploadLimits.MaxRawFileMegabytes МБ</small>
-            <InputFile OnChange="SelectFiles" accept="@Accept" multiple disabled="@(Disabled||batch.Started)" />
-        </label>
-        @if (Camera)
-        {
-            <label class="upload"><strong>Снять фото / видео</strong>
-                <InputFile OnChange="SelectFiles" accept="@CameraAccept" capture="environment" disabled="@(Disabled||batch.Started)" />
-            </label>
-        }
-    @if (error != null) { <p role="alert">@error</p> }
-    @if (batch.Items.Count > 0)
+    @* Both native pickers stay mounted until hashing, PUT and server confirmation finish. *@
+    <label class="upload"><strong>＋ Выбрать файлы</strong><small>Галерея или файлы · до @MaxFiles файлов по @(UseDirect ? FileUploadLimits.MaxRawFileMegabytes : 50) МБ</small>
+        <InputFile @ref="picker" OnChange="args => SelectFiles(args,picker)" accept="@Accept" multiple="@(MaxFiles>1)" disabled="@(Disabled||batch.Started)" />
+    </label>
+    @if(Camera){<label class="upload"><strong>Снять фото / видео</strong><InputFile @ref="cameraPicker" OnChange="args => SelectFiles(args,cameraPicker)" accept="@CameraAccept" capture="environment" disabled="@(Disabled||batch.Started)" /></label>}
+    @if(error!=null){<p role="alert">@error</p>}
+    @if(batch.Items.Count>0)
     {
         <ul aria-live="polite">
-            @foreach (var item in batch.Items)
-            {
-                <li @key="item.UploadId" data-upload-state="@(item.Complete ? "complete" : item.Error != null ? "failed" : "pending")">@item.File.Name — @(item.Complete ? "Загружен" : item.TooLarge ? FileUploadLimits.TooLargeMessage : item.Error ?? (batch.Busy ? "Ожидает загрузки" : "Готов к загрузке"))</li>
-            }
+        @foreach(var item in batch.Items)
+        {
+            <li @key="item.UploadId" data-upload-state="@(item.Complete ? "complete" : item.Error!=null ? "failed" : "pending")">
+                <span>@item.File.Name — @(item.Complete ? "Загружен" : item.TooLarge ? FileUploadLimits.TooLargeMessage : item.Error ?? item.Phase ?? "Готов к загрузке")</span>
+                @if(current==item && batch.Busy){<progress max="100" value="@item.Percent" aria-label="@(item.Phase??"Загрузка")"></progress>}
+            </li>
+        }
         </ul>
-        <button type="button" class="btn primary" disabled="@(Disabled || batch.Busy || !batch.HasPending)" @onclick="UploadAsync">
-            @(batch.Busy ? "Загрузка…" : batch.Started ? "Повторить незагруженные" : "Загрузить выбранные")
-        </button>
-        @if (batch.Started && !batch.Busy && batch.Items.All(item => item.Complete)) { <p role="status">Все файлы загружены.</p> }
+        <div class="upload-actions">
+            <button type="button" class="btn primary" disabled="@(Disabled||batch.Busy||!batch.HasPending)" @onclick="UploadAsync">@(batch.Busy?"Загрузка…":batch.Started?"Повторить незагруженные":"Загрузить выбранные")</button>
+            @if(UseDirect&&batch.Busy){<button type="button" class="btn secondary" @onclick="CancelAsync" disabled="@confirming">Остановить загрузку</button>}
+        </div>
+        @if(batch.Started&&!batch.Busy&&batch.Items.All(x=>x.Complete)){<p role="status">Все файлы загружены.</p>}
     }
 </div>
 
 @code {
-    [Parameter] public string Accept { get; set; } = "image/*,video/*,audio/*,.pdf";
+    [Parameter] public string Accept { get; set; }="image/*,video/*,audio/*,.pdf";
     [Parameter] public bool Camera { get; set; }
-    [Parameter] public string CameraAccept { get; set; } = "image/*,video/*";
+    [Parameter] public string CameraAccept { get; set; }="image/*,video/*";
     [Parameter] public bool Disabled { get; set; }
-    [Parameter, EditorRequired] public Func<IBrowserFile, Guid, Task> OnUpload { get; set; } = default!;
+    [Parameter] public int MaxFiles { get; set; }=FileUploadLimits.MaxBatchFiles;
+    [Parameter] public bool UseDirect { get; set; }
+    [Parameter] public Func<IBrowserFile,Guid,Task>? OnUpload { get; set; }
+    [Parameter] public Func<IBrowserFile,Guid,string,Task<CaseAttachmentUploadTicket>>? OnPrepare { get; set; }
+    [Parameter] public Func<CaseAttachmentUploadTicket,Task>? OnComplete { get; set; }
+    [Parameter] public Func<CaseAttachmentUploadTicket,Task>? OnCancel { get; set; }
     [Parameter] public EventCallback<bool> OnBusyChanged { get; set; }
-    private readonly CaseUploadBatch batch = new();
-    private string? error;
-
-    private void SelectFiles(InputFileChangeEventArgs args)
+    private readonly CaseUploadBatch batch=new();
+    private InputFile? picker,cameraPicker;
+    private ElementReference selectedInput;
+    private CaseUploadBatch.Item? current;
+    private string? error,job;
+    private bool confirming;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<CaseFileUpload>? receiver;
+    private void SelectFiles(InputFileChangeEventArgs args,InputFile? input)
     {
-        error = null;
-        try { batch.Select(args.GetMultipleFiles(FileUploadLimits.MaxBatchFiles)); }
-        catch (InvalidOperationException) { error = $"Выберите не больше {FileUploadLimits.MaxBatchFiles} файлов за один раз."; }
+        error=null;
+        try { batch.Select(args.GetMultipleFiles(Math.Min(MaxFiles,FileUploadLimits.MaxBatchFiles)));selectedInput=input!.Element!.Value; }
+        catch(InvalidOperationException){error=$"Выберите не больше {MaxFiles} файлов за один раз.";}
     }
-
     private async Task UploadAsync()
     {
-        if (Disabled || batch.Busy) return;
+        if(Disabled||batch.Busy)return;
         await OnBusyChanged.InvokeAsync(true);
-        try { await batch.RunAsync(item => OnUpload(item.File, item.UploadId), changed: () => InvokeAsync(StateHasChanged)); }
-        finally { await OnBusyChanged.InvokeAsync(false); }
+        try{await batch.RunAsync(UploadOneAsync,changed:()=>InvokeAsync(StateHasChanged));}
+        finally{current=null;await OnBusyChanged.InvokeAsync(false);await InvokeAsync(StateHasChanged);}
+    }
+    private async Task UploadOneAsync(CaseUploadBatch.Item item)
+    {
+        current=item;CaseAttachmentUploadTicket? ticket=null;confirming=false;
+        try
+        {
+            if(!UseDirect)
+            {
+                FileUploadLimits.EnsureBufferedFileSize(item.File.Size);
+                item.Phase="Загружается…";await InvokeAsync(StateHasChanged);
+                await OnUpload!(item.File,item.UploadId);return;
+            }
+            module??=await Js.InvokeAsync<IJSObjectReference>("import","./js/case-upload.js");
+            receiver??=DotNetObjectReference.Create(this);job=item.UploadId.ToString("N");
+            int index=Enumerable.Range(0,batch.Items.Count).Single(i=>ReferenceEquals(batch.Items[i],item));
+            item.Phase="Проверяем файл…";item.Percent=0;await InvokeAsync(StateHasChanged);
+            using var transferDeadline=new CancellationTokenSource(TimeSpan.FromMinutes(31));
+            item.Sha256??=await module.InvokeAsync<string>("hashFile",transferDeadline.Token,selectedInput,index,job,receiver,FileUploadLimits.MaxRawFileBytes);
+            if(batch.StopRequested)throw new ArgumentException("Загрузка остановлена. Можно повторить тот же файл.");
+            item.Phase="Подготавливаем загрузку…";await InvokeAsync(StateHasChanged);
+            ticket=await OnPrepare!(item.File,item.UploadId,item.Sha256);
+            if(!ticket.Available)
+            {
+                if(ticket.UploadUrl!=null)
+                {
+                    item.Phase="Передаём на Яндекс Диск…";item.Percent=0;await InvokeAsync(StateHasChanged);
+                    if(batch.StopRequested)throw new ArgumentException("Загрузка остановлена. Можно повторить тот же файл.");
+                    await module.InvokeVoidAsync("putFile",transferDeadline.Token,selectedInput,index,ticket.UploadUrl,job,receiver);
+                }
+                confirming=true;item.Phase="Подтверждаем сохранение на Диске…";item.Percent=100;await InvokeAsync(StateHasChanged);
+                await OnComplete!(ticket);
+            }
+        }
+        catch(JSException)
+        {
+            await CancelTicketAsync(ticket);
+            throw new ArgumentException(batch.StopRequested?"Загрузка остановлена. Повтор продолжит это вложение.":"Браузер не подтвердил передачу файла на Диск. Проверьте соединение и повторите незагруженные.");
+        }
+        catch {await CancelTicketAsync(ticket);throw;}
+        finally
+        {
+            confirming=false;
+            if(module!=null&&job!=null){try{await module.InvokeVoidAsync("release",job);}catch(JSException){}}
+            job=null;
+        }
+    }
+    private async Task CancelTicketAsync(CaseAttachmentUploadTicket? ticket)
+    {
+        if(ticket!=null&&OnCancel!=null){try{await OnCancel(ticket);}catch{ /* Pending state stays recoverable; never claim completion. */ }}
+    }
+    [JSInvokable]
+    public Task UploadProgress(string id,string phase,long loaded,long total)
+    {
+        if(current!=null&&id==job)
+        {
+            current.Percent=total>0?(int)Math.Clamp(100L*loaded/total,0,100):0;
+            current.Phase=(phase=="hash"?"Проверяем файл":"Передаём на Яндекс Диск")+$" — {current.Percent}%";
+            return InvokeAsync(StateHasChanged);
+        }
+        return Task.CompletedTask;
+    }
+    private async Task CancelAsync(){batch.Stop();if(module!=null&&job!=null)await module.InvokeVoidAsync("cancel",job);}
+    public async ValueTask DisposeAsync()
+    {
+        if(module!=null){try{if(job!=null)await module.InvokeVoidAsync("cancel",job);await module.DisposeAsync();}catch(JSException){}}
+        receiver?.Dispose();
     }
 }

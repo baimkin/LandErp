@@ -120,7 +120,7 @@ else if(data!=null)
                 <label class="field"><span>Общее название (необязательно)</span><input @bind="media.Label"/></label>
                 <label class="field"><span>Общий комментарий (необязательно)</span><textarea @bind="media.Description"/></label>
             </fieldset>
-            <CaseFileUpload Camera="true" Disabled="@(Busy||inspectionConflict)" OnUpload="UploadMediaFileAsync" OnBusyChanged="SetMediaUploadBusy" />
+            <CaseFileUpload Camera="true" Disabled="@(Busy||inspectionConflict)" OnUpload="UploadMediaFileAsync" UseDirect="Workspace.SupportsDirectAttachmentUploads" OnPrepare="PrepareMediaFileAsync" OnComplete="CompleteMediaFileAsync" OnCancel="CancelMediaFileAsync" OnBusyChanged="SetMediaUploadBusy" />
         </CaseModal>
     }
     @if(finishOpen)
@@ -205,6 +205,20 @@ else if(data!=null)
     }
     private void SetMediaUploadBusy(bool value){mediaUploading=value;if(value)mediaBatchStarted=true;}
     private void CloseMedia(){if(!mediaUploading){mediaOpen=false;media=new();mediaBatchStarted=false;}}
+    private Task<CaseAttachmentUploadTicket> PrepareMediaFileAsync(IBrowserFile file, Guid uploadId, string hash) => ExecuteRequiredAsync(async () =>
+    {
+        if(inspectionConflict||Inspection==null) throw new ArgumentException("Обновите осмотр перед загрузкой.");
+        if(hasLocalDraft) await SaveLocalAsync();
+        var kind=file.ContentType.StartsWith("image/",StringComparison.OrdinalIgnoreCase)?CaseAttachmentKind.Photo
+            :file.ContentType.StartsWith("video/",StringComparison.OrdinalIgnoreCase)?CaseAttachmentKind.Video
+            :file.ContentType.StartsWith("audio/",StringComparison.OrdinalIgnoreCase)?CaseAttachmentKind.Audio:CaseAttachmentKind.Document;
+        Guid owner=string.IsNullOrWhiteSpace(media.Owner)?Inspection.Id:Guid.Parse(media.Owner);
+        var ownerType=string.IsNullOrWhiteSpace(media.Owner)?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;
+        string label=string.IsNullOrWhiteSpace(media.Label)?file.Name:media.Label;
+        return await Workspace.BeginAttachmentUploadAsync(CurrentSubject,new(new(CaseId,ownerType,owner,kind,label,media.Description,file.Name,file.ContentType,null,null,UploadId:uploadId),file.Size,hash),OperationId,CancellationToken.None);
+    });
+    private Task CompleteMediaFileAsync(CaseAttachmentUploadTicket ticket) => ExecuteRequiredAsync(() => Workspace.CompleteAttachmentUploadAsync(CurrentSubject,new(CaseId,ticket.AttachmentId),OperationId,CancellationToken.None));
+    private Task CancelMediaFileAsync(CaseAttachmentUploadTicket ticket) => ExecuteRequiredAsync(() => Workspace.CancelAttachmentUploadAsync(CurrentSubject,new(CaseId,ticket.AttachmentId),OperationId,CancellationToken.None));
     private async Task UploadMediaFileAsync(IBrowserFile file, Guid uploadId)
     {
         // Keep authentication refresh, write confirmation and read-after-commit handling
@@ -213,8 +227,8 @@ else if(data!=null)
         {
         if(inspectionConflict||Inspection==null)throw new ArgumentException("Обновите осмотр перед загрузкой.");
         if(hasLocalDraft)await SaveLocalAsync();
-        FileUploadLimits.EnsureRawFileSize(file.Size);
-        await using Stream input=file.OpenReadStream(FileUploadLimits.MaxRawFileBytes);
+        FileUploadLimits.EnsureBufferedFileSize(file.Size);
+        await using Stream input=file.OpenReadStream(FileUploadLimits.MaxBufferedFileBytes);
         using MemoryStream buffer=new();await input.CopyToAsync(buffer);
         CaseAttachmentKind kind=file.ContentType.StartsWith("image/",StringComparison.OrdinalIgnoreCase)?CaseAttachmentKind.Photo
             :file.ContentType.StartsWith("video/",StringComparison.OrdinalIgnoreCase)?CaseAttachmentKind.Video

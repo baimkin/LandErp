@@ -4,13 +4,18 @@ namespace LandErp.Infrastructure.Foundation.Files;
 
 /// <summary>Writes use the selected provider. Existing keys retain their provider;
 /// cloud errors never fall back to local files with a coincidentally matching name.</summary>
-public sealed class RoutedFileStorage(IFileStorage writer, IFileStorage? cloud, IFileStorage? local) : IFileStorage, IFileStorageHealth
+public sealed class RoutedFileStorage(IFileStorage writer, IFileStorage? cloud, IFileStorage? local) : IFileStorage, IFileStorageHealth, IDirectFileStorage
 {
     public Task<FileWriteResult> WriteAsync(Guid stableFileId, ReadOnlyMemory<byte> content, CancellationToken cancellationToken) =>
         writer.WriteAsync(stableFileId, content, cancellationToken);
 
     public Task<FileWriteResult> WriteAsync(FileWriteRequest request, ReadOnlyMemory<byte> content, CancellationToken cancellationToken) =>
         writer.WriteAsync(request, content, cancellationToken);
+
+    public bool SupportsDirectUploads => writer is IDirectFileStorage { SupportsDirectUploads: true };
+    private IDirectFileStorage Direct => writer as IDirectFileStorage ?? throw new FileStorageException("STORAGE_DIRECT_UNAVAILABLE", false, "Прямая загрузка не подключена.");
+    public Task<DirectFileUpload> PrepareDirectUploadAsync(FileWriteRequest request, long sizeBytes, string sha256, CancellationToken ct) => Direct.PrepareDirectUploadAsync(request, sizeBytes, sha256, ct);
+    public Task<FileWriteResult> ConfirmDirectUploadAsync(FileWriteRequest request, long sizeBytes, string sha256, CancellationToken ct) => Direct.ConfirmDirectUploadAsync(request, sizeBytes, sha256, ct);
 
     public Task<FileStorageHealth> CheckAsync(CancellationToken cancellationToken) =>
         writer is IFileStorageHealth health

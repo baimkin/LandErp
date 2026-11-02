@@ -15,9 +15,9 @@ namespace LandErp.Foundation.Tests;
 public sealed class ReleasePackageB302Tests
 {
     [TestMethod]
-    public void MaximumRawAttachmentFitsConfiguredJsonEnvelope()
+    public void MaximumBufferedAttachmentFitsConfiguredJsonEnvelope()
     {
-        byte[] content = new byte[FileUploadLimits.MaxRawFileBytes];
+        byte[] content = new byte[FileUploadLimits.MaxBufferedFileBytes];
         AddCaseAttachment add = new(Guid.NewGuid(), CaseAttachmentOwner.Case, null, CaseAttachmentKind.Document,
             new string('L', 512), new string('D', 4000), new string('N', 512), "application/octet-stream", content, null);
         RetryCaseAttachment retry = new(Guid.NewGuid(), Guid.NewGuid(), new string('N', 512), "application/octet-stream", content);
@@ -27,7 +27,7 @@ public sealed class ReleasePackageB302Tests
         int addBytes = JsonSerializer.SerializeToUtf8Bytes(add, options).Length;
         int retryBytes = JsonSerializer.SerializeToUtf8Bytes(retry, options).Length;
 
-        Assert.IsTrue(addBytes > FileUploadLimits.MaxRawFileBytes,
+        Assert.IsTrue(addBytes > FileUploadLimits.MaxBufferedFileBytes,
             "Base64 JSON requires an envelope larger than the raw file limit.");
         Assert.IsTrue(addBytes <= FileUploadLimits.MaxJsonRequestBodyBytes);
         Assert.IsTrue(retryBytes <= FileUploadLimits.MaxJsonRequestBodyBytes);
@@ -41,15 +41,15 @@ public sealed class ReleasePackageB302Tests
         TakeToWorkResult taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(sourceId), "b302-take", CancellationToken.None);
         CountingFileStorage storage = new();
         ProcurementWorkspace workspace = new(fixture.Factory, TimeProvider.System, storage);
-        byte[] oversize = new byte[FileUploadLimits.MaxRawFileBytes + 1];
+        byte[] oversize = new byte[FileUploadLimits.MaxBufferedFileBytes + 1];
 
-        FileUploadLimitException error = await Assert.ThrowsExactlyAsync<FileUploadLimitException>(() =>
+        ArgumentException error = await Assert.ThrowsExactlyAsync<ArgumentException>(() =>
             workspace.AddAttachmentAsync(fixture.Manager,
                 new(taken.CaseId, CaseAttachmentOwner.Case, null, CaseAttachmentKind.Document,
                     "Oversize", "", "oversize.bin", "application/pdf", oversize, null),
                 "b302-oversize", CancellationToken.None));
 
-        Assert.AreEqual(FileUploadLimits.TooLargeMessage, error.Message);
+        StringAssert.Contains(error.Message, "50 МБ");
         Assert.AreEqual(0, storage.WriteCount);
         Assert.AreEqual(0, await fixture.CountAsync(db => db.CaseAttachments.CountAsync(item => item.PropertyCaseId == taken.CaseId)));
         Assert.AreEqual(0, await fixture.CountAsync(db => db.StoredFiles.CountAsync(item => item.OrganizationId == fixture.OrganizationId)));

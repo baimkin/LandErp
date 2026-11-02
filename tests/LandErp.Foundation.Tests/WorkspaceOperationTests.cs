@@ -128,7 +128,10 @@ public sealed class WorkspaceOperationTests
         Assert.AreEqual(WorkspaceWriteOutcome.Unknown, workspace.Outcome);
         StringAssert.Contains(workspace.Failure!, "проверьте состояние вложения");
         Assert.IsFalse(workspace.Failure!.Contains("private provider reply", StringComparison.Ordinal));
-        StringAssert.Contains(workspace.Diagnostics.Entries.Single().Message, "Storage");
+        StringAssert.Contains(workspace.Diagnostics.Entries.First().Message, "Storage");
+        StringAssert.Contains(workspace.Diagnostics.Entries.Last().Message, "STORAGE_UNAVAILABLE");
+        Assert.AreEqual(2, workspace.Diagnostics.Entries.Count);
+        Assert.IsTrue(workspace.Diagnostics.Entries.All(entry => entry.Exception == null && !entry.Message.Contains("private provider reply", StringComparison.Ordinal)));
     }
 
     [TestMethod]

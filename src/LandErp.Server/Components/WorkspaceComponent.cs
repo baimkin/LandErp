@@ -19,6 +19,46 @@ public abstract class WorkspaceComponent : ComponentBase
             new EventId(1101, "WORKSPACE_OPERATION_FAILED"),
             "Workspace operation {OperationId}; phase {Phase}; component {Component}; action {Action}; failure type {FailureType}");
 
+    private static readonly Action<ILogger, string, string, bool, Exception?> LogStorageFailure =
+        LoggerMessage.Define<string, string, bool>(LogLevel.Warning, new EventId(1102, "WORKSPACE_STORAGE_FAILED"),
+            "Storage operation {OperationId}; code {StorageCode}; retryable {Retryable}");
+    private static string SafeStorageCode(FileStorageException error) => error.Code switch
+    {
+        "STORAGE_TIMEOUT" or "STORAGE_UPLOAD_PENDING" or "STORAGE_INTEGRITY" or "STORAGE_AUTH"
+        or "STORAGE_BUSY" or "STORAGE_QUOTA" or "STORAGE_NOT_FOUND" or "STORAGE_CONFLICT"
+        or "STORAGE_UNAVAILABLE" or "STORAGE_SIZE" or "STORAGE_LINK_INVALID" or "STORAGE_DIRECT_UNAVAILABLE"
+        or "STORAGE_DISCONNECTED" or "STORAGE_CONNECTION_MISMATCH" or "STORAGE_KEY_INVALID"
+        or "STORAGE_PATH_CONFLICT" or "STORAGE_RESPONSE_INVALID" => error.Code,
+        _ => "STORAGE_UNKNOWN"
+    };
+    private static string StorageFailureMessage(FileStorageException error)
+    {
+        string reason = error.Code switch
+        {
+            "STORAGE_TIMEOUT" => "Яндекс Диск не ответил вовремя.",
+            "STORAGE_UPLOAD_PENDING" => "Яндекс Диск пока не подтвердил сохранение файла.",
+            "STORAGE_INTEGRITY" => "Размер или SHA-256 сохранённого файла не совпали.",
+            "STORAGE_AUTH" => "Нет доступа к подключённому хранилищу.",
+            "STORAGE_BUSY" => "Хранилище временно занято.",
+            "STORAGE_QUOTA" => "Достигнут лимит хранилища или загрузок.",
+            "STORAGE_SIZE" => "Размер превышает лимит, заданный в настройках хранилища.",
+            _ => "Хранилище не подтвердило загрузку."
+        };
+        return reason + " Обновите карточку и проверьте состояние вложения перед повтором. Код: " + SafeStorageCode(error) + ".";
+    }
+    protected async Task<T> ExecuteRequiredAsync<T>(Func<Task<T>> action, [CallerMemberName] string operation = "")
+    {
+        T result = default!;
+        bool committed = await ExecuteConfirmedAsync(async () => { result = await action(); }, operation);
+        if (!committed) throw new ArgumentException(Error ?? "Действие не подтверждено. Повторите после проверки.");
+        if (!RefreshRequired) Success = null;
+        return result;
+    }
+    protected async Task ExecuteRequiredAsync(Func<Task> action, [CallerMemberName] string operation = "")
+    {
+        if (!await ExecuteConfirmedAsync(action, operation)) throw new ArgumentException(Error ?? "Действие не подтверждено. Повторите после проверки.");
+        if (!RefreshRequired) Success = null;
+    }
     [Inject] protected AuthenticationStateProvider Authentication { get; set; } = default!;
     [Inject] protected ILogger<WorkspaceComponent> Logger { get; set; } = NullLogger<WorkspaceComponent>.Instance;
     protected Subject CurrentSubject { get; private set; } = new(Guid.Empty, false);
@@ -119,7 +159,7 @@ public abstract class WorkspaceComponent : ComponentBase
                 // File metadata may have been committed before the provider failed.
                 WriteOutcome = WorkspaceWriteOutcome.Unknown;
                 Error = FailureMessage(exception, "Storage", operation,
-                    "Загрузка не подтверждена. Обновите карточку и проверьте состояние вложения перед повтором.");
+                    StorageFailureMessage(exception));
                 return false;
             }
             catch (Exception exception)
@@ -170,7 +210,11 @@ public abstract class WorkspaceComponent : ComponentBase
     {
         // Never pass exception/InnerException, messages, user forms, file bytes, URLs or
         // credentials to ILogger. Exception type + phase + operation identify the boundary.
-        try { LogFailure(Logger, id, phase, GetType().Name, operation, exception.GetType().Name, null); }
+        try
+        {
+            LogFailure(Logger, id, phase, GetType().Name, operation, exception.GetType().Name, null);
+            if (exception is FileStorageException storageError) LogStorageFailure(Logger, id, SafeStorageCode(storageError), storageError.Retryable, null);
+        }
         catch { /* A logging-provider failure must not change the business operation's outcome. */ }
     }
 }

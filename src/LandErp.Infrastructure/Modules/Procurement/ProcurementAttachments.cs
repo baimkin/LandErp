@@ -39,6 +39,9 @@ public sealed partial class ProcurementWorkspace
         if (value.File.Status is StoredFileStatus.Quarantined or StoredFileStatus.Rejected)
             throw new ArgumentException("Материал на проверке или отклонён. Его состояние нельзя менять удалением.");
 
+        if (value.File.StorageKey == null && value.File.ExternalUrl == null)
+            throw new ArgumentException("Файл ещё не сохранён в хранилище. Повторите загрузку перед удалением.");
+
         StoredFileStatus previousStatus = value.File.Status;
         value.File.Status = StoredFileStatus.Deleted;
         DateTimeOffset now = time.GetUtcNow();

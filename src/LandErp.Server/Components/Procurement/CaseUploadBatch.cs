@@ -11,6 +11,9 @@ public sealed class CaseUploadBatch
         public Guid UploadId { get; } = Guid.CreateVersion7();
         public bool Complete { get; private set; }
         public string? Error { get; private set; }
+        public string? Sha256 { get; set; }
+        public string? Phase { get; set; }
+        public int Percent { get; set; }
         public bool TooLarge => File.Size > FileUploadLimits.MaxRawFileBytes;
         internal void Confirm() { Complete = true; Error = null; }
         internal void Fail(string message) => Error = message;
@@ -19,6 +22,8 @@ public sealed class CaseUploadBatch
     public IReadOnlyList<Item> Items { get; private set; } = [];
     public bool Busy { get; private set; }
     public bool Started { get; private set; }
+    public bool StopRequested { get; private set; }
+    public void Stop() => StopRequested = true;
     public bool HasPending => Items.Any(item => !item.Complete && !item.TooLarge && item.File.Size > 0);
 
     public void Select(IReadOnlyList<IBrowserFile> files)
@@ -33,13 +38,14 @@ public sealed class CaseUploadBatch
     {
         if (Busy) return;
         Busy = true;
-        Started = true;
+        Started = true; StopRequested = false;
         try
         {
             // Read/upload only one file at a time. Retain each ID and skip confirmed files
             // when retrying a partial batch, including an ambiguous acknowledgement.
             foreach (Item item in Items.Where(item => !item.Complete))
             {
+                if (StopRequested) break;
                 if (item.TooLarge) { item.Fail(FileUploadLimits.TooLargeMessage); continue; }
                 try { await upload(item); item.Confirm(); }
                 catch (Exception exception)

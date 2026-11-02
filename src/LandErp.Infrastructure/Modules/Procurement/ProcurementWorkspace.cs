@@ -1871,7 +1871,10 @@ public sealed partial class ProcurementWorkspace(
         await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<Guid> AddAttachmentAsync(Subject subject, AddCaseAttachment command, string correlationId, CancellationToken cancellationToken)
+    public Task<Guid> AddAttachmentAsync(Subject subject, AddCaseAttachment command, string correlationId, CancellationToken cancellationToken) =>
+        AddAttachmentCoreAsync(subject, command, correlationId, null, cancellationToken);
+
+    private async Task<Guid> AddAttachmentCoreAsync(Subject subject, AddCaseAttachment command, string correlationId, BeginCaseAttachmentUpload? direct, CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(command.OwnerType) || !Enum.IsDefined(command.Kind)) throw new ArgumentException("Некорректный тип вложения.");
         EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
@@ -1921,13 +1924,21 @@ public sealed partial class ProcurementWorkspace(
         bool external = externalUrl != null;
         if (external && (!Uri.TryCreate(externalUrl, UriKind.Absolute, out Uri? parsed) || parsed.Scheme != Uri.UriSchemeHttps))
             throw new ArgumentException("Внешняя ссылка должна использовать HTTPS.");
-        if (external != (command.Kind == CaseAttachmentKind.Link) || external == (command.Content != null))
+        if (external != (command.Kind == CaseAttachmentKind.Link) || external == (command.Content != null || direct != null))
             throw new ArgumentException("Передайте либо HTTPS-ссылку, либо содержимое файла подходящего типа.");
-        if (!external) FileUploadLimits.EnsureRawFileSize(command.Content!.LongLength);
+        if (!external)
+        {
+            if (direct != null) FileUploadLimits.EnsureRawFileSize(direct.SizeBytes);
+            else FileUploadLimits.EnsureBufferedFileSize(command.Content!.LongLength);
+        }
         string contentType = external ? "text/uri-list" : Required(command.ContentType, 3, 256, "Укажите MIME-тип файла.");
         if (!external && !AllowedContentType(command.Kind, contentType)) throw new ArgumentException("Тип файла не разрешён для выбранного вложения.");
         // Stable draft upload ID covers a lost acknowledgement and provider failure without adding another file.
-        string? contentHash = command.Content == null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(command.Content));
+        string? contentHash = direct?.Sha256 ?? (command.Content == null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(command.Content)));
+        // Serialize draft creation for this case. Commit PendingUpload before any provider request.
+        await using var draftTransaction = direct == null ? null : await db.Database.BeginTransactionAsync(cancellationToken);
+        if (direct != null)
+            await db.PropertyCases.FromSqlInterpolated($"SELECT * FROM procurement.property_cases WHERE id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE").LoadAsync(cancellationToken);
         if (command.UploadId is Guid uploadId)
         {
             var existing = await (from link in db.CaseAttachments join file in db.StoredFiles on link.StoredFileId equals file.Id
@@ -1939,6 +1950,13 @@ public sealed partial class ProcurementWorkspace(
                     || existing.Link.Kind != command.Kind || existing.File.OriginalName != command.OriginalName
                     || existing.File.ContentType != contentType || existing.File.Sha256 != contentHash)
                     throw new ArgumentException("Ключ загрузки уже использован для другого файла.");
+                if (direct != null)
+                {
+                    if (existing.Link.DocumentRequirementId != command.DocumentRequirementId || existing.File.SizeBytes != direct.SizeBytes
+                        || existing.File.Status is StoredFileStatus.Deleted or StoredFileStatus.Quarantined or StoredFileStatus.Rejected)
+                        throw new ArgumentException("Параметры вложения изменились или загрузка недоступна.");
+                    return uploadId;
+                }
                 if(existing.File.Status == StoredFileStatus.Available) return uploadId;
                 if(command.Content == null) throw new ArgumentException("Для повтора требуется содержимое файла.");
                 await RetryAttachmentAsync(subject,new(command.CaseId,uploadId,command.OriginalName,contentType,command.Content),correlationId,cancellationToken);
@@ -1950,7 +1968,7 @@ public sealed partial class ProcurementWorkspace(
         {
             Id = storedId, OrganizationId = context.OrganizationId, OwnerModule = "Procurement", Purpose = command.Kind.ToString(),
             ExternalUrl = externalUrl, OriginalName = external ? Required(command.Label, 2, 512, "Укажите название ссылки.") : Required(command.OriginalName, 1, 512, "Укажите имя файла."),
-            ContentType = contentType, Sha256 = contentHash, Status = external ? StoredFileStatus.Available : StoredFileStatus.PendingUpload,
+            ContentType = contentType, Sha256 = contentHash, SizeBytes = direct?.SizeBytes ?? 0, Status = external ? StoredFileStatus.Available : StoredFileStatus.PendingUpload,
             CreatedByEmployeeId = context.EmployeeId, RecordedAt = now
         };
         db.StoredFiles.Add(stored);
@@ -1965,6 +1983,11 @@ public sealed partial class ProcurementWorkspace(
         // Files need a durable recovery record before provider I/O. External links have no
         // provider step and can be committed atomically with their business metadata below.
         if (!external) await db.SaveChangesAsync(cancellationToken);
+        if (direct != null)
+        {
+            await draftTransaction!.CommitAsync(cancellationToken);
+            return attachmentId;
+        }
         if (!external)
         {
             try
@@ -2093,7 +2116,7 @@ public sealed partial class ProcurementWorkspace(
     {
         EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
         AccessContext context = effective.OrganizationContext;
-        FileUploadLimits.EnsureRawFileSize(command.Content.LongLength);
+        FileUploadLimits.EnsureBufferedFileSize(command.Content.LongLength);
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // Match deletion's case/file lock order so a late retry cannot resurrect a tombstone.

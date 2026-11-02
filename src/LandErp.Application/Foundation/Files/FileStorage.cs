@@ -23,14 +23,22 @@ public sealed class StoredFile
 
 public static class FileUploadLimits
 {
-    public const int MaxRawFileMegabytes = 50;
+    public const int MaxRawFileMegabytes = 500;
+    // Legacy JSON/byte[] callers remain bounded; only the direct browser path accepts 500 MiB.
+    public const int MaxBufferedFileBytes = 50 * 1024 * 1024;
     public const int MaxRawFileBytes = MaxRawFileMegabytes * 1024 * 1024;
-    // 50 MiB raw becomes ~66.67 MiB as base64, plus bounded JSON metadata.
+    // Legacy 50 MiB JSON payloads only. Large files never use base64 or this request body.
     public const long MaxJsonRequestBodyBytes = 68L * 1024 * 1024;
     public const int MaxBatchFiles = 20;
-    public const string TooLargeMessage = "Файл не должен превышать 50 МБ.";
+    public const string TooLargeMessage = "Файл не должен превышать 500 МБ.";
 
     public static bool IsRawFileSizeAllowed(long sizeBytes) => sizeBytes is > 0 and <= MaxRawFileBytes;
+
+    public static void EnsureBufferedFileSize(long sizeBytes)
+    {
+        EnsureRawFileSize(sizeBytes);
+        if (sizeBytes > MaxBufferedFileBytes) throw new ArgumentException("Файлы больше 50 МБ загружайте напрямую в подключённое хранилище.");
+    }
 
     public static void EnsureRawFileSize(long sizeBytes)
     {
@@ -65,4 +73,14 @@ public interface IFileStorage
     Task<FileWriteResult> WriteAsync(FileWriteRequest request, ReadOnlyMemory<byte> content, CancellationToken cancellationToken) =>
         WriteAsync(request.FileId, content, cancellationToken);
     Task<byte[]> ReadAsync(string storageKey, CancellationToken cancellationToken);
+}
+
+/// <summary>Upload capabilities are transient secrets: pass only to the authorized browser, never log/cache.</summary>
+public sealed record DirectFileUpload(string? UploadUrl)
+{ public override string ToString() => "DirectFileUpload [capability redacted]"; }
+public interface IDirectFileStorage
+{
+    bool SupportsDirectUploads { get; }
+    Task<DirectFileUpload> PrepareDirectUploadAsync(FileWriteRequest request, long sizeBytes, string sha256, CancellationToken ct);
+    Task<FileWriteResult> ConfirmDirectUploadAsync(FileWriteRequest request, long sizeBytes, string sha256, CancellationToken ct);
 }

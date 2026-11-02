@@ -35,6 +35,14 @@ internal static class ProcurementEndpoints
             Results.Ok(new { id = await workspace.AddAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token) })).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/documents/requirements", async (SaveDocumentRequirement command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.SaveDocumentRequirementAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapPost("/attachments/retry", async (RetryCaseAttachment command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.RetryAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapPost("/attachments/upload/begin", async (HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
+            Results.Ok(await workspace.BeginAttachmentUploadAsync(PermissionAuthorization.SubjectFrom(http.User), await UploadMetadataAsync<BeginCaseAttachmentUpload>(http, token), http.TraceIdentifier, token))).AddEndpointFilter(ValidateCsrfAsync).AddEndpointFilter(ValidateUploadBodyAsync);
+        group.MapPost("/attachments/upload/retry", async (HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
+            Results.Ok(await workspace.BeginAttachmentRetryAsync(PermissionAuthorization.SubjectFrom(http.User), await UploadMetadataAsync<BeginCaseAttachmentRetry>(http, token), http.TraceIdentifier, token))).AddEndpointFilter(ValidateCsrfAsync).AddEndpointFilter(ValidateUploadBodyAsync);
+        group.MapPost("/attachments/upload/complete", async (HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
+        { await workspace.CompleteAttachmentUploadAsync(PermissionAuthorization.SubjectFrom(http.User), await UploadMetadataAsync<CompleteCaseAttachmentUpload>(http, token), http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync).AddEndpointFilter(ValidateUploadBodyAsync);
+        group.MapPost("/attachments/upload/cancel", async (HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
+        { await workspace.CancelAttachmentUploadAsync(PermissionAuthorization.SubjectFrom(http.User), await UploadMetadataAsync<CompleteCaseAttachmentUpload>(http, token), http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync).AddEndpointFilter(ValidateUploadBodyAsync);
         group.MapPost("/attachments/delete", async (DeleteCaseAttachment command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.DeleteAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
         group.MapGet("/attachments/{id:guid}/image", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
         {
@@ -90,5 +98,29 @@ internal static class ProcurementEndpoints
         try { await context.HttpContext.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context.HttpContext); }
         catch (AntiforgeryValidationException) { return Results.Problem(statusCode: 400, title: "Проверка запроса не пройдена", extensions: new Dictionary<string, object?> { ["code"] = "CSRF_VALIDATION_FAILED" }); }
         return await next(context);
+    }
+    private static async ValueTask<object?> ValidateUploadBodyAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        try { return await next(context); }
+        catch (BadHttpRequestException error) when (error.StatusCode is 413 or 415)
+        { return Results.Problem(statusCode: error.StatusCode, title: "Некорректные метаданные загрузки", extensions: new Dictionary<string, object?> { ["code"] = "UPLOAD_METADATA_INVALID" }); }
+    }
+    // Capability responses must never be cached. These endpoints accept metadata only, even for chunked requests.
+    private static async Task<T> UploadMetadataAsync<T>(HttpContext http, CancellationToken token)
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        if (!http.Request.HasJsonContentType()) throw new BadHttpRequestException("Ожидаются JSON-метаданные.", StatusCodes.Status415UnsupportedMediaType);
+        const int limit = 64 * 1024;
+        if (http.Request.ContentLength > limit) throw new BadHttpRequestException("Метаданные слишком велики.", StatusCodes.Status413PayloadTooLarge);
+        using var buffer = new MemoryStream();
+        byte[] chunk = new byte[8192];
+        int read;
+        while ((read = await http.Request.Body.ReadAsync(chunk, token)) > 0)
+        {
+            if (buffer.Length + read > limit) throw new BadHttpRequestException("Метаданные слишком велики.", StatusCodes.Status413PayloadTooLarge);
+            buffer.Write(chunk, 0, read);
+        }
+        try { return System.Text.Json.JsonSerializer.Deserialize<T>(buffer.GetBuffer().AsSpan(0, (int)buffer.Length), http.RequestServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>().Value.SerializerOptions) ?? throw new ArgumentException("Некорректные метаданные."); }
+        catch (System.Text.Json.JsonException) { throw new ArgumentException("Некорректные метаданные."); }
     }
 }

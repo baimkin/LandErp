@@ -7,3 +7,7 @@ button { justify-self:start; }
 
 li progress{display:block;width:min(100%,32rem);margin-top:var(--space-1)}
 .upload-actions{display:flex;gap:var(--space-2);flex-wrap:wrap}
+
+.upload-phase,li small{display:block}.upload-timings,.upload-summary{color:var(--text-muted);font-size:var(--text-ui)}li{padding-block:var(--space-2)}
+
+.failed-batch{border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);background:var(--danger-soft)}.failed-batch summary{cursor:pointer;color:var(--danger);font-weight:var(--weight-medium)}.failed-batch small{overflow-wrap:anywhere}

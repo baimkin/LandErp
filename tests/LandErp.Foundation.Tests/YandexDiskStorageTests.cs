@@ -173,6 +173,7 @@ public sealed class YandexDiskStorageTests
         public string TransferHost { get; set; } = "storage.yandex.net";
         public string? RedirectDownload { get; set; }
         public byte[]? DownloadOverride { get; set; }
+        public bool IgnoreRange { get; set; }
         public HttpStatusCode? ApiFailure { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -216,7 +217,14 @@ public sealed class YandexDiskStorageTests
             {
                 HttpResponseMessage redirect = new(HttpStatusCode.Found); redirect.Headers.Location = new(RedirectDownload); return redirect;
             }
-            return new(HttpStatusCode.OK) { Content = new ByteArrayContent(DownloadOverride ?? Files[path]) };
+            byte[] data=DownloadOverride??Files[path];
+            if(request.Headers.Range is {} ranges&&!IgnoreRange)
+            {
+                var range=ranges.Ranges.Single();int from=(int)range.From!.Value,to=(int)range.To!.Value;
+                var response=new HttpResponseMessage(HttpStatusCode.PartialContent){Content=new ByteArrayContent(data[from..(to+1)])};
+                response.Content.Headers.ContentRange=new System.Net.Http.Headers.ContentRangeHeaderValue(from,to,data.Length);return response;
+            }
+            return new(HttpStatusCode.OK) { Content = new ByteArrayContent(data) };
         }
 
         private static HttpResponseMessage Json(object value, HttpStatusCode status = HttpStatusCode.OK) =>

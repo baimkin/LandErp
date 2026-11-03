@@ -1,0 +1,100 @@
+@using LandErp.Application.Foundation.Files
+@using LandErp.Application.Modules.Procurement.Contracts
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+
+<section class="attachment-gallery @(Compact?"compact":"")" @ref="root">
+    @if(!Compact){<div class="gallery-heading"><div><h3>@Title</h3><p>Фото и видео можно открыть для просмотра</p></div><span class="gallery-count">@Ready.Count</span></div>}
+    @if(Media.Count>0)
+    {
+        <div class="media-grid">
+        @foreach(var file in Media)
+        {
+            bool video=AttachmentMediaTypes.IsVideo(file.ContentType);
+            <article class="media-card" @key="file.Id">
+                <button type="button" class="media-preview" aria-label="Открыть: @file.Label" @onclick="()=>OpenAsync(file)">
+                    @if(previewErrors.Contains(file.Id)){<span class="preview-placeholder">@(video?"▶":"▧")<small>Открыть материал</small></span>}
+                    else if(video){<video data-preview="@MediaUrl(file)" preload="metadata" muted playsinline tabindex="-1" aria-hidden="true" @onerror="()=>PreviewError(file.Id)"></video><span class="play-mark" aria-hidden="true">▶</span>}
+                    else{<img src="@MediaUrl(file)" alt="" loading="lazy" decoding="async" @onerror="()=>PreviewError(file.Id)"/>}
+                    <span class="media-kind">@(video?"Видео":"Фото")</span>
+                </button>
+                <div class="media-caption"><strong title="@file.OriginalName">@file.Label</strong><small>@Size(file.SizeBytes)</small></div>
+                <div class="media-actions"><a href="@DownloadUrl(file)" class="btn quiet" download>Скачать</a>@if(CanDelete){<button type="button" class="btn quiet delete-action" disabled="@Disabled" @onclick="()=>OnDelete.InvokeAsync(file)">Удалить</button>}</div>
+            </article>
+        }
+        </div>
+    }
+    @foreach(var file in Ready.Where(x=>!AttachmentMediaTypes.IsPreviewable(x.ContentType)||x.External))
+    {
+        <div class="gallery-file"><span class="file-symbol" aria-hidden="true">▤</span><div><strong>@file.Label</strong><small>@(file.External?"Ссылка":Size(file.SizeBytes))</small></div><a class="btn quiet" href="@DownloadUrl(file)" target="_blank" rel="noopener">@(file.External?"Открыть ссылку":"Скачать")</a>@if(CanDelete){<button type="button" class="btn quiet delete-action" disabled="@Disabled" @onclick="()=>OnDelete.InvokeAsync(file)">Удалить</button>}</div>
+    }
+    @if(Failed.Count>0)
+    {
+        <details class="failed-uploads"><summary><span class="failure-mark" aria-hidden="true">!</span>Не завершено <span class="failure-count">@Failed.Count</span></summary>
+            <p>Загрузка не была подтверждена. Для повтора выберите исходный файл — новое вложение не создаётся.</p>
+            @foreach(var file in Failed){<div class="failed-file"><div><strong>@file.OriginalName</strong><small>@ProcurementLabels.FileStatus(file.Status) · @Size(file.SizeBytes)</small></div>@if(CanRetry?.Invoke(file)==true){<button type="button" class="btn secondary" disabled="@Disabled" @onclick="()=>OnRetry.InvokeAsync(file.Id)">Повторить загрузку</button>}</div>}
+        </details>
+    }
+    @foreach(var file in Files.Where(x=>x.Status is StoredFileStatus.Quarantined or StoredFileStatus.Rejected)){<p class="gallery-notice">@file.Label · @ProcurementLabels.FileStatus(file.Status)</p>}
+    @if(!Files.Any(x=>x.Status!=StoredFileStatus.Deleted)&&!Compact){<div class="gallery-empty"><span aria-hidden="true">▧</span><p>Материалов пока нет</p><small>Загруженные фото, видео и документы появятся здесь.</small></div>}
+</section>
+@if(Selected is {} selected)
+{
+    <dialog class="media-viewer" @ref="viewer" aria-label="Просмотр материалов">
+        <div class="viewer-shell">
+            <header><div><strong>@selected.Label</strong><small>@selected.OriginalName · @Size(selected.SizeBytes) · @(SelectedIndex+1) из @Media.Count</small></div><button type="button" class="viewer-close" aria-label="Закрыть просмотр" @onclick="CloseAsync">×</button></header>
+            <div class="viewer-stage">
+                @if(Media.Count>1){<button type="button" class="viewer-arrow previous" aria-label="Предыдущий материал" @onclick="()=>NavigateAsync(-1)">‹</button>}
+                <div class="viewer-content" @key="selected.Id">
+                    @if(viewerError){<div class="viewer-error" role="alert"><strong>Не удалось открыть материал</strong><p>Возможно, браузер не поддерживает формат или доступ к файлу изменился.</p><a class="btn secondary" href="@DownloadUrl(selected)" download>Скачать оригинал</a></div>}
+                    else if(AttachmentMediaTypes.IsVideo(selected.ContentType)){<video src="@MediaUrl(selected)" controls playsinline preload="metadata" @onerror="()=>viewerError=true"></video>}
+                    else{<div class="photo-viewport"><div class="photo-canvas" style="width:@(zoom*100)%;height:@(zoom*100)%"><img class="viewer-photo" src="@MediaUrl(selected)" alt="@selected.Label" @ondblclick="()=>{zoom=zoom>1?1:2;centerPhoto=true;}" @onerror="()=>viewerError=true"/></div></div>}
+                </div>
+                @if(Media.Count>1){<button type="button" class="viewer-arrow next" aria-label="Следующий материал" @onclick="()=>NavigateAsync(1)">›</button>}
+            </div>
+            <footer><div class="zoom-actions">@if(AttachmentMediaTypes.IsImage(selected.ContentType)&&!viewerError){<button type="button" aria-label="Уменьшить фото" disabled="@(zoom<=1)" @onclick="()=>Zoom(-1)">−</button><button type="button" aria-label="Сбросить увеличение" @onclick="()=>zoom=1">@((int)(zoom*100))%</button><button type="button" aria-label="Увеличить фото" disabled="@(zoom>=3)" @onclick="()=>Zoom(1)">+</button>}</div><div class="viewer-actions"><a class="btn secondary" href="@DownloadUrl(selected)" download>Скачать</a>@if(CanDelete){<button type="button" class="btn secondary" disabled="@Disabled" @onclick="()=>DeleteSelectedAsync(selected)">Удалить</button>}</div></footer>
+        </div>
+    </dialog>
+}
+@code {
+    [Parameter] public IReadOnlyList<AttachmentView> Files{get;set;}=[];
+    [Parameter] public string Title{get;set;}="Материалы";
+    [Parameter] public bool Compact{get;set;}
+    [Parameter] public bool CanDelete{get;set;}
+    [Parameter] public bool Disabled{get;set;}
+    [Parameter] public Func<AttachmentView,bool>? CanRetry{get;set;}
+    [Parameter] public EventCallback<AttachmentView> OnDelete{get;set;}
+    [Parameter] public EventCallback<Guid> OnRetry{get;set;}
+    private ElementReference root,viewer;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<AttachmentGallery>? receiver;
+    private Guid? selectedId;
+    private readonly HashSet<Guid> previewErrors=[];
+    private double zoom=1;
+    private bool viewerError,attached,centerPhoto;
+    private List<AttachmentView> Ready=>Files.Where(x=>x.Status==StoredFileStatus.Available).ToList();
+    private List<AttachmentView> Media=>Ready.Where(x=>!x.External&&AttachmentMediaTypes.IsPreviewable(x.ContentType)).ToList();
+    private List<AttachmentView> Failed=>Files.Where(x=>x.Status is StoredFileStatus.UploadFailed or StoredFileStatus.PendingUpload).ToList();
+    private AttachmentView? Selected=>Media.FirstOrDefault(x=>x.Id==selectedId);
+    private int SelectedIndex=>Media.FindIndex(x=>x.Id==selectedId);
+    private static string MediaUrl(AttachmentView file)=>$"/api/procurement/attachments/{file.Id}/media";
+    private static string DownloadUrl(AttachmentView file)=>$"/api/procurement/attachments/{file.Id}";
+    private static string Size(long bytes)=>bytes>=1024*1024?$"{bytes/(1024d*1024):0.0} МБ":bytes>0?$"{bytes/1024d:0.#} КБ":"Размер не подтверждён";
+    private void PreviewError(Guid id)=>previewErrors.Add(id);
+    protected override async Task OnParametersSetAsync(){if(selectedId!=null&&Selected==null)await CloseAsync();}
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        module??=await Js.InvokeAsync<IJSObjectReference>("import","./js/attachment-gallery.js");
+        await module.InvokeVoidAsync("observe",root);
+        if(centerPhoto&&attached){await module.InvokeVoidAsync("center",viewer);centerPhoto=false;}
+        if(Selected!=null&&!attached){receiver??=DotNetObjectReference.Create(this);await module.InvokeVoidAsync("open",viewer,receiver);attached=true;}
+    }
+    private async Task OpenAsync(AttachmentView file){if(Selected!=null)await CloseAsync();selectedId=file.Id;zoom=1;viewerError=false;}
+    [JSInvokable] public async Task CloseAsync(){if(module!=null&&attached)await module.InvokeVoidAsync("close",viewer);selectedId=null;attached=false;await InvokeAsync(StateHasChanged);}
+    [JSInvokable] public async Task NavigateAsync(int direction){if(module!=null)await module.InvokeVoidAsync("stop",viewer);var items=Media;if(items.Count>0){int index=(SelectedIndex+direction+items.Count)%items.Count;selectedId=items[index].Id;zoom=1;viewerError=false;await InvokeAsync(StateHasChanged);}}
+    [JSInvokable] public Task ZoomAsync(int direction){Zoom(direction);return InvokeAsync(StateHasChanged);}
+    private void Zoom(int direction){zoom=Math.Clamp(zoom+direction*0.5,1,3);centerPhoto=true;}
+    private async Task DeleteSelectedAsync(AttachmentView file){await CloseAsync();await OnDelete.InvokeAsync(file);}
+    public async ValueTask DisposeAsync(){if(module!=null){try{if(attached)await module.InvokeVoidAsync("close",viewer);await module.InvokeVoidAsync("disconnect",root);await module.DisposeAsync();}catch(JSDisconnectedException){}}receiver?.Dispose();}
+}

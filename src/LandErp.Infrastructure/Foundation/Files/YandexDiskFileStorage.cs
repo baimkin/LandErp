@@ -8,7 +8,7 @@ namespace LandErp.Infrastructure.Foundation.Files;
 
 /// <summary>Private app-folder storage. OAuth is sent only to the fixed API origin.
 /// Download/upload URLs and raw provider errors must never escape this adapter.</summary>
-public sealed partial class YandexDiskFileStorage : IFileStorage, IFileStorageHealth, IDirectFileStorage, IDisposable
+public sealed partial class YandexDiskFileStorage : IFileStorage, IFileStorageHealth, IDirectFileStorage, IStreamingFileStorage, IDisposable
 {
     private const string Api = "https://cloud-api.yandex.net/v1/disk/resources";
     private readonly HttpClient http;
@@ -127,13 +127,13 @@ public sealed partial class YandexDiskFileStorage : IFileStorage, IFileStorageHe
         finally { transfers.Release(); }
     }
 
-    private async Task<HttpResponseMessage> DownloadAsync(Uri uri, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> DownloadAsync(Uri uri, CancellationToken cancellationToken, FileReadRange? range = null)
     {
         // Signed downloads may redirect to another Yandex storage host. Revalidate each hop;
         // never forward the OAuth header or accept a redirect to a local/third-party server.
         for (int hop = 0; hop < 4; hop++)
         {
-            HttpResponseMessage response = await SendAsync(() => new(HttpMethod.Get, uri), true, cancellationToken);
+            HttpResponseMessage response = await SendAsync(() => { var request=new HttpRequestMessage(HttpMethod.Get,uri); if(range!=null)request.Headers.Range=new System.Net.Http.Headers.RangeHeaderValue(range.Offset,range.Offset+range.Length-1);return request; }, true, cancellationToken);
             if ((int)response.StatusCode is not (301 or 302 or 303 or 307 or 308)) return response;
             Uri? location = response.Headers.Location;
             response.Dispose();

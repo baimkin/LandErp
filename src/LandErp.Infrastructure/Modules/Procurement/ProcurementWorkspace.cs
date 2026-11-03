@@ -1623,7 +1623,7 @@ public sealed partial class ProcurementWorkspace(
 
         return new(propertyCase.Id, propertyCase.BusinessNumber, propertyCase.WorkingTitle,
             propertyCase.WorkingLocation, propertyCase.CadastralNumber, photos, assignmentView, inspectionView,
-            attachmentViews, inspectors, canAssign, canPerform, procurementReader);
+            attachmentViews, inspectors, canAssign, canPerform, procurementReader) { CanManageAttachments=workAccess };
     }
 
     public async Task AssignInspectionAsync(Subject subject, AssignInspection command, string correlationId,
@@ -2074,7 +2074,7 @@ public sealed partial class ProcurementWorkspace(
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<AttachmentContent> ReadAttachmentAsync(Subject subject, Guid attachmentId, CancellationToken cancellationToken)
+    private async Task<(CaseAttachment Link,StoredFile File)> RequireReadableAttachmentAsync(Subject subject,Guid attachmentId,CancellationToken cancellationToken,bool inline=false)
     {
         EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
         AccessContext context = effective.OrganizationContext;
@@ -2100,7 +2100,12 @@ public sealed partial class ProcurementWorkspace(
                 .AnyAsync(item => item.Case.Id == value.Link.PropertyCaseId, cancellationToken))
                 throw new AccessDeniedException();
         }
-        else if (value.File.Status != StoredFileStatus.Available) throw new InvalidOperationException("Вложение ещё не доступно.");
+        else if (value.File.Status != StoredFileStatus.Available) { if(inline)throw new AccessDeniedException();throw new InvalidOperationException("Вложение ещё не доступно."); }
+        return (value.Link,value.File);
+    }
+    public async Task<AttachmentContent> ReadAttachmentAsync(Subject subject, Guid attachmentId, CancellationToken cancellationToken)
+    {
+        var value=await RequireReadableAttachmentAsync(subject,attachmentId,cancellationToken);
         if (value.File.ExternalUrl != null) return new(value.File.OriginalName, value.File.ContentType, null, value.File.ExternalUrl);
         if (value.File.StorageKey == null) throw new InvalidOperationException("Вложение повреждено.");
         byte[] content = await fileStorage.ReadAsync(value.File.StorageKey, cancellationToken);

@@ -1,3 +1,42 @@
+# Активная задача — MEDIA-GALLERY
+
+03.11.2026 владелец разрешил галерею фото/видео, просмотр с листанием/увеличением,
+видеоплеер, отдельные скачивание/мягкое удаление и компактный блок ошибок/повтора.
+Gate GATE-MEDIA-GALLERY.md. Ветка codex/inspection-file-improvements, накопленное сохранить.
+Required reading: README → START_HERE → ACTIVE_TASK → этот Gate → уже прочитанные
+FP-004 §§3,9,14–15, ADR-005, media Gates, UI instructions/consistency/tokens,
+screens03/04 → affected code/tests. Новых пакетов/migrations/ролей нет.
+Без live cloud/production/Collector/commit/push. Отчёт reports/MEDIA_GALLERY_REPORT.md.
+Статус: реализовано. Release build 0 warnings/errors; core 28 Passed и исправленный endpoint/UI 22/22 Passed, итоговый real browser 1/1 Passed (desktop/mobile/видео/повтор/soft delete). Production/commit/push не выполнялись. Следующий Gate не начинать.
+
+
+## Совместная публикация — 03.11.2026
+
+Владелец прямо поручил commit/push обеих доработок в main и скрипт обновления.
+Публикуются MEDIA-PARALLEL-UPLOAD и MEDIA-GALLERY одним коммитом после
+b0a18a9af7469f00756ba81ce5da8052f1f81897, fast-forward без force.
+Предыдущие локальные изменения Parser/README/диагностики и их история исключены.
+ACTIVE_TASK снимка сохраняет историю remote main и только два разрешённых media Gate;
+общий локальный ACTIVE_TASK другого чата не перезаписывается.
+Проверка отдельной сборки точного main-based snapshot, SHA всех blob и итогового main.
+Рабочая ветка/индекс и production сохраняются. Скрипт — прежний проверенный
+Update-ProductionMedia.ps1 с закреплённым новым SHA в отдельной копии для владельца;
+ff-only, unique version, private config backup, 500 МиБ, без migrations.
+Evidence: artifacts/media-gallery/publication/verification.json.
+---
+# История — MEDIA-PARALLEL-UPLOAD
+
+03.11.2026 владелец разрешил до пяти параллельных direct uploads, скорость передачи,
+понятные этапы/время; проверка SHA-256 последовательная. Ветка текущая
+codex/inspection-file-improvements, накопленные изменения сохранить.
+Gate: GATE-MEDIA-PARALLEL-UPLOAD.md. Required reading: README → START_HERE → ACTIVE_TASK
+→ этот Gate → уже прочитанные FP-004 §§3,9,14–15, ADR-005, YANDEX_DISK_SETUP,
+прежний media Gate и UI instructions/consistency/tokens → affected code/tests.
+Без новых пакетов/ролей/migrations, галереи/сжатия, Collector, live cloud,
+production и commit/push/merge. Отчёт reports/MEDIA_PARALLEL_UPLOAD_REPORT.md.
+Статус: реализовано. Release build 0 warnings/errors; core 46/46, финальный UI 21/21, browser 2/2, JS metrics 11/11 Passed. Production/commit/push не выполнялись. Завершённый Parser сохранён ниже; следующий Gate не начинать.
+
+---
 # Активная задача — MEDIA-LARGE-UPLOAD
 
 02.11.2026 владелец разрешил проверить прямую браузерную загрузку на Яндекс Диск

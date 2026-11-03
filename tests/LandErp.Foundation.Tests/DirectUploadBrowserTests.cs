@@ -38,7 +38,7 @@ public sealed class DirectUploadBrowserTests
                     await http.Response.WriteAsync("<!doctype html><input id='file' type='file'><script type='module'>import * as upload from '/js/case-upload.js';window.upload=upload;</script>");
                     return;
                 }
-                if (route is "/js/case-upload.js" or "/js/file-hash-worker.js" or "/js/sha256.mjs")
+                if (route is "/js/case-upload.js" or "/js/file-hash-worker.js" or "/js/sha256.mjs" or "/js/upload-metrics.mjs")
                 {
                     http.Response.ContentType = "text/javascript";
                     await http.Response.SendFileAsync(Path.Combine(root, "src/LandErp.Server/wwwroot", route.TrimStart('/')));
@@ -56,6 +56,7 @@ public sealed class DirectUploadBrowserTests
                 byte[] chunk = new byte[64 * 1024]; int read;
                 while ((read = await http.Request.Body.ReadAsync(chunk)) > 0) { sha.AppendData(chunk, 0, read); received += read; }
                 providerHash = Convert.ToHexStringLower(sha.GetHashAndReset());
+                await Task.Delay(650); // Distinguish sent bytes from the provider response.
                 http.Response.StatusCode = 201;
             });
             await app.StartAsync(); origin = app.Urls.Single();
@@ -69,13 +70,13 @@ public sealed class DirectUploadBrowserTests
             var result = await page.EvaluateAsync<JsonElement>("""
                 async ({target,maxBytes}) => {
                     const element=document.querySelector('#file'),events=[];
-                    const receiver={invokeMethodAsync:async (_,id,phase,loaded,total)=>events.push({phase,loaded,total})};
+                    const receiver={invokeMethodAsync:async (_,id,phase,loaded,total,rate)=>events.push({phase,loaded,total,rate})};
                     const hash=await upload.hashFile(element,0,'large',receiver,maxBytes);
-                    await upload.putFile(element,0,target,'large',receiver);upload.release('large');
+                    const timings=await upload.putFile(element,0,target,'large',receiver);upload.release('large');
                     let cancelled=false;
                     const pending=upload.hashFile(element,0,'cancel',receiver,maxBytes);
                     upload.cancel('cancel');try{await pending;}catch{cancelled=true;}upload.release('cancel');
-                    return {hash,cancelled,hashProgress:events.some(e=>e.phase==='hash'&&e.loaded===maxBytes),
+                    return {hash,cancelled,timings,responseStage:events.some(e=>e.phase==='response'),speed:events.some(e=>e.phase==='upload'&&e.rate>0),hashProgress:events.some(e=>e.phase==='hash'&&e.loaded===maxBytes),
                        uploadProgress:events.some(e=>e.phase==='upload'&&e.loaded===maxBytes)};
                 }
                 """, new { target, maxBytes = FileUploadLimits.MaxRawFileBytes });
@@ -84,6 +85,9 @@ public sealed class DirectUploadBrowserTests
             Assert.IsTrue(result.GetProperty("hashProgress").GetBoolean());
             Assert.IsTrue(result.GetProperty("uploadProgress").GetBoolean());
             Assert.IsTrue(result.GetProperty("cancelled").GetBoolean());
+            Assert.IsTrue(result.GetProperty("responseStage").GetBoolean());
+            Assert.IsTrue(result.GetProperty("speed").GetBoolean());
+            Assert.IsTrue(result.GetProperty("timings").GetProperty("responseMilliseconds").GetDouble()>=500);
             Assert.AreEqual(1, puts, "Cancelling hashing must not start a PUT.");
             await using (var oversized = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)) oversized.SetLength((long)FileUploadLimits.MaxRawFileBytes + 1);
             await page.Locator("#file").SetInputFilesAsync(path);

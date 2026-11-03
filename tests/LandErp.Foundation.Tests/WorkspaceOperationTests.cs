@@ -245,6 +245,24 @@ public sealed class WorkspaceOperationTests
         Assert.IsNotNull(workspace.Message);
     }
 
+    [TestMethod]
+    public async Task FiveUploadStepsHaveIndependentCorrelationAndNeverSharePageBusyOrRefresh()
+    {
+        var workspace=new ProbeWorkspace();await workspace.RefreshAsync();
+        string pageId=workspace.RequestId;List<string> ids=[];
+        var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls=Enumerable.Range(0,5).Select(_=>workspace.UploadAsync(async (subject,id)=>
+        {
+            Assert.AreNotEqual(Guid.Empty,subject.UserId);ids.Add(id);await release.Task;
+        })).ToArray();
+        Assert.AreEqual(5,ids.Distinct().Count());Assert.IsFalse(workspace.IsBusy);
+        release.SetResult();await Task.WhenAll(calls);
+        Assert.AreEqual(1,workspace.ReadCount);Assert.AreEqual(pageId,workspace.RequestId);
+        Assert.IsNull(workspace.Message);Assert.IsNull(workspace.Failure);
+        var error=await Assert.ThrowsExactlyAsync<ArgumentException>(()=>workspace.UploadAsync((_,_)=>Task.FromException(new FileStorageException("STORAGE_BUSY",true,"secret capability"))));
+        Assert.IsFalse(error.Message.Contains("secret capability",StringComparison.Ordinal));
+        Assert.IsTrue(workspace.Diagnostics.Entries.All(x=>x.Exception==null&&!x.Message.Contains("secret capability",StringComparison.Ordinal)));
+    }
     private sealed class ProbeWorkspace : WorkspaceComponent
     {
         public StubAuthentication AuthenticationStub { get; } = new();
@@ -263,6 +281,7 @@ public sealed class WorkspaceOperationTests
         public Task RefreshAsync() => ReloadAsync();
         public Task<bool> SubmitAsync(Func<Task> command) => ExecuteConfirmedAsync(command);
         public Task SubmitLegacyAsync(Func<Task> command) => ExecuteAsync(command);
+        public Task UploadAsync(Func<Subject,string,Task> action)=>ExecuteUploadStepAsync(action);
         protected override Task ReadAsync() { ReadCount++; return Read(); }
     }
 

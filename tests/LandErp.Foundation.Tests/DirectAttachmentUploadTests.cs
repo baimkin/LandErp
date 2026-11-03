@@ -125,9 +125,34 @@ public sealed class DirectAttachmentUploadTests
         var error = await Assert.ThrowsExactlyAsync<FileStorageException>(() => storage.ConfirmDirectUploadAsync(request, bytes.Length, hash, Ct));
         Assert.AreEqual("STORAGE_INTEGRITY", error.Code);
     }
+    [TestMethod, TestCategory("PostgreSQL")]
+    public async Task ProviderWaitReleasesCaseLockAndRechecksRevokedRightsAfterWaiting()
+    {
+        await using var f=await ProcurementTests.Phase1Fixture.CreateAsync(false,false);
+        Guid id=await f.InsertIndependentCaseAsync("Independent confirmations");
+        var storage=new DirectStorage(f.FileStorage);var workspace=new ProcurementWorkspace(f.Factory,TimeProvider.System,storage);
+        var first=await workspace.BeginAttachmentUploadAsync(f.Manager,Command(id,60),"first",Ct);
+        var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        storage.Uploaded=true;storage.BeforeConfirm=async _=>{entered.TrySetResult();await release.Task;};
+        Task confirmation=workspace.CompleteAttachmentUploadAsync(f.Manager,new(id,first.AttachmentId),"slow-provider",Ct);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            var second=await workspace.BeginAttachmentUploadAsync(f.Manager,Command(id,60),"second-during-wait",Ct).WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.AreNotEqual(first.AttachmentId,second.AttachmentId,"A provider wait must not lock the case against subsequent uploads.");
+            await f.SetExplicitAccessAsync(f.ManagerEmployeeId,EmployeeAccessRules.NoAccess);
+        }
+        finally{release.TrySetResult();}
+        await Assert.ThrowsExactlyAsync<AccessDeniedException>(()=>confirmation);
+        await using var db=f.Sandbox.Context();
+        Assert.AreEqual(0,await db.StoredFiles.CountAsync(x=>x.Status==StoredFileStatus.Available));
+        Assert.AreEqual(0,await db.BusinessTimeline.CountAsync(x=>x.ObjectId==id&&x.Kind=="Attachment"));
+    }
     internal sealed class DirectStorage(IFileStorage inner) : IFileStorage, IDirectFileStorage
     {
         public bool SupportsDirectUploads => true;
+        public Func<FileWriteRequest,Task>? BeforeConfirm { get; set; }
         public bool Uploaded { get; set; }
         public bool WrongHash { get; set; }
         public int Prepares { get; private set; }
@@ -137,10 +162,11 @@ public sealed class DirectAttachmentUploadTests
         public Task<byte[]> ReadAsync(string key, CancellationToken ct) => inner.ReadAsync(key, ct);
         public Task<DirectFileUpload> PrepareDirectUploadAsync(FileWriteRequest request, long sizeBytes, string sha256, CancellationToken ct)
         { Prepares++; return Task.FromResult(new DirectFileUpload(Uploaded ? null : "https://storage.yandex.net/synthetic-upload")); }
-        public Task<FileWriteResult> ConfirmDirectUploadAsync(FileWriteRequest request, long sizeBytes, string sha256, CancellationToken ct)
+        public async Task<FileWriteResult> ConfirmDirectUploadAsync(FileWriteRequest request, long sizeBytes, string sha256, CancellationToken ct)
         {
+            if(BeforeConfirm!=null)await BeforeConfirm(request);
             if (!Uploaded) throw new FileStorageException("STORAGE_UPLOAD_PENDING", true, "synthetic pending");
-            return Task.FromResult(new FileWriteResult("synthetic-key", WrongHash ? new string('f',64) : sha256, sizeBytes));
+            return new FileWriteResult("synthetic-key", WrongHash ? new string('f',64) : sha256, sizeBytes);
         }
     }
 }

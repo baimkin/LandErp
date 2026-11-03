@@ -87,17 +87,25 @@ else if(data!=null)
                                     </div>
                                     <div class="question-tools"><details open="@(item.Note.Length>0)"><summary>Комментарий</summary><textarea value="@item.Note" data-inspection-note="@item.Id" aria-label="Комментарий: @item.Title" @oninput="e=>SetNoteAsync(item,e.Value?.ToString()??string.Empty)"></textarea></details>@if(item.AllowAttachments){<button type="button" class="btn quiet" @onclick="()=>PrepareItemMedia(item)">＋ Материал</button>}</div>
                                 </fieldset>
-                                @foreach(var file in data.Attachments.Where(x=>x.OwnerId==item.Id)){<a class="material-link" href="/api/inspection/attachments/@file.Id" target="_blank" rel="noopener">@file.Label · @ProcurementLabels.FileStatus(file.Status)</a>}
+                                <AttachmentGallery Compact="true" Files="@data.Attachments.Where(x=>x.OwnerId==item.Id).ToArray()" CanDelete="data.CanManageAttachments" Disabled="Busy" CanRetry="CanRetryMedia" OnDelete="BeginMediaDelete" OnRetry="BeginMediaRetry" />
                             </article>
                         }
                     </article>
                     <footer class="inspection-footer"><small>@DraftStateLabel()</small><div><ActionButton Label="Сохранить черновик" Tone="secondary" OnClick="()=>SaveAsync(false)" Busy="Busy" Disabled="@(!Editable)"/><button type="button" class="btn primary" @onclick="()=>{ClearFeedback();finishOpen=true;}" disabled="@(!Editable||Busy)">Завершить осмотр</button></div></footer>
                 </div>
             </section>
-            <section class="panel inspection-summary"><h3>Общие материалы и вывод</h3>@foreach(var file in data.Attachments.Where(x=>x.OwnerType==CaseAttachmentOwner.Inspection)){<a class="material-link" href="/api/inspection/attachments/@file.Id" target="_blank" rel="noopener">@file.Label</a>}@if(!string.IsNullOrWhiteSpace(conclusion)){<p>@conclusion</p>}@if(!string.IsNullOrWhiteSpace(decision)){<p>@decision</p>}</section>
+            <section class="panel inspection-summary"><AttachmentGallery Title="Общие материалы" Files="@data.Attachments.Where(x=>x.OwnerType==CaseAttachmentOwner.Inspection).ToArray()" CanDelete="data.CanManageAttachments" Disabled="Busy" CanRetry="CanRetryMedia" OnDelete="BeginMediaDelete" OnRetry="BeginMediaRetry" />@if(!string.IsNullOrWhiteSpace(conclusion)){<p>@conclusion</p>}@if(!string.IsNullOrWhiteSpace(decision)){<p>@decision</p>}</section>
         }
     </main>
 
+    @if(deleteMedia is {} deleting)
+    {
+        <CaseModal Title="Удалить материал?" Error="@Error" Busy="Busy" OnClose="()=>deleteMedia=null"><p>@deleting.Label</p><p>Материал исчезнет из галереи. Запись и файл сохранятся в истории объекта.</p><div class="form-actions"><button class="btn secondary" disabled="@Busy" @onclick="()=>deleteMedia=null">Отмена</button><ActionButton Label="Удалить" Busy="Busy" OnClick="DeleteMediaAsync" /></div></CaseModal>
+    }
+    @if(retryMedia is {} retrying)
+    {
+        <CaseModal Title="Повторить загрузку" Busy="@(Busy||retryMediaBusy)" OnClose="CloseMediaRetry"><p>@retrying.OriginalName</p><p class="subtle">Выберите исходный файл. Повтор продолжит существующее вложение.</p><CaseFileUpload MaxFiles="1" UseDirect="Workspace.SupportsDirectAttachmentUploads" Disabled="Busy" OnPrepare="PrepareMediaRetryAsync" OnComplete="CompleteMediaFileAsync" OnCancel="CancelMediaFileAsync" OnUpload="RetryMediaBufferedAsync" OnBusyChanged="SetMediaRetryBusy" /></CaseModal>
+    }
     @if(assignOpen)
     {
         <CaseModal Title="Назначить осмотр" Subtitle="Осмотрщик получит доступ только к этому заданию и чек-листу" Error="@Error" Busy="Busy" OnClose="()=>assignOpen=false">
@@ -135,6 +143,7 @@ else if(data!=null)
 }
 @code {
     [Parameter] public Guid CaseId { get; set; }
+    private AttachmentView? deleteMedia,retryMedia; private bool retryMediaBusy;
     private InspectionWorkspaceView? data; private IJSObjectReference? draftModule;
     private bool mediaUploading,mediaBatchStarted; private bool mediaOpen,finishOpen,assignOpen,hasLocalDraft,localSaved,inspectionConflict,acceptServerInspectionRead;
     private int section; private bool onlyUnanswered; private Guid loaded,draftInspectionId; private long draftVersion;
@@ -173,6 +182,18 @@ else if(data!=null)
     private string DueLabel(DateTimeOffset? value)=>value==null?"Без срока":(IsOverdue(value)?"Просрочено · ":"")+Time(value);
     private string DueTone(DateTimeOffset? value)=>IsOverdue(value)?"overdue":"";
 
+    private bool CanRetryMedia(AttachmentView file)=>data?.CanPerform==true&&file.Status is StoredFileStatus.PendingUpload or StoredFileStatus.UploadFailed;
+    private void BeginMediaDelete(AttachmentView file){if(!Busy&&data?.CanManageAttachments==true){ClearFeedback();deleteMedia=file;}}
+    private async Task DeleteMediaAsync(){if(deleteMedia is not {} file)return;bool saved=await ExecuteConfirmedAsync(()=>Workspace.DeleteAttachmentAsync(CurrentSubject,new(CaseId,file.Id),OperationId,CancellationToken.None));if(saved)deleteMedia=null;}
+    private void BeginMediaRetry(Guid id){if(!Busy){ClearFeedback();retryMedia=data?.Attachments.FirstOrDefault(x=>x.Id==id);}}
+    private void CloseMediaRetry(){if(!retryMediaBusy&&!Busy)retryMedia=null;}
+    private async Task SetMediaRetryBusy(bool value){retryMediaBusy=value;if(!value)await RefreshAfterUploadAsync();}
+    private Task<CaseAttachmentUploadTicket> PrepareMediaRetryAsync(IBrowserFile file,Guid uploadId,string hash)=>ExecuteUploadStepAsync((subject,id)=>Workspace.BeginAttachmentRetryAsync(subject,new(CaseId,retryMedia!.Id,file.Name,file.ContentType,file.Size,hash),id,CancellationToken.None));
+    private async Task RetryMediaBufferedAsync(IBrowserFile file,Guid uploadId)
+    {
+        bool confirmed=await ExecuteConfirmedAsync(async()=>{FileUploadLimits.EnsureBufferedFileSize(file.Size);await using var input=file.OpenReadStream(FileUploadLimits.MaxBufferedFileBytes);using var buffer=new MemoryStream();await input.CopyToAsync(buffer);await Workspace.RetryAttachmentAsync(CurrentSubject,new(CaseId,retryMedia!.Id,file.Name,file.ContentType,buffer.ToArray()),OperationId,CancellationToken.None);});
+        if(!confirmed)throw new ArgumentException(Error??"Загрузка не подтверждена.");
+    }
     private void OpenAssign()
     {
         ClearFeedback();string selected=data!.Assignment?.InspectorEmployeeId.ToString()??"";
@@ -203,9 +224,9 @@ else if(data!=null)
         if(committed&&!RefreshRequired&&draftModule!=null){await draftModule.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;finishOpen=false;}
         else if(LastWriteWasConflict){inspectionConflict=true;hasLocalDraft=true;await SaveLocalAsync();}
     }
-    private void SetMediaUploadBusy(bool value){mediaUploading=value;if(value)mediaBatchStarted=true;}
+    private async Task SetMediaUploadBusy(bool value){mediaUploading=value;if(value)mediaBatchStarted=true;else if(Workspace.SupportsDirectAttachmentUploads)await RefreshAfterUploadAsync();}
     private void CloseMedia(){if(!mediaUploading){mediaOpen=false;media=new();mediaBatchStarted=false;}}
-    private Task<CaseAttachmentUploadTicket> PrepareMediaFileAsync(IBrowserFile file, Guid uploadId, string hash) => ExecuteRequiredAsync(async () =>
+    private Task<CaseAttachmentUploadTicket> PrepareMediaFileAsync(IBrowserFile file, Guid uploadId, string hash) => ExecuteUploadStepAsync(async (subject,operationId) =>
     {
         if(inspectionConflict||Inspection==null) throw new ArgumentException("Обновите осмотр перед загрузкой.");
         if(hasLocalDraft) await SaveLocalAsync();
@@ -215,10 +236,10 @@ else if(data!=null)
         Guid owner=string.IsNullOrWhiteSpace(media.Owner)?Inspection.Id:Guid.Parse(media.Owner);
         var ownerType=string.IsNullOrWhiteSpace(media.Owner)?CaseAttachmentOwner.Inspection:CaseAttachmentOwner.InspectionItem;
         string label=string.IsNullOrWhiteSpace(media.Label)?file.Name:media.Label;
-        return await Workspace.BeginAttachmentUploadAsync(CurrentSubject,new(new(CaseId,ownerType,owner,kind,label,media.Description,file.Name,file.ContentType,null,null,UploadId:uploadId),file.Size,hash),OperationId,CancellationToken.None);
+        return await Workspace.BeginAttachmentUploadAsync(subject,new(new(CaseId,ownerType,owner,kind,label,media.Description,file.Name,file.ContentType,null,null,UploadId:uploadId),file.Size,hash),operationId,CancellationToken.None);
     });
-    private Task CompleteMediaFileAsync(CaseAttachmentUploadTicket ticket) => ExecuteRequiredAsync(() => Workspace.CompleteAttachmentUploadAsync(CurrentSubject,new(CaseId,ticket.AttachmentId),OperationId,CancellationToken.None));
-    private Task CancelMediaFileAsync(CaseAttachmentUploadTicket ticket) => ExecuteRequiredAsync(() => Workspace.CancelAttachmentUploadAsync(CurrentSubject,new(CaseId,ticket.AttachmentId),OperationId,CancellationToken.None));
+    private Task CompleteMediaFileAsync(CaseAttachmentUploadTicket ticket) => ExecuteUploadStepAsync((subject,operationId) => Workspace.CompleteAttachmentUploadAsync(subject,new(CaseId,ticket.AttachmentId),operationId,CancellationToken.None));
+    private Task CancelMediaFileAsync(CaseAttachmentUploadTicket ticket) => ExecuteUploadStepAsync((subject,operationId) => Workspace.CancelAttachmentUploadAsync(subject,new(CaseId,ticket.AttachmentId),operationId,CancellationToken.None));
     private async Task UploadMediaFileAsync(IBrowserFile file, Guid uploadId)
     {
         // Keep authentication refresh, write confirmation and read-after-commit handling

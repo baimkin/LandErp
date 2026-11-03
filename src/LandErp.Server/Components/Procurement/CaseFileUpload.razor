@@ -1,31 +1,42 @@
+@using System.Diagnostics
+@using System.Globalization
 @using LandErp.Application.Foundation.Files
 @using LandErp.Application.Modules.Procurement.Contracts
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IJSRuntime Js
+@inject ILogger<CaseFileUpload> Logger
 
-<div class="stack" aria-busy="@batch.Busy">
-    @* Both native pickers stay mounted until hashing, PUT and server confirmation finish. *@
+<div class="stack" aria-busy="@(batch.Busy||starting)">
+    @* Native inputs stay mounted for the entire batch; no server-side browser stream in direct mode. *@
     <label class="upload"><strong>＋ Выбрать файлы</strong><small>Галерея или файлы · до @MaxFiles файлов по @(UseDirect ? FileUploadLimits.MaxRawFileMegabytes : 50) МБ</small>
-        <InputFile @ref="picker" OnChange="args => SelectFiles(args,picker)" accept="@Accept" multiple="@(MaxFiles>1)" disabled="@(Disabled||batch.Started)" />
+        <InputFile @ref="picker" OnChange="args => SelectFiles(args,picker)" accept="@Accept" multiple="@(MaxFiles>1)" disabled="@(Disabled||batch.Started||starting)" />
     </label>
-    @if(Camera){<label class="upload"><strong>Снять фото / видео</strong><InputFile @ref="cameraPicker" OnChange="args => SelectFiles(args,cameraPicker)" accept="@CameraAccept" capture="environment" disabled="@(Disabled||batch.Started)" /></label>}
+    @if(Camera){<label class="upload"><strong>Снять фото / видео</strong><InputFile @ref="cameraPicker" OnChange="args => SelectFiles(args,cameraPicker)" accept="@CameraAccept" capture="environment" disabled="@(Disabled||batch.Started||starting)" /></label>}
     @if(error!=null){<p role="alert">@error</p>}
     @if(batch.Items.Count>0)
     {
-        <ul aria-live="polite">
-        @foreach(var item in batch.Items)
+        <p class="upload-summary" role="status">Готово @batch.Items.Count(x=>x.Complete) из @batch.Items.Count@if(UseDirect){<span> · До 5 передач одновременно, проверка файлов по одному</span>}</p>
+        <ul>
+        @foreach(var item in batch.Items.Where(x=>x.Error==null))
         {
             <li @key="item.UploadId" data-upload-state="@(item.Complete ? "complete" : item.Error!=null ? "failed" : "pending")">
-                <span>@item.File.Name — @(item.Complete ? "Загружен" : item.TooLarge ? FileUploadLimits.TooLargeMessage : item.Error ?? item.Phase ?? "Готов к загрузке")</span>
-                @if(current==item && batch.Busy){<progress max="100" value="@item.Percent" aria-label="@(item.Phase??"Загрузка")"></progress>}
+                <strong>@item.File.Name · @Bytes(item.File.Size)</strong>
+                <span class="upload-phase" role="status">@Status(item)</span>
+                @if(batch.Busy&&item.Stage is CaseUploadStage.Checking or CaseUploadStage.Sending){<progress max="100" value="@item.Percent" aria-label="@Status(item)"></progress>}
+                @if(item.Stage==CaseUploadStage.Sending){<small>@Bytes(item.Loaded) из @Bytes(item.File.Size) · @Bytes(item.CurrentSpeed)/с</small>}
+                @if(item.Elapsed>TimeSpan.Zero){<small class="upload-timings">@Timing(item)</small>}
             </li>
         }
         </ul>
+        @if(batch.Items.Any(x=>x.Error!=null))
+        {
+            <details class="failed-batch" open><summary>Не удалось загрузить · @batch.Items.Count(x=>x.Error!=null)</summary><ul>@foreach(var item in batch.Items.Where(x=>x.Error!=null)){<li data-upload-state="failed"><strong>@item.File.Name</strong><small>@item.Error</small></li>}</ul></details>
+        }
         <div class="upload-actions">
-            <button type="button" class="btn primary" disabled="@(Disabled||batch.Busy||!batch.HasPending)" @onclick="UploadAsync">@(batch.Busy?"Загрузка…":batch.Started?"Повторить незагруженные":"Загрузить выбранные")</button>
-            @if(UseDirect&&batch.Busy){<button type="button" class="btn secondary" @onclick="CancelAsync" disabled="@confirming">Остановить загрузку</button>}
+            <button type="button" class="btn primary" disabled="@(Disabled||batch.Busy||starting||!batch.HasPending)" @onclick="UploadAsync">@(batch.Busy?"Загрузка…":batch.Started?"Повторить незагруженные":"Загрузить выбранные")</button>
+            @if(UseDirect&&batch.Busy){<button type="button" class="btn secondary" @onclick="CancelAsync" disabled="@(batch.StopRequested||batch.Items.All(x=>x.Complete||x.Error!=null||x.Stage==CaseUploadStage.Confirming))">Остановить загрузку</button>}
         </div>
         @if(batch.Started&&!batch.Busy&&batch.Items.All(x=>x.Complete)){<p role="status">Все файлы загружены.</p>}
     }
@@ -44,13 +55,31 @@
     [Parameter] public Func<CaseAttachmentUploadTicket,Task>? OnCancel { get; set; }
     [Parameter] public EventCallback<bool> OnBusyChanged { get; set; }
     private readonly CaseUploadBatch batch=new();
+    private readonly Dictionary<Guid,CaseAttachmentUploadTicket> tickets=[];
+    private readonly SemaphoreSlim prepareGate=new(1);
+    private readonly CancellationTokenSource lifetime=new();
     private InputFile? picker,cameraPicker;
     private ElementReference selectedInput;
-    private CaseUploadBatch.Item? current;
-    private string? error,job;
-    private bool confirming;
+    private string? error;
     private IJSObjectReference? module;
     private DotNetObjectReference<CaseFileUpload>? receiver;
+    private bool disposed,starting;
+    private static readonly Action<ILogger,Guid,long,long,long,long,long,Exception?> LogTimings=LoggerMessage.Define<Guid,long,long,long,long,long>(LogLevel.Information,new EventId(1103,"UPLOAD_TIMINGS"),
+        "Upload {UploadId}; check {CheckMs} ms; prepare {PrepareMs} ms; send {SendMs} ms; response {ResponseMs} ms; confirm {ConfirmMs} ms");
+    public sealed record TransferTimings(double SendingMilliseconds,double ResponseMilliseconds);
+    private static string Bytes(double value) => value>=1024*1024?$"{value/(1024*1024):0.0} МБ":value>=1024?$"{value/1024:0.0} КБ":$"{value:0} Б";
+    private static string Duration(TimeSpan value)=>value.TotalHours>=1?value.ToString(@"h\:mm\:ss",CultureInfo.InvariantCulture):value.ToString(@"m\:ss",CultureInfo.InvariantCulture);
+    private string Status(CaseUploadBatch.Item item)=>item.Complete?"Загружен":item.TooLarge?FileUploadLimits.TooLargeMessage:item.Error??item.Phase??(item.Stage switch
+    {
+        CaseUploadStage.Checking=>$"Проверяем файл — {item.Percent}%",
+        CaseUploadStage.Preparing=>"Получаем ссылку для загрузки…",
+        CaseUploadStage.Sending=>$"Передаём на Яндекс Диск — {item.Percent}%",
+        CaseUploadStage.WaitingForResponse=>"Файл передан. Ожидаем ответ Яндекса…",
+        CaseUploadStage.Confirming=>"Проверяем сохранение на Диске…",
+        _=>batch.StopRequested?"Загрузка остановлена. Можно повторить.":"В очереди"
+    });
+    private static string Timing(CaseUploadBatch.Item item)=>$"Всего {Duration(item.Elapsed)} · Очередь {Duration(item.Duration(CaseUploadStage.Queued))} · Проверка {Duration(item.Duration(CaseUploadStage.Checking))} · Ссылка {Duration(item.Duration(CaseUploadStage.Preparing))} · Передача {Duration(item.Duration(CaseUploadStage.Sending))} · Ответ Диска {Duration(item.Duration(CaseUploadStage.WaitingForResponse))} · Сохранение {Duration(item.Duration(CaseUploadStage.Confirming))}";
+    private Task Changed()=>disposed?Task.CompletedTask:InvokeAsync(StateHasChanged);
     private void SelectFiles(InputFileChangeEventArgs args,InputFile? input)
     {
         error=null;
@@ -59,75 +88,111 @@
     }
     private async Task UploadAsync()
     {
-        if(Disabled||batch.Busy)return;
-        await OnBusyChanged.InvokeAsync(true);
-        try{await batch.RunAsync(UploadOneAsync,changed:()=>InvokeAsync(StateHasChanged));}
-        finally{current=null;await OnBusyChanged.InvokeAsync(false);await InvokeAsync(StateHasChanged);}
-    }
-    private async Task UploadOneAsync(CaseUploadBatch.Item item)
-    {
-        current=item;CaseAttachmentUploadTicket? ticket=null;confirming=false;
+        if(Disabled||batch.Busy||starting||disposed)return;
+        starting=true;error=null;
+        using var clock=new CancellationTokenSource();
+        Task tick=RefreshTimesAsync(clock.Token);
         try
         {
+            await OnBusyChanged.InvokeAsync(true);
             if(!UseDirect)
+                await batch.RunAsync(async item=>{FileUploadLimits.EnsureBufferedFileSize(item.File.Size);item.SetStage(CaseUploadStage.Sending);item.Phase="Загружается…";await Changed();await OnUpload!(item.File,item.UploadId);},changed:Changed);
+            else
             {
-                FileUploadLimits.EnsureBufferedFileSize(item.File.Size);
-                item.Phase="Загружается…";await InvokeAsync(StateHasChanged);
-                await OnUpload!(item.File,item.UploadId);return;
-            }
-            module??=await Js.InvokeAsync<IJSObjectReference>("import","./js/case-upload.js");
-            receiver??=DotNetObjectReference.Create(this);job=item.UploadId.ToString("N");
-            int index=Enumerable.Range(0,batch.Items.Count).Single(i=>ReferenceEquals(batch.Items[i],item));
-            item.Phase="Проверяем файл…";item.Percent=0;await InvokeAsync(StateHasChanged);
-            using var transferDeadline=new CancellationTokenSource(TimeSpan.FromMinutes(31));
-            item.Sha256??=await module.InvokeAsync<string>("hashFile",transferDeadline.Token,selectedInput,index,job,receiver,FileUploadLimits.MaxRawFileBytes);
-            if(batch.StopRequested)throw new ArgumentException("Загрузка остановлена. Можно повторить тот же файл.");
-            item.Phase="Подготавливаем загрузку…";await InvokeAsync(StateHasChanged);
-            ticket=await OnPrepare!(item.File,item.UploadId,item.Sha256);
-            if(!ticket.Available)
-            {
-                if(ticket.UploadUrl!=null)
-                {
-                    item.Phase="Передаём на Яндекс Диск…";item.Percent=0;await InvokeAsync(StateHasChanged);
-                    if(batch.StopRequested)throw new ArgumentException("Загрузка остановлена. Можно повторить тот же файл.");
-                    await module.InvokeVoidAsync("putFile",transferDeadline.Token,selectedInput,index,ticket.UploadUrl,job,receiver);
-                }
-                confirming=true;item.Phase="Подтверждаем сохранение на Диске…";item.Percent=100;await InvokeAsync(StateHasChanged);
-                await OnComplete!(ticket);
+                module??=await Js.InvokeAsync<IJSObjectReference>("import","./js/case-upload.js");
+                receiver??=DotNetObjectReference.Create(this);tickets.Clear();
+                await batch.RunParallelAsync(CheckAsync,TransferAsync,ConfirmAsync,Changed);
             }
         }
-        catch(JSException)
-        {
-            await CancelTicketAsync(ticket);
-            throw new ArgumentException(batch.StopRequested?"Загрузка остановлена. Повтор продолжит это вложение.":"Браузер не подтвердил передачу файла на Диск. Проверьте соединение и повторите незагруженные.");
-        }
-        catch {await CancelTicketAsync(ticket);throw;}
+        catch(JSException){error="Не удалось подготовить загрузку. Обновите страницу и повторите.";}
         finally
         {
-            confirming=false;
-            if(module!=null&&job!=null){try{await module.InvokeVoidAsync("release",job);}catch(JSException){}}
-            job=null;
+            clock.Cancel();await tick;
+            foreach(var item in batch.Items)await ReleaseAsync(item);
+            foreach(var item in batch.Items.Where(x=>x.Elapsed>TimeSpan.Zero))
+                try{LogTimings(Logger,item.UploadId,(long)item.Duration(CaseUploadStage.Checking).TotalMilliseconds,(long)item.Duration(CaseUploadStage.Preparing).TotalMilliseconds,(long)item.Duration(CaseUploadStage.Sending).TotalMilliseconds,(long)item.Duration(CaseUploadStage.WaitingForResponse).TotalMilliseconds,(long)item.Duration(CaseUploadStage.Confirming).TotalMilliseconds,null);}catch{/* Diagnostics cannot change upload outcome. */}
+            if(!disposed)await OnBusyChanged.InvokeAsync(false);
+            starting=false;
+            await Changed();
         }
+    }
+    private async Task RefreshTimesAsync(CancellationToken token)
+    {
+        using var timer=new PeriodicTimer(TimeSpan.FromSeconds(1));
+        try{while(await timer.WaitForNextTickAsync(token))await Changed();}catch(OperationCanceledException){}
+    }
+    private int Index(CaseUploadBatch.Item item)=>Enumerable.Range(0,batch.Items.Count).Single(i=>ReferenceEquals(batch.Items[i],item));
+    private static string Job(CaseUploadBatch.Item item)=>item.UploadId.ToString("N");
+    private async Task CheckAsync(CaseUploadBatch.Item item)
+    {
+        if(item.Sha256!=null)return;
+        item.SetStage(CaseUploadStage.Checking);await Changed();
+        try{using var deadline=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);deadline.CancelAfter(TimeSpan.FromMinutes(31));
+            item.Sha256=await module!.InvokeAsync<string>("hashFile",deadline.Token,selectedInput,Index(item),Job(item),receiver,FileUploadLimits.MaxRawFileBytes);item.SetStage(CaseUploadStage.Queued);}
+        catch(JSException){throw new ArgumentException(batch.StopRequested?"Проверка остановлена. Можно повторить.":"Не удалось проверить файл на устройстве. Повторите загрузку.");}
+    }
+    private async Task TransferAsync(CaseUploadBatch.Item item)
+    {
+        CaseAttachmentUploadTicket? ticket=null;
+        try
+        {
+            await prepareGate.WaitAsync();
+            try
+            {
+                if(batch.StopRequested)throw new ArgumentException("Загрузка остановлена. Можно повторить.");
+                item.SetStage(CaseUploadStage.Preparing);await Changed();
+                ticket=await OnPrepare!(item.File,item.UploadId,item.Sha256!);tickets[item.UploadId]=ticket;
+            }
+            finally{prepareGate.Release();}
+            TransferTimings? timing=null;
+            if(!ticket.Available&&ticket.UploadUrl!=null)
+            {
+                if(batch.StopRequested)throw new ArgumentException("Загрузка остановлена. Можно повторить.");
+                item.SetStage(CaseUploadStage.Sending);await Changed();
+                using var deadline=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);deadline.CancelAfter(TimeSpan.FromMinutes(31));
+                timing=await module!.InvokeAsync<TransferTimings>("putFile",deadline.Token,selectedInput,Index(item),ticket.UploadUrl,Job(item),receiver);
+            }
+            item.SetStage(CaseUploadStage.Confirming);
+            if(timing!=null)item.SetTransferTimings(timing.SendingMilliseconds,timing.ResponseMilliseconds);
+        }
+        catch(JSException){await CancelTicketAsync(ticket);throw new ArgumentException(batch.StopRequested?"Загрузка остановлена. Повтор продолжит это вложение.":"Браузер не подтвердил передачу файла на Диск. Проверьте соединение и повторите незагруженные.");}
+        catch{await CancelTicketAsync(ticket);throw;}
+        finally{await ReleaseAsync(item);}
+    }
+    private async Task ConfirmAsync(CaseUploadBatch.Item item)
+    {
+        try{await Changed();var ticket=tickets[item.UploadId];if(!ticket.Available)await OnComplete!(ticket);}
+        catch{await CancelTicketAsync(tickets.GetValueOrDefault(item.UploadId));throw;}
     }
     private async Task CancelTicketAsync(CaseAttachmentUploadTicket? ticket)
     {
-        if(ticket!=null&&OnCancel!=null){try{await OnCancel(ticket);}catch{ /* Pending state stays recoverable; never claim completion. */ }}
+        if(ticket!=null&&OnCancel!=null){try{await OnCancel(ticket);}catch{/* Pending state is recoverable; never claim completion. */}}
+    }
+    private async Task ReleaseAsync(CaseUploadBatch.Item item)
+    {
+        if(module!=null){try{await module.InvokeVoidAsync("release",Job(item));}catch(JSException){}}
     }
     [JSInvokable]
-    public Task UploadProgress(string id,string phase,long loaded,long total)
+    public Task UploadProgress(string id,string phase,long loaded,long total,double rate=0)
     {
-        if(current!=null&&id==job)
-        {
-            current.Percent=total>0?(int)Math.Clamp(100L*loaded/total,0,100):0;
-            current.Phase=(phase=="hash"?"Проверяем файл":"Передаём на Яндекс Диск")+$" — {current.Percent}%";
-            return InvokeAsync(StateHasChanged);
-        }
-        return Task.CompletedTask;
+        var item=batch.Items.FirstOrDefault(x=>Job(x)==id);
+        if(item==null||disposed||item.Complete||item.Error!=null)return Task.CompletedTask;
+        if(phase=="hash"&&item.Stage!=CaseUploadStage.Checking||phase!="hash"&&item.Stage is not (CaseUploadStage.Sending or CaseUploadStage.WaitingForResponse))return Task.CompletedTask;
+        if(phase=="response")item.SetStage(CaseUploadStage.WaitingForResponse);
+        else if(phase=="upload"&&item.Stage==CaseUploadStage.WaitingForResponse)return Task.CompletedTask;
+        item.Percent=total>0?(int)Math.Clamp(100L*loaded/total,0,100):0;item.Loaded=loaded;
+        item.BytesPerSecond=double.IsFinite(rate)?Math.Max(0,rate):0;item.LastProgressAt=Stopwatch.GetTimestamp();
+        return Changed();
     }
-    private async Task CancelAsync(){batch.Stop();if(module!=null&&job!=null)await module.InvokeVoidAsync("cancel",job);}
+    private async Task CancelAsync()
+    {
+        batch.Stop();
+        if(module!=null)foreach(var item in batch.Items.Where(x=>!x.Complete&&x.Stage!=CaseUploadStage.Confirming)){try{await module.InvokeVoidAsync("cancel",Job(item));}catch(JSException){}}
+    }
     public async ValueTask DisposeAsync()
     {
-        if(module!=null){try{if(job!=null)await module.InvokeVoidAsync("cancel",job);await module.DisposeAsync();}catch(JSException){}}
+        disposed=true;lifetime.Cancel();await CancelAsync();
+        if(module!=null){try{await module.DisposeAsync();}catch(JSException){}}
         receiver?.Dispose();
     }
 }

@@ -1,16 +1,19 @@
+import { UploadRate } from './upload-metrics.mjs';
 const jobs = new Map();
 const fileAt = (element,index) => { const file=element?.files?.[index]; if(!file)throw new Error('UPLOAD_FILE_UNAVAILABLE'); return file; };
-const report = (receiver,id,phase,loaded,total) => receiver.invokeMethodAsync('UploadProgress',id,phase,loaded,total).catch(()=>{});
+const report = (receiver,id,phase,loaded,total,rate=0) => receiver.invokeMethodAsync('UploadProgress',id,phase,loaded,total,rate).catch(()=>{});
 export function hashFile(element,index,id,receiver,maxBytes) {
   const file=fileAt(element,index);
   if(file.size<=0||file.size>maxBytes)throw new Error('UPLOAD_SIZE');
   const job={cancelled:false};jobs.set(id,job);
   return new Promise((resolve,reject)=>{
     const worker=new Worker(new URL('./file-hash-worker.js',import.meta.url),{type:'module'});job.worker=worker;
+    let lastReport=-Infinity;
     job.rejectHash=()=>{worker.terminate();reject(new Error('UPLOAD_CANCELLED'));};
     worker.onmessage=({data})=>{
       if(data.error){worker.terminate();reject(new Error('UPLOAD_HASH_FAILED'));return;}
-      report(receiver,id,'hash',data.loaded,data.total);
+      const now=performance.now();
+      if(data.sha256||now-lastReport>=500){report(receiver,id,'hash',data.loaded,data.total);lastReport=now;}
       if(data.sha256){worker.terminate();job.worker=null;job.rejectHash=null;resolve(data.sha256);}
     };
     worker.onerror=()=>{worker.terminate();reject(new Error('UPLOAD_HASH_FAILED'));};
@@ -22,11 +25,20 @@ export function putFile(element,index,url,id,receiver) {
   if(job.cancelled)throw new Error('UPLOAD_CANCELLED');
   return new Promise((resolve,reject)=>{
     const xhr=new XMLHttpRequest();job.xhr=xhr;
-    // Only a transient upload capability reaches the browser. No OAuth, cookies or response-body logging.
+    const started=performance.now(),rate=new UploadRate(started);let bodyFinished=null,lastReport=-Infinity;
+    // A capability goes only to this XHR. No OAuth, credentials, URLs or response bodies in diagnostics.
     xhr.open('PUT',url);xhr.timeout=30*60*1000;xhr.withCredentials=false;
     xhr.setRequestHeader('Content-Type','application/octet-stream');
-    xhr.upload.onprogress=e=>report(receiver,id,'upload',e.loaded,e.lengthComputable?e.total:file.size);
-    xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else reject(new Error('UPLOAD_HTTP_'+xhr.status));};
+    xhr.upload.onprogress=e=>{
+      const now=performance.now();
+      if(e.loaded===file.size||now-lastReport>=500){report(receiver,id,'upload',e.loaded,e.lengthComputable?e.total:file.size,rate.sample(e.loaded,now));lastReport=now;}
+    };
+    xhr.upload.onload=()=>{bodyFinished=performance.now();report(receiver,id,'response',file.size,file.size);};
+    xhr.onload=()=>{
+      const ended=performance.now();
+      if(xhr.status>=200&&xhr.status<300)resolve({sendingMilliseconds:(bodyFinished??ended)-started,responseMilliseconds:bodyFinished==null?0:ended-bodyFinished});
+      else reject(new Error('UPLOAD_HTTP_'+xhr.status));
+    };
     xhr.onerror=()=>reject(new Error('UPLOAD_NETWORK'));xhr.ontimeout=()=>reject(new Error('UPLOAD_TIMEOUT'));
     xhr.onabort=()=>reject(new Error('UPLOAD_CANCELLED'));xhr.send(file);
   });

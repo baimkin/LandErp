@@ -44,6 +44,7 @@ internal static class ProcurementEndpoints
         group.MapPost("/attachments/upload/cancel", async (HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
         { await workspace.CancelAttachmentUploadAsync(PermissionAuthorization.SubjectFrom(http.User), await UploadMetadataAsync<CompleteCaseAttachmentUpload>(http, token), http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync).AddEndpointFilter(ValidateUploadBodyAsync);
         group.MapPost("/attachments/delete", async (DeleteCaseAttachment command, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) => { await workspace.DeleteAttachmentAsync(PermissionAuthorization.SubjectFrom(http.User), command, http.TraceIdentifier, token); return Results.NoContent(); }).AddEndpointFilter(ValidateCsrfAsync);
+        group.MapGet("/attachments/{id:guid}/media",AttachmentMediaEndpoint.ReadAsync);
         group.MapGet("/attachments/{id:guid}/image", async (Guid id, HttpContext http, IProcurementWorkspace workspace, CancellationToken token) =>
         {
             // Reuse the same visibility and integrity boundary as downloads; never redirect inline images.

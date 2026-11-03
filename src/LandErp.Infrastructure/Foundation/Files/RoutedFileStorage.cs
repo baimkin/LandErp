@@ -4,7 +4,7 @@ namespace LandErp.Infrastructure.Foundation.Files;
 
 /// <summary>Writes use the selected provider. Existing keys retain their provider;
 /// cloud errors never fall back to local files with a coincidentally matching name.</summary>
-public sealed class RoutedFileStorage(IFileStorage writer, IFileStorage? cloud, IFileStorage? local) : IFileStorage, IFileStorageHealth, IDirectFileStorage
+public sealed class RoutedFileStorage(IFileStorage writer, IFileStorage? cloud, IFileStorage? local) : IFileStorage, IFileStorageHealth, IDirectFileStorage, IStreamingFileStorage
 {
     public Task<FileWriteResult> WriteAsync(Guid stableFileId, ReadOnlyMemory<byte> content, CancellationToken cancellationToken) =>
         writer.WriteAsync(stableFileId, content, cancellationToken);
@@ -34,6 +34,18 @@ public sealed class RoutedFileStorage(IFileStorage writer, IFileStorage? cloud, 
             .ReadAsync(storageKey, cancellationToken);
     }
 
+    public Task<Stream> OpenReadAsync(string storageKey,long expectedSize,string expectedSha256,FileReadRange? range,CancellationToken cancellationToken)
+    {
+        IFileStorage selected;
+        if(storageKey.StartsWith("yd1:",StringComparison.Ordinal))selected=cloud??throw new FileStorageException("STORAGE_DISCONNECTED",false,"Подключите хранилище материала.");
+        else
+        {
+            if(!IsLocalKey(storageKey))throw new FileStorageException("STORAGE_KEY_INVALID",false,"Некорректный ключ материала.");
+            selected=local??throw new FileStorageException("STORAGE_LOCAL_UNAVAILABLE",false,"Хранилище материала недоступно.");
+        }
+        return selected is IStreamingFileStorage streaming?streaming.OpenReadAsync(storageKey,expectedSize,expectedSha256,range,cancellationToken)
+            :throw new FileStorageException("STORAGE_STREAM_UNAVAILABLE",false,"Просмотр материала не подключён.");
+    }
     private static bool IsLocalKey(string key)
     {
         if (key.Length < 36 || !key.EndsWith(".bin", StringComparison.Ordinal)

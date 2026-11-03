@@ -59,6 +59,31 @@ public abstract class WorkspaceComponent : ComponentBase
         if (!await ExecuteConfirmedAsync(action, operation)) throw new ArgumentException(Error ?? "Действие не подтверждено. Повторите после проверки.");
         if (!RefreshRequired) Success = null;
     }
+    // Per-file operations have independent auth/correlation and never mutate the page's Busy/result.
+    // The parent refreshes once after the batch, keeping every native InputFile mounted meanwhile.
+    protected async Task<T> ExecuteUploadStepAsync<T>(Func<Subject,string,Task<T>> action, [CallerMemberName] string operation = "")
+    {
+        string id = Guid.CreateVersion7().ToString();
+        try
+        {
+            Subject subject = PermissionAuthorization.SubjectFrom((await Authentication.GetAuthenticationStateAsync()).User);
+            return await action(subject, id);
+        }
+        catch (Exception exception)
+        {
+            WriteDiagnostic(id, exception is FileStorageException ? "Storage" : "Upload", operation, exception);
+            string message = exception switch
+            {
+                FileStorageException storage => StorageFailureMessage(storage),
+                AccessDeniedException => "Доступ к вложению изменился. Обновите карточку.",
+                ArgumentException => exception.Message,
+                _ => "Результат загрузки не подтверждён. Повторите это вложение после проверки."
+            };
+            throw new ArgumentException($"{message} Номер обращения: {id}.");
+        }
+    }
+    protected Task ExecuteUploadStepAsync(Func<Subject,string,Task> action, [CallerMemberName] string operation = "") =>
+        ExecuteUploadStepAsync(async (subject,id) => { await action(subject,id); return true; },operation);
     [Inject] protected AuthenticationStateProvider Authentication { get; set; } = default!;
     [Inject] protected ILogger<WorkspaceComponent> Logger { get; set; } = NullLogger<WorkspaceComponent>.Instance;
     protected Subject CurrentSubject { get; private set; } = new(Guid.Empty, false);
@@ -193,6 +218,21 @@ public abstract class WorkspaceComponent : ComponentBase
         finally { Busy = false; }
     }
 
+    // Refresh uploaded metadata without toggling Loading: mounted pickers and batch results must survive.
+    protected async Task RefreshAfterUploadAsync()
+    {
+        if(Busy)return;
+        try
+        {
+            CurrentSubject=PermissionAuthorization.SubjectFrom((await Authentication.GetAuthenticationStateAsync()).User);
+            await ReadAsync();RefreshRequired=false;
+        }
+        catch(Exception exception)
+        {
+            RefreshRequired=true;
+            Success=ReadFailure(exception,"Состояние файлов не обновилось. Обновите данные, не повторяя успешные загрузки.");
+        }
+    }
     protected string ReadFailure(Exception exception, string message, [CallerMemberName] string operation = "")
     {
         string id = Guid.CreateVersion7().ToString();

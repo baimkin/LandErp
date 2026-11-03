@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { UploadRate } from '../src/LandErp.Server/wwwroot/js/upload-metrics.mjs';
+let passed=0;const check=(actual,expected)=>{assert.equal(actual,expected);passed++;};
+const rate=new UploadRate(0);
+check(rate.sample(0,0),0);check(rate.sample(1024,1000),1024);check(rate.sample(2048,2000),1024);
+check(rate.sample(2048,6000),0);
+check(rate.sample(2047,7000),0);check(rate.sample(2048,5000),0);check(rate.sample(Infinity,7000),0);
+const a=new UploadRate(0),b=new UploadRate(0);check(a.sample(4000,1000),4000);check(b.sample(1000,1000),1000);
+const long=new UploadRate(0);for(let i=1;i<=600;i++)long.sample(i*500, i*500);
+check(long.sample(300500,300500),1000);check(long.points.length<=8,true);
+console.log(JSON.stringify({Passed:passed,WindowMilliseconds:3000}));

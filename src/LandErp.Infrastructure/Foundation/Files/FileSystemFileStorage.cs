@@ -4,7 +4,7 @@ using LandErp.Application.Foundation.Files;
 namespace LandErp.Infrastructure.Foundation.Files;
 
 /// <summary>Local/Test adapter for the provider-neutral storage contract. Production must configure another approved backend.</summary>
-public sealed class FileSystemFileStorage(string root) : IFileStorage, IFileStorageHealth
+public sealed class FileSystemFileStorage(string root) : IFileStorage, IFileStorageHealth, IStreamingFileStorage
 {
     private readonly string root = Path.GetFullPath(root);
 
@@ -43,6 +43,19 @@ public sealed class FileSystemFileStorage(string root) : IFileStorage, IFileStor
         }
     }
 
+    public async Task<Stream> OpenReadAsync(string storageKey,long expectedSize,string expectedSha256,FileReadRange? range,CancellationToken cancellationToken)
+    {
+        var stream=new FileStream(Resolve(storageKey),FileMode.Open,FileAccess.Read,FileShare.Read,65536,FileOptions.Asynchronous|FileOptions.SequentialScan);
+        try
+        {
+            if(stream.Length!=expectedSize||!string.Equals(Convert.ToHexStringLower(await SHA256.HashDataAsync(stream,cancellationToken)),expectedSha256,StringComparison.OrdinalIgnoreCase))
+                throw new FileStorageException("STORAGE_INTEGRITY",false,"Проверка целостности материала не пройдена.");
+            long offset=range?.Offset??0,length=range?.Length??expectedSize;
+            if(offset<0||length<1||offset>expectedSize-length)throw new ArgumentException("Некорректный диапазон материала.");
+            stream.Position=offset;return new FileReadStream(stream,length);
+        }
+        catch{await stream.DisposeAsync();throw;}
+    }
     public Task<byte[]> ReadAsync(string storageKey, CancellationToken cancellationToken) =>
         File.ReadAllBytesAsync(Resolve(storageKey), cancellationToken);
 

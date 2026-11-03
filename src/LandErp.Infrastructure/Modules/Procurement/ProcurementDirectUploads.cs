@@ -100,22 +100,38 @@ public sealed partial class ProcurementWorkspace
     }
     public async Task CompleteAttachmentUploadAsync(Subject subject, CompleteCaseAttachmentUpload command, string correlationId, CancellationToken cancellationToken)
     {
-        await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
-        var value = await RequireDirectAttachmentAsync(db, subject, command.CaseId, command.AttachmentId, cancellationToken);
-        if (value.File.Status == StoredFileStatus.Available) return;
-        ValidateDirectMetadata(value.File.SizeBytes, value.File.Sha256!);
+        FileWriteRequest request;
+        long expectedSize;
+        string expectedHash;
+        // Authorize before provider I/O, but do not hold case/file locks while the cloud responds.
+        await using (var snapshot = await factory.CreateDbContextAsync(cancellationToken))
+        await using (var snapshotTx = await snapshot.Database.BeginTransactionAsync(cancellationToken))
+        {
+            var current = await RequireDirectAttachmentAsync(snapshot, subject, command.CaseId, command.AttachmentId, cancellationToken);
+            if (current.File.Status == StoredFileStatus.Available) return;
+            expectedSize = current.File.SizeBytes; expectedHash = ValidateDirectMetadata(expectedSize, current.File.Sha256!);
+            request = DirectRequest(current.Link, current.File);
+        }
         FileWriteResult confirmed;
-        try { confirmed = await DirectStorage.ConfirmDirectUploadAsync(DirectRequest(value.Link, value.File), value.File.SizeBytes, value.File.Sha256!, cancellationToken); }
+        try
+        {
+            confirmed = await DirectStorage.ConfirmDirectUploadAsync(request, expectedSize, expectedHash, cancellationToken);
+            if (confirmed.SizeBytes != expectedSize || !string.Equals(confirmed.Sha256, expectedHash, StringComparison.OrdinalIgnoreCase))
+                throw new FileStorageException("STORAGE_INTEGRITY", false, "Размер или SHA-256 файла не совпали.");
+        }
         catch (FileStorageException)
         {
-            value.File.Status = StoredFileStatus.UploadFailed;
-            await db.SaveChangesAsync(CancellationToken.None); await tx.CommitAsync(CancellationToken.None);
+            await MarkDirectUploadFailedAsync(subject, command, cancellationToken);
             throw;
         }
-        // The provider, never the browser's claimed completion, authorizes Available.
-        if (confirmed.SizeBytes != value.File.SizeBytes || !string.Equals(confirmed.Sha256, value.File.Sha256, StringComparison.OrdinalIgnoreCase))
-            throw new FileStorageException("STORAGE_INTEGRITY", false, "Размер или SHA-256 файла не совпали.");
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        // Recheck access, ownership and immutable metadata after the asynchronous provider wait.
+        var value = await RequireDirectAttachmentAsync(db, subject, command.CaseId, command.AttachmentId, cancellationToken);
+        if (value.File.Status == StoredFileStatus.Available) return;
+        if (DirectRequest(value.Link,value.File) != request || value.File.SizeBytes != expectedSize
+            || !string.Equals(value.File.Sha256, expectedHash, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Параметры вложения изменились. Повторите проверку.");
         value.File.StorageKey = confirmed.StorageKey; value.File.Status = StoredFileStatus.Available;
         var now = time.GetUtcNow();
         if (value.Link.DocumentRequirementId is Guid requirementId)
@@ -130,6 +146,15 @@ public sealed partial class ProcurementWorkspace
         db.BusinessTimeline.Add(new() { Id = DataConventions.NewId(), OrganizationId = value.Context.OrganizationId,
             ObjectType = "PropertyCase", ObjectId = command.CaseId, ActorEmployeeId = value.Context.EmployeeId,
             Kind = "Attachment", Title = "Добавлено вложение", Body = value.Link.Label, RecordedAt = now });
+        await db.SaveChangesAsync(cancellationToken); await tx.CommitAsync(cancellationToken);
+    }
+    private async Task MarkDirectUploadFailedAsync(Subject subject, CompleteCaseAttachmentUpload command, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var value = await RequireDirectAttachmentAsync(db,subject,command.CaseId,command.AttachmentId,cancellationToken);
+        // Another confirmation may already have committed. A late failure must not downgrade it.
+        if (value.File.Status == StoredFileStatus.PendingUpload) value.File.Status = StoredFileStatus.UploadFailed;
         await db.SaveChangesAsync(cancellationToken); await tx.CommitAsync(cancellationToken);
     }
     public async Task CancelAttachmentUploadAsync(Subject subject, CompleteCaseAttachmentUpload command, string correlationId, CancellationToken cancellationToken)

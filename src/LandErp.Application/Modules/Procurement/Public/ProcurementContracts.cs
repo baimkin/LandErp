@@ -65,7 +65,7 @@ public sealed record InspectionAssignmentView(Guid InspectorEmployeeId, string I
     DateTimeOffset? RequestedAt, DateTimeOffset? DueAt, string Instructions);
 public sealed record InspectionWorkspaceView(Guid CaseId, string BusinessNumber, string Title, string? Location, string? CadastralNumber,
     string[] Photos, InspectionAssignmentView? Assignment, InspectionView? Inspection, IReadOnlyList<AttachmentView> Attachments,
-    IReadOnlyList<DecisionTarget> Inspectors, bool CanAssign, bool CanPerform, bool ReturnToProcurement);
+    IReadOnlyList<DecisionTarget> Inspectors, bool CanAssign, bool CanPerform, bool ReturnToProcurement) { public bool CanManageAttachments { get; init; } }
 public sealed record SourceDiscrepancyView(Guid CatalogItemId, CatalogSource Source, CaseFactField Field,
     string WorkingValue, string SourceValue, bool Different);
 public sealed record CaseCard(QueueItem Item, string? Description, string? SellerName, string[] Photos,
@@ -125,6 +125,7 @@ public sealed record AssignInspection(Guid CaseId, Guid InspectorEmployeeId, Dat
 public sealed record MarkCaseAcquired(Guid CaseId, long ExpectedCaseVersion, decimal ActualPrice, DateOnly AcquisitionDate, string Comment);
 public sealed record CorrectCaseAcquisition(Guid CaseId, long ExpectedCaseVersion, decimal ActualPrice,
     DateOnly AcquisitionDate, string Comment, string Reason);
+public sealed record AttachmentMediaInfo(string OriginalName,string ContentType,long SizeBytes,string Sha256);
 public sealed record AttachmentContent(string OriginalName, string ContentType, byte[]? Content, string? ExternalUrl);
 public sealed record ApplySourceFact(Guid CaseId, Guid CatalogItemId, long ExpectedCaseVersion,
     CaseFactField Field);
@@ -174,6 +175,8 @@ public interface IProcurementWorkspace
     Task<Guid> SaveInspectionAsync(Subject subject, SaveInspection command, string correlationId, CancellationToken cancellationToken);
     Task MarkAcquiredAsync(Subject subject, MarkCaseAcquired command, string correlationId, CancellationToken cancellationToken);
     Task CorrectAcquisitionAsync(Subject subject, CorrectCaseAcquisition command, string correlationId, CancellationToken cancellationToken);
+    Task<AttachmentMediaInfo> ReadAttachmentMediaInfoAsync(Subject subject,Guid attachmentId,CancellationToken cancellationToken)=>throw new NotSupportedException();
+    Task<Stream> OpenAttachmentMediaAsync(Subject subject,Guid attachmentId,FileReadRange? range,CancellationToken cancellationToken)=>throw new NotSupportedException();
     Task<AttachmentContent> ReadAttachmentAsync(Subject subject, Guid attachmentId, CancellationToken cancellationToken);
     Task ApplySourceFactAsync(Subject subject, ApplySourceFact command, string correlationId, CancellationToken cancellationToken);
     Task CorrectCaseFactAsync(Subject subject, CorrectPropertyCaseFact command, string correlationId, CancellationToken cancellationToken);

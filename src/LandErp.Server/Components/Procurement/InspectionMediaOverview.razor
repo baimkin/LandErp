@@ -1,0 +1,23 @@
+@using LandErp.Application.Modules.Procurement.Contracts
+<div class="inspection-overview-container"><section class="inspection-overview" aria-label="Материалы и описание осмотра">
+    <div class="overview-media"><AttachmentGallery Featured="true" Title="Фото и видео" Files="Files" CanDelete="CanDelete" Disabled="Disabled" CanRetry="CanRetry" OnDelete="OnDelete" OnRetry="OnRetry" /></div>
+    <aside class="inspection-description @(expanded?"expanded":"")">
+        <header><h3>Описание осмотра</h3><button type="button" class="description-toggle" aria-expanded="@expanded" @onclick="()=>expanded=!expanded">@(expanded?"Свернуть":"Развернуть")</button></header>
+        <div class="description-body" tabindex="0" aria-label="Текст осмотра">
+            @if(string.IsNullOrWhiteSpace(Description)){<p class="description-empty">Общий комментарий пока не добавлен.</p>}
+            else{<div class="inspection-original-text">@Description</div>}
+            @if(!string.IsNullOrWhiteSpace(Decision)){<div class="inspection-decision"><h4>Предварительный вывод</h4><div class="inspection-original-text">@Decision</div></div>}
+        </div>
+    </aside>
+</section></div>
+@code {
+    [Parameter] public IReadOnlyList<AttachmentView> Files{get;set;}=[];
+    [Parameter] public string Description{get;set;}="";
+    [Parameter] public string? Decision{get;set;}
+    [Parameter] public bool CanDelete{get;set;}
+    [Parameter] public bool Disabled{get;set;}
+    [Parameter] public Func<AttachmentView,bool>? CanRetry{get;set;}
+    [Parameter] public EventCallback<AttachmentView> OnDelete{get;set;}
+    [Parameter] public EventCallback<Guid> OnRetry{get;set;}
+    private bool expanded;
+}

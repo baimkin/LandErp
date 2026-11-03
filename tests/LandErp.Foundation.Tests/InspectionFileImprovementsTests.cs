@@ -18,6 +18,13 @@ namespace LandErp.Foundation.Tests;
 [TestClass]
 public sealed class InspectionFileImprovementsTests
 {
+    private static readonly string[] DescriptionParagraphs=[
+            "Участок и границы\nУчасток прямоугольный, границы видны. Вдоль южной стороны есть взрослые деревья. Перед началом работ стоит проверить состояние ограждения и уточнить расположение въезда.",
+            "Подъезд\nАсфальт подходит к участку с двух сторон. Есть место для разгрузки материалов. После сильного дождя нужно дополнительно проверить сток воды у нижней границы.",
+            "Постройки\nНа территории стоят небольшой дом и хозяйственная постройка. Состояние фундамента требует отдельного обследования. Часть материалов можно сохранить для временного использования.",
+            "Окружение\nРядом жилые дома и зелёная зона. На момент осмотра было тихо. Основная дорога находится в стороне; до ближайшего магазина можно дойти пешком.",
+            "Коммуникации\nЛиния электроснабжения проходит рядом с участком. Точки подключения, выделенную мощность и состояние колодца необходимо подтвердить документами и дополнительной проверкой.",
+            "Рекомендации\nПроверить документы на постройки, уточнить условия подключения и оценить расчистку участка. Сохранить здоровые деревья. Все замечания учитывать при обсуждении стоимости."];
     private static readonly string[] BatchNames = ["one.jpg", "two.jpg", "three.jpg"];
     private static readonly string[] RetryNames = ["two.jpg"];
     [TestMethod]
@@ -207,8 +214,13 @@ public sealed class InspectionFileImprovementsTests
         Assert.AreEqual(1, await fixture.CountAsync(db => db.CaseAttachments.CountAsync(item => item.PropertyCaseId == taken.CaseId)));
     }
 
-    [TestMethod, TestCategory("PostgreSQL"), TestCategory("Browser"), Timeout(150_000)]
-    public async Task ActualFormsUploadMultipleFilesAndThirtyMiBVideoThenDeleteAndDownloadThroughHistory()
+    [TestMethod, TestCategory("PostgreSQL"), TestCategory("Browser"), Timeout(210_000)]
+    public Task ActualFormsUploadMultipleFilesAndThirtyMiBVideoThenDeleteAndDownloadThroughHistory()=>RunInspectionScenarioAsync(30*1024*1024);
+
+    [TestMethod,TestCategory("PostgreSQL"),TestCategory("Browser"),Timeout(150_000)]
+    public Task ActualInspectionStageWithTwentyFilesPreservesFormattingAndMobileLayout()=>RunInspectionScenarioAsync(2048);
+
+    private async Task RunInspectionScenarioAsync(int videoBytes)
     {
         await using var fixture = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
         var taken = await fixture.Workspace.TakeToWorkAsync(fixture.Manager, new(await fixture.CreateUnlinkedManualAsync()), "take", CancellationToken.None);
@@ -217,7 +229,8 @@ public sealed class InspectionFileImprovementsTests
                 ProcurementReadScope = AccessScope.Department, ProcurementWorkScope = AccessScope.Department, CanPerformInspections = true });
         await fixture.Workspace.AssignInspectionAsync(fixture.Head, new(taken.CaseId, fixture.ManagerEmployeeId, null, "Inspect", null), "assign", CancellationToken.None);
         var inspection = (await fixture.Workspace.ReadInspectionAsync(fixture.Manager, taken.CaseId, CancellationToken.None)).Inspection!;
-        await fixture.Workspace.SaveInspectionAsync(fixture.Manager, new(taken.CaseId, inspection.Id, inspection.Version, "", "", [], false), "start", CancellationToken.None);
+        string description=string.Join("\n\n",DescriptionParagraphs);
+        await fixture.Workspace.SaveInspectionAsync(fixture.Manager, new(taken.CaseId, inspection.Id, inspection.Version, description, "", [], false), "start", CancellationToken.None);
         string root = Path.Combine(FoundationTests.RepositoryRoot(), "artifacts", "inspection-files", "browser", Guid.NewGuid().ToString("N"));
         string? oldRoot = Environment.GetEnvironmentVariable("Storage__Root");
         string? oldProvider = Environment.GetEnvironmentVariable("Storage__Provider");
@@ -324,13 +337,12 @@ public sealed class InspectionFileImprovementsTests
                 recorder.start();const timer=setInterval(draw,80);await new Promise(resolve=>setTimeout(resolve,900));recorder.stop();await done;clearInterval(timer);stream.getTracks().forEach(t=>t.stop());
                 const bytes=new Uint8Array(await new Blob(parts,{type:'video/webm'}).arrayBuffer());let result='';for(const byte of bytes)result+=String.fromCharCode(byte);return btoa(result);}
                 """));
-            byte[] video = new byte[30 * 1024 * 1024];
+            byte[] video = new byte[videoBytes];
             video[0] = 1; video[^1] = 2;
-            await modal.Locator("input[multiple]").SetInputFilesAsync([
-                new FilePayload { Name = "inspection.png", MimeType = "image/png", Buffer = photo },
-                new FilePayload { Name = "second.png", MimeType = "image/png", Buffer = photo },
-                new FilePayload { Name = "walkthrough.webm", MimeType = "video/webm", Buffer = clip },
-                new FilePayload { Name = "inspection.mp4", MimeType = "video/mp4", Buffer = video }]);
+            List<FilePayload> uploads=[new(){Name="inspection.png",MimeType="image/png",Buffer=photo},new(){Name="second.png",MimeType="image/png",Buffer=photo},
+                new(){Name="walkthrough.webm",MimeType="video/webm",Buffer=clip},new(){Name="inspection.mp4",MimeType="video/mp4",Buffer=video}];
+            for(int i=1;i<=16;i++)uploads.Add(new(){Name=$"Ракурс {i:00}.png",MimeType="image/png",Buffer=photo});
+            await modal.Locator("input[multiple]").SetInputFilesAsync(uploads.ToArray());
             await modal.GetByRole(AriaRole.Button, new() { Name = "Загрузить выбранные", Exact = true }).ClickAsync();
             try
             {
@@ -345,8 +357,9 @@ public sealed class InspectionFileImprovementsTests
             }
             await modal.GetByRole(AriaRole.Button,new(){Name="Закрыть",Exact=true}).Last.ClickAsync();
             var gallery=page.Locator(".inspection-summary .attachment-gallery");
-            await Assertions.Expect(gallery.Locator(".media-card")).ToHaveCountAsync(4);
-            string evidence=Path.Combine(FoundationTests.RepositoryRoot(),"artifacts","media-gallery");Directory.CreateDirectory(evidence);
+            await Assertions.Expect(gallery.Locator(".featured-thumb")).ToHaveCountAsync(20);
+            string evidence=Path.Combine(FoundationTests.RepositoryRoot(),"artifacts","inspection-media-layout");Directory.CreateDirectory(evidence);
+            await gallery.GetByRole(AriaRole.Button,new(){Name="Выбрать: inspection.png",Exact=true}).ClickAsync();
             await gallery.GetByRole(AriaRole.Button,new(){Name="Открыть: inspection.png",Exact=true}).ClickAsync();
             var viewer=page.Locator("dialog.media-viewer[open]");await viewer.WaitForAsync();
             await page.WaitForFunctionAsync("()=>{const i=document.querySelector('dialog.media-viewer img');return i?.complete&&i.naturalWidth>0;}");
@@ -355,12 +368,14 @@ public sealed class InspectionFileImprovementsTests
             await page.ScreenshotAsync(new(){Path=Path.Combine(evidence,"gallery-photo-desktop.png")});
             await page.Keyboard.PressAsync("ArrowRight");await Assertions.Expect(viewer.Locator("header strong")).Not.ToHaveTextAsync("inspection.png");
             await page.Keyboard.PressAsync("Escape");await viewer.WaitForAsync(new(){State=WaitForSelectorState.Detached});
+            await gallery.GetByRole(AriaRole.Button,new(){Name="Выбрать: walkthrough.webm",Exact=true}).ClickAsync();
             await gallery.GetByRole(AriaRole.Button,new(){Name="Открыть: walkthrough.webm",Exact=true}).ClickAsync();
             await page.WaitForFunctionAsync("()=>document.querySelector('dialog.media-viewer video')?.readyState>=2");
             await viewer.Locator("video").EvaluateAsync("async v=>{v.muted=true;await v.play();}");
             await page.WaitForFunctionAsync("()=>document.querySelector('dialog.media-viewer video')?.currentTime>0.05");
             await page.ScreenshotAsync(new(){Path=Path.Combine(evidence,"gallery-video-desktop.png")});
             await page.Keyboard.PressAsync("Escape");await viewer.WaitForAsync(new(){State=WaitForSelectorState.Detached});
+            await gallery.GetByRole(AriaRole.Button,new(){Name="Выбрать: inspection.mp4",Exact=true}).ClickAsync();
             await gallery.GetByRole(AriaRole.Button,new(){Name="Открыть: inspection.mp4",Exact=true}).ClickAsync();
             await viewer.GetByText("Не удалось открыть материал",new(){Exact=true}).WaitForAsync();
             await viewer.GetByRole(AriaRole.Link,new(){Name="Скачать оригинал",Exact=true}).WaitForAsync();
@@ -371,11 +386,26 @@ public sealed class InspectionFileImprovementsTests
                 var record=await (from link in db.CaseAttachments join file in db.StoredFiles on link.StoredFileId equals file.Id where link.PropertyCaseId==taken.CaseId&&file.OriginalName=="second.png" select new{Link=link,File=file}).SingleAsync();
                 record.File.Status=StoredFileStatus.UploadFailed;failed=record.Link.Id;await db.SaveChangesAsync();
             }
-            await page.ReloadAsync();await page.Locator("[data-inspection-ready=true]").WaitForAsync();
+            await page.ReloadAsync();await page.Locator("[data-inspection-ready=true]").WaitForAsync();await page.Locator(".app-shell[data-interactive-ready=true]").WaitForAsync();await page.Locator(".inspection-summary .attachment-gallery[data-gallery-ready=true]").WaitForAsync();
             gallery=page.Locator(".inspection-summary .attachment-gallery");
+
+            await page.SetViewportSizeAsync(1440,1000);
+            var overview=page.Locator(".inspection-overview");
+            await page.WaitForFunctionAsync("()=>{const ge=document.querySelector('.featured-stage'),de=document.querySelector('.inspection-description');if(!ge||!de)return false;const g=ge.getBoundingClientRect(),d=de.getBoundingClientRect();return d.left>=g.right&&d.height<650;}");
+            Assert.AreEqual(description,await overview.Locator(".inspection-original-text").First.TextContentAsync());
+            Assert.AreEqual("pre-wrap",await overview.Locator(".inspection-original-text").First.EvaluateAsync<string>("e=>getComputedStyle(e).whiteSpace"));
+            Assert.IsTrue(await overview.Locator(".description-body").EvaluateAsync<bool>("e=>e.scrollHeight>e.clientHeight"));
+            await overview.GetByRole(AriaRole.Button,new(){Name="Развернуть",Exact=true}).ClickAsync();
+            await Assertions.Expect(overview.Locator(".inspection-description")).ToHaveClassAsync(new System.Text.RegularExpressions.Regex("expanded"));
+            await overview.GetByRole(AriaRole.Button,new(){Name="Свернуть",Exact=true}).ClickAsync();
+            await gallery.GetByRole(AriaRole.Button,new(){Name="Прокрутить миниатюры вправо",Exact=true}).ClickAsync();
+            try{await page.WaitForFunctionAsync("()=>document.querySelector('.featured-thumbnails').scrollLeft>0");}
+            catch{Assert.Fail("Filmstrip: "+await gallery.EvaluateAsync<string>("async e=>{const r=e.querySelector('.featured-thumbnails'),i=e.querySelector('.featured-photo img'),before=r.scrollLeft;const m=await import('/js/attachment-gallery.js');m.scrollThumbs(e,1);return JSON.stringify({width:r.clientWidth,scrollWidth:r.scrollWidth,before,afterDirect:r.scrollLeft,thumbs:r.children.length,heroComplete:i?.complete,heroWidth:i?.naturalWidth,errorVisible:getComputedStyle(document.querySelector('#blazor-error-ui')).display});}")+"; types: "+string.Join(",",failureTypes.Distinct()));}
+            await gallery.Locator(".featured-stage").ScrollIntoViewIfNeededAsync();
+            try{await page.WaitForFunctionAsync("()=>{const i=document.querySelector('.featured-photo img');return i?.complete&&i.naturalWidth>0;}");}
+            catch{Assert.Fail("Hero: "+await gallery.EvaluateAsync<string>("e=>{const i=e.querySelector('.featured-photo img');return JSON.stringify({exists:!!i,complete:i?.complete,width:i?.naturalWidth,src:i?.getAttribute('src')});}"));}
+            await overview.ScreenshotAsync(new(){Path=Path.Combine(evidence,"inspection-layout-desktop.png")});
             await gallery.Locator(".failed-uploads summary").ClickAsync();
-            await page.WaitForFunctionAsync("()=>Array.from(document.querySelectorAll('video[data-preview]')).some(v=>v.readyState>=2&&v.currentTime>0.05)");
-            await gallery.ScreenshotAsync(new(){Path=Path.Combine(evidence,"gallery-grid-desktop.png")});
             await gallery.GetByRole(AriaRole.Button,new(){Name="Повторить загрузку",Exact=true}).ClickAsync();
             modal=page.Locator("dialog.case-modal[open]");
             await modal.Locator("input[type=file]").SetInputFilesAsync(new FilePayload{Name="second.png",MimeType="image/png",Buffer=photo});
@@ -387,14 +417,20 @@ public sealed class InspectionFileImprovementsTests
             await using(var db=fixture.Sandbox.Context())Assert.AreEqual(StoredFileStatus.Available,(await (from link in db.CaseAttachments join file in db.StoredFiles on link.StoredFileId equals file.Id where link.Id==failed select file).SingleAsync()).Status);
             await page.SetViewportSizeAsync(390,844);
             await page.WaitForFunctionAsync("()=>document.querySelector('.sidebar').getBoundingClientRect().right<=1");
-            await gallery.ScreenshotAsync(new(){Path=Path.Combine(evidence,"gallery-grid-mobile.png")});
+            await gallery.GetByRole(AriaRole.Button,new(){Name="Выбрать: inspection.png",Exact=true}).ClickAsync();
+            await page.WaitForFunctionAsync("()=>{const de=document.querySelector('.inspection-description'),ge=document.querySelector('.featured-stage');if(!de||!ge)return false;const d=de.getBoundingClientRect(),g=ge.getBoundingClientRect();return d.top>g.bottom&&g.height<330;}");
+            try{await page.WaitForFunctionAsync("()=>{const i=document.querySelector('.featured-photo img');return i?.complete&&i.naturalWidth>0;}");}
+            catch{Assert.Fail("Hero: "+await gallery.EvaluateAsync<string>("e=>{const i=e.querySelector('.featured-photo img');return JSON.stringify({exists:!!i,complete:i?.complete,width:i?.naturalWidth,src:i?.getAttribute('src')});}"));}
+            await page.SetViewportSizeAsync(390,1000);
+            await page.Locator(".inspection-overview").ScreenshotAsync(new(){Path=Path.Combine(evidence,"inspection-layout-mobile.png")});
+            await gallery.GetByRole(AriaRole.Button,new(){Name="Выбрать: inspection.png",Exact=true}).ClickAsync();
             await gallery.GetByRole(AriaRole.Button,new(){Name="Открыть: inspection.png",Exact=true}).ClickAsync();
             await viewer.WaitForAsync();Assert.IsTrue(await viewer.EvaluateAsync<bool>("d=>{const r=d.getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1;}"));
             await page.ScreenshotAsync(new(){Path=Path.Combine(evidence,"gallery-photo-mobile.png")});
             await viewer.GetByRole(AriaRole.Button,new(){Name="Удалить",Exact=true}).ClickAsync();
             await page.Locator("dialog.case-modal[open]").GetByRole(AriaRole.Button,new(){Name="Удалить",Exact=true}).ClickAsync();
             await page.Locator("dialog.case-modal[open]").WaitForAsync(new(){State=WaitForSelectorState.Detached});
-            await Assertions.Expect(gallery.Locator(".media-card")).ToHaveCountAsync(3);
+            await Assertions.Expect(gallery.Locator(".featured-thumb")).ToHaveCountAsync(19);
             Guid deletedPhoto;
             await using(var db=fixture.Sandbox.Context())
             {
@@ -404,8 +440,16 @@ public sealed class InspectionFileImprovementsTests
             var preserved=await context.APIRequest.GetAsync(origin+$"/api/procurement/attachments/{deletedPhoto}");
             Assert.AreEqual(200,preserved.Status);CollectionAssert.AreEqual(photo,await preserved.BodyAsync());
             Assert.AreEqual(403,(await context.APIRequest.GetAsync(origin+$"/api/procurement/attachments/{deletedPhoto}/media")).Status);
-            Assert.AreEqual(6, await fixture.CountAsync(db => db.CaseAttachments.CountAsync(item => item.PropertyCaseId == taken.CaseId)));
-            Assert.AreEqual(6, Directory.GetFiles(root, "*.bin").Length, "Soft deletion must retain the actual file on disk.");
+            await page.SetViewportSizeAsync(1440,1000);
+            await page.GotoAsync(origin+$"/procurement/{taken.CaseId}?tab=inspection");
+            await page.Locator(".inspection-overview .attachment-gallery[data-gallery-ready=true]").WaitForAsync();
+            try{await page.WaitForFunctionAsync("()=>{const i=document.querySelector('.featured-photo img');return i?.complete&&i.naturalWidth>0;}");}
+            catch{Assert.Fail("Hero: "+await gallery.EvaluateAsync<string>("e=>{const i=e.querySelector('.featured-photo img');return JSON.stringify({exists:!!i,complete:i?.complete,width:i?.naturalWidth,src:i?.getAttribute('src')});}"));}
+            Assert.AreEqual(description,await page.Locator(".inspection-original-text").First.TextContentAsync());
+            Assert.IsTrue(await page.Locator(".inspection-overview").EvaluateAsync<bool>("e=>{const d=e.querySelector('.inspection-description').getBoundingClientRect(),g=e.querySelector('.featured-stage').getBoundingClientRect();return d.left>=g.right&&e.clientHeight<650;}"));
+            await page.Locator(".inspection-overview").ScreenshotAsync(new(){Path=Path.Combine(evidence,"inspection-card-desktop.png")});
+            Assert.AreEqual(22, await fixture.CountAsync(db => db.CaseAttachments.CountAsync(item => item.PropertyCaseId == taken.CaseId)));
+            Assert.AreEqual(22, Directory.GetFiles(root, "*.bin").Length, "Soft deletion must retain the actual file on disk.");
         }
         finally { await PostgresTests.StopAsync(server); }
     }

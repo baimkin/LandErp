@@ -1,3 +1,25 @@
+# Активная задача — INSPECTION-MEDIA-LAYOUT
+
+03.11.2026 прямой запрос: крупный кадр + лента миниатюр слева, исходное описание
+справа с сохранением переносов и ограниченной высотой; mobile вертикально.
+Gate GATE-INSPECTION-MEDIA-LAYOUT.md. Required reading: README → START_HERE →
+ACTIVE_TASK → этот Gate → уже прочитанные UI/screens03/04/tokens, FP-004/ADR-005,
+media Gate → affected components/tests. Ветка текущая; накопленное сохранить.
+Без backend/пакетов/migrations/production/commit/push/Collector.
+Отчёт reports/INSPECTION_MEDIA_LAYOUT_REPORT.md. Статус: реализовано локально; Release build 0 warnings/errors, component 2/2, финальный real browser 1/1 Passed (20 материалов, desktop/mobile, переносы). Скриншоты просмотрены. Commit/push/production не выполнялись.
+
+
+## Публикация — 03.11.2026
+
+Владелец прямо разрешил commit/push текущей переделки в main.
+Публикуется ровно UI scope INSPECTION-MEDIA-LAYOUT одним коммитом после
+0608fbdc1ea6dd39d3f64fba233972a00d9859fb, fast-forward без force.
+Другие локальные Parser/README/диагностика и общий ACTIVE_TASK другого чата
+сохраняются. В published ACTIVE_TASK — только новый media этап и история main.
+Проверяется отдельная сборка точного main-based snapshot, scope, blob SHA и remote head.
+Production/конфигурация/БД агентом не обновляются.
+Evidence artifacts/inspection-media-layout/publication/verification.json.
+---
 # Активная задача — MEDIA-GALLERY
 
 03.11.2026 владелец разрешил галерею фото/видео, просмотр с листанием/увеличением,

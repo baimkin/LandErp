@@ -94,7 +94,7 @@ else if(data!=null)
                     <footer class="inspection-footer"><small>@DraftStateLabel()</small><div><ActionButton Label="Сохранить черновик" Tone="secondary" OnClick="()=>SaveAsync(false)" Busy="Busy" Disabled="@(!Editable)"/><button type="button" class="btn primary" @onclick="()=>{ClearFeedback();finishOpen=true;}" disabled="@(!Editable||Busy)">Завершить осмотр</button></div></footer>
                 </div>
             </section>
-            <section class="panel inspection-summary"><AttachmentGallery Title="Общие материалы" Files="@data.Attachments.Where(x=>x.OwnerType==CaseAttachmentOwner.Inspection).ToArray()" CanDelete="data.CanManageAttachments" Disabled="Busy" CanRetry="CanRetryMedia" OnDelete="BeginMediaDelete" OnRetry="BeginMediaRetry" />@if(!string.IsNullOrWhiteSpace(conclusion)){<p>@conclusion</p>}@if(!string.IsNullOrWhiteSpace(decision)){<p>@decision</p>}</section>
+            <section class="panel inspection-summary"><InspectionMediaOverview Description="@conclusion" Decision="@decision" Files="@data.Attachments.Where(x=>x.OwnerType==CaseAttachmentOwner.Inspection).ToArray()" CanDelete="data.CanManageAttachments" Disabled="Busy" CanRetry="CanRetryMedia" OnDelete="BeginMediaDelete" OnRetry="BeginMediaRetry" /></section>
         }
     </main>
 

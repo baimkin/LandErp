@@ -1,3 +1,47 @@
+# Задача этого чата — WORKSPACE-TRANSFER-PUBLICATION
+
+16.11.2026 владелец разрешил commit/push в main обеих доработок и запросил
+скрипт обновления. Gate GATE-WORKSPACE-TRANSFER-PUBLICATION.md. Required reading:
+README → START_HERE → ACTIVE_TASK → Gate → оба завершённых Gate/отчёта →
+PRODUCTION_RUNBOOK §§5–6 / publish/deploy. Проверенный base main edce4b9.
+Только main-based snapshot поисков/парсинга и передачи менеджеру, без прочих
+локальных работ; branch/index и локальный preview сохраняются. Production не
+выполняется, migrations/config/packages не меняются. Подготовлено: 24 файла,
+locked restore / Release 0 warnings/errors, 35/35 адресных проверок на точном
+main-based snapshot прошли. Галерея уже в base и входит в полную сборку.
+Факт публикации и SHA — внешний verification.json и итоговое сообщение.
+Отчёт reports/WORKSPACE_TRANSFER_PUBLICATION_REPORT.md.
+
+---
+# Завершённая задача этого чата — INCOMING-MANAGER-TRANSFER
+
+16.11.2026 разрешена кнопка «Передать менеджеру» с выбором сотрудника и назначением
+его ответственным. Права остаются прежними. Gate GATE-INCOMING-MANAGER-TRANSFER.md.
+Required reading: README → START_HERE → ACTIVE_TASK → Gate → уже прочитанные
+UI instructions/consistency/tokens, screen01/reference, FP-004 §§3,9,14–15 →
+IncomingCatalogV2 и существующий transfer/Access V1 tests. Только поштучный UI,
+существующие команды; без backend/schema/packages/production/commit/push.
+Текущая ветка, Parser и накопленное сохраняются. Статус: реализовано локально.
+Release 0 warnings/errors, адресные backend и реальный browser/PostgreSQL проверки
+прошли. Назначение/история/права/защита от дубля подтверждены, 1440/390 просмотрены.
+Отчёт reports/INCOMING_MANAGER_TRANSFER_REPORT.md. Production/commit/push не было.
+
+---
+# Завершённая задача этого чата — PARSING-WORKSPACE
+
+16.11.2026 владелец принял автономный v2 и разрешил интеграцию /collectors.
+Gate GATE-PARSING-WORKSPACE.md. Required reading — README → START_HERE →
+ACTIVE_TASK → этот Gate → prototype Gate/report, UI instructions/consistency,
+screen07, v2/reference v1.3/tokens, FP-004 §§3,9,12–15 → affected Collection/UI/tests.
+Четыре вкладки, доказанные причины в таблицах, правка/повтор через реальные
+команды, сохранение прав и истории. Без migrations/packages/Parser/production/
+commit/push. Текущая ветка и накопленное сохраняются. Отчёт
+reports/PARSING_WORKSPACE_REPORT.md. Статус: реализовано локально. Release без
+warnings/errors; финальные 13/13 (включая реальный browser + disposable PostgreSQL),
+ещё 18 проверок расписаний/пула прошли. Desktop/tablet/mobile просмотрены,
+переполнения документа нет. Production/commit/push не выполнялись.
+
+---
 # Активная задача — INSPECTION-MEDIA-LAYOUT
 
 03.11.2026 прямой запрос: крупный кадр + лента миниатюр слева, исходное описание

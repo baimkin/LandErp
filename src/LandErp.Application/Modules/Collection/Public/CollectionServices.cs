@@ -20,7 +20,8 @@ public sealed record CollectionRunView(Guid JobId, string? Agent, string State, 
     CollectionCoverage? Coverage, int RetryAttempt, DateTimeOffset? RetryAt, bool AttentionRequired);
 public sealed record SearchView(Guid Id, string Label, CatalogSource Source, string Url, int MaxPages,
     Guid? GroupId, string Group, string Schedule, CollectionScheduleKind ScheduleKind, int? IntervalMinutes,
-    string[] FixedTimes, bool Enabled, DateTimeOffset? NextRunAt, long Revision, CollectionRunView? LastRun);
+    string[] FixedTimes, bool Enabled, DateTimeOffset? NextRunAt, long Revision, CollectionRunView? LastRun,
+    CollectionRunView? ActiveRun = null);
 public sealed record SearchGroupView(Guid Id, string Name, int SortOrder, bool Active, long Revision, int SearchCount,
     Guid? OwnerEmployeeId = null, string? OwnerName = null, bool CanManage = false);
 public sealed record CollectionJobView(Guid Id, Guid SearchId, string Label, string? Agent, string State,

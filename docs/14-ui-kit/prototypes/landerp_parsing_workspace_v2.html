@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LandErp — Поиски и парсинг · макет</title>
+<style>
+:root {
+  color-scheme: light;
+  --navy: #10223a; --canvas: #f3f6f9; --surface: #fff;
+  --text: #14243a; --muted: #586b80; --border: #dce4ec; --subtle: #f8fafc;
+  --accent: #2268b5; --accent-soft: #e8f1fb;
+  --green: #14734b; --green-soft: #e8f6ef;
+  --amber: #9a6200; --amber-soft: #fff4d8;
+  --red: #b4232d; --red-soft: #fdecef;
+  --purple: #7257a8; --purple-soft: #f1edfa;
+  --sidebar: 248px; --radius: 14px; --row-space: 17px;
+  --text-xs: 12px; --text-sm: 14px; --text-ui: 15px;
+  --text-body: 16px; --text-section: 18px; --text-title: 28px;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--text); font-size: var(--text-ui); line-height: 1.45; }
+button, input, select, textarea { font: inherit; }
+button, select { cursor: pointer; }
+button { color: inherit; }
+button:disabled { opacity: .45; cursor: default; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 3px solid #7fa9e0; outline-offset: 3px; }
+button { touch-action: manipulation; }
+svg { width: 19px; height: 19px; flex: none; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: var(--text-title); font-weight: 600; letter-spacing: -.7px; line-height: 1.25; }
+h2 { font-size: var(--text-section); font-weight: 600; }
+h3 { font-size: var(--text-ui); font-weight: 600; }
+small { font-size: var(--text-sm); }
+.muted { color: var(--muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.sidebar { position: fixed; inset: 0 auto 0 0; width: var(--sidebar); background: #0e1d30; color: #b9c9dc; display: flex; flex-direction: column; padding: 22px 14px 16px; z-index: 80; }
+.brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 25px; }
+.brand-mark { width: 36px; height: 36px; border-radius: 11px; background: #1d3856; border: 1px solid #34506e; display: grid; place-items: center; color: white; font-size: 20px; font-weight: 600; flex: none; }
+.brand strong { color: white; font-size: 17px; }
+.brand small { display: block; color: #90a7bf; font-size: var(--text-xs); margin-top: 2px; }
+.nav-label { padding: 23px 12px 8px; font-size: var(--text-xs); color: #7890ab; text-transform: uppercase; letter-spacing: .1em; }
+.side-link { display: flex; gap: 12px; align-items: center; width: 100%; border: 0; background: transparent; color: inherit; border-radius: 8px; padding: 11px 12px; text-align: left; margin: 3px 0; }
+.side-link:hover { background: #192d44; }
+.side-link.active { background: #213d5b; color: #fff; box-shadow: inset 3px 0 #72acf0; }
+.side-link.active svg { color: #99c8ff; }
+.side-link.faded { color: #6e839a; }
+.side-bottom { margin-top: auto; border-top: 1px solid #26374b; padding: 18px 9px 0; font-size: var(--text-xs); color: #9eb4cd; display: flex; gap: 8px; align-items: center; }
+.shell { margin-left: var(--sidebar); min-width: 0; }
+.topbar { position: sticky; top: 0; height: 68px; display: flex; align-items: center; justify-content: space-between; background: white; border-bottom: 1px solid var(--border); padding: 0 32px; z-index: 50; gap: 16px; }
+.top-product small { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .08em; display: block; }
+.top-product strong { font-size: var(--text-sm); font-weight: 600; }
+.top-right, .row, .actions { display: flex; align-items: center; gap: 10px; }
+.avatar { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; color: #355773; background: #eaf0f7; font-weight: 600; }
+.profile { font-size: var(--text-sm); }
+.profile small { color: var(--muted); display: block; font-size: var(--text-xs); }
+.prototype-tag { color: #596e85; background: #f1f5f9; border: 1px solid var(--border); padding: 4px 9px; border-radius: 6px; font-size: var(--text-xs); white-space: nowrap; }
+.mobile-menu { display: none; }
+main { padding: 28px 32px 40px; max-width: 1770px; margin: auto; min-width: 0; }
+.breadcrumb { color: var(--muted); font-size: var(--text-sm); margin-bottom: 14px; }
+.page-heading { display: flex; justify-content: space-between; gap: 24px; align-items: center; margin-bottom: 22px; }
+.page-heading p { color: var(--muted); margin-top: 8px; }
+.btn { display: inline-flex; justify-content: center; align-items: center; gap: 7px; min-height: 38px; padding: 8px 13px; background: white; border: 1px solid #cbd7e4; border-radius: 8px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+.btn:hover { background: var(--subtle); border-color: #aebfd2; }
+.btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+.btn.primary:hover { background: #195797; }
+.btn.small { min-height: 34px; padding: 6px 10px; font-size: var(--text-sm); }
+.btn.quiet { border-color: transparent; color: var(--accent); background: transparent; }
+.btn.quiet:hover { background: var(--accent-soft); }
+.icon-btn { width: 36px; height: 36px; border-radius: 8px; background: transparent; border: 1px solid transparent; display: grid; place-items: center; color: var(--muted); }
+.icon-btn:hover { background: #edf2f7; }
+.icon-btn.mobile-menu { display: none; }
+.tabs-wrap { position: sticky; top: 68px; z-index: 40; background: var(--canvas); padding: 0 0 18px; }
+.tabs { display: flex; align-items: center; gap: 5px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: thin; }
+.tab { display: flex; align-items: center; gap: 9px; min-height: 53px; padding: 12px 17px; border: 0; border-bottom: 3px solid transparent; color: var(--muted); background: transparent; white-space: nowrap; }
+.tab:hover { color: var(--text); background: #eaf0f5; }
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-count { background: #e5ecf3; color: #556a80; font-size: var(--text-xs); border-radius: 6px; padding: 1px 6px; min-width: 21px; text-align: center; }
+.tab[aria-selected="true"] .tab-count { background: #deebfb; color: var(--accent); }
+.tab-count.danger { color: var(--red); background: var(--red-soft); }
+.page-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--muted); font-size: var(--text-sm); }
+.page-meta .meta-auto { display: flex; align-items: center; gap: 7px; }
+.page-meta button { font-size: var(--text-sm); }
+.dot { display: inline-block; width: 7px; height: 7px; background: var(--green); border-radius: 50%; flex: none; }
+.dot.amber { background: #be8326; }
+.dot.gray { background: #99a8b7; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 22px; overflow: hidden; box-shadow: 0 1px 2px #10223a03; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 20px 22px; }
+.panel-head p { color: var(--muted); font-size: var(--text-sm); margin-top: 5px; }
+.panel-title { display: flex; align-items: center; gap: 10px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 6px; color: var(--muted); background: #eef2f6; font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
+.badge.red { color: var(--red); background: var(--red-soft); }
+.badge.amber { color: var(--amber); background: var(--amber-soft); }
+.badge.green { color: var(--green); background: var(--green-soft); }
+.badge.blue { color: var(--accent); background: var(--accent-soft); }
+.badge.purple { color: var(--purple); background: var(--purple-soft); }
+.health { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); border-top: 1px solid var(--border); }
+.health-item { padding: 16px 22px; display: flex; align-items: flex-start; gap: 10px; border-right: 1px solid var(--border); }
+.health-item:last-child { border: 0; }
+.health-item:nth-child(4n) { border-right: 0; }
+.health-item:nth-child(n+5) { border-top: 1px solid var(--border); }
+.health-item .dot { margin-top: 7px; }
+.health-item strong { font-weight: 500; }
+.health-item small { display: block; font-size: var(--text-xs); color: var(--muted); margin-top: 3px; }
+.system-head { padding-top: 16px; padding-bottom: 16px; }
+.system-head .row { color: var(--muted); font-size: var(--text-sm); }
+.issue-panel { border-top: 3px solid #d98282; }
+.issue-intro { display: flex; gap: 12px; align-items: center; }
+.issue-symbol { width: 38px; height: 38px; border-radius: 10px; background: var(--red-soft); color: var(--red); display: grid; place-items: center; }
+.chips { display: flex; align-items: center; gap: 6px; padding: 0 22px 16px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; border: 1px solid var(--border); background: white; border-radius: 7px; padding: 5px 11px; color: var(--muted); font-size: var(--text-sm); }
+.chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: #bfd2eb; }
+.chip span { font-size: var(--text-xs); }
+.data-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: var(--text-ui); }
+th { background: var(--subtle); color: var(--muted); font-size: var(--text-xs); font-weight: 500; text-align: left; padding: 11px 20px; border-block: 1px solid var(--border); white-space: nowrap; }
+td { padding: var(--row-space) 20px; border-bottom: 1px solid #e8edf3; vertical-align: middle; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: #fcfdff; }
+td strong { font-weight: 600; display: block; }
+.subline { display: flex; gap: 7px; align-items: center; font-size: var(--text-sm); color: var(--muted); margin-top: 6px; }
+.source { display: inline-flex; gap: 5px; align-items: center; color: var(--muted); white-space: nowrap; font-size: var(--text-xs); }
+.source-icon { width: 15px; height: 15px; display: inline-grid; place-items: center; background: #f2d1db; color: #80394b; border-radius: 4px; font-size: 10px; font-weight: 600; }
+.source.cian .source-icon { background: #dceaff; color: #2e64b1; }
+.text-link { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 0; background: transparent; color: var(--accent); font-size: var(--text-sm); text-align: left; }
+.text-link svg { width: 13px; height: 13px; }
+.text-link:hover { text-decoration: underline; }
+.issue-reason { min-width: 240px; }
+.issue-reason p { color: var(--muted); font-size: var(--text-sm); margin-top: 6px; }
+.issue-time { white-space: nowrap; color: var(--muted); font-size: var(--text-sm); }
+.table-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.table-actions .btn svg { width: 16px; height: 16px; }
+.issue-table { table-layout: fixed; min-width: 1030px; }
+.issue-table td:first-child { width: 22%; }
+.issue-table td:nth-child(2) { width: 42%; }
+.issue-table td:nth-child(3) { width: 20%; }
+.issue-table td:last-child { width: 16%; }
+.saved-count, .run-agent { display: block; margin-top: 5px; color: var(--muted); font-size: var(--text-sm); }
+.run-agent { font-size: var(--text-xs); }
+.result-explanation { margin-top: 7px; color: var(--muted); font-size: var(--text-sm); line-height: 1.5; }
+.result-cell { min-width: 240px; max-width: 340px; }
+.search-table, .history-table { min-width: 1100px; }
+.search-table td:nth-child(1) { min-width: 150px; }
+.search-table td:nth-child(2) { min-width: 180px; }
+.search-table td:nth-child(4), .agent-cell { white-space: nowrap; }
+.panel-foot { display: flex; align-items: center; justify-content: space-between; padding: 13px 22px; border-top: 1px solid var(--border); font-size: var(--text-sm); color: var(--muted); gap: 14px; }
+.foot-note { display: flex; align-items: center; gap: 7px; }
+.foot-note svg { width: 16px; height: 16px; }
+.agent-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; }
+.agent-card { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.agent-card.waiting { border-color: #ead7ac; }
+.agent-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.agent-name { display: flex; align-items: center; gap: 10px; }
+.agent-device { width: 36px; height: 36px; display: grid; place-items: center; color: #61788f; background: #f0f4f8; border-radius: 9px; }
+.agent-head small { display: block; color: var(--muted); font-size: var(--text-xs); margin-top: 2px; }
+.agent-body { padding: 20px 0 17px; min-height: 104px; }
+.agent-body small { color: var(--muted); display: block; margin-bottom: 6px; }
+.agent-body p { color: var(--muted); font-size: var(--text-sm); margin-top: 5px; }
+.agent-foot { border-top: 1px solid var(--border); padding-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted); font-size: var(--text-xs); }
+.section-heading { display: flex; justify-content: space-between; align-items: center; margin: 26px 0 13px; gap: 15px; }
+.section-heading p { color: var(--muted); margin-top: 4px; font-size: var(--text-sm); }
+.progress { height: 5px; background: #e7edf4; border-radius: 6px; margin-top: 12px; overflow: hidden; }
+.progress i { display: block; height: 100%; width: 40%; border-radius: inherit; background: #5b93ce; }
+.toolbar { padding: 0 22px 19px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.search-input { position: relative; flex: 1; min-width: 200px; max-width: 400px; }
+.search-input svg { position: absolute; left: 12px; top: 11px; color: #8193a7; width: 17px; height: 17px; pointer-events: none; }
+input, select, textarea { min-height: 40px; border: 1px solid #cbd7e4; border-radius: 8px; background: white; color: var(--text); padding: 8px 11px; max-width: 100%; }
+.search-input input { width: 100%; padding-left: 38px; }
+input::placeholder { color: #8290a2; }
+.toolbar select { max-width: 260px; }
+.toolbar .filter-summary { font-size: var(--text-sm); color: var(--muted); margin-left: auto; }
+.zone-mark { display: flex; align-items: center; gap: 12px; }
+.zone-icon { width: 35px; height: 35px; border-radius: 9px; background: #eef3f8; color: #7288a0; display: grid; place-items: center; }
+.zone-icon.warn { color: var(--amber); background: var(--amber-soft); }
+.table-main { min-width: 720px; }
+.table-main small { display: block; color: var(--muted); margin-top: 4px; font-size: var(--text-sm); }
+.numbers { font-variant-numeric: tabular-nums; }
+.pages { display: flex; gap: 4px; align-items: center; }
+.page-btn { width: 32px; height: 32px; border: 1px solid transparent; background: transparent; border-radius: 6px; color: var(--muted); display: grid; place-items: center; }
+.page-btn[aria-current="page"] { background: var(--accent-soft); border-color: #c5d8ef; color: var(--accent); font-weight: 600; }
+.page-btn:hover { background: #edf2f7; }
+.empty { padding: 38px 22px; text-align: center; color: var(--muted); }
+.empty strong { display: block; font-size: var(--text-section); color: var(--text); margin-bottom: 8px; }
+.good-state { padding: 40px 24px; display: flex; align-items: center; justify-content: center; gap: 15px; }
+.good-state svg { width: 32px; height: 32px; color: var(--green); }
+.good-state p { color: var(--muted); margin-top: 5px; }
+.toast { position: fixed; bottom: 24px; left: calc(50% + var(--sidebar)/2); transform: translateX(-50%); background: #142c47; color: white; border-radius: 10px; padding: 13px 18px; box-shadow: 0 8px 24px #10223a25; z-index: 200; display: none; gap: 12px; align-items: center; max-width: calc(100vw - 32px); font-size: var(--text-sm); }
+.toast.show { display: flex; }
+.toast button { border: 0; color: white; background: transparent; padding: 0; }
+dialog { border: 1px solid var(--border); border-radius: 16px; padding: 0; width: min(600px,calc(100vw - 28px)); max-height: calc(100dvh - 36px); box-shadow: 0 24px 90px #10223a38; color: var(--text); }
+dialog::backdrop { background: #10223a66; backdrop-filter: blur(2px); }
+.dialog-head { padding: 23px 24px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.dialog-head h2 { font-size: 20px; }
+.dialog-head p { color: var(--muted); font-size: var(--text-sm); margin-top: 7px; }
+.dialog-body { padding: 22px 24px 25px; }
+.dialog-foot { padding: 16px 24px; background: var(--subtle); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+.field { display: grid; gap: 8px; margin-bottom: 18px; }
+.field>span { font-size: var(--text-sm); font-weight: 500; }
+.field input, .field select, .field textarea { width: 100%; }
+.field small { font-size: var(--text-xs); color: var(--muted); }
+.field textarea { resize: vertical; min-height: 88px; }
+.notice { display: flex; gap: 10px; padding: 13px 15px; border-radius: 9px; background: #eef5fc; color: #365b7e; font-size: var(--text-sm); margin-bottom: 20px; }
+.notice.warn { color: #785516; background: var(--amber-soft); }
+.dialog-details { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+.dialog-details span { display: block; color: var(--muted); font-size: var(--text-xs); margin-bottom: 5px; }
+.error { color: var(--red); font-size: var(--text-sm); margin-top: 10px; }
+.mobile-shade { display: none; }
+.demo-bottom { text-align: right; margin-top: 28px; font-size: var(--text-xs); color: #7e8da0; }
+.demo-bottom button { border: 0; padding: 0; background: transparent; color: var(--muted); font-size: inherit; text-decoration: underline; margin-left: 12px; }
+@media (min-width:1650px) { .issue-table td { padding-block: 20px; } }
+@media (max-width:1200px) {
+  :root { --sidebar: 76px; }
+  .sidebar { padding-inline: 10px; }
+  .brand { padding-inline: 10px; }
+  .brand>div:last-child, .side-link span, .nav-label, .side-bottom span { display: none; }
+  .side-link { justify-content: center; padding: 13px; }
+  .sidebar nav { padding-top: 18px; }
+  .side-bottom { justify-content: center; padding-inline: 0; }
+  main { padding-inline: 24px; }
+  .topbar { padding-inline: 24px; }
+  .issue-table td { padding-inline: 15px; }
+
+  .agent-grid { gap: 12px; }
+  .agent-card { padding: 16px; }
+  .agent-head { align-items: flex-start; flex-wrap: wrap; }
+}
+@media (max-width:820px) {
+  .health { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .health-item { border-bottom: 1px solid var(--border); }
+  .health-item:nth-child(2) { border-right: 0; }
+  .health-item:nth-child(3) { border-bottom: 0; }
+  .health-item:nth-child(n) { border-top: 0; border-bottom: 1px solid var(--border); }
+  .health-item:nth-child(2n) { border-right: 0; }
+  .health-item:nth-last-child(-n+2) { border-bottom: 0; }
+  .agent-grid { grid-template-columns: 1fr; }
+  .agent-head { flex-wrap: nowrap; }
+  .agent-body { min-height: 0; padding-block: 14px; }
+  .issue-table thead { display: none; }
+  .issue-table, .issue-table tbody { display: block; min-width: 0; }
+  .issue-table tr { display: grid; grid-template-columns: 1fr 1.3fr; padding: 16px 20px; border-top: 1px solid var(--border); gap: 14px 20px; }
+  .issue-table td { display: block; padding: 0; border: 0; width: auto !important; min-width: 0; }
+  .issue-table td.issue-time { display: block; }
+  .issue-table td:last-child { grid-column: 1/-1; }
+  .table-actions { justify-content: flex-start; }
+  .issue-table td.issue-reason { min-width: 0; }
+}
+@media (max-width:600px) {
+  :root { --sidebar: 0px; }
+  .sidebar { width: 248px; transform: translateX(-100%); }
+  body.menu-open .sidebar { transform: translateX(0); }
+  body.menu-open .mobile-shade { display: block; position: fixed; inset: 0; background: #10223a80; z-index: 70; }
+  .sidebar .brand>div:last-child, .sidebar .side-link span, .sidebar .nav-label, .sidebar .side-bottom span { display: block; }
+  .sidebar .side-link { justify-content: flex-start; }
+  .sidebar .brand { padding-left: 8px; }
+  .icon-btn.mobile-menu { display: grid; }
+  .topbar { padding-inline: 14px; height: 60px; }
+  .top-product { display: none; }
+  .profile { display: none; }
+  .top-right { gap: 9px; }
+  main { padding: 22px 16px 28px; }
+  h1 { font-size: 26px; }
+  .breadcrumb { font-size: var(--text-xs); margin-bottom: 12px; }
+  .page-heading { display: block; margin-bottom: 20px; }
+  .page-heading>.actions { margin-top: 17px; }
+  .page-heading>.actions .btn { width: 100%; }
+  .tabs-wrap { top: 60px; margin-inline: -16px; padding-inline: 16px; padding-bottom: 14px; }
+  .tab { padding: 11px 12px; font-size: var(--text-sm); }
+  .tab svg { display: none; }
+  .page-meta { font-size: var(--text-xs); }
+  .page-meta .auto-text { display: none; }
+  .panel-head { padding: 17px; align-items: flex-start; }
+  .system-head .row { font-size: var(--text-xs); }
+  .system-head .row>span { display: none; }
+  .health-item { padding: 14px 16px; }
+  .health-item strong { font-size: var(--text-sm); }
+  .chips { padding-inline: 16px; }
+  .issue-intro { align-items: flex-start; }
+  .issue-symbol { display: none; }
+  .issue-table tr { grid-template-columns: 1fr; gap: 12px; padding: 18px 16px; }
+  .issue-table .issue-reason p { margin-top: 5px; }
+  .issue-table .subline { margin-top: 4px; }
+  .table-actions .btn { flex: 1; }
+  .issue-table td:last-child { margin-top: 3px; }
+  .panel-foot { flex-wrap: wrap; padding-inline: 16px; }
+  .toolbar { padding-inline: 16px; }
+  .search-input { max-width: none; flex-basis: 100%; }
+  .toolbar select { flex: 1; min-width: 0; }
+  .toolbar .filter-summary { width: 100%; }
+  .panel-head .btn { padding-inline: 9px; font-size: var(--text-sm); }
+  .dialog-head, .dialog-body { padding-inline: 19px; }
+  .dialog-foot { padding: 14px 19px; }
+  .dialog-foot .btn { padding-inline: 10px; font-size: var(--text-sm); }
+  .toast { left: 50%; width: max-content; bottom: 16px; }
+  .demo-bottom { text-align: center; }
+}
+@media (prefers-reduced-motion:reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="mobile-shade" data-action="menu" aria-hidden="true"></div>
+<aside class="sidebar" aria-label="Главное меню">
+  <div class="brand"><div class="brand-mark">L</div><div><strong>LandErp</strong><small>Земля. Данные. Решения.</small></div></div>
+  <nav id="sideNav"></nav>
+  <div class="side-bottom"><i class="dot"></i><span>Рабочее пространство · LandErp</span></div>
+</aside>
+<div class="shell">
+  <header class="topbar">
+    <button class="icon-btn mobile-menu" data-action="menu" aria-label="Открыть меню" aria-controls="sideNav" aria-expanded="false" id="menuButton"></button>
+    <div class="top-product"><small>Закупка</small><strong>Земля. Данные. Решения.</strong></div>
+    <div class="top-right"><span class="prototype-tag">Макет · демоданные</span><div class="avatar">АБ</div><div class="profile">Александр<small>Администратор</small></div></div>
+  </header>
+  <main>
+    <div class="breadcrumb">Данные <span aria-hidden="true">/</span> Поиски и парсинг</div>
+    <div class="page-heading"><div><h1>Поиски и парсинг</h1><p>Сбор объявлений, зоны поиска и работа парсеров.</p></div><div class="actions"><button class="btn primary" data-action="new-search" id="addSearchButton"></button></div></div>
+    <div class="tabs-wrap"><div class="tabs" role="tablist" aria-label="Разделы поисков и парсинга" id="tabs"></div></div>
+    <div id="content" role="tabpanel" tabindex="-1"></div>
+    <div class="demo-bottom">Автономный макет · все данные демонстрационные<button data-action="reset">Сбросить пример</button></div>
+  </main>
+</div>
+<dialog id="modal" aria-labelledby="dialogTitle"></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+'use strict';
+const iconPaths = {
+  overview:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
+  map:'<path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2zM9 3v16M15 5v16"/>',
+  inbox:'<path d="M4 4h16l2 11v5H2v-5zM2 15h6l2 3h4l2-3h6"/>',
+  case:'<rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V3h8v4M3 12h18M10 12v3h4v-3"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  users:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M21 21v-3a6 6 0 0 0-3-5"/>',
+  device:'<rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/>',
+  alert:'<path d="m12 3 10 18H2zM12 9v5M12 17v.1"/>',
+  check:'<circle cx="12" cy="12" r="9"/><path d="m7 12 3 3 7-7"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  refresh:'<path d="M20 7v5h-5M4 17v-5h5M20 12a8 8 0 0 0-14-5M4 12a8 8 0 0 0 14 5"/>',
+  edit:'<path d="m15 4 5 5M4 15 16 3a2 2 0 0 1 3 0l2 2a2 2 0 0 1 0 3L9 20l-6 1z"/>',
+  open:'<path d="M14 3h7v7M21 3 11 13M10 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-6"/>',
+  close:'<path d="m6 6 12 12M6 18 18 6"/>',
+  arrow:'<path d="m9 5 7 7-7 7"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/>',
+  menu:'<path d="M3 6h18M3 12h18M3 18h18"/>',
+  link:'<path d="m10 13 4-4M8 16l-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0M16 8l2-2a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0" transform="translate(1 0) scale(.9)"/>'
+};
+function icon(name) { return `<svg viewBox="0 0 24 24" aria-hidden="true">${iconPaths[name] || iconPaths.info}</svg>`; }
+function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character])); }
+const initialZones = ['Апрелевка','Архангельское','Балашиха','Внуково','г. Видное','Химки, мкр. Фирсановка','Жилино-1','Зеленоградский','Крекшино','Дубки','Иславское','Одинцово'];
+const issueTypes = {
+  areaChanged:{label:'Контур изменился',tone:'red',category:'area',description:'Полученная область отличается от сохранённого контура.',help:'Откройте поиск на сайте, проверьте выделенную область и сохраните актуальную ссылку.'},
+  areaUnknown:{label:'Область не подтверждена',tone:'amber',category:'area',description:'Не удалось подтвердить выделение на карте.',help:'Проверьте, загрузилась ли карта и сохранилось ли выделение. При необходимости замените ссылку.'},
+  restricted:{label:'Авито ограничил доступ',tone:'amber',category:'access',description:'Источник временно ограничил запросы парсера.',help:'Проверьте доступ к Avito в локальном Parser. Повторите сбор после снятия ограничения.'},
+  partial:{label:'Неполный сбор',tone:'blue',category:'collection',description:'Сохранено 42 объявления. Конец выдачи не подтверждён.',help:'Ссылка и область поиска прошли проверку. Повторите запуск, чтобы дочитать выдачу.'},
+  captcha:{label:'Нужна CAPTCHA',tone:'purple',category:'access',description:'Проверка ожидает подтверждения в Parser «Офис-01».',help:'На компьютере «Офис-01» откройте окно Parser, пройдите проверку на вкладке Avito и продолжите сбор.'}
+};
+let zones, searches, history, activeTab = 'home';
+let issueFilter = 'all';
+const filters = {zones:{query:'',status:'all',page:1},searches:{query:'',zone:'all',source:'all',page:1},history:{query:'',status:'all',source:'all',page:1}};
+const pageSize = 8;
+let generation = 0;
+const modal = document.getElementById('modal');
+const content = document.getElementById('content');
+function sourceBadge(source) { return `<span class="source ${source==='Cian'?'cian':''}"><span class="source-icon">${source==='Avito'?'A':'Ц'}</span>${source==='Avito'?'Avito':'Циан'}</span>`; }
+function zoneById(id) { return zones.find(zone => zone.id === Number(id)); }
+function searchName(search) { return `${zoneById(search.zoneId).name} · ${search.source==='Avito'?'Avito':'Циан'}`; }
+function issueCount(zoneId) { return searches.filter(search => search.issue && (!zoneId || search.zoneId === zoneId)).length; }
+function seedData() {
+  generation++;
+  zones = initialZones.map((name,index)=>({id:index+1,name,owner:index%3===0?'Екатерина':'Администратор',active:true}));
+  searches = zones.flatMap(zone => ['Avito','Cian'].map((source,index)=>({
+    id:zone.id*10+index,zoneId:zone.id,source,enabled:true,issue:null,run:'idle',
+    time:'16.11 · 15:18',lastAgent:source==='Avito'?'Офис-01':'Офис-02',lastCount:28+(zone.id*7+index*3)%52,
+    schedule:index?'Каждые 4 часа':'Ежедневно, 09:00 и 16:00',
+    url:source==='Avito'?`https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?drawId=demo-${zone.id}`:`https://www.cian.ru/kupit-zemelniy-uchastok/?region=demo-${zone.id}`
+  })));
+  [[1,'areaChanged'],[10,'areaUnknown'],[7,'restricted'],[11,'captcha']].forEach(([zone,type])=>searches.find(search=>search.zoneId===zone&&search.source==='Avito').issue=type);
+  searches.find(search=>search.zoneId===9&&search.source==='Cian').issue='partial';
+  history = Array.from({length:34},(_,index)=>({
+    id:1000+index,searchId:searches[index%searches.length].id,date:`${index<20?'16.11':'15.11'} · ${String(15-Math.floor(index%20/4)).padStart(2,'0')}:${String((29-index%4*7)).padStart(2,'0')}`,
+    status:index<5?'issue':'success',issue:['areaChanged','areaUnknown','restricted','partial','captcha'][index],
+    count:index<5?[0,0,0,42,0][index]:28+index*2,added:index%9,changed:index%5,agent:index%3?'Офис-01':'Офис-02'
+  }));
+  [10,100,70,91,110].forEach((id,index)=>{
+    history[index].searchId=id;
+    const search=searches.find(item=>item.id===id);
+    search.lastCount=history[index].count;
+    search.lastAgent=history[index].agent;
+    search.time=history[index].date;
+  });
+}
+function badge(label,tone='') { return `<span class="badge ${tone}">${escapeHtml(label)}</span>`; }
+function resultBadge(search) {
+  if(search.run==='queued')return badge('В очереди','blue');
+  if(search.run==='running')return badge('Выполняется','blue');
+  if(search.time==='Ещё не запускался')return badge('Ещё не запускался');
+  if(search.issue)return badge(issueTypes[search.issue].label,issueTypes[search.issue].tone);
+  return badge('Собрано','green');
+}
+function renderTabs() {
+  const tabs=[['home','Главная','overview',issueCount()],['zones','Зоны поиска','map',zones.length],['searches','Список поисков','search',searches.length],['history','История запусков','clock',null]];
+  document.getElementById('tabs').innerHTML=tabs.map(([id,name,symbol,count])=>`<button class="tab" role="tab" id="tab-${id}" aria-selected="${activeTab===id}" aria-controls="content" tabindex="${activeTab===id?0:-1}" data-tab="${id}">${icon(symbol)}${name}${count!==null?`<span class="tab-count ${id==='home'&&count?'danger':''}">${count}</span>`:''}</button>`).join('');
+  content.setAttribute('aria-labelledby',`tab-${activeTab}`);
+}
+function render() {
+  renderTabs();
+  content.innerHTML = activeTab==='home'?renderHome():activeTab==='zones'?renderZones():activeTab==='searches'?renderSearches():renderHistory();
+}
+function issueRows() {
+  const candidates=searches.filter(search=>search.issue && (issueFilter==='all'||issueTypes[search.issue].category===issueFilter));
+  const priority={areaChanged:0,areaUnknown:1,restricted:2,captcha:3,partial:4};
+  candidates.sort((a,b)=>priority[a.issue]-priority[b.issue]);
+  return candidates.map(search=>{
+    const busy=search.run!=='idle';
+    return `<tr>
+      <td><strong>${escapeHtml(zoneById(search.zoneId).name)}</strong><div class="subline">${sourceBadge(search.source)}<span>·</span><button class="text-link" data-action="show-link" data-id="${search.id}">Ссылка поиска ${icon('open')}</button></div></td>
+      <td class="issue-reason">${resultBadge(search)}<p>${escapeHtml(resultExplanation(search))}</p></td>
+      <td class="issue-time">${runInformation(search)}<small class="run-agent">${escapeHtml(search.lastAgent||'—')}</small></td>
+      <td><div class="table-actions"><button class="btn small" data-action="retry" data-id="${search.id}" ${busy?'disabled':''}>${icon('refresh')}${busy?'Запускается':'Повторить'}</button><button class="icon-btn" title="Изменить ссылку" aria-label="Изменить ссылку поиска ${escapeHtml(searchName(search))}" data-action="edit-link" data-id="${search.id}" ${busy?'disabled':''}>${icon('edit')}</button></div></td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="4"><div class="empty"><strong>По этому фильтру проблем нет</strong>Выберите другую категорию.</div></td></tr>';
+}
+function resultExplanation(search) {
+  if(search.run==='queued')return 'Поиск поставлен в очередь и ожидает свободный парсер.';
+  if(search.run==='running')return 'Парсер собирает объявления. Результат появится после проверки.';
+  if(search.issue)return issueTypes[search.issue].help;
+  return search.time==='Ещё не запускался'?'Результат появится после первого запуска.':'Выдача обработана, область и условия поиска подтверждены.';
+}
+function runInformation(search) {
+  const saved=search.run!=='idle'?'Результат ожидается':search.lastCount===null?'Сохранено —':`Сохранено ${search.lastCount} объявлений`;
+  return `<span class="numbers">${escapeHtml(search.time)}</span><small class="saved-count">${saved}</small>`;
+}
+function nextRunText(search) {
+  if(!search.enabled)return 'Приостановлен';
+  if(search.schedule==='Только вручную')return 'Запуск вручную';
+  return search.schedule==='Каждые 4 часа'?'Следующий — сегодня, 19:18':'Следующий — сегодня, 16:00';
+}
+function renderHome() {
+  const issues=searches.filter(search=>search.issue);
+  const categoryCount=category=>issues.filter(search=>issueTypes[search.issue].category===category).length;
+  return `<div class="page-meta"><span class="meta-auto"><i class="dot"></i>Обновлено 16 ноября, 15:29 <span class="auto-text">· автообновление каждые 15 с</span></span><button class="btn quiet small" data-action="refresh">${icon('refresh')}Обновить</button></div>
+    <section class="panel" aria-labelledby="systemTitle"><div class="panel-head system-head"><h2 id="systemTitle">Состояние системы</h2><div class="row"><i class="dot"></i>Сервисы доступны</div></div><div class="health">
+      ${[['Сайт','Отвечает на запросы',''],['База данных','Соединение установлено',''],['Фоновая служба','Работает · проверено в 15:29',''],['Планировщик','Последний цикл в 15:29',''],['Парсеры','2 на связи · 1 не подключён','amber'],['Очередь',`${3+searches.filter(search=>search.run==='queued').length} поиска ожидают запуска`,'amber'],['Просроченные задания','0 · все назначения актуальны',''],['Хранилище','Доступно для файлов','']].map(([title,description,tone])=>`<div class="health-item"><i class="dot ${tone}"></i><div><strong>${title}</strong><small>${description}</small></div></div>`).join('')}
+    </div></section>
+    <section class="panel issue-panel" aria-labelledby="issuesTitle"><div class="panel-head"><div class="issue-intro"><div class="issue-symbol">${icon('alert')}</div><div><div class="panel-title"><h2 id="issuesTitle">Требуют внимания</h2>${badge(`${issues.length} поисков`,issues.length?'red':'green')}</div><p>Проблемы последних запусков и действия для их устранения.</p></div></div></div>
+    ${issues.length?`<div class="chips" role="group" aria-label="Причины проблем">${[['all','Все',issues.length],['area','Область',categoryCount('area')],['access','Доступ',categoryCount('access')],['collection','Сбор',categoryCount('collection')]].map(([value,label,count])=>`<button class="chip" data-issue-filter="${value}" aria-pressed="${issueFilter===value}">${label}<span>${count}</span></button>`).join('')}</div><div class="data-wrap"><table class="issue-table"><thead><tr><th>Зона и поиск</th><th>Причина</th><th>Последний запуск</th><th style="text-align:right">Действия</th></tr></thead><tbody>${issueRows()}</tbody></table></div><div class="panel-foot"><span class="foot-note">${icon('info')}Проблема снимается после проверки повторного запуска.</span><button class="text-link" data-tab="history">История запусков ${icon('arrow')}</button></div>`:`<div class="good-state">${icon('check')}<div><h3>Все поиски в порядке</h3><p>По результатам последних запусков проблем не обнаружено.</p></div></div>`}
+    </section>
+    <div class="section-heading"><div><h2>Локальные парсеры</h2><p>2 на связи · 1 не подключён</p></div><button class="btn small" data-action="connect">${icon('plus')}Подключить парсер</button></div>
+    <div class="agent-grid">
+      ${searches.some(search=>search.issue==='captcha')
+        ?renderAgent('Офис-01','Avito · Циан','waiting','Ожидает действия','Иславское · Avito','Подтвердите CAPTCHA в окне Parser.','Связь 20 секунд назад')
+        :renderAgent('Офис-01','Avito · Циан','ready','Готов к работе','Ожидает следующий поиск','Проверка доступа пройдена.','Связь 20 секунд назад')}
+      ${renderAgent('Офис-02','Avito · Циан','working','Собирает','Одинцово · Циан','24 из 60 объявлений · 40%','Связь 8 секунд назад')}
+      ${renderAgent('Ноутбук-03','Avito','offline','Не на связи','Последний запуск завершён','Проверьте подключение и приложение.','Последняя связь вчера, 18:42')}
+    </div>`;
+}
+function renderAgent(name,sources,state,status,title,description,connection) {
+  return `<article class="agent-card ${state}"><div class="agent-head"><div class="agent-name"><span class="agent-device">${icon('device')}</span><div><h3>${name}</h3><small>${sources}</small></div></div>${badge(status,state==='waiting'?'amber':state==='working'?'blue':'')}</div><div class="agent-body"><small>${state==='working'?'Сейчас выполняет':state==='waiting'?'Требует внимания':state==='ready'?'Подключён':'Нет активного подключения'}</small><strong>${title}</strong><p>${description}</p>${state==='working'?'<div class="progress"><i></i></div>':''}</div><div class="agent-foot"><span>${connection}</span><button class="text-link" data-action="agent" data-name="${name}">Подробности</button></div></article>`;
+}
+function searchBox(kind,placeholder) { return `<label class="search-input">${icon('search')}<span class="sr-only">${placeholder}</span><input type="search" data-query="${kind}" value="${escapeHtml(filters[kind].query)}" placeholder="${placeholder}"></label>`; }
+function selectOption(value,label,current) { return `<option value="${value}" ${String(current)===String(value)?'selected':''}>${escapeHtml(label)}</option>`; }
+function paginate(items,kind) {
+  const pages=Math.max(1,Math.ceil(items.length/pageSize));
+  filters[kind].page=Math.min(filters[kind].page,pages);
+  const offset=(filters[kind].page-1)*pageSize;
+  return {items:items.slice(offset,offset+pageSize),foot:`<div class="panel-foot"><span>${items.length?`${offset+1}–${Math.min(offset+pageSize,items.length)} из ${items.length}`:'Ничего не найдено'}</span><div class="pages" aria-label="Страницы"><button class="page-btn" aria-label="Предыдущая страница" data-page="${filters[kind].page-1}" ${filters[kind].page===1?'disabled':''}>‹</button>${Array.from({length:pages},(_,index)=>`<button class="page-btn" data-page="${index+1}" ${filters[kind].page===index+1?'aria-current="page"':''}>${index+1}</button>`).join('')}<button class="page-btn" aria-label="Следующая страница" data-page="${filters[kind].page+1}" ${filters[kind].page===pages?'disabled':''}>›</button></div></div>`};
+}
+function renderZones() {
+  const filter=filters.zones;
+  const selected=zones.filter(zone=>zone.name.toLocaleLowerCase().includes(filter.query.toLocaleLowerCase())&&(filter.status==='all'||filter.status==='issues'&&issueCount(zone.id)||filter.status==='active'&&zone.active||filter.status==='archive'&&!zone.active));
+  const page=paginate(selected,'zones');
+  return `<section class="panel"><div class="panel-head"><div><div class="panel-title"><h2>Зоны поиска</h2>${badge(zones.length)}</div><p>Области поиска, владельцы и связанные поисковые ссылки.</p></div><button class="btn" data-action="new-zone">${icon('plus')}Добавить зону</button></div><div class="toolbar">${searchBox('zones','Найти зону')}<select aria-label="Состояние зон" data-filter="status">${[['all','Все зоны'],['issues','Требуют внимания'],['active','Действующие'],['archive','Архивные']].map(([value,label])=>selectOption(value,label,filter.status)).join('')}</select><span class="filter-summary">${selected.length} зон</span></div><div class="data-wrap"><table class="table-main"><thead><tr><th>Зона</th><th>Владелец</th><th>Поиски</th><th>Состояние</th><th></th></tr></thead><tbody>${page.items.map(zone=>`<tr><td><div class="zone-mark"><span class="zone-icon ${issueCount(zone.id)?'warn':''}">${icon('map')}</span><strong>${escapeHtml(zone.name)}</strong></div></td><td>${escapeHtml(zone.owner)}</td><td>${searches.filter(search=>search.zoneId===zone.id).length}<small>Avito · Циан</small></td><td>${!zone.active?badge('В архиве'):issueCount(zone.id)?badge(`${issueCount(zone.id)} поиск требует внимания`,'amber'):badge('В порядке','green')}</td><td><div class="table-actions"><button class="btn small quiet" data-action="zone-searches" data-id="${zone.id}">Поиски ${icon('arrow')}</button><button class="icon-btn" data-action="edit-zone" data-id="${zone.id}" aria-label="Изменить зону ${escapeHtml(zone.name)}">${icon('edit')}</button></div></td></tr>`).join('')||'<tr><td colspan="5"><div class="empty"><strong>Зоны не найдены</strong>Попробуйте изменить условия поиска.</div></td></tr>'}</tbody></table></div>${page.foot}</section>`;
+}
+function renderSearches() {
+  const filter=filters.searches;
+  const selected=searches.filter(search=>searchName(search).toLocaleLowerCase().includes(filter.query.toLocaleLowerCase())&&(filter.zone==='all'||search.zoneId===Number(filter.zone))&&(filter.source==='all'||search.source===filter.source));
+  const page=paginate(selected,'searches');
+  const rows=page.items.map(search=>`<tr>
+    <td><strong>${escapeHtml(zoneById(search.zoneId).name)}</strong><div class="subline">${sourceBadge(search.source)}<span>·</span><button class="text-link" data-action="show-link" data-id="${search.id}">Ссылка ${icon('open')}</button></div></td>
+    <td>${escapeHtml(search.schedule)}<small>${nextRunText(search)}</small></td>
+    <td class="result-cell">${resultBadge(search)}<p class="result-explanation">${escapeHtml(resultExplanation(search))}</p></td>
+    <td>${runInformation(search)}</td>
+    <td class="agent-cell">${escapeHtml(search.lastAgent||'—')}</td>
+    <td><div class="table-actions"><button class="btn small" data-action="retry" data-id="${search.id}" ${search.run!=='idle'?'disabled':''}>${icon('refresh')}Запустить</button><button class="icon-btn" data-action="edit-search" data-id="${search.id}" title="Редактировать поиск" aria-label="Настроить поиск ${escapeHtml(searchName(search))}" ${search.run!=='idle'?'disabled':''}>${icon('edit')}</button></div></td>
+  </tr>`).join('');
+  return `<section class="panel">
+    <div class="panel-head"><div><div class="panel-title"><h2>Список поисков</h2>${badge(searches.length)}</div><p>Ссылки, расписания и результаты последних запусков.</p></div></div>
+    <div class="toolbar">${searchBox('searches','Найти поиск')}<select aria-label="Зона поиска" data-filter="zone">${selectOption('all','Все зоны',filter.zone)}${zones.map(zone=>selectOption(zone.id,zone.name,filter.zone)).join('')}</select><select aria-label="Источник" data-filter="source">${[['all','Все источники'],['Avito','Avito'],['Cian','Циан']].map(([value,label])=>selectOption(value,label,filter.source)).join('')}</select><span class="filter-summary">${selected.length} поисков</span></div>
+    <div class="data-wrap"><table class="table-main search-table"><thead><tr><th>Зона и источник</th><th>Расписание</th><th>Результат и причина</th><th>Последний запуск</th><th>Локальный парсер</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="6"><div class="empty"><strong>Поиски не найдены</strong>Измените фильтр или добавьте новый поиск.</div></td></tr>'}</tbody></table></div>${page.foot}
+  </section>`;
+}
+function renderHistory() {
+  const filter=filters.history;
+  const selected=history.filter(job=>{
+    const search=searches.find(item=>item.id===job.searchId);
+    return search&&searchName(search).toLocaleLowerCase().includes(filter.query.toLocaleLowerCase())&&(filter.status==='all'||job.status===filter.status)&&(filter.source==='all'||search.source===filter.source);
+  });
+  const page=paginate(selected,'history');
+  const rows=page.items.map(job=>{
+    const search=searches.find(item=>item.id===job.searchId);
+    const state=job.status==='success'?badge('Собрано','green'):job.status==='queued'?badge('В очереди','blue'):job.status==='running'?badge('Выполняется','blue'):badge(issueTypes[job.issue].label,issueTypes[job.issue].tone);
+    const explanation=job.status==='issue'?`<p class="result-explanation">${escapeHtml(issueTypes[job.issue].help)}</p>`:'';
+    return `<tr>
+      <td><strong>${escapeHtml(zoneById(search.zoneId).name)}</strong><div class="subline">${sourceBadge(search.source)}</div></td>
+      <td class="numbers">${job.date}</td>
+      <td class="result-cell">${state}${explanation}</td>
+      <td class="numbers">${job.status==='queued'||job.status==='running'?'—':job.count}</td>
+      <td>${job.agent}</td>
+      <td><span style="color:var(--green)">+${job.added} новых</span><small>${job.changed} изменено</small></td>
+      <td><button class="icon-btn" data-action="edit-link" data-id="${search.id}" title="Изменить текущую ссылку поиска" aria-label="Изменить ссылку поиска ${escapeHtml(searchName(search))}">${icon('edit')}</button></td>
+    </tr>`;
+  }).join('');
+  return `<section class="panel">
+    <div class="panel-head"><div><h2>История запусков</h2><p>Результаты сбора и повторные попытки по всем поискам.</p></div>${badge('Московское время')}</div>
+    <div class="toolbar">${searchBox('history','Найти запуск по зоне')}<select aria-label="Результат запуска" data-filter="status">${[['all','Все результаты'],['issue','С проблемами'],['success','Успешные']].map(([value,label])=>selectOption(value,label,filter.status)).join('')}</select><select aria-label="Источник" data-filter="source">${[['all','Все источники'],['Avito','Avito'],['Cian','Циан']].map(([value,label])=>selectOption(value,label,filter.source)).join('')}</select><span class="filter-summary">${selected.length} запусков</span></div>
+    <div class="data-wrap"><table class="table-main history-table"><thead><tr><th>Поиск</th><th>Время запуска</th><th>Результат и причина</th><th>Сохранено</th><th>Локальный парсер</th><th>Изменения</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7"><div class="empty"><strong>Запуски не найдены</strong>Измените условия отбора.</div></td></tr>'}</tbody></table></div>${page.foot}
+  </section>`;
+}
+// All result fields are visible in tables. Dialogs are reserved for editing.
+function showDialog(title,subtitle,body,footer='') {
+  modal.innerHTML=`<div class="dialog-head"><div><h2 id="dialogTitle">${escapeHtml(title)}</h2><p>${escapeHtml(subtitle)}</p></div><button class="icon-btn" data-action="close" aria-label="Закрыть">${icon('close')}</button></div><div class="dialog-body">${body}</div>${footer?`<div class="dialog-foot">${footer}</div>`:''}`;
+  if(!modal.open)modal.showModal();
+}
+function notify(message) {
+  const toast=document.getElementById('toast');
+  toast.innerHTML=`${icon('check')}<span>${escapeHtml(message)}</span><button data-action="dismiss-toast" aria-label="Закрыть уведомление">${icon('close')}</button>`;
+  toast.classList.add('show');
+  clearTimeout(notify.timer);
+  notify.timer=setTimeout(()=>toast.classList.remove('show'),4500);
+}
+function editSearch(search,linkOnly=false) {
+  const zoneOptions=zones.map(zone=>selectOption(zone.id,zone.name,search?.zoneId||zones[0].id)).join('');
+  const footer=`<button class="btn" data-action="close">Отмена</button><button class="btn primary" data-action="save-search" data-id="${search?.id||0}" data-run="${linkOnly}">${linkOnly?'Сохранить и запустить':'Сохранить поиск'}</button>`;
+  showDialog(linkOnly?'Изменить ссылку и повторить':search?'Настроить поиск':'Добавить поиск',search?searchName(search):'Выберите зону, источник и расписание.',`
+    ${linkOnly&&search.issue?`<div class="notice warn">${icon('info')}<span>${escapeHtml(issueTypes[search.issue].help)}</span></div>`:''}
+    ${!linkOnly?`<div class="field"><span>Зона поиска</span><select id="editZone">${zoneOptions}</select></div><label class="field"><span>Источник</span><select id="editSource">${selectOption('Avito','Avito',search?.source||'Avito')}${selectOption('Cian','Циан',search?.source||'Avito')}</select></label>`:''}
+    <label class="field"><span>Ссылка поиска</span><textarea id="editUrl" spellcheck="false" placeholder="https://…">${escapeHtml(search?.url||'')}</textarea><small>Полная ссылка с областью и условиями поиска.</small></label>
+    ${!linkOnly?`<label class="field"><span>Расписание</span><select id="editSchedule">${['Ежедневно, 09:00 и 16:00','Каждые 4 часа','Только вручную'].map(value=>selectOption(value,value,search?.schedule)).join('')}</select></label>`:''}
+    <p class="error" id="formError" role="alert"></p>`,footer);
+}
+function queueSearch(search) {
+  if(search.run!=='idle'){notify('Этот поиск уже поставлен в очередь.');return;}
+  const completedCount=search.lastCount>0?search.lastCount:35;
+  search.run='queued';search.time='16.11 · 15:30';search.lastCount=null;search.lastAgent='Ожидает парсер';
+  const job={id:Date.now(),searchId:search.id,date:'16.11 · 15:30',status:'queued',count:0,added:0,changed:0,agent:'Ожидает парсер'};
+  history.unshift(job);
+  modal.close();render();notify('Поиск поставлен в очередь.');
+  const token=generation;
+  setTimeout(()=>{
+    if(token!==generation)return;
+    search.run='running';search.lastAgent='Офис-02';job.status='running';job.agent='Офис-02';render();
+  },1300);
+  setTimeout(()=>{
+    if(token!==generation)return;
+    search.run='idle';search.issue=null;search.time='16.11 · 15:30';
+    search.lastCount=completedCount;search.lastAgent='Офис-02';
+    job.status='success';job.count=completedCount;job.added=3;job.changed=2;
+    render();notify(`${zoneById(search.zoneId).name} — проверка завершена, проблема устранена.`);
+  },4300);
+}
+function switchTab(tab) {
+  if(!['home','zones','searches','history'].includes(tab))return;
+  activeTab=tab;render();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+function toggleMenu(force) {
+  const opened=typeof force==='boolean'?force:!document.body.classList.contains('menu-open');
+  document.body.classList.toggle('menu-open',opened);
+  document.getElementById('menuButton').setAttribute('aria-expanded',String(opened));
+  document.getElementById('menuButton').setAttribute('aria-label',opened?'Закрыть меню':'Открыть меню');
+}
+document.addEventListener('click',event=>{
+  const tab=event.target.closest('[data-tab]');
+  if(tab){switchTab(tab.dataset.tab);return;}
+  const chip=event.target.closest('[data-issue-filter]');
+  if(chip){issueFilter=chip.dataset.issueFilter;render();return;}
+  const page=event.target.closest('[data-page]');
+  if(page&&!page.disabled){filters[activeTab].page=Number(page.dataset.page);render();return;}
+  const target=event.target.closest('[data-action]');
+  if(!target||target.disabled)return;
+  const search=searches.find(item=>item.id===Number(target.dataset.id));
+  switch(target.dataset.action) {
+    case 'menu':toggleMenu();break;
+    case 'close':modal.close();break;
+    case 'dismiss-toast':document.getElementById('toast').classList.remove('show');break;
+    case 'reset':seedData();Object.values(filters).forEach(filter=>{filter.query='';filter.page=1;if('zone'in filter)filter.zone='all';if('status'in filter)filter.status='all';if('source'in filter)filter.source='all';});issueFilter='all';render();notify('Исходный пример восстановлен.');break;
+    case 'refresh':notify('Состояние обновлено.');break;
+    case 'nav-demo':notify('В этом макете открыт раздел «Поиски и парсинг».');break;
+    case 'new-search':editSearch(null);break;
+    case 'edit-search':editSearch(search);break;
+    case 'edit-link':editSearch(search,true);break;
+    case 'show-link':showDialog('Ссылка поиска',searchName(search),`<label class="field"><span>Текущая ссылка</span><textarea readonly>${escapeHtml(search.url)}</textarea><small>Ссылка с демонстрационными параметрами.</small></label>`,`<button class="btn" data-action="close">Закрыть</button><button class="btn primary" data-action="edit-link" data-id="${search.id}">${icon('edit')}Изменить ссылку</button>`);break;
+    case 'retry':
+      if(search.issue==='captcha'||search.issue==='restricted')showDialog('Проверить доступ и повторить',searchName(search),`<div class="notice warn">${icon('info')}<span>${escapeHtml(issueTypes[search.issue].help)}</span></div><p>После проверки доступа можно повторно поставить поиск в очередь.</p>`,`<button class="btn" data-action="close">Отмена</button><button class="btn primary" data-action="confirm-retry" data-id="${search.id}">Доступ проверен, запустить</button>`);
+      else queueSearch(search);
+      break;
+    case 'confirm-retry':queueSearch(search);break;
+    case 'save-search': {
+      const url=document.getElementById('editUrl').value.trim();
+      let parsed;try{parsed=new URL(url);}catch{}
+      const selectedSource=document.getElementById('editSource')?.value||search?.source||'Avito';
+      const domain=selectedSource==='Avito'?'avito.ru':'cian.ru';
+      if(!parsed||parsed.protocol!=='https:'||!(parsed.hostname===domain||parsed.hostname.endsWith(`.${domain}`))){document.getElementById('formError').textContent=`Введите полную HTTPS-ссылку на ${domain}.`;return;}
+      const edited=search||{id:Math.max(...searches.map(item=>item.id))+1,enabled:true,issue:null,run:'idle',time:'Ещё не запускался',lastCount:null,lastAgent:null};
+      edited.url=url;
+      if(document.getElementById('editZone')){edited.zoneId=Number(document.getElementById('editZone').value);edited.source=selectedSource;edited.schedule=document.getElementById('editSchedule').value;}
+      if(!search)searches.push(edited);
+      if(target.dataset.run==='true')queueSearch(edited);
+      else{modal.close();render();notify('Поиск сохранён.');}
+      break;
+    }
+    case 'zone-searches':filters.searches.zone=target.dataset.id;filters.searches.page=1;switchTab('searches');break;
+    case 'new-zone':case 'edit-zone':{
+      const zone=target.dataset.action==='edit-zone'?zoneById(target.dataset.id):null;
+      showDialog(zone?'Изменить зону':'Добавить зону',zone?.name||'Объедините поиски одной локации.',`<label class="field"><span>Название зоны</span><input id="zoneName" value="${escapeHtml(zone?.name||'')}" maxlength="200" placeholder="Например, Апрелевка"></label><label class="field"><span>Владелец</span><select id="zoneOwner">${['Администратор','Екатерина','Анастасия'].map(name=>selectOption(name,name,zone?.owner)).join('')}</select></label><p class="error" id="formError" role="alert"></p>`,`<button class="btn" data-action="close">Отмена</button><button class="btn primary" data-action="save-zone" data-id="${zone?.id||0}">Сохранить зону</button>`);break;
+    }
+    case 'save-zone':{
+      const name=document.getElementById('zoneName').value.trim();
+      if(!name){document.getElementById('formError').textContent='Укажите название зоны.';return;}
+      const zone=zoneById(target.dataset.id)||{id:Math.max(...zones.map(item=>item.id))+1,active:true};
+      zone.name=name;zone.owner=document.getElementById('zoneOwner').value;
+      if(!zones.includes(zone))zones.push(zone);
+      modal.close();render();notify('Зона сохранена.');break;
+    }
+    case 'connect':showDialog('Подключить локальный парсер','На компьютере, который будет выполнять сбор.',`<p>Установите и откройте LandErp Parser. В разделе подключения к серверу введите адрес системы и одноразовый код.</p><div class="notice" style="margin-top:20px;margin-bottom:0">${icon('info')}<span>В рабочей системе одноразовый код будет выдан администратором.</span></div>`,`<button class="btn primary" data-action="close">Понятно</button>`);break;
+    case 'agent':showDialog(target.dataset.name,'Локальное приложение Parser',`<div class="dialog-details"><div><span>Источники</span>Avito · Циан</div><div><span>Версия</span>2026.11.16</div></div><p class="muted">Состояние подключения и текущий поиск обновляются вместе со страницей.</p>`,`<button class="btn primary" data-action="close">Закрыть</button>`);break;
+  }
+});
+document.addEventListener('input',event=>{
+  if(['editUrl','zoneName'].includes(event.target.id)) {
+    const error=document.getElementById('formError');
+    if(error)error.textContent='';
+  }
+  const kind=event.target.dataset.query;
+  if(!kind)return;
+  const position=event.target.selectionStart;
+  filters[kind].query=event.target.value;filters[kind].page=1;render();
+  const input=document.querySelector(`[data-query="${kind}"]`);input.focus();input.setSelectionRange(position,position);
+});
+document.addEventListener('change',event=>{
+  const field=event.target.dataset.filter;
+  if(field&&filters[activeTab]){filters[activeTab][field]=event.target.value;filters[activeTab].page=1;render();}
+});
+document.getElementById('tabs').addEventListener('keydown',event=>{
+  if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+  event.preventDefault();
+  const names=['home','zones','searches','history'];
+  let index=names.indexOf(activeTab);
+  index=event.key==='Home'?0:event.key==='End'?3:(index+(event.key==='ArrowRight'?1:3))%4;
+  switchTab(names[index]);document.getElementById(`tab-${activeTab}`).focus();
+});
+modal.addEventListener('click',event=>{if(event.target===modal){const box=modal.getBoundingClientRect();if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)modal.close();}});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')toggleMenu(false);});
+document.getElementById('sideNav').innerHTML=`<div class="nav-label">Работа</div>${[['overview','Обзор'],['inbox','Входящие объявления'],['case','Очередь закупки'],['check','Мои осмотры']].map(([symbol,label])=>`<button class="side-link" data-action="nav-demo" title="${label}">${icon(symbol)}<span>${label}</span></button>`).join('')}<div class="nav-label">Система</div><button class="side-link active" aria-current="page" title="Поиски и парсинг">${icon('search')}<span>Поиски и парсинг</span></button>${[['users','Организация'],['clock','Аудит']].map(([symbol,label])=>`<button class="side-link" data-action="nav-demo" title="${label}">${icon(symbol)}<span>${label}</span></button>`).join('')}`;
+document.getElementById('addSearchButton').innerHTML=`${icon('plus')}Добавить поиск`;
+document.getElementById('menuButton').innerHTML=icon('menu');
+seedData();render();
+</script>
+</body>
+</html>

@@ -12,7 +12,7 @@ namespace LandErp.Server.Components.Pages;
 
 public partial class Collectors : IAsyncDisposable
 {
-    private const int PageSize = 10;
+    private const int PageSize = 8;
     private CollectionAdminView? view;
     private EffectiveEmployeeAccess? effectiveAccess;
     private bool CanManageCollection => effectiveAccess?.CanManageCollection == true;
@@ -20,13 +20,12 @@ public partial class Collectors : IAsyncDisposable
     private AgentConnectionCode? connectionCode;
     private AgentCredential? credential;
     private AgentView? selectedAgent;
-    private CollectionJobView? selectedJob;
     private SearchView? editingSearch;
     private SearchGroupView? editingGroup;
     private AgentInput agentInput = new();
     private CollectionSearchForm searchInput = new();
     private GroupInput groupInput = new();
-    private bool showSearchModal, showConnectionModal, showGroupsModal, showQuickGroup, showAttentionDetails;
+    private bool showSearchModal, showConnectionModal, showGroupsModal, showQuickGroup;
     private string quickGroupName = "", query = "", groupFilter = "all", statusFilter = "all";
     private string historyQuery = "", historyFilter = "all", groupVisibility = "active";
     private string? refreshMessage;
@@ -36,7 +35,6 @@ public partial class Collectors : IAsyncDisposable
     private int previewVersion;
     private DateTimeOffset? refreshedAt;
     private int historyPage = 1;
-    private readonly HashSet<string> collapsed = [];
     private readonly CancellationTokenSource lifetime = new();
     private Task? refreshTask;
 
@@ -56,6 +54,7 @@ public partial class Collectors : IAsyncDisposable
         if (!databaseReady) { view = null; return; }
         effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, lifetime.Token);
         view = await Administration.ReadAsync(CurrentSubject, lifetime.Token);
+        if (!view.CanReadCollection) activeTab = "zones";
     }
 
     private async Task RefreshLoopAsync()
@@ -97,66 +96,32 @@ public partial class Collectors : IAsyncDisposable
     private int StaleAgents => view?.Agents.Count(IsAgentStale) ?? 0;
     private int OfflineAgents => view?.Agents.Count(agent => agent.Enabled && !agent.Online && !IsAgentStale(agent)) ?? 0;
     private bool StorageHealthy => storageHealth.Available;
-    private int AttentionCount => (view?.AttentionJobs ?? 0) + (view?.Agents.Count(AgentNeedsAttention) ?? 0)
-        + (SchedulerHealthy ? 0 : 1) + ExpiredLeaseCount;
-    private string AttentionSummary => !SchedulerHealthy
-        ? "Автоматические запуски не подтверждены: проверьте службу расписаний. Ручной запуск доступен."
-        : "Некоторые поиски или парсеры требуют действия. Откройте причины.";
-    private bool HasFilters => query.Length > 0 || groupFilter != "all" || statusFilter != "all" || groupVisibility != "active";
+    private bool HasFilters => query.Length > 0 || groupFilter != "all" || statusFilter != "all" || groupVisibility != "active" || sourceFilter != "all";
     private string ZoneLabel => view?.BusinessTimeZone ?? "Europe/Moscow";
-    private bool HasOpenDialog => showSearchModal || showConnectionModal || showGroupsModal || selectedAgent is not null || selectedJob is not null;
-
-    private IReadOnlyList<GroupSection> FilteredSections
-    {
-        get
-        {
-            if (view is null) return [];
-            var filtered = view.Searches.Where(Matches).ToArray();
-            var result = new List<GroupSection>();
-            foreach (var group in view.Groups.Where(g => groupVisibility == "all" || (groupVisibility == "archived" ? !g.Active : g.Active)).OrderBy(g => g.SortOrder))
-            {
-                var searches = filtered.Where(s => s.GroupId == group.Id).ToArray();
-                if (searches.Length > 0 || query.Length == 0 && statusFilter == "all" && (groupFilter == "all" || groupFilter == group.Id.ToString()))
-                    result.Add(Build(group.Id.ToString(), group.Id, group.Name, group.Active, searches));
-            }
-            var ungrouped = filtered.Where(s => s.GroupId is null).ToArray();
-            if (ungrouped.Length > 0 && groupVisibility != "archived") result.Add(Build("none", null, "Без группы", true, ungrouped));
-            return result;
-        }
-    }
+    private bool HasOpenDialog => showSearchModal || showConnectionModal || showGroupsModal || selectedAgent is not null;
 
     private List<CollectionJobView> FilteredJobs => view?.Jobs.Where(j =>
         (historyQuery.Length == 0 || j.Label.Contains(historyQuery, StringComparison.OrdinalIgnoreCase) ||
             (j.Agent?.Contains(historyQuery, StringComparison.OrdinalIgnoreCase) ?? false)) &&
         (historyFilter == "all" || historyFilter == "completed" && j.State is "Completed" or "LimitReached" ||
             historyFilter == "running" && j.State is "Pending" or "Leased" ||
-            historyFilter == "attention" && j.AttentionRequired)).ToList() ?? [];
+            historyFilter == "attention" && Result(j).IsIssue) &&
+        (historySource == "all" || FindSearch(j.SearchId)?.Source.ToString() == historySource)).ToList() ?? [];
     private int HistoryPages => Math.Max(1, (int)Math.Ceiling(FilteredJobs.Count / (double)PageSize));
     private IEnumerable<CollectionJobView> PagedJobs => FilteredJobs.Skip((Math.Min(historyPage, HistoryPages) - 1) * PageSize).Take(PageSize);
     private bool Matches(SearchView s) =>
-        (query.Length == 0 || s.Label.Contains(query, StringComparison.OrdinalIgnoreCase) || s.Url.Contains(query, StringComparison.OrdinalIgnoreCase)) &&
+        (query.Length == 0 || s.Label.Contains(query, StringComparison.OrdinalIgnoreCase) || s.Group.Contains(query, StringComparison.OrdinalIgnoreCase) || s.Url.Contains(query, StringComparison.OrdinalIgnoreCase)) &&
         (groupFilter == "all" || groupFilter == "none" && s.GroupId is null || Guid.TryParse(groupFilter, out var id) && s.GroupId == id) &&
-        (statusFilter == "all" || statusFilter == "active" && s.Enabled || statusFilter == "paused" && !s.Enabled || statusFilter == "attention" && NeedsAttention(s));
-
-    private static GroupSection Build(string key, Guid? id, string name, bool active, SearchView[] searches)
-    {
-        var runs = searches.Where(s => s.LastRun is not null).Select(s => s.LastRun!).ToArray();
-        var schedules = searches.Select(s => s.Schedule).Distinct().ToArray();
-        return new(key, id, name, active, searches, searches.Count(s => s.Enabled),
-            schedules.Length == 0 ? "—" : schedules.Length == 1 ? schedules[0] : "Разные расписания",
-            runs.Length == 0 ? null : runs.Max(r => r.CompletedAt ?? r.CreatedAt),
-            searches.Where(s => s.Enabled).Select(s => s.NextRunAt).DefaultIfEmpty().Min(),
-            runs.Sum(r => r.ProcessedCount), runs.Sum(r => r.NewListingsCount), runs.Sum(r => r.ChangedListingsCount));
-    }
+        (statusFilter == "all" || statusFilter == "active" && s.Enabled || statusFilter == "paused" && !s.Enabled || statusFilter == "attention" && HasIssue(s));
 
     private async Task OpenSearch(Guid? id = null)
     {
-        editingSearch = null; searchInput = new() { GroupId = id }; showQuickGroup = false; showSearchModal = true;
+        saveAndRun = false; ClearFeedback(); editingSearch = null; searchInput = new() { GroupId = id }; showQuickGroup = false; showSearchModal = true;
         await UpdatePreviewAsync();
     }
     private async Task OpenEditSearch(SearchView search)
     {
-        editingSearch = search; searchInput = CollectionSearchForm.From(search); showQuickGroup = false; showSearchModal = true;
+        saveAndRun = false; ClearFeedback(); editingSearch = search; searchInput = CollectionSearchForm.From(search); showQuickGroup = false; showSearchModal = true;
         await UpdatePreviewAsync();
     }
     private async Task UpdatePreviewAsync()
@@ -184,14 +149,10 @@ public partial class Collectors : IAsyncDisposable
         groupInput = new() { Name = group.Name, SortOrder = group.SortOrder };
         showGroupsModal = true;
     }
-    private void CancelGroupEdit() { editingGroup = null; groupInput = new(); }
     private void CloseGroups() { if (!Busy) { showGroupsModal = false; editingGroup = null; } }
     private void OpenAgent(AgentView agent) { credential = null; selectedAgent = agent; }
     private void CloseAgent() { if (Busy) return; credential = null; selectedAgent = null; }
-    private void ResetFilters() { query = ""; groupFilter = "all"; statusFilter = "all"; groupVisibility = "active"; }
-    private void ShowAttention() => showAttentionDetails = !showAttentionDetails;
-    private void ToggleGroup(string key) { if (!collapsed.Add(key)) collapsed.Remove(key); }
-    private bool IsExpanded(string key) => !collapsed.Contains(key);
+    private void ResetFilters() { query = ""; groupFilter = "all"; statusFilter = "all"; groupVisibility = "active"; sourceFilter = "all"; searchPage = 1; }
     private async Task AddTime()
     {
         if (searchInput.Times.Count < 12) searchInput.Times.Add(new(""));
@@ -216,7 +177,18 @@ public partial class Collectors : IAsyncDisposable
             saved = true;
         });
         // Do not invite a duplicate create if the write succeeded but a subsequent read failed.
-        if (saved) { CloseSearch(); Success = searchInput.RunImmediately ? "Поиск создан, первый сбор добавлен в очередь." : "Поиск сохранён."; }
+        if (saved)
+        {
+            // A failed enqueue never undoes the acknowledged edit or invites a duplicate save.
+            Guid? rerunId = saveAndRun && searchInput.Enabled ? editingSearch?.Id : null;
+            CloseSearch();
+            if (rerunId is { } id)
+            {
+                await EnqueueAsync(id);
+                if (Error is not null) ShowValidationError($"Поиск сохранён. Повторный запуск не подтверждён. {Error}");
+            }
+            else Success = searchInput.RunImmediately ? "Поиск создан, первый сбор добавлен в очередь." : "Поиск сохранён.";
+        }
     }
     private async Task QuickCreateGroupAsync()
     {
@@ -226,16 +198,20 @@ public partial class Collectors : IAsyncDisposable
             showQuickGroup = false; quickGroupName = "";
         });
     }
-    private Task SaveGroupAsync() => ExecuteAsync(async () =>
+    private async Task SaveGroupAsync()
     {
-        if (editingGroup is null)
-            await Administration.CreateGroupAsync(CurrentSubject, groupInput.Name, groupInput.SortOrder, Correlation(), lifetime.Token);
-        else
-            await Administration.UpdateGroupAsync(CurrentSubject, editingGroup.Id, editingGroup.Revision,
-                groupInput.Name, groupInput.SortOrder, Correlation(), lifetime.Token);
-        editingGroup = null;
-        groupInput = new();
-    });
+        bool saved = false;
+        await ExecuteAsync(async () =>
+        {
+            if (editingGroup is null)
+                await Administration.CreateGroupAsync(CurrentSubject, groupInput.Name, groupInput.SortOrder, Correlation(), lifetime.Token);
+            else
+                await Administration.UpdateGroupAsync(CurrentSubject, editingGroup.Id, editingGroup.Revision,
+                    groupInput.Name, groupInput.SortOrder, Correlation(), lifetime.Token);
+            saved = true;
+        });
+        if (saved) { CloseGroups(); groupInput = new(); Success = "Зона сохранена."; }
+    }
     private Task ArchiveGroupAsync(SearchGroupView group) => ExecuteAsync(() =>
         Administration.ArchiveGroupAsync(CurrentSubject, group.Id, group.Revision, Correlation(), lifetime.Token));
     private async Task EnqueueAsync(Guid id)
@@ -264,39 +240,11 @@ public partial class Collectors : IAsyncDisposable
         var payload = $"{Navigation.BaseUri}|{code.AgentId:N}|{code.ActivationSecret}";
         return "LDP1." + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payload)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
-    private static bool NeedsAttention(SearchView search) => search.LastRun?.AttentionRequired == true;
     private bool IsAgentStale(AgentView agent) => agent.Enabled && !agent.Online && agent.LastHeartbeatAt is { } heartbeat
         && refreshedAt is { } refreshed && heartbeat >= refreshed.AddMinutes(-10);
     private static bool AgentNeedsAttention(AgentView agent) => agent.Enabled && (agent.RuntimeState == AgentRuntimeState.AwaitingManualAction || !string.IsNullOrWhiteSpace(agent.AttentionCode));
     private string Time(DateTimeOffset? instant) => instant.HasValue
         ? TimeZoneInfo.ConvertTime(instant.Value, TimeZoneInfo.FindSystemTimeZoneById(ZoneLabel)).ToString("dd.MM HH:mm", CultureInfo.InvariantCulture) : "—";
-    private static string LastRunTitle(CollectionRunView? run) => run is null ? "Ещё не запускался" : JobLabel(run.State);
-    private static string JobLabel(string state) => state switch
-    {
-        "Pending" => "В очереди", "Leased" => "Выполняется", "Completed" => "Завершён",
-        "LimitReached" => "Завершён по лимиту", "Partial" => "Собрано частично", "RateLimited" => "Отложен источником",
-        "AwaitingManualAction" => "Нужно действие", "Interrupted" => "Прерван", _ => "Ошибка"
-    };
-    private static string JobTone(string state) => state switch
-    {
-        "Completed" => "success", "LimitReached" => "neutral", "Pending" or "Leased" => "info",
-        "Partial" or "RateLimited" or "AwaitingManualAction" => "warning", _ => "danger"
-    };
-    private static string ReasonLabel(string code) => code switch
-    {
-        CollectionResultReasonCodes.CountHintMismatch => "Количество на странице отличается от подсказки источника",
-        CollectionResultReasonCodes.EndNotConfirmed => "Конец выдачи не подтверждён",
-        CollectionResultReasonCodes.LoadingInterrupted => "Загрузка выдачи прервалась",
-        CollectionResultReasonCodes.NetworkTimeout => "Источник не ответил вовремя",
-        CollectionResultReasonCodes.SourceUnavailable => "Источник временно недоступен",
-        CollectionResultReasonCodes.LayoutChanged => "Структура страницы изменилась",
-        CollectionResultReasonCodes.InvalidSearchUrl => "Ссылка поиска некорректна",
-        CollectionResultReasonCodes.InvalidSourceResponse => "Ответ источника не распознан",
-        CollectionResultReasonCodes.PageLimitReached => "Достигнут настроенный предел страниц",
-        CollectionResultReasonCodes.AgentInterrupted => "Работа Parser была прервана",
-        CollectionResultReasonCodes.LeaseExpiredOrReplaced => "Назначение Parser устарело или заменено",
-        _ => code
-    };
     private static string CoverageText(CollectionCoverage coverage) => coverage.SourceCountHint.HasValue
         ? $"Собрано {coverage.UniqueObserved}; источник сообщил {coverage.SourceCountHint}; конец {(coverage.EndReached ? "подтверждён" : "не подтверждён")}."
         : $"Собрано {coverage.UniqueObserved}; конец {(coverage.EndReached ? "подтверждён" : "не подтверждён")}.";
@@ -317,8 +265,6 @@ public partial class Collectors : IAsyncDisposable
     private static string ProgressLabel(AgentView a) => a.ProgressTotal is > 0 ? $"{a.ProgressProcessed} из {a.ProgressTotal}"
         : a.ProgressCurrentPage.HasValue ? $"страница {a.ProgressCurrentPage} из {a.ProgressMaxPages}" : $"обработано {a.ProgressProcessed}";
     private static string SourceShort(CatalogSource source) => source switch { CatalogSource.Avito => "A", CatalogSource.Cian => "Ц", _ => source.ToString()[..1] };
-    private sealed record GroupSection(string Key, Guid? GroupId, string Name, bool Active, IReadOnlyList<SearchView> Searches,
-        int ActiveCount, string Schedule, DateTimeOffset? LastRunAt, DateTimeOffset? NextRunAt, int Processed, int NewListings, int Changed);
     private sealed class AgentInput { [Required, MaxLength(200)] public string Name { get; set; } = ""; }
     private sealed class GroupInput { [Required, MaxLength(200)] public string Name { get; set; } = ""; [Range(0, 10000)] public int SortOrder { get; set; } }
 }

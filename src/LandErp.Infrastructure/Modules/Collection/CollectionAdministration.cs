@@ -91,10 +91,21 @@ public sealed class CollectionAdministration(
             orderby job.CompletedAt descending, job.CreatedAt descending, job.Id descending
             select new { Job = job, Agent = agent == null ? null : agent.Name }).ToArrayAsync(cancellationToken);
         var lastBySearch = lastResults.GroupBy(item => item.Job.SearchId).ToDictionary(group => group.Key, group => group.First());
+        // Active work is independent of the last completed result and the bounded history.
+        // A search queued before the most recent 100 jobs must still disable duplicate UI actions.
+        var activeResults = await (from job in db.CollectionJobs
+            join agentValue in db.CollectorAgents on job.AgentId equals (Guid?)agentValue.Id into agentValues
+            from agent in agentValues.DefaultIfEmpty()
+            where job.OrganizationId == context.OrganizationId
+                && (job.State == CollectionJobState.Pending || job.State == CollectionJobState.Leased)
+            orderby job.CreatedAt descending, job.Id descending
+            select new { Job = job, Agent = agent == null ? null : agent.Name }).ToArrayAsync(cancellationToken);
+        var activeBySearch = activeResults.GroupBy(item => item.Job.SearchId).ToDictionary(group => group.Key, group => group.First());
         var searches = rawSearches.Select(item => new SearchView(item.Id, item.Label, item.Source, item.Url, item.MaxPages, item.SearchGroupId,
             groups.FirstOrDefault(group => group.Id == item.SearchGroupId)?.Name ?? "Без группы", CollectionScheduleRules.Display(item), item.ScheduleKind, item.IntervalMinutes,
             System.Text.Json.JsonSerializer.Deserialize<string[]>(item.FixedTimesJson) ?? [], item.Enabled,
-            item.NextRunAt, item.Version, lastBySearch.TryGetValue(item.Id, out var last) ? Run(last.Job, last.Agent) : null)).ToArray();
+            item.NextRunAt, item.Version, lastBySearch.TryGetValue(item.Id, out var last) ? Run(last.Job, last.Agent) : null,
+            activeBySearch.TryGetValue(item.Id, out var active) ? Run(active.Job, active.Agent) : null)).ToArray();
         var rawJobs = await (from job in db.CollectionJobs join search in db.SearchConfigurations on job.SearchId equals search.Id
                              join agentValue in db.CollectorAgents on job.AgentId equals (Guid?)agentValue.Id into agentValues
                              from agent in agentValues.DefaultIfEmpty() where job.OrganizationId == context.OrganizationId

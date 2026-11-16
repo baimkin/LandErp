@@ -1,3 +1,32 @@
+# Задача этого чата — PARSING-LISTS-PUBLICATION
+
+16.11.2026 владелец разрешил commit/push в main доработки больших списков и
+запросил скрипт обновления. Gate GATE-PARSING-LISTS-PUBLICATION.md.
+Required reading: README → START_HERE → ACTIVE_TASK → Gate → завершённый
+PARSING-LARGE-LISTS Gate/report → PRODUCTION_RUNBOOK §§5–6 / publish/deploy.
+Отдельный main-based snapshot от 9bf4ed9, только текущая доработка и документация.
+Галерея/передача менеджеру сохраняются; накопленное/branch/index/preview не менять.
+Без production/schema/packages/config. Проверить Release/tests точного снимка,
+опубликовать один fast-forward commit без force, дать pinned update script.
+Отчёт reports/PARSING_LISTS_PUBLICATION_REPORT.md. Подготовлено 18 scoped файлов;
+locked restore/Release 0 warnings/errors; 37/37 .NET и 11 JS проверок Passed на
+точном main-based снимке. SHA и факт публикации — artifacts/parsing-lists-publication/verification.json.
+
+---
+# Завершённая задача этого чата — PARSING-LARGE-LISTS
+
+16.11.2026 разрешены зоны/поиски без страниц с внутренней прокруткой, история
+порциями по 50, сохранение позиции/фильтров. Gate GATE-PARSING-LARGE-LISTS.md.
+Required reading: README → START_HERE → ACTIVE_TASK → Gate → уже прочитанные
+PARSING-WORKSPACE/UI/tokens/screen07/v2/FP-004 §§3,9,12–15 → Collection/UI/tests.
+Только списки и чтение истории; права/команды/schema/packages/Parser без изменений.
+Текущая ветка и накопленное сохраняются. Без commit/push/production.
+Отчёт reports/PARSING_LARGE_LISTS_REPORT.md. Статус: реализовано локально,
+Release 0 warnings/errors, 32/32 .NET и 11 JS проверок Passed; настоящий browser
+на 70 зонах/120 поисках, history 50/100/150, desktop/tablet/mobile просмотрен.
+Commit/push/production не выполнялись, следующий Gate не начат.
+
+---
 # Задача этого чата — WORKSPACE-TRANSFER-PUBLICATION
 
 16.11.2026 владелец разрешил commit/push в main обеих доработок и запросил

@@ -13,7 +13,7 @@ using System.Security.Cryptography;
 
 namespace LandErp.Infrastructure.Modules.Collection;
 
-public sealed class CollectionAdministration(
+public sealed partial class CollectionAdministration(
     IDbContextFactory<LandErpDbContext> factory,
     IEmployeeAccessService employeeAccess,
     TimeProvider time) : ICollectionAdministration
@@ -43,7 +43,7 @@ public sealed class CollectionAdministration(
             throw new AccessDeniedException();
     }
 
-    public async Task<CollectionAdminView> ReadAsync(Subject subject, CancellationToken cancellationToken)
+    public async Task<CollectionAdminView> ReadAsync(Subject subject, CancellationToken cancellationToken, bool includeRecentJobs = true)
     {
         EffectiveEmployeeAccess effective = await employeeAccess.ResolveAsync(subject, cancellationToken);
         if (!effective.CanReadCollection && !effective.CanManageSearchGroups) throw new AccessDeniedException();
@@ -108,7 +108,7 @@ public sealed class CollectionAdministration(
             activeBySearch.TryGetValue(item.Id, out var active) ? Run(active.Job, active.Agent) : null)).ToArray();
         var rawJobs = await (from job in db.CollectionJobs join search in db.SearchConfigurations on job.SearchId equals search.Id
                              join agentValue in db.CollectorAgents on job.AgentId equals (Guid?)agentValue.Id into agentValues
-                             from agent in agentValues.DefaultIfEmpty() where job.OrganizationId == context.OrganizationId
+                             from agent in agentValues.DefaultIfEmpty() where includeRecentJobs && job.OrganizationId == context.OrganizationId
                              orderby job.CreatedAt descending, job.Id descending select new { Job = job, search.Label, Agent = agent == null ? null : agent.Name })
             .Take(100).ToArrayAsync(cancellationToken);
         CollectionJobView[] jobs = rawJobs.Select(item => Job(item.Job, item.Label, item.Agent)).ToArray();

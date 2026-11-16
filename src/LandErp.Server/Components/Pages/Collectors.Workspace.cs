@@ -9,14 +9,17 @@ public partial class Collectors
 {
     private string activeTab = "home", issueFilter = "all", sourceFilter = "all";
     private string zoneQuery = "", zoneState = "active", historySource = "all";
-    private int searchPage = 1, zonePage = 1;
     private bool saveAndRun;
     private readonly ElementReference[] tabButtons = new ElementReference[4];
     private static readonly string[] TabKeys = ["home", "zones", "searches", "history"];
     private static readonly string[] TabLabels = ["Главная", "Зоны поиска", "Список поисков", "История запусков"];
     private IEnumerable<int> VisibleTabs => view?.CanReadCollection == true ? [0, 1, 2, 3] : [1];
     private bool CanShowWorkspace => !Loading && !Forbidden && view is not null;
-    private void SelectTab(string tab) { activeTab = tab; }
+    private async Task SelectTab(string tab)
+    {
+        activeTab = tab;
+        if (tab == "history" && !historyInitialized) await LoadHistoryAsync();
+    }
     private async Task TabKeyAsync(KeyboardEventArgs e, int index)
     {
         int[] tabs = VisibleTabs.ToArray();
@@ -24,7 +27,7 @@ public partial class Collectors
         int target = e.Key switch { "ArrowRight" => (position + 1) % tabs.Length, "ArrowLeft" => (position + tabs.Length - 1) % tabs.Length,
             "Home" => 0, "End" => tabs.Length - 1, _ => -1 };
         if (target < 0) return;
-        SelectTab(TabKeys[tabs[target]]);
+        await SelectTab(TabKeys[tabs[target]]);
         await tabButtons[tabs[target]].FocusAsync();
     }
     private static CollectionResultPresentation Result(CollectionRunView? run) => CollectionResultPresentation.From(run);
@@ -47,25 +50,17 @@ public partial class Collectors
         && (s.GroupId is null ? groupVisibility != "archived" : view.Groups.Any(g => g.Id == s.GroupId &&
             (groupVisibility == "all" || (groupVisibility == "archived" ? !g.Active : g.Active)))))
         .OrderBy(s => s.Group).ThenBy(s => s.Label).ThenBy(s => s.Source).ToArray() ?? [];
-    private int SearchPages => Pages(WorkspaceSearches.Length);
-    private int CurrentSearchPage => Math.Clamp(searchPage, 1, SearchPages);
-    private IEnumerable<SearchView> PagedSearches => WorkspaceSearches.Skip((CurrentSearchPage - 1) * PageSize).Take(PageSize);
     private SearchGroupView[] WorkspaceZones => view?.Groups.Where(g =>
         (zoneQuery.Length == 0 || g.Name.Contains(zoneQuery, StringComparison.OrdinalIgnoreCase)) &&
         (zoneState == "all" || (zoneState == "archived" ? !g.Active : g.Active)))
         .OrderBy(g => g.SortOrder).ThenBy(g => g.Name).ToArray() ?? [];
-    private int ZonePages => Pages(WorkspaceZones.Length);
-    private int CurrentZonePage => Math.Clamp(zonePage, 1, ZonePages);
-    private IEnumerable<SearchGroupView> PagedZones => WorkspaceZones.Skip((CurrentZonePage - 1) * PageSize).Take(PageSize);
     private SearchView[] ZoneSearches(Guid id) => view?.Searches.Where(s => s.GroupId == id).ToArray() ?? [];
     private int ZoneIssueCount(Guid id) => ZoneSearches(id).Count(HasIssue);
-    private void ShowZoneSearches(Guid id)
+    private async Task ShowZoneSearches(Guid id)
     {
-        ResetFilters(); sourceFilter = "all"; groupVisibility = "all"; groupFilter = id.ToString(); searchPage = 1;
-        SelectTab("searches");
+        ResetFilters(); sourceFilter = "all"; groupVisibility = "all"; groupFilter = id.ToString(); ResetListPosition("searches");
+        await SelectTab("searches");
     }
-    private static int Pages(int count) => Math.Max(1, (count + PageSize - 1) / PageSize);
-    private static string PageRange(int page, int count) => count == 0 ? "0" : $"{(page - 1) * PageSize + 1}–{Math.Min(page * PageSize, count)} из {count}";
     private static bool Finished(string state) => state is not ("Pending" or "Leased");
     private static string SavedCount(CollectionRunView? run) => run is null ? "Сохранено —" : Finished(run.State) ? $"Сохранено {run.AcceptedCount} объявлений" : "Результат ожидается";
     private async Task OpenLinkEdit(SearchView search)

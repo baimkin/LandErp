@@ -12,7 +12,6 @@ namespace LandErp.Server.Components.Pages;
 
 public partial class Collectors : IAsyncDisposable
 {
-    private const int PageSize = 8;
     private CollectionAdminView? view;
     private EffectiveEmployeeAccess? effectiveAccess;
     private bool CanManageCollection => effectiveAccess?.CanManageCollection == true;
@@ -34,7 +33,6 @@ public partial class Collectors : IAsyncDisposable
     private FileStorageHealth storageHealth = new(false, "NOT_CHECKED");
     private int previewVersion;
     private DateTimeOffset? refreshedAt;
-    private int historyPage = 1;
     private readonly CancellationTokenSource lifetime = new();
     private Task? refreshTask;
 
@@ -53,8 +51,9 @@ public partial class Collectors : IAsyncDisposable
         refreshMessage = null;
         if (!databaseReady) { view = null; return; }
         effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, lifetime.Token);
-        view = await Administration.ReadAsync(CurrentSubject, lifetime.Token);
-        if (!view.CanReadCollection) activeTab = "zones";
+        view = await Administration.ReadAsync(CurrentSubject, lifetime.Token, includeRecentJobs: false);
+        if (!view.CanReadCollection) { activeTab = "zones"; historyRows = []; historyInitialized = false; }
+        else if (historyInitialized && !historyLoading) await LoadHistoryAsync();
     }
 
     private async Task RefreshLoopAsync()
@@ -81,6 +80,7 @@ public partial class Collectors : IAsyncDisposable
     {
         await lifetime.CancelAsync();
         if (refreshTask is not null) await refreshTask;
+        await DisposeListsAsync();
         lifetime.Dispose();
         GC.SuppressFinalize(this);
         credential = null;
@@ -100,15 +100,6 @@ public partial class Collectors : IAsyncDisposable
     private string ZoneLabel => view?.BusinessTimeZone ?? "Europe/Moscow";
     private bool HasOpenDialog => showSearchModal || showConnectionModal || showGroupsModal || selectedAgent is not null;
 
-    private List<CollectionJobView> FilteredJobs => view?.Jobs.Where(j =>
-        (historyQuery.Length == 0 || j.Label.Contains(historyQuery, StringComparison.OrdinalIgnoreCase) ||
-            (j.Agent?.Contains(historyQuery, StringComparison.OrdinalIgnoreCase) ?? false)) &&
-        (historyFilter == "all" || historyFilter == "completed" && j.State is "Completed" or "LimitReached" ||
-            historyFilter == "running" && j.State is "Pending" or "Leased" ||
-            historyFilter == "attention" && Result(j).IsIssue) &&
-        (historySource == "all" || FindSearch(j.SearchId)?.Source.ToString() == historySource)).ToList() ?? [];
-    private int HistoryPages => Math.Max(1, (int)Math.Ceiling(FilteredJobs.Count / (double)PageSize));
-    private IEnumerable<CollectionJobView> PagedJobs => FilteredJobs.Skip((Math.Min(historyPage, HistoryPages) - 1) * PageSize).Take(PageSize);
     private bool Matches(SearchView s) =>
         (query.Length == 0 || s.Label.Contains(query, StringComparison.OrdinalIgnoreCase) || s.Group.Contains(query, StringComparison.OrdinalIgnoreCase) || s.Url.Contains(query, StringComparison.OrdinalIgnoreCase)) &&
         (groupFilter == "all" || groupFilter == "none" && s.GroupId is null || Guid.TryParse(groupFilter, out var id) && s.GroupId == id) &&
@@ -152,7 +143,7 @@ public partial class Collectors : IAsyncDisposable
     private void CloseGroups() { if (!Busy) { showGroupsModal = false; editingGroup = null; } }
     private void OpenAgent(AgentView agent) { credential = null; selectedAgent = agent; }
     private void CloseAgent() { if (Busy) return; credential = null; selectedAgent = null; }
-    private void ResetFilters() { query = ""; groupFilter = "all"; statusFilter = "all"; groupVisibility = "active"; sourceFilter = "all"; searchPage = 1; }
+    private void ResetFilters() { query = ""; groupFilter = "all"; statusFilter = "all"; groupVisibility = "active"; sourceFilter = "all"; ResetListPosition("searches"); }
     private async Task AddTime()
     {
         if (searchInput.Times.Count < 12) searchInput.Times.Add(new(""));

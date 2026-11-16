@@ -37,6 +37,11 @@ public sealed record CollectionAdminView(IReadOnlyList<AgentView> Agents, IReadO
     string BusinessTimeZone = "Europe/Moscow", bool CanReadCollection = true,
     bool CanManageCollection = false, bool CanManageSearchGroups = false);
 public sealed record CollectionSchedule(CollectionScheduleKind Kind, int? IntervalMinutes = null, string[]? FixedTimes = null);
+public enum CollectionHistoryResult { All, Completed, Attention, Running }
+public sealed record CollectionHistoryCursor(DateTimeOffset CreatedAt, Guid Id);
+public sealed record CollectionHistoryQuery(string Text = "", CatalogSource? Source = null,
+    CollectionHistoryResult Result = CollectionHistoryResult.All, CollectionHistoryCursor? Before = null, int Size = 50);
+public sealed record CollectionHistoryPage(IReadOnlyList<CollectionJobView> Items, int Total, CollectionHistoryCursor? Next);
 public sealed record CreateSearch(string Label, CatalogSource Source, string Url, int MaxPages,
     Guid? SearchGroupId = null, CollectionSchedule? Schedule = null, bool RunImmediately = false);
 public sealed record UpdateSearch(Guid Id, long ExpectedVersion, string Label, CatalogSource Source, string Url,
@@ -45,7 +50,8 @@ public interface ICollectionAdministration
 {
     Task<DateTimeOffset?> PreviewScheduleAsync(Subject subject, CollectionSchedule schedule, Guid? searchId,
         bool enabled, CancellationToken cancellationToken);
-    Task<CollectionAdminView> ReadAsync(Subject subject, CancellationToken cancellationToken);
+    Task<CollectionAdminView> ReadAsync(Subject subject, CancellationToken cancellationToken, bool includeRecentJobs = true);
+    Task<CollectionHistoryPage> ReadHistoryAsync(Subject subject, CollectionHistoryQuery query, CancellationToken cancellationToken);
     Task<AgentCredential> CreateAgentAsync(Subject subject, string name, bool canManageSearches, string correlationId, CancellationToken cancellationToken);
     Task SetAgentSearchManagementAsync(Subject subject, Guid agentId, long expectedVersion, bool allowed, string correlationId, CancellationToken cancellationToken);
     Task<AgentConnectionCode> CreateConnectionCodeAsync(Subject subject, string name, string correlationId, CancellationToken cancellationToken);

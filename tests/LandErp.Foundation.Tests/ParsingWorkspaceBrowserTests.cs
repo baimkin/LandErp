@@ -19,7 +19,7 @@ namespace LandErp.Foundation.Tests;
 public sealed class ParsingWorkspaceBrowserTests
 {
     private static readonly string[] Tabs = ["Главная", "Зоны поиска", "Список поисков", "История запусков"];
-    [TestMethod, Timeout(240_000)]
+    [TestMethod, Timeout(360_000)]
     public async Task RealPageTabsCausesEditEnqueueRefreshAndPermissions()
     {
         await using var f = await ProcurementTests.Phase1Fixture.CreateAsync(false, false);
@@ -27,8 +27,8 @@ public sealed class ParsingWorkspaceBrowserTests
         { CollectionAccess = CollectionAccessLevel.Manage, CanManageSearchGroups = true });
         var admin = new CollectionAdministration(f.Factory, TimeProvider.System);
         Guid zone = await admin.CreateGroupAsync(f.Manager, "Апрелевка", 0, "workspace", default);
-        for(int i = 1; i <= 10; i++) await admin.CreateGroupAsync(f.Owner, $"Зона {i:00}", i, "workspace", default);
-        for(int i = 0; i < 12; i++) await admin.CreateSearchAsync(f.Owner,
+        for(int i = 1; i <= 69; i++) await admin.CreateGroupAsync(f.Owner, $"Зона {i:00}", i, "workspace", default);
+        for(int i = 0; i < 120; i++) await admin.CreateSearchAsync(f.Owner,
             new($"Поиск {i:00}", i % 2 == 0 ? CatalogSource.Avito : CatalogSource.Cian,
                 i % 2 == 0 ? "https://www.avito.ru/moskva/zemelnye_uchastki" : "https://www.cian.ru/cat.php", 10, zone), "workspace", default);
         var searches = (await admin.ReadAsync(f.Owner, default)).Searches.OrderBy(s => s.Label).ToArray();
@@ -48,7 +48,7 @@ public sealed class ParsingWorkspaceBrowserTests
                 WarningsJson = "[\"AREA_GEOMETRY_CHANGED\"]", CreatedAt = now.AddMinutes(-5), CompletedAt = now.AddMinutes(-4), AcceptedCount = 3, ProcessedCount = 5 });
             db.CollectionJobs.Add(new() { Id = Guid.CreateVersion7(), OrganizationId = f.OrganizationId, SearchId = oldPending.Id,
                 State = CollectionJobState.Pending, CreatedAt = now.AddDays(-1) });
-            for(int i = 0; i < 105; i++) db.CollectionJobs.Add(new() { Id = Guid.CreateVersion7(), OrganizationId = f.OrganizationId,
+            for(int i = 0; i < 175; i++) db.CollectionJobs.Add(new() { Id = Guid.CreateVersion7(), OrganizationId = f.OrganizationId,
                 SearchId = searches[1].Id, State = CollectionJobState.Completed, ResultCode = "Success",
                 CreatedAt = now.AddMinutes(-200 + i), CompletedAt = now.AddMinutes(-199 + i) });
             await db.SaveChangesAsync();
@@ -59,7 +59,7 @@ public sealed class ParsingWorkspaceBrowserTests
         Assert.AreEqual("Pending", initial.Searches.Single(s => s.Id == oldPending.Id).ActiveRun?.State);
         Assert.IsNull(initial.Searches.Single(s => s.Id == oldPending.Id).LastRun);
 
-        string output = Path.Combine(FoundationTests.RepositoryRoot(), "artifacts", "parsing-workspace", "browser");
+        string output = Path.Combine(FoundationTests.RepositoryRoot(), "artifacts", "parsing-large-lists", "browser");
         Directory.CreateDirectory(output);
         using RSA rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -144,21 +144,77 @@ public sealed class ParsingWorkspaceBrowserTests
             await page.GetByRole(AriaRole.Button, new() { Name = "Обновить", Exact = true }).ClickAsync();
             await Assertions.Expect(issue).ToHaveCountAsync(0);
             await page.GetByRole(AriaRole.Tab, new() { Name = "Зоны поиска" }).ClickAsync();
-            await Assertions.Expect(page.Locator(".zones-table tbody tr")).ToHaveCountAsync(8);
-            await page.GetByRole(AriaRole.Button, new() { Name = "Следующая страница зон" }).ClickAsync();
-            await Assertions.Expect(page.Locator(".zones-table tbody tr")).ToHaveCountAsync(3);
+            await Assertions.Expect(page.Locator(".zones-table tbody tr")).ToHaveCountAsync(70);
+            await Assertions.Expect(page.Locator("[data-list-ready='true']")).ToHaveCountAsync(1);
+            var zoneViewport = page.Locator("[data-scroll-list='zones']");
+            Assert.IsTrue(await zoneViewport.EvaluateAsync<bool>("e=>e.scrollHeight>e.clientHeight+500"));
+            await zoneViewport.EvaluateAsync("e=>e.scrollTop=1300");
+            await page.WaitForTimeoutAsync(250);
+            double zonePosition = await zoneViewport.EvaluateAsync<double>("e=>e.scrollTop");
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Список поисков" }).ClickAsync();
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Зоны поиска" }).ClickAsync();
+            await page.WaitForTimeoutAsync(250);
+            Assert.AreEqual(zonePosition, await zoneViewport.EvaluateAsync<double>("e=>e.scrollTop"), 2);
+            await page.GetByRole(AriaRole.Button, new() { Name = "Обновить", Exact = true }).ClickAsync();
+            await page.WaitForTimeoutAsync(500);
+            Assert.AreEqual(zonePosition, await zoneViewport.EvaluateAsync<double>("e=>e.scrollTop"), 2);
+            Assert.IsTrue(await zoneViewport.EvaluateAsync<bool>("e=>Math.abs(e.querySelector('th').getBoundingClientRect().top-e.getBoundingClientRect().top)<3"));
+            await page.ScreenshotAsync(new() { Path = Path.Combine(output, "zones-scrolled-1720.png") });
             await page.GetByLabel("Найти зону", new() { Exact = true }).FillAsync("Апрелевка");
-            await page.GetByRole(AriaRole.Button, new() { Name = "12 поисков" }).ClickAsync();
+            await page.GetByRole(AriaRole.Button, new() { Name = "120 поисков" }).ClickAsync();
             await Assertions.Expect(page.GetByRole(AriaRole.Tab, new() { Name = "Список поисков" })).ToHaveAttributeAsync("aria-selected", "true");
             var primaryRow = page.Locator($".search-table tr[data-search='{primary.Id}']");
             await Assertions.Expect(primaryRow).ToContainTextAsync("Сохранено 6 объявлений");
             await Assertions.Expect(page.Locator($".search-table tr[data-search='{oldPending.Id}'] button").First).ToBeDisabledAsync();
             await page.ScreenshotAsync(new() { Path = Path.Combine(output, "searches-1720.png"), FullPage = true });
-            await page.GetByRole(AriaRole.Button, new() { Name = "Следующая страница поисков" }).ClickAsync();
-            await Assertions.Expect(page.Locator(".search-table tbody tr")).ToHaveCountAsync(4);
+            await Assertions.Expect(page.Locator(".search-table tbody tr")).ToHaveCountAsync(120);
+            await page.GetByLabel("Источник", new() { Exact = true }).SelectOptionAsync("Cian");
+            await Assertions.Expect(page.Locator(".search-table tbody tr")).ToHaveCountAsync(60);
+            var searchViewport = page.Locator("[data-scroll-list='searches']");
+            var editRow = page.Locator(".search-table tbody tr").Nth(20);
+            await editRow.GetByRole(AriaRole.Button, new() { Name = "Настроить поиск" }).ClickAsync();
+            await page.WaitForTimeoutAsync(250);
+            double searchPosition = await searchViewport.EvaluateAsync<double>("e=>e.scrollTop");
+            string editedName = await modal.GetByLabel("Название", new() { Exact = true }).InputValueAsync() + " · тест";
+            await modal.GetByLabel("Название", new() { Exact = true }).FillAsync(editedName);
+            await page.WaitForTimeoutAsync(16_000);
+            await Assertions.Expect(modal.GetByLabel("Название", new() { Exact = true })).ToHaveValueAsync(editedName);
+            await modal.GetByRole(AriaRole.Button, new() { Name = "Сохранить", Exact = true }).ClickAsync();
+            await Assertions.Expect(modal).ToHaveCountAsync(0);
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Зоны поиска" }).ClickAsync();
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Список поисков" }).ClickAsync();
+            await Assertions.Expect(page.GetByLabel("Источник", new() { Exact = true })).ToHaveValueAsync("Cian");
+            await page.WaitForTimeoutAsync(250);
+            Assert.AreEqual(searchPosition, await searchViewport.EvaluateAsync<double>("e=>e.scrollTop"), 2);
+            await page.GetByLabel("Источник", new() { Exact = true }).SelectOptionAsync("all");
             await page.GetByLabel("Найти поиск", new() { Exact = true }).FillAsync("Поиск 00");
             await Assertions.Expect(page.Locator(".search-table tbody tr")).ToHaveCountAsync(1);
             await page.GetByRole(AriaRole.Tab, new() { Name = "История запусков" }).ClickAsync();
+            var historyViewport = page.Locator("[data-scroll-list='history']");
+            await Assertions.Expect(page.Locator(".history-table tbody tr")).ToHaveCountAsync(50);
+            await historyViewport.EvaluateAsync("e=>e.scrollTop=900");
+            await page.WaitForTimeoutAsync(200);
+            double historyPosition = await historyViewport.EvaluateAsync<double>("e=>e.scrollTop");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Загрузить ещё", Exact = true }).ClickAsync();
+            await Assertions.Expect(page.Locator(".history-table tbody tr")).ToHaveCountAsync(100);
+            await page.WaitForTimeoutAsync(250);
+            Assert.AreEqual(historyPosition, await historyViewport.EvaluateAsync<double>("e=>e.scrollTop"), 2);
+            await page.GetByRole(AriaRole.Button, new() { Name = "Загрузить ещё", Exact = true }).ClickAsync();
+            await Assertions.Expect(page.Locator(".history-table tbody tr")).ToHaveCountAsync(150);
+            await historyViewport.EvaluateAsync("e=>e.scrollTop=6500");
+            await page.WaitForTimeoutAsync(250);
+            historyPosition = await historyViewport.EvaluateAsync<double>("e=>e.scrollTop");
+            await page.ReloadAsync();
+            await Assertions.Expect(page.Locator("[data-list-ready='true']")).ToHaveCountAsync(1);
+            await Assertions.Expect(page.GetByRole(AriaRole.Tab, new() { Name = "История запусков" })).ToHaveAttributeAsync("aria-selected", "true");
+            await Assertions.Expect(page.Locator(".history-table tbody tr")).ToHaveCountAsync(150);
+            await page.WaitForTimeoutAsync(300);
+            Assert.AreEqual(historyPosition, await historyViewport.EvaluateAsync<double>("e=>e.scrollTop"), 2);
+            await page.GetByLabel("Найти запуск", new() { Exact = true }).FillAsync("Поиск 02");
+            await Assertions.Expect(page.Locator(".history-table tbody tr")).ToHaveCountAsync(1);
+            await Assertions.Expect(page.Locator(".history-table tbody tr")).ToContainTextAsync("В очереди");
+            await page.GetByLabel("Найти запуск", new() { Exact = true }).FillAsync("");
+            await Assertions.Expect(page.Locator(".history-table tbody tr")).ToHaveCountAsync(50);
             await page.ScreenshotAsync(new() { Path = Path.Combine(output, "history-1720.png"), FullPage = true });
             await page.GetByLabel("Результат запуска", new() { Exact = true }).SelectOptionAsync("attention");
             await Assertions.Expect(page.Locator(".history-table tbody tr")).ToHaveCountAsync(1);
@@ -178,11 +234,31 @@ public sealed class ParsingWorkspaceBrowserTests
                 foreach(string tab in Tabs)
                 {
                     await page.GetByRole(AriaRole.Tab, new() { Name = tab }).ClickAsync();
-                    await page.ScreenshotAsync(new() { Path = Path.Combine(output, $"{Array.IndexOf(Tabs, tab)}-{width}.png"), FullPage = true });
+                    await Assertions.Expect(page.GetByRole(AriaRole.Tab, new() { Name = tab })).ToHaveAttributeAsync("aria-selected", "true");
+                    await page.WaitForTimeoutAsync(150);
+                    await page.ScreenshotAsync(new() { Path = Path.Combine(output, $"{Array.IndexOf(Tabs, tab)}-{width}.png") });
                     string geometry = await page.EvaluateAsync<string>("()=>JSON.stringify([...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1).slice(0,12).map(e=>({tag:e.tagName,css:typeof e.className==='string'?e.className:'svg',width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right})))");
                     Assert.IsFalse(await page.EvaluateAsync<bool>("()=>document.documentElement.scrollWidth>innerWidth"), $"Overflow at {width}: {tab}; {geometry}");
                 }
             }
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Зоны поиска" }).ClickAsync();
+            await page.GetByLabel("Найти зону", new() { Exact = true }).FillAsync("");
+            await Assertions.Expect(page.Locator(".zones-table tbody tr")).ToHaveCountAsync(70);
+            Assert.AreEqual("none", await zoneViewport.EvaluateAsync<string>("e=>getComputedStyle(e).maxHeight"));
+            await page.EvaluateAsync("()=>window.scrollTo(0,1700)");
+            await page.WaitForTimeoutAsync(250);
+            double mobilePosition = await page.EvaluateAsync<double>("()=>scrollY");
+            Assert.IsTrue(mobilePosition > 1500);
+            string mobileAnchor = await zoneViewport.EvaluateAsync<string>("e=>[...e.querySelectorAll('tbody tr')].find(r=>r.getBoundingClientRect().bottom>130).dataset.rowKey");
+            double mobileOffset = await page.Locator($".zones-table tr[data-row-key='{mobileAnchor}']").EvaluateAsync<double>("e=>e.getBoundingClientRect().top");
+            await page.ScreenshotAsync(new() { Path = Path.Combine(output, "zones-native-scroll-390.png") });
+            await page.ReloadAsync();
+            await Assertions.Expect(page.Locator("[data-list-ready='true']")).ToHaveCountAsync(1);
+            await Assertions.Expect(page.Locator(".zones-table tbody tr")).ToHaveCountAsync(70);
+            await page.WaitForTimeoutAsync(350);
+            // A transient success notice disappears on reload; preserve the viewed row, not the old pixel count.
+            Assert.AreEqual(mobileOffset, await page.Locator($".zones-table tr[data-row-key='{mobileAnchor}']").EvaluateAsync<double>("e=>e.getBoundingClientRect().top"), 3);
+            await page.ScreenshotAsync(new() { Path = Path.Combine(output, "zones-restored-390.png") });
             // Existing permissions remain authoritative; a fresh read removes operational tabs.
             await f.SetExplicitAccessAsync(f.ManagerEmployeeId, EmployeeAccessRules.NoAccess with { CollectionAccess = CollectionAccessLevel.Read });
             await page.ReloadAsync();

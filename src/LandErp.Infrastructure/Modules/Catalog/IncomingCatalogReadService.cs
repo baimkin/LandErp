@@ -42,7 +42,6 @@ public sealed class IncomingCatalogReadService(
                 .ReadAsync(subject, cancellationToken);
         var prepared = await IncomingCatalogSelection.PrepareAsync(db, context.OrganizationId, time.GetUtcNow(), filter, presets, cancellationToken);
         filter = prepared.Filter;
-        var baseFilter = filter.Base;
         var scope = filter.WorkingScope;
         bool archive = scope?.Mode == IncomingCatalogMode.Archive;
         var predicates = prepared.Predicates;
@@ -50,8 +49,6 @@ public sealed class IncomingCatalogReadService(
         var union = prepared.Union;
         var current = prepared.Current;
         var ContextFor = prepared.ContextFor;
-        var reviewedIds = prepared.ReviewedIds;
-        var pendingDuplicateListingIds = prepared.PendingDuplicateListingIds;
         var activeSlice = scope?.Slice;
         IQueryable<Listing> organizationItems = db.Listings.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId);
         // Each tile replaces only the page slice. Persisted preset criteria still participate in AND.
@@ -93,9 +90,48 @@ public sealed class IncomingCatalogReadService(
             else ungroupedCount = counts[groupOffset + index];
         IncomingCatalogFilterCounts? filterCounts = scope == null || archive || prepared.ParticipantTotal != null ? null
             : new(presets, presetCounts, filterGroupCounts, ungroupedCount, counts[allPresetsOffset], applicable.Length);
+        IncomingCatalogReadWindow window = await ReadWindowCoreAsync(db, context.OrganizationId, prepared, cancellationToken);
+
+        IncomingSearchGroupView[] groups = await db.SearchGroups.AsNoTracking()
+            .Where(item => item.OrganizationId == context.OrganizationId && item.Active)
+            .OrderBy(item => item.SortOrder).ThenBy(item => item.Name).ThenBy(item => item.Id)
+            .Select(item => new IncomingSearchGroupView(item.Id, item.Name, item.SortOrder,
+                item.OwnerEmployeeId, effective.CanManageAllSearchGroups
+                    || effective.Settings.CanManageSearchGroups && item.OwnerEmployeeId == effective.EmployeeId))
+            .ToArrayAsync(cancellationToken);
+        IncomingSearchConfigurationView[] searches = await db.SearchConfigurations.AsNoTracking()
+            .Where(item => item.OrganizationId == context.OrganizationId && item.Enabled)
+            .OrderBy(item => item.Label).ThenBy(item => item.Id)
+            .Select(item => new IncomingSearchConfigurationView(item.Id, item.Label, item.Source, item.SearchGroupId))
+            .ToArrayAsync(cancellationToken);
+
+        return new(window.Items, counts[0], summary, groups, searches, window.Rows, filterCounts, prepared.ParticipantTotal);
+    }
+
+    public async Task<IncomingCatalogReadWindow> ReadWindowAsync(Subject subject, IncomingCatalogReadFilter filter,
+        CancellationToken cancellationToken)
+    {
+        EffectiveEmployeeAccess effective = await RequireReadAsync(subject, cancellationToken);
+        await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
+        IReadOnlyList<IncomingFilterPresetView> presets = filter.WorkingScope?.Mode != IncomingCatalogMode.SavedFilters ? []
+            : await (filterPresets ?? throw new InvalidOperationException("Saved-filter service is required."))
+                .ReadAsync(subject, cancellationToken);
+        var prepared = await IncomingCatalogSelection.PrepareAsync(db, effective.OrganizationContext.OrganizationId,
+            time.GetUtcNow(), filter, presets, cancellationToken);
+        return await ReadWindowCoreAsync(db, effective.OrganizationContext.OrganizationId, prepared, cancellationToken);
+    }
+
+    private static async Task<IncomingCatalogReadWindow> ReadWindowCoreAsync(LandErpDbContext db, Guid organizationId,
+        IncomingCatalogSelection prepared, CancellationToken cancellationToken)
+    {
+        var filter = prepared.Filter;
+        var baseFilter = filter.Base;
+        var current = prepared.Current;
+        var reviewedIds = prepared.ReviewedIds;
+        var pendingDuplicateListingIds = prepared.PendingDuplicateListingIds;
+        IQueryable<Listing> organizationItems = db.Listings.AsNoTracking().Where(item => item.OrganizationId == organizationId);
         IQueryable<Listing> query = organizationItems.Where(current);
         string[] searchTerms = SearchTerms(baseFilter.Text);
-        int total = counts[0];
         IOrderedQueryable<Listing> ordered = (filter.SortField, filter.SortDirection) switch
         {
             (IncomingCatalogSortField.PricePerSotka, IncomingCatalogSortDirection.Ascending) => query
@@ -119,7 +155,7 @@ public sealed class IncomingCatalogReadService(
 
         var commentRows = await (from comment in db.ListingComments.AsNoTracking()
                                  join type in db.ListingCommentTypes.AsNoTracking() on comment.CommentTypeId equals type.Id
-                                 where comment.OrganizationId == context.OrganizationId && ids.Contains(comment.ListingId)
+                                 where comment.OrganizationId == organizationId && ids.Contains(comment.ListingId)
                                  orderby type.SortOrder, type.Name, type.Id
                                  select new { comment.ListingId, Comment = new ListingCommentPreview(
                                      comment.Id, comment.CommentTypeId, type.Name, comment.Text) })
@@ -140,7 +176,7 @@ public sealed class IncomingCatalogReadService(
             .Select(item => item.ObjectGroupId!.Value).Distinct().ToArray();
         Dictionary<Guid, int> groupCounts = pageGroupIds.Length == 0
             ? []
-            : await db.Listings.AsNoTracking().Where(item => item.OrganizationId == context.OrganizationId
+            : await db.Listings.AsNoTracking().Where(item => item.OrganizationId == organizationId
                     && item.ObjectGroupId != null && pageGroupIds.Contains(item.ObjectGroupId.Value))
                 .GroupBy(item => item.ObjectGroupId!.Value)
                 .ToDictionaryAsync(group => group.Key, group => group.Count(), cancellationToken);
@@ -148,7 +184,7 @@ public sealed class IncomingCatalogReadService(
         var searchRows = await (from observation in db.ListingObservations.AsNoTracking()
                                 join job in db.CollectionJobs.AsNoTracking() on observation.JobId equals job.Id
                                 join search in db.SearchConfigurations.AsNoTracking() on job.SearchId equals search.Id
-                                where ids.Contains(observation.ListingId) && search.OrganizationId == context.OrganizationId
+                                where ids.Contains(observation.ListingId) && search.OrganizationId == organizationId
                                 select new { observation.ListingId, observation.ObservedAt, SearchId = search.Id, search.Label })
             .ToArrayAsync(cancellationToken);
         var searchByItem = searchRows.GroupBy(item => item.ListingId)
@@ -198,20 +234,7 @@ public sealed class IncomingCatalogReadService(
             return CatalogView(item, link?.Id, link?.BusinessNumber, link?.StageId, objectGroupMemberCount);
         }).ToArray();
 
-        IncomingSearchGroupView[] groups = await db.SearchGroups.AsNoTracking()
-            .Where(item => item.OrganizationId == context.OrganizationId && item.Active)
-            .OrderBy(item => item.SortOrder).ThenBy(item => item.Name).ThenBy(item => item.Id)
-            .Select(item => new IncomingSearchGroupView(item.Id, item.Name, item.SortOrder,
-                item.OwnerEmployeeId, effective.CanManageAllSearchGroups
-                    || effective.Settings.CanManageSearchGroups && item.OwnerEmployeeId == effective.EmployeeId))
-            .ToArrayAsync(cancellationToken);
-        IncomingSearchConfigurationView[] searches = await db.SearchConfigurations.AsNoTracking()
-            .Where(item => item.OrganizationId == context.OrganizationId && item.Enabled)
-            .OrderBy(item => item.Label).ThenBy(item => item.Id)
-            .Select(item => new IncomingSearchConfigurationView(item.Id, item.Label, item.Source, item.SearchGroupId))
-            .ToArrayAsync(cancellationToken);
-
-        return new(views, total, summary, groups, searches, rows, filterCounts, prepared.ParticipantTotal);
+        return new(views, rows);
     }
 
     public async Task<IncomingCatalogDetailRead> ReadDetailAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken)

@@ -1,3 +1,61 @@
+# Публикация доработок LandErp за 19.11.2026
+
+Прямой запрос владельца: опубликовать точечный отказ входящих, контроль архивных зон и технические логи Server/Worker. Снимок основан на GitHub main `1480144c8939e2cedc5bd83ec4faba99bf618a04`.
+
+Gate: `GATE-NOV19-PUBLICATION.md`. Отчёт: `reports/NOV19_PUBLICATION_REPORT.md`.
+
+---
+
+# Завершённая задача этого чата — PRODUCTION-LOGGING
+
+19.11.2026 разрешены дневные логи по месяцам, предел 10 МиБ, retention 7 суток,
+безопасная диагностика следующего сбоя общения и поиск по incident ID.
+Required reading: README → START_HERE → ACTIVE_TASK → GATE-PRODUCTION-LOGGING.md
+→ PRODUCTION_RUNBOOK (запуск/диагностика), FP-004 §§9,12,14,15 → runner/deploy,
+Server/Worker/WorkspaceComponent/CaseCommunication/tests. Текущая ветка и всё
+накопленное, Parser и preview сохраняются. Без schema/packages/commit/push/
+production и удаления реальных логов. Отчёт reports/PRODUCTION_LOGGING_REPORT.md.
+Реализовано локально: Windows PowerShell 5.1 runner/helper, ротация 10 МиБ по
+московским дням/месяцам, 7 суток last-write retention, безопасный поиск и UTC JSON.
+Event 1101 дополнен кодами/SQLSTATE/объектами БД/длительностью/CommandId общения.
+Release clean; 35 реальных PowerShell/helper/launcher и 26 .NET проверок Passed.
+Production/Git не изменялись; причина прежнего сбоя общения без данных не заявляется.
+
+---
+# Завершённая задача этого чата — INCOMING-QUICK-DISMISS
+
+19.11.2026 владелец разрешил точечное удаление строки после подтверждения
+«Не подходит», без полной перезагрузки, с прокруткой/следующим/пагинацией.
+Gate GATE-INCOMING-QUICK-DISMISS.md. Required reading: README → START_HERE →
+ACTIVE_TASK → Gate → ранее прочитанные incoming pagination/screen01/UI/tokens,
+FP-004 §§3,9,12–15 → IncomingCatalogV2/WorkspaceComponent/read contracts и tests.
+Без схемы/packages/Parser/массовой архивации/смены прав/commit/push/production.
+Сохранить предыдущие доработки, накопленное и preview. Проверить лёгкое обновление,
+ошибки/unknown, порядок/границы страниц/следующее/скролл и отсутствие тяжёлых read.
+Отчёт reports/INCOMING_QUICK_DISMISS_REPORT.md.
+Реализовано локальное подтверждённое исключение и ограниченная подгрузка строк,
+без общего read/рынка; сохранены прокрутка, следующий, пагинация и выбор.
+Release — clean; 25 предварительных проверок Passed, 21 адресная final-build
+Passed, заключительный localhost browser — 1 Passed (47s). Позиция/DOM,
+границы страниц, New, rejected/unknown, восстановление после сбоя проверены.
+Убрано перекрывающее пагинацию уведомление успеха. Production/Git не изменялись.
+
+---
+# Завершённая задача этого чата — PARSING-ARCHIVE-GUARD
+
+19.11.2026 владелец разрешил исключить архивные зоны из текущих ошибок и прямо
+проверять архив при enqueue/schedule/retry/claim, сохраняя историю.
+Gate GATE-PARSING-ARCHIVE-GUARD.md. Required reading: README → START_HERE →
+ACTIVE_TASK → Gate → ранее прочитанные Retry/Large-Lists/UI/screen07/tokens,
+FP-004 §§3,9,12–15 → Collection/UI/tests. Без schema/packages/Parser переписывания,
+commit/push/production. Сохранить накопленное, исправление кнопок и preview.
+Отчёт reports/PARSING_ARCHIVE_GUARD_REPORT.md. Проверить архив при enabled=true,
+старые задания, права, активные/без группы, ошибки/счётчики и доступную историю.
+Статус: реализовано локально. Release 0 warnings/errors, 37/37 .NET и 11 JS
+проверок Passed; PostgreSQL/фактический HTML/browser-регрессия пройдены.
+Commit/push/deploy не выполнялись; следующий Gate не начат.
+
+---
 # Задача этого чата — PARSING-LISTS-PUBLICATION
 
 16.11.2026 владелец разрешил commit/push в main доработки больших списков и

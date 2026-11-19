@@ -35,6 +35,7 @@ if (Test-Path -LiteralPath $releaseDirectory) {
 $runnerDirectory = Join-Path $StateRoot 'bin'
 New-Item -ItemType Directory -Force -Path $runnerDirectory | Out-Null
 $runner = Join-Path $runnerDirectory 'Run-ProductionProcess.ps1'
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'ProductionLogRunner.cs') -Destination (Join-Path $runnerDirectory 'ProductionLogRunner.cs') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Run-ProductionProcess.ps1') -Destination $runner -Force
 $currentFile = Join-Path $StateRoot 'current-release.json'
 $previousFile = Join-Path $StateRoot 'previous-release.json'

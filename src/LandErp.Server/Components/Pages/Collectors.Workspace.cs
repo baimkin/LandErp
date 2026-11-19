@@ -34,16 +34,17 @@ public partial class Collectors
     private static CollectionResultPresentation Result(CollectionJobView job) => CollectionResultPresentation.From(job);
     private static CollectionRunView? IssueRun(SearchView search) => search.ActiveRun is { } active && Result(active).IsIssue ? active : search.LastRun;
     private static bool HasIssue(SearchView search) => Result(IssueRun(search)).IsIssue;
-    private SearchView[] IssueSearches => view?.Searches.Where(HasIssue).OrderBy(s => Result(IssueRun(s)).Category == "area" ? 0 : 1)
+    private bool IsArchivedSearch(SearchView search) => search.GroupId is { } id && view?.Groups.Any(g => g.Id == id && !g.Active) == true;
+    private SearchView[] IssueSearches => view?.Searches.Where(s => !IsArchivedSearch(s) && HasIssue(s)).OrderBy(s => Result(IssueRun(s)).Category == "area" ? 0 : 1)
         .ThenByDescending(s => IssueRun(s)?.CompletedAt ?? IssueRun(s)?.CreatedAt).ToArray() ?? [];
     private IEnumerable<SearchView> VisibleIssues => IssueSearches.Where(s => issueFilter == "all" || Result(IssueRun(s)).Category == issueFilter);
     private int IssueCount(string category) => IssueSearches.Count(s => category == "all" || Result(IssueRun(s)).Category == category);
     private static string IssueFilterLabel(string key) => key switch { "area" => "Область", "access" => "Доступ", "collection" => "Сбор", _ => "Все" };
     private static string DisplayName(SearchView search) => search.GroupId.HasValue ? search.Group : search.Label;
     private static bool Active(SearchView search) => search.ActiveRun is not null;
-    private bool CanRun(SearchView search) => CanManageCollection && !Busy && databaseReady && search.Enabled && !Active(search);
+    private bool CanRun(SearchView search) => CanManageCollection && !Busy && databaseReady && search.Enabled && !Active(search) && !IsArchivedSearch(search);
     private bool CanEdit(SearchView search) => CanManageCollection && !Busy && databaseReady && !Active(search);
-    private static string RunDisabledReason(SearchView search) => Active(search) ? "Поиск уже в очереди или выполняется" : !search.Enabled ? "Сначала включите поиск в настройках" : "Запустить сейчас";
+    private string RunDisabledReason(SearchView search) => IsArchivedSearch(search) ? "Зона в архиве. Новые запуски недоступны." : Active(search) ? "Поиск уже в очереди или выполняется" : !search.Enabled ? "Сначала включите поиск в настройках" : "Запустить сейчас";
     private SearchView? FindSearch(Guid id) => view?.Searches.FirstOrDefault(s => s.Id == id);
     private SearchView[] WorkspaceSearches => view?.Searches.Where(s => Matches(s)
         && (sourceFilter == "all" || s.Source.ToString() == sourceFilter)

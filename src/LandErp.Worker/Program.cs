@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 LoadExternalConfiguration(builder);
 builder.Logging.ClearProviders();
-builder.Logging.AddJsonConsole();
+builder.Logging.AddJsonConsole(options => { options.IncludeScopes = true; options.UseUtcTimestamp = true; options.TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'"; });
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.None);
 builder.Services.AddLandErpPersistence(builder.Configuration);
 builder.Services.AddLandErpCollection();

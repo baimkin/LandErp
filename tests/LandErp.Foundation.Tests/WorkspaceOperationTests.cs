@@ -6,12 +6,68 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Npgsql;
 
 namespace LandErp.Foundation.Tests;
 
 [TestClass]
 public sealed class WorkspaceOperationTests
 {
+    [TestMethod]
+    public async Task DatabaseFailureLogsStableCommandCauseAndDurationWhileRetryHasNewIncident()
+    {
+        var workspace = new ProbeWorkspace { Command = Guid.CreateVersion7() };
+        await workspace.RefreshAsync();
+        const string secret = "SYNTHETIC_PROVIDER_SECRET";
+        var failure = new DbUpdateException(secret, new PostgresException(secret, "ERROR", "ERROR", "23505",
+            detail: secret, hint: secret, tableName: "case_negotiations", columnName: "id", constraintName: "pk_case_negotiations"));
+        Assert.IsFalse(await workspace.SubmitAsync(async () => { await Task.Delay(20); throw failure; }));
+        string first = workspace.RequestId;
+        Assert.IsFalse(await workspace.SubmitAsync(() => Task.FromException(failure)));
+        Assert.AreNotEqual(first, workspace.RequestId);
+        Assert.AreEqual(2, workspace.Diagnostics.Entries.Count);
+        foreach (var entry in workspace.Diagnostics.Entries)
+        {
+            Assert.AreEqual(workspace.Command, entry.Fields["CommandId"]);
+            Assert.AreEqual("PG_23505", entry.Fields["DiagnosticCode"]);
+            Assert.AreEqual("23505", entry.Fields["SqlState"]);
+            Assert.AreEqual("PostgresException", entry.Fields["InnerFailureType"]);
+            Assert.AreEqual("pk_case_negotiations", entry.Fields["Constraint"]);
+            Assert.AreEqual("case_negotiations", entry.Fields["Table"]);
+            Assert.AreEqual("id", entry.Fields["Column"]);
+            Assert.IsNull(entry.Exception);
+            Assert.IsFalse(entry.Message.Contains(secret, StringComparison.Ordinal));
+        }
+        Assert.IsTrue((long)workspace.Diagnostics.Entries[0].Fields["ElapsedMs"]! >= 15);
+        Assert.AreEqual(WorkspaceWriteOutcome.Unknown, workspace.Outcome);
+        Assert.IsFalse(workspace.Failure!.Contains(secret, StringComparison.Ordinal));
+    }
+    [TestMethod]
+    public async Task BoundedRefreshRunsOnlyAfterCommitInsideBusyWithoutFullRead()
+    {
+        var workspace = new ProbeWorkspace();
+        await workspace.RefreshAsync();
+        bool committed = false, patched = false;
+        Assert.IsTrue(await workspace.SubmitWithRefreshAsync(() => { committed = true; return Task.CompletedTask; }, () =>
+        {
+            Assert.IsTrue(committed);
+            Assert.IsTrue(workspace.IsBusy);
+            patched = true;
+            return Task.CompletedTask;
+        }));
+        Assert.IsTrue(patched);
+        Assert.AreEqual(1, workspace.ReadCount);
+        Assert.IsFalse(workspace.NeedsRefresh);
+        patched = false;
+        Assert.IsFalse(await workspace.SubmitWithRefreshAsync(() => throw new IOException("Unknown"), () =>
+        { patched = true; return Task.CompletedTask; }));
+        Assert.IsFalse(patched);
+        Assert.AreEqual(WorkspaceWriteOutcome.Unknown, workspace.Outcome);
+        Assert.IsTrue(await workspace.SubmitWithRefreshAsync(() => Task.CompletedTask, () => throw new IOException("Read failed")));
+        Assert.AreEqual(WorkspaceWriteOutcome.Committed, workspace.Outcome);
+        Assert.IsTrue(workspace.NeedsRefresh);
+        Assert.AreEqual(1, workspace.ReadCount);
+    }
     [TestMethod]
     public async Task CommittedWriteSurvivesReadFailureAndReadOnlyRetry()
     {
@@ -268,6 +324,8 @@ public sealed class WorkspaceOperationTests
         public StubAuthentication AuthenticationStub { get; } = new();
         public RecordingLogger Diagnostics { get; } = new();
         public Func<Task> Read { get; set; } = () => Task.CompletedTask;
+        public Guid? Command { get; set; }
+        protected override Guid? DiagnosticCommandId => Command;
         public int ReadCount { get; private set; }
         public ProbeWorkspace() { Authentication = AuthenticationStub; Logger = Diagnostics; }
         public WorkspaceWriteOutcome Outcome => WriteOutcome;
@@ -280,6 +338,7 @@ public sealed class WorkspaceOperationTests
         public string RequestId => OperationId;
         public Task RefreshAsync() => ReloadAsync();
         public Task<bool> SubmitAsync(Func<Task> command) => ExecuteConfirmedAsync(command);
+        public Task<bool> SubmitWithRefreshAsync(Func<Task> command, Func<Task> refresh) => ExecuteConfirmedAsync(command, refreshAfterCommit: refresh);
         public Task SubmitLegacyAsync(Func<Task> command) => ExecuteAsync(command);
         public Task UploadAsync(Func<Subject,string,Task> action)=>ExecuteUploadStepAsync(action);
         protected override Task ReadAsync() { ReadCount++; return Read(); }
@@ -294,7 +353,7 @@ public sealed class WorkspaceOperationTests
             ? Task.FromException<AuthenticationState>(failure) : Task.FromResult(state);
     }
 
-    private sealed record Diagnostic(string Message, Exception? Exception);
+    private sealed record Diagnostic(string Message, Exception? Exception, Dictionary<string, object?> Fields);
 
     private sealed class RecordingLogger : ILogger<WorkspaceComponent>
     {
@@ -306,7 +365,8 @@ public sealed class WorkspaceOperationTests
             Func<TState, Exception?, string> formatter)
         {
             if (ThrowOnLog) throw new InvalidOperationException("Synthetic logger failure");
-            Entries.Add(new(formatter(state, exception), exception));
+            Entries.Add(new(formatter(state, exception), exception,
+                state is IEnumerable<KeyValuePair<string, object?>> fields ? fields.ToDictionary() : []));
         }
     }
 }

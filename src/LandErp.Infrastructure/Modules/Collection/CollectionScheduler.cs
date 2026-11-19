@@ -32,7 +32,8 @@ public sealed class CollectionScheduler(IDbContextFactory<LandErpDbContext> fact
                     bool activeRetry = await db.CollectionJobs.AnyAsync(item => item.SearchId == previous.SearchId
                         && (item.State == CollectionJobState.Pending || item.State == CollectionJobState.Leased), cancellationToken);
                     previous.RetryAt = null;
-                    if (retrySearch.Enabled && !activeRetry && !await db.CollectionJobs.AnyAsync(item => item.RetryOfJobId == previous.Id, cancellationToken))
+                    if (retrySearch.Enabled && await CollectionSearchAvailability.HasActiveGroupAsync(db, retrySearch, cancellationToken)
+                        && !activeRetry && !await db.CollectionJobs.AnyAsync(item => item.RetryOfJobId == previous.Id, cancellationToken))
                     {
                         db.CollectionJobs.Add(new ServerCollectionJob
                         {
@@ -47,9 +48,12 @@ public sealed class CollectionScheduler(IDbContextFactory<LandErpDbContext> fact
                     continue;
                 }
                 var due = await db.SearchConfigurations.FromSqlInterpolated($"""
-                    SELECT * FROM collection.search_configurations
-                    WHERE enabled=true AND next_run_at IS NOT NULL AND next_run_at<={now}
-                    ORDER BY next_run_at LIMIT 1 FOR UPDATE SKIP LOCKED
+                    SELECT s.* FROM collection.search_configurations s
+                    WHERE s.enabled=true AND s.next_run_at IS NOT NULL AND s.next_run_at<={now}
+                      AND (s.search_group_id IS NULL OR EXISTS (
+                          SELECT 1 FROM collection.search_groups g
+                          WHERE g.id=s.search_group_id AND g.organization_id=s.organization_id AND g.active=true))
+                    ORDER BY s.next_run_at LIMIT 1 FOR UPDATE OF s SKIP LOCKED
                     """).ToListAsync(cancellationToken);
                 if (due.Count == 0)
                 {

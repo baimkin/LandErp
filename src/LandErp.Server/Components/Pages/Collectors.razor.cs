@@ -207,6 +207,7 @@ public partial class Collectors : IAsyncDisposable
         Administration.ArchiveGroupAsync(CurrentSubject, group.Id, group.Revision, Correlation(), lifetime.Token));
     private async Task EnqueueAsync(Guid id)
     {
+        if (FindSearch(id) is { } search && IsArchivedSearch(search)) return;
         await ExecuteAsync(() => Administration.EnqueueAsync(CurrentSubject, id, Correlation(), lifetime.Token));
         if (Error is null && !Forbidden) Success = "Сбор добавлен в очередь. Его возьмёт свободный совместимый парсер.";
     }

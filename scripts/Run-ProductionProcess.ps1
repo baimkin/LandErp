@@ -19,10 +19,6 @@ $env:LANDERP_CONFIG_FILE = $configFile
 if ($Service -eq 'Server') { $env:ASPNETCORE_URLS = $ServerUrl } else { Remove-Item Env:ASPNETCORE_URLS -ErrorAction SilentlyContinue }
 $logDirectory = Join-Path $StateRoot 'logs'
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
-$stamp = [DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')
-$suffix = [Guid]::NewGuid().ToString('N').Substring(0,8)
-$prefix = $Service.ToLowerInvariant()
-$outLog = Join-Path $logDirectory "$prefix-$stamp-$suffix.out.log"
-$errLog = Join-Path $logDirectory "$prefix-$stamp-$suffix.err.log"
-$process = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe -Parent) -PassThru -Wait -RedirectStandardOutput $outLog -RedirectStandardError $errLog
-exit $process.ExitCode
+Add-Type -Path (Join-Path $PSScriptRoot 'ProductionLogRunner.cs')
+$exitCode = [LandErp.Production.LogProcess]::Run($exe, (Split-Path $exe -Parent), $logDirectory, $Service.ToLowerInvariant())
+exit $exitCode

@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Diagnostics;
+using LandErp.Server.Foundation;
 
 namespace LandErp.Server.Components;
 
@@ -14,10 +16,8 @@ public enum WorkspaceWriteOutcome { None, NotSent, Rejected, Unknown, Committed 
 
 public abstract class WorkspaceComponent : ComponentBase
 {
-    private static readonly Action<ILogger, string, string, string, string, string, Exception?> LogFailure =
-        LoggerMessage.Define<string, string, string, string, string>(LogLevel.Warning,
-            new EventId(1101, "WORKSPACE_OPERATION_FAILED"),
-            "Workspace operation {OperationId}; phase {Phase}; component {Component}; action {Action}; failure type {FailureType}");
+    private long operationStarted;
+    protected virtual Guid? DiagnosticCommandId => null;
 
     private static readonly Action<ILogger, string, string, bool, Exception?> LogStorageFailure =
         LoggerMessage.Define<string, string, bool>(LogLevel.Warning, new EventId(1102, "WORKSPACE_STORAGE_FAILED"),
@@ -110,6 +110,7 @@ public abstract class WorkspaceComponent : ComponentBase
         Loading = true; Error = null; Forbidden = false;
         if (!RefreshRequired) Success = null;
         OperationId = Guid.CreateVersion7().ToString();
+        operationStarted = Stopwatch.GetTimestamp();
         try
         {
             CurrentSubject = PermissionAuthorization.SubjectFrom((await Authentication.GetAuthenticationStateAsync()).User);
@@ -136,13 +137,15 @@ public abstract class WorkspaceComponent : ComponentBase
     protected Task ExecuteAsync(Func<Task> action, [CallerMemberName] string operation = "")
         => ExecuteConfirmedAsync(action, operation);
 
-    protected async Task<bool> ExecuteConfirmedAsync(Func<Task> action, [CallerMemberName] string operation = "")
+    protected async Task<bool> ExecuteConfirmedAsync(Func<Task> action, [CallerMemberName] string operation = "",
+        Func<Task>? refreshAfterCommit = null)
     {
         if (Busy || Loading) return false;
         Busy = true; Error = null; Success = null; Forbidden = false;
         WriteOutcome = WorkspaceWriteOutcome.NotSent;
         LastWriteWasConflict = false;
         OperationId = Guid.CreateVersion7().ToString();
+        operationStarted = Stopwatch.GetTimestamp();
         try
         {
             try
@@ -200,7 +203,9 @@ public abstract class WorkspaceComponent : ComponentBase
             Success = "Изменения сохранены";
             try
             {
-                await ReadAsync();
+                // A caller with a bounded local projection may replace the full screen refresh.
+                // Keep it inside Busy and after acknowledgement; a refresh failure never resends the command.
+                await (refreshAfterCommit?.Invoke() ?? ReadAsync());
                 RefreshRequired = false;
             }
             catch (Exception exception)
@@ -242,17 +247,21 @@ public abstract class WorkspaceComponent : ComponentBase
 
     private string FailureMessage(Exception exception, string phase, string operation, string message)
     {
-        WriteDiagnostic(OperationId, phase, operation, exception);
+        WriteDiagnostic(OperationId, phase, operation, exception,
+            operationStarted == 0 ? null : (long)Stopwatch.GetElapsedTime(operationStarted).TotalMilliseconds);
         return $"{message} Номер обращения: {OperationId}.";
     }
 
-    private void WriteDiagnostic(string id, string phase, string operation, Exception exception)
+    private void WriteDiagnostic(string id, string phase, string operation, Exception exception, long? elapsedMs = null)
     {
         // Never pass exception/InnerException, messages, user forms, file bytes, URLs or
-        // credentials to ILogger. Exception type + phase + operation identify the boundary.
+        // credentials to ILogger. Only allowlisted structural metadata identifies the failure.
         try
         {
-            LogFailure(Logger, id, phase, GetType().Name, operation, exception.GetType().Name, null);
+            var details = WorkspaceFailureDiagnostics.Inspect(exception);
+            WorkspaceFailureLog.Write(Logger, id, phase, GetType().Name, operation, exception.GetType().Name,
+                details.Code, details.InnerFailureType, details.SqlState, details.Constraint, details.Table,
+                details.Column, details.Transient, elapsedMs, DiagnosticCommandId);
             if (exception is FileStorageException storageError) LogStorageFailure(Logger, id, SafeStorageCode(storageError), storageError.Retryable, null);
         }
         catch { /* A logging-provider failure must not change the business operation's outcome. */ }

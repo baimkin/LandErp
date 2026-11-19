@@ -76,6 +76,8 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         var rows = await db.SearchConfigurations.FromSqlInterpolated(
             $"SELECT * FROM collection.search_configurations WHERE id={command.SearchId} AND organization_id={agent.OrganizationId} FOR UPDATE").ToListAsync(cancellationToken);
         SearchConfiguration search = rows.SingleOrDefault() ?? throw new CollectorProtocolException(CollectorErrorCodes.WorkNotAllowed);
+        if (!await CollectionSearchAvailability.HasActiveGroupAsync(db, search, cancellationToken))
+            throw new CollectorProtocolException("SEARCH_GROUP_ARCHIVED");
         if (!search.Enabled) throw new CollectorProtocolException("SEARCH_DISABLED");
         // A repeated click or lost response must not create another active job.
         if (!await db.CollectionJobs.AnyAsync(j => j.SearchId == search.Id && (j.State == CollectionJobState.Pending || j.State == CollectionJobState.Leased), cancellationToken))
@@ -248,7 +250,7 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         DateTimeOffset now = time.GetUtcNow();
         string[] capabilities = agent.Capabilities.Split(',', StringSplitOptions.RemoveEmptyEntries);
         // AuthenticateAsync holds a row lock on the Agent. Concurrent claims from the same machine
-        // therefore serialize here and always return its one still-valid lease.
+        // therefore serialize here and reuse its one still-valid lease, subject to the archive guard.
         var active = await db.CollectionJobs.FromSqlInterpolated($"""
             SELECT * FROM collection.jobs
             WHERE agent_id={agent.Id} AND state='Leased' AND lease_expires_at>{now}
@@ -259,13 +261,20 @@ public sealed class CollectorGateway(IDbContextFactory<LandErpDbContext> factory
         {
             agent.LastHeartbeatAt = now;
             SearchConfiguration activeSearch = await db.SearchConfigurations.SingleAsync(item => item.Id == active[0].SearchId, cancellationToken);
+            bool activeGroup = await CollectionSearchAvailability.HasActiveGroupAsync(db, activeSearch, cancellationToken);
             await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
-            return Work(active[0], activeSearch);
+            // Do not redeliver archived work after a reconnect. Its existing lease may still
+            // finish/submit; no second job is assigned to the same agent until that lease ends.
+            return activeGroup ? Work(active[0], activeSearch) : null;
         }
         // Shared work is assigned only here. SKIP LOCKED prevents two compatible agents leasing the same job.
         var jobs = await db.CollectionJobs.FromSqlInterpolated($"""
             SELECT j.* FROM collection.jobs j JOIN collection.search_configurations s ON s.id=j.search_id
-            WHERE j.organization_id={agent.OrganizationId} AND s.enabled=true AND s.source=ANY({capabilities})
+            WHERE j.organization_id={agent.OrganizationId} AND s.organization_id={agent.OrganizationId}
+              AND s.enabled=true AND s.source=ANY({capabilities})
+              AND (s.search_group_id IS NULL OR EXISTS (
+                  SELECT 1 FROM collection.search_groups g
+                  WHERE g.id=s.search_group_id AND g.organization_id=s.organization_id AND g.active=true))
               AND (j.state='Pending' OR (j.state='Leased' AND j.lease_expires_at<={now}))
             ORDER BY j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED
             """).ToListAsync(cancellationToken);

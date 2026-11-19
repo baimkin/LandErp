@@ -182,8 +182,59 @@ B4-04 must sign in through public HTTPS, restart Server and confirm expected aut
 
 ## 9. Logs
 
-Each process launch writes separate stdout/stderr files to `C:\ProgramData\LandErp\logs`.
-Use those together with the `/collectors` operational-health block.
+Logs stay under `<StateRoot>\logs` (default `C:\ProgramData\LandErp\logs`).
+Server and Worker have separate stdout/stderr streams. The installed runner uses
+`ProductionLogRunner.cs` beside `Run-ProductionProcess.ps1`; the deployment script
+copies both files into `<StateRoot>\bin`. No new service/package is required.
+
+Files are UTF-8 without BOM, grouped by **Moscow calendar month/day**, for example:
+
+```text
+C:\ProgramData\LandErp\logs\2026-11\server-2026-11-19-a1b2c3d4.001.out.log
+C:\ProgramData\LandErp\logs\2026-11\server-2026-11-19-a1b2c3d4.001.err.log
+```
+
+The random session distinguishes restarts; numbered parts never overwrite one
+another. Each file is at most **10 MiB (10,485,760 bytes)**. The runner switches
+parts at the limit and closes the previous day's files at midnight without
+restarting Server/Worker. No empty daily file is needed while the process is idle.
+An exceptional record larger than the limit spans parts without cutting UTF-8
+characters; ordinary JSON records stay together. Stdout/stderr are drained before
+the child exit code is returned. Existing Task Scheduler restart policy remains.
+
+Cleanup runs at startup (first runner cycle) and hourly. It removes only recognized,
+closed technical logs whose **last write is older than 7 x 24 hours**, including
+legacy `server/worker-yyyyMMdd-HHmmss-session.out/err.log` files at the root.
+Active files, other filenames/directories, reparse points/junctions and ERP
+database history are not removed. No recursive directory deletion is performed.
+Legacy files are neither truncated nor retroactively split: a large old file with
+recent writes stays until its seven-day retention expires. The total directory
+size depends on the last week's volume; 10 MiB is a per-file limit, not a total cap.
+
+JSON entries include UTC `Timestamp`; workspace failure EventId 1101 retains
+OperationId/Phase/Component/Action/FailureType and adds DiagnosticCode,
+InnerFailureType, SqlState, Constraint/Table/Column, Transient, ElapsedMs and
+CommandId where available. SQLSTATE distinguishes constraints (23505/23503/23502),
+privileges (42501), serialization/deadlock (40001/40P01), cancellation (57014), etc.
+Database timeouts and connection failures have distinct codes. Communication
+retries keep CommandId and receive a new incident OperationId. Provider messages,
+Detail/Hint/SQL/parameters, exception dumps and form content are not logged by this
+diagnostic. Unknown errors can still require reproduction; a cause is not inferred
+from the UI's generic warning alone.
+
+Search complete files, including old root files and new month folders:
+
+```powershell
+& 'C:\LandErp\scripts\Find-ProductionIncident.ps1' `
+    -Incident '01a1edd0-fcab-74b7-ba5e-8b62479b0338'
+```
+
+Use `-StateRoot` for a custom installation, `-MaxResults` (default 10) to bound the
+output. The search streams lines without `-Raw`, tail or a first-six-files cutoff.
+It emits only selected diagnostic fields, not entire raw log lines. No match is
+reported explicitly. Old entries may contain only the original type/boundary;
+the new details appear only after the updated Server is deployed.
+Use logs together with the `/collectors` operational-health block.
 
 ## 10. Rollback
 

@@ -65,6 +65,7 @@
     private readonly Draft draft = new();
     private readonly Dictionary<string,string> errors = [];
     private RecordCaseCommunication? pending;
+    protected override Guid? DiagnosticCommandId => pending?.Communication.CommandId;
     private CaseTextInput? textInput;
     private List<Material> materials = [];
     private bool initialized, saved, uploading, preparing;

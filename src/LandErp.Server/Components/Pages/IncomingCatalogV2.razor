@@ -18,10 +18,11 @@
 @inject NavigationManager Navigation
 @using LandErp.Application.Modules.Overview.Contracts
 @inject IGroupMarketService Markets
+@inject Microsoft.JSInterop.IJSRuntime IncomingJs
 
 <PageTitle>@(IsParticipants ? "Участники расчёта" : IsArchive ? "Архив объявлений" : "Входящие предложения") · LandErp</PageTitle>
 
-<div class="incoming-v2">
+<div class="incoming-v2" @ref="incomingRoot" data-quick-dismiss="@(CanDismissLocally ? "true" : "false")">
     <div class="v2-head">
         <div>
             <div class="v2-eyebrow">Первичный отбор</div>
@@ -278,7 +279,7 @@
                                 {
                                     IncomingCatalogRowRead? row = Row(item.Id);
                                     int completeness = Math.Clamp(row?.CompletenessPercent ?? 0, 0, 100);
-                                    <tr class="@RowTone(row) @(IsCalculationSelected(item.Id) ? "selected" : "")" @onclick="() => OpenDetailAsync(item.Id)">
+                                    <tr @key="item.Id" data-listing-id="@item.Id" class="@RowTone(row) @(IsCalculationSelected(item.Id) ? "selected" : "")" @onclick="() => OpenDetailAsync(item.Id)">
                                         @if (CanSelectRows)
                                         {
                                             <td class="selection-cell" @onclick:stopPropagation="true"><label class="selection-hit"><input type="checkbox" aria-label="@($"Выбрать {item.Title}")" checked="@IsCalculationSelected(item.Id)" disabled="@Busy" @onchange="e => SelectCalculationItem(item, e.Value is true)" /></label></td>
@@ -872,7 +873,8 @@
 
 @if (classificationOpen)
 {
-    <Modal Title="@DispositionLabel(classification)" OnClose="() => classificationOpen = false">
+    <Modal Title="@DispositionLabel(classification)" OnClose="() => { if (!Busy) classificationOpen = false; }">
+        @if (Error != null) { <p role="alert" class="form-error">@Error</p> }
         @if (classification == CatalogDisposition.Dismissed)
         {
             <label class="field"><span>Причина</span><select @bind="classificationCategory"><option>Цена</option><option>Площадь</option><option>Локация</option><option>Пропорции</option><option>Категория / ВРИ</option><option>Технические проблемы</option><option>Другое</option></select></label>
@@ -892,7 +894,7 @@
             <div data-todo-backend="TODO-BACKEND-INCOMING"><p>Подтверждённый человеком факт о реальном объекте.</p><label class="field"><span>Дата подтверждения</span><input type="date" disabled /></label><label class="field"><span>Источник</span><select disabled><option>Со слов продавца</option><option>Со слов агента</option><option>Другой подтверждённый источник</option></select></label><label class="field"><span>Цена сделки, ₽ (необязательно)</span><input inputmode="numeric" disabled /></label></div>
         }
         <label class="field"><span>Причина / подтверждение</span><InputTextArea @bind-Value="classificationReason" /></label>
-        <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" OnClick="() => classificationOpen = false" /><ActionButton Label="Подтвердить" Busy="Busy" OnClick="ClassifyAsync" /></div>
+        <div class="form-actions"><ActionButton Label="Отмена" Tone="quiet" Disabled="Busy" OnClick="() => classificationOpen = false" /><ActionButton Label="Подтвердить" Busy="Busy" OnClick="ClassifyAsync" /></div>
     </Modal>
 }
 
@@ -2249,10 +2251,16 @@
     private async Task ClassifyAsync()
     {
         if(!CanProcessIncoming)throw new AccessDeniedException();
+        if (Busy || Loading) return;
         Guid id = detail!.Item.Id;
         int currentIndex = CurrentItemIndex(id);
         Guid? preferredNextId = NextItemId(id);
         string reason = BuildClassificationReason();
+        if (classification == CatalogDisposition.Dismissed && CanDismissLocally)
+        {
+            await DismissLocallyAsync(id, detail.Item.Version, reason, currentIndex, preferredNextId);
+            return;
+        }
         await ExecuteAsync(() => Workspace.SetDispositionAsync(CurrentSubject,
             new(id, detail.Item.Version, classification, reason), Guid.CreateVersion7().ToString(), CancellationToken.None));
         if (Success != null)

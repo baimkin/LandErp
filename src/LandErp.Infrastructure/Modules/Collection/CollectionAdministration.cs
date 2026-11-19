@@ -337,6 +337,8 @@ public sealed partial class CollectionAdministration(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var searches = await db.SearchConfigurations.FromSqlInterpolated($"SELECT * FROM collection.search_configurations WHERE id={searchId} AND organization_id={context.OrganizationId} FOR UPDATE").ToListAsync(cancellationToken);
         SearchConfiguration search = searches.SingleOrDefault() ?? throw new AccessDeniedException();
+        if (!await CollectionSearchAvailability.HasActiveGroupAsync(db, search, cancellationToken))
+            throw new ArgumentException("Зона поиска в архиве или недоступна. Запуск запрещён.");
         if (!search.Enabled) throw new AccessDeniedException();
         if (await db.CollectionJobs.AnyAsync(item => item.SearchId == searchId && (item.State == CollectionJobState.Pending || item.State == CollectionJobState.Leased), cancellationToken))
             throw new ArgumentException("Для поиска уже есть активная работа.");

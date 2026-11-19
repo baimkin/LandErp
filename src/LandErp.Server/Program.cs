@@ -27,7 +27,7 @@ LoadExternalConfiguration(builder);
 if (builder.Environment.IsEnvironment("Local") || builder.Environment.IsEnvironment("Test"))
     builder.WebHost.UseStaticWebAssets();
 builder.Logging.ClearProviders();
-builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
+builder.Logging.AddJsonConsole(options => { options.IncludeScopes = true; options.UseUtcTimestamp = true; options.TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'"; });
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.None);
 builder.Services.AddLandErpPersistence(builder.Configuration);
 builder.Services.AddLandErpIdentity();

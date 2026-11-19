@@ -45,6 +45,9 @@ public sealed record IncomingCatalogReadPage(IReadOnlyList<CatalogItemView> Item
     IncomingCatalogReadSummary Summary, IReadOnlyList<IncomingSearchGroupView> SearchGroups,
     IReadOnlyList<IncomingSearchConfigurationView> SearchConfigurations,
     IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows, IncomingCatalogFilterCounts? FilterCounts = null, int? ParticipantTotal = null);
+// A bounded projection for filling a changed page; deliberately excludes facet/market aggregates.
+public sealed record IncomingCatalogReadWindow(IReadOnlyList<CatalogItemView> Items,
+    IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows);
 public sealed record IncomingCatalogFilterCounts(IReadOnlyList<IncomingFilterPresetView> Presets,
     IReadOnlyDictionary<Guid, int> PresetCounts, IReadOnlyDictionary<Guid, int> GroupCounts,
     int UngroupedCount, int AllPresetsCount, int ApplicableCount);
@@ -102,6 +105,7 @@ public sealed record DeleteIncomingFilterPreset(Guid Id, long ExpectedVersion);
 public interface IIncomingCatalogReadService
 {
     Task<IncomingCatalogReadPage> ReadAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken);
+    Task<IncomingCatalogReadWindow> ReadWindowAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken);
     Task<IncomingCatalogDetailRead> ReadDetailAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken);
     Task<IReadOnlyList<IncomingDuplicateLinkTargetView>> SearchDuplicateTargetsAsync(
         Subject subject, Guid catalogItemId, string text, CancellationToken cancellationToken);

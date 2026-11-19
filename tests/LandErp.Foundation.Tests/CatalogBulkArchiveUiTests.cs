@@ -23,7 +23,7 @@ namespace LandErp.Foundation.Tests;
 
 [TestClass]
 [TestCategory("PostgreSQL")]
-public sealed class CatalogBulkArchiveUiTests
+public sealed partial class CatalogBulkArchiveUiTests
 {
     [TestMethod]
     [DataRow(true)]
@@ -251,7 +251,7 @@ public sealed class CatalogBulkArchiveUiTests
     }
 
     private static ServiceProvider PageServices(ProcurementTests.Phase1Fixture f, NpgsqlDataSource source,
-        PageActivator activator, Subject subject)
+        PageActivator activator, Subject subject, Action<IServiceCollection>? configure = null)
     {
         var access = new EmployeeAccessService(f.Factory);
         var presets = new IncomingFilterPresetService(source, access);
@@ -268,6 +268,7 @@ public sealed class CatalogBulkArchiveUiTests
         registrations.AddSingleton<ICatalogCalculationService>(new CatalogCalculationService(f.Factory, access, presets, TimeProvider.System));
         registrations.AddSingleton<ICatalogArchiveService>(new CatalogArchiveService(f.Factory, access, presets, TimeProvider.System));
         registrations.AddSingleton<IGroupMarketService>(new GroupMarketService(f.Factory, access, presets));
+        configure?.Invoke(registrations);
         return registrations.BuildServiceProvider();
     }
     private static object? Get(object page, string name) => page.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(page)

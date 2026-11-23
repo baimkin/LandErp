@@ -119,3 +119,14 @@ ACTIVE_TASK снимка сохраняет историю remote main и тол
 Update-ProductionMedia.ps1 с закреплённым новым SHA в отдельной копии для владельца;
 ff-only, unique version, private config backup, 500 МиБ, без migrations.
 Evidence: artifacts/media-gallery/publication/verification.json.
+## Совместная публикация завершена — 03.11.2026
+
+Опубликован main 0608fbdc1ea6dd39d3f64fba233972a00d9859fb;
+единственный родитель b0a18a9af7469f00756ba81ce5da8052f1f81897.
+Ровно 39 файлов двух media Gate. Все blob SHA совпали со snapshot.
+Снимок remote-main + выбранные файлы собран отдельно: 0 warnings/errors.
+Force/merge/rebase не использовались. Локальные Parser/ветка/индекс сохранены;
+общий ACTIVE_TASK другого чата не перезаписывался. Production агентом не обновлялся.
+Pinned script artifacts/media-gallery/Update-Production-0608fbd.ps1 создан из
+опубликованного Update-ProductionMedia.ps1; синтаксис/ExpectedCommit проверены.
+Evidence artifacts/media-gallery/publication/verification.json.

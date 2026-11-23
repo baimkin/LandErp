@@ -11,6 +11,9 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Diagnostics;
+using System.Reflection;
+using Microsoft.Data.Sqlite;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace LandErp.ParserSpike.Tests;
@@ -27,6 +30,31 @@ public sealed class WorkspaceUiTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
     [TestMethod]
+    public async Task DiagnosticWorkspaceDisablesCollectionAndShowsEvidenceButtons()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "LandErp-MapUi", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root); File.WriteAllText(Path.Combine(root, "automation.txt"), "on");
+        NoSessions sessions = new();
+        WorkspaceController controller = new(Path.Combine(root, "data.sqlite"), root, sessions, diagnosticsOnly: true);
+        await OnSta(async () =>
+        {
+            WorkspaceWindow window = new(controller); window.Show();
+            try
+            {
+                await Until(() => ((TextBlock)window.FindName("PageText")).Text.Length > 0);
+                Assert.IsFalse(((Button)window.FindName("AutomationButton")).IsEnabled);
+                Assert.IsFalse(((Button)window.FindName("StartButton")).IsEnabled);
+                Assert.AreEqual(Visibility.Visible, ((Button)window.FindName("MapDiagnosticOpenButton")).Visibility);
+                Assert.AreEqual(Visibility.Visible, ((Button)window.FindName("MapDiagnosticSaveButton")).Visibility);
+                Assert.Contains("без сбора", window.Title);
+                Assert.AreEqual(0, sessions.Created);
+                Assert.IsEmpty(controller.Store.Jobs());
+            }
+            finally { window.Close(); await Until(() => !window.IsVisible); }
+        });
+        Assert.AreEqual("on", File.ReadAllText(Path.Combine(root, "automation.txt")));
+    }
+    [TestMethod]
     public async Task WorkspaceHasFourSectionsValidatesSettingsAndAddsSearchWithSchedule()
     {
         string root = Path.Combine(Path.GetTempPath(), "LandErp-WorkspaceUi", Guid.NewGuid().ToString("N"));
@@ -37,13 +65,14 @@ public sealed class WorkspaceUiTests
             WorkspaceWindow window = new(controller); window.Show();
             try
             {
-                await Until(() => ((TextBox)window.FindName("MaxPagesInput")).Text.Length > 0);
+                await Until(() => ((TextBlock)window.FindName("PageText")).Text.Length > 0);
                 TabControl tabs = (TabControl)window.FindName("Pages");
                 Assert.AreEqual(4, tabs.Items.Count);
                 CollectionAssert.AreEqual((string[])["Поиски", "Работа", "Результаты", "Настройки"], tabs.Items.Cast<TabItem>().Select(x => (string)x.Header).ToArray());
                 Assert.IsNull(window.FindName("SettingsGrid")); Assert.IsNull(window.FindName("DiagnosticText"));
                 Assert.AreEqual(0, sessions.Created); Assert.IsFalse(controller.AutomationEnabled);
                 tabs.SelectedIndex = 2;
+                window.UpdateLayout();
                 DataGrid results = (DataGrid)window.FindName("ListingsGrid");
                 Assert.AreEqual(1, results.FrozenColumnCount);
                 Assert.IsFalse(results.Columns.Any(column => column.Width.IsStar));
@@ -52,6 +81,10 @@ public sealed class WorkspaceUiTests
                 Assert.IsNotNull(window.FindName("ResetFiltersButton"));
                 Assert.IsNotNull(window.FindName("ResetServerSyncButton"));
                 Assert.IsNotNull(window.FindName("OpenDiagnosticsButton"));
+                Assert.IsNotNull(window.FindName("SaveSearchAreaButton"));
+                TextBox diagnosticsPath = (TextBox)window.FindName("DiagnosticsPathText");
+                Assert.IsTrue(diagnosticsPath.IsReadOnly);
+                Assert.AreEqual(controller.Diagnostics.RootPath, diagnosticsPath.Text);
                 Assert.IsNotNull(window.FindName("ExportTodayDiagnosticsButton"));
                 tabs.SelectedIndex = 3;
                 ((TextBox)window.FindName("MaxPagesInput")).Text = "0";
@@ -72,6 +105,7 @@ public sealed class WorkspaceUiTests
                 }, DispatcherPriority.ApplicationIdle);
                 ((Button)window.FindName("AddButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 await Until(() => controller.Store.Links().Length == 1);
+                await Until(() => ((DataGrid)window.FindName("LinksGrid")).Items.Count == 1);
                 Assert.AreEqual(60, controller.Store.ScheduledLinks().Single().Schedule.IntervalMinutes);
                 Assert.AreEqual(1, ((DataGrid)window.FindName("LinksGrid")).Items.Count);
                 window.UpdateLayout(); double small = ((DataGrid)window.FindName("LinksGrid")).ActualWidth;
@@ -174,6 +208,78 @@ public sealed class WorkspaceUiTests
         Assert.IsNull(reopened.Server); Assert.AreEqual(1, reopened.Store.Links().Length);
         Assert.IsFalse(File.Exists(Path.Combine(root, "server-connection.json")));
     }
+    [TestMethod]
+    public async Task HistoryNavigationKeepsSelectionAndDoesNotRebuildUnchangedHistoryEachTick()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "LandErp-HistoryUi", Guid.NewGuid().ToString("N"));
+        WorkspaceController controller = new(Path.Combine(root, "test.sqlite"), root, new NoSessions());
+        controller.Store.SaveLink("History", "https://www.avito.ru/pushkino/zemelnye_uchastki");
+        for (int i = 0; i < 120; i++) controller.Store.StopBatch(controller.Store.StartBatch(new(), true));
+        await OnSta(async () =>
+        {
+            WorkspaceWindow window = new(controller); window.Show();
+            try
+            {
+                DataGrid history = (DataGrid)window.FindName("JobsGrid");
+                TextBlock page = (TextBlock)window.FindName("HistoryPageText");
+                await Until(() => history.Items.Count == 50);
+                ((Button)window.FindName("HistoryNextButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Until(() => page.Text.StartsWith("51", StringComparison.Ordinal));
+                history.SelectedIndex = 3; object selected = history.SelectedItem;
+                System.Collections.IEnumerable source = history.ItemsSource;
+                ComboBox runs = (ComboBox)window.FindName("RunFilterInput"); runs.SelectedIndex = 1;
+                string? runId = ((WorkspaceFilterOption)runs.SelectedItem).Id;
+                await Task.Delay(1250);
+                Assert.AreSame(source, history.ItemsSource); Assert.AreSame(selected, history.SelectedItem);
+                ((Button)window.FindName("HistoryNextButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Until(() => page.Text.StartsWith("101", StringComparison.Ordinal));
+                Assert.AreEqual(20, history.Items.Count);
+                Assert.AreEqual(runId, ((WorkspaceFilterOption)runs.SelectedItem).Id);
+            }
+            finally { window.Close(); await Until(() => !window.IsVisible); }
+        });
+    }
+
+    [TestMethod]
+    public async Task WindowDispatcherRemainsResponsiveWhileResultsWaitForDatabaseWriter()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "LandErp-ResponsiveUi", Guid.NewGuid().ToString("N"));
+        WorkspaceController controller = new(Path.Combine(root, "test.sqlite"), root, new NoSessions());
+        await OnSta(async () =>
+        {
+            WorkspaceWindow window = new(controller); window.Show();
+            try
+            {
+                await Until(() => ((TextBlock)window.FindName("PageText")).Text.Length > 0);
+                ((DispatcherTimer)typeof(WorkspaceWindow).GetField("refresh", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!).Stop();
+                using SqliteConnection writer = new(new SqliteConnectionStringBuilder { DataSource = controller.Store.Path, Pooling = false }.ToString());
+                writer.Open(); using (SqliteCommand command = writer.CreateCommand())
+                { command.CommandText = "PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE;"; command.ExecuteNonQuery(); }
+                // Guarantee release even if the regression blocks this Dispatcher inside FindAsync.
+                Task release = Task.Run(async () =>
+                {
+                    await Task.Delay(750);
+                    using SqliteCommand command = writer.CreateCommand(); command.CommandText = "COMMIT"; command.ExecuteNonQuery();
+                });
+                int heartbeats = 0;
+                DispatcherTimer heartbeat = new() { Interval = TimeSpan.FromMilliseconds(20) };
+                heartbeat.Tick += (_, _) => heartbeats++; heartbeat.Start();
+                try
+                {
+                    Stopwatch watch = Stopwatch.StartNew();
+                    Task read = (Task)typeof(WorkspaceWindow).GetMethod("FindAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null)!;
+                    long invocationMilliseconds = watch.ElapsedMilliseconds;
+                    await Task.Delay(150);
+                    Assert.IsTrue(invocationMilliseconds < 250, $"Read blocked Dispatcher for {invocationMilliseconds} ms");
+                    Assert.IsTrue(heartbeats > 0); Assert.IsFalse(read.IsCompleted);
+                    await read.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                finally { heartbeat.Stop(); await release; }
+            }
+            finally { window.Close(); await Until(() => !window.IsVisible); }
+        });
+    }
+
     private static async Task Until(Func<bool> predicate)
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(10);

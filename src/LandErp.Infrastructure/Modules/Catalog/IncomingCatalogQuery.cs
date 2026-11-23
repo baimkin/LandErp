@@ -9,7 +9,7 @@ namespace LandErp.Infrastructure.Modules.Catalog;
 /// <summary>One predicate path for page rows, saved-filter OR and conditional SQL counts. No listing materialization.</summary>
 internal sealed class IncomingCatalogQuery(LandErpDbContext db, Guid organizationId, DateTimeOffset now,
     IQueryable<Guid> priceChangedIds, IQueryable<Guid> returnedFromMonitoringIds, IQueryable<Guid> reviewedIds,
-    IQueryable<Guid> pendingDuplicateListingIds, IQueryable<Guid> processedTodayIds)
+    IQueryable<Guid> pendingDuplicateListingIds, IQueryable<Guid> processedTodayIds, IncomingCatalogReadSql? readSql = null)
 {
     public Expression<Func<Listing, bool>> Conditions(IncomingCatalogReadFilter filter)
     {
@@ -69,6 +69,7 @@ internal sealed class IncomingCatalogQuery(LandErpDbContext db, Guid organizatio
                 where job.OrganizationId == organizationId && search.OrganizationId == organizationId
                     && searchGroup.OrganizationId == organizationId && searchGroup.Active && searchGroup.Id == groupId
                 select observation.ListingId;
+            if (readSql != null) groupListingIds = readSql.GroupIds(groupId);
             query = query.Where(item => groupListingIds.Contains(item.Id));
         }
 
@@ -82,6 +83,7 @@ internal sealed class IncomingCatalogQuery(LandErpDbContext db, Guid organizatio
                 where job.OrganizationId == organizationId && search.OrganizationId == organizationId
                     && search.Id == searchId
                 select observation.ListingId;
+            if (readSql != null) searchListingIds = readSql.SearchIds(searchId);
             query = query.Where(item => searchListingIds.Contains(item.Id));
         }
 
@@ -149,14 +151,16 @@ internal sealed class IncomingCatalogQuery(LandErpDbContext db, Guid organizatio
 
     public static async Task<int[]> CountAsync(IQueryable<Listing> organizationItems,
         IReadOnlyList<Expression<Func<Listing, bool>>> predicates, CancellationToken cancellationToken)
+        => await CountProjection(organizationItems, predicates).SingleOrDefaultAsync(cancellationToken)
+            ?? new int[predicates.Count];
+
+    internal static IQueryable<int[]> CountProjection(IQueryable<Listing> organizationItems,
+        IReadOnlyList<Expression<Func<Listing, bool>>> predicates)
     {
         ParameterExpression group = Expression.Parameter(typeof(IGrouping<int, Listing>), "items");
         var counts = predicates.Select(predicate => Expression.Call(typeof(Enumerable), nameof(Enumerable.Count),
             [typeof(Listing)], group, predicate));
         var projection = Expression.Lambda<Func<IGrouping<int, Listing>, int[]>>(Expression.NewArrayInit(typeof(int), counts), group);
-        // All alternative filters and slices are conditional aggregates in one SQL query,
-        // not separate scans/round trips or counts over the materialized page.
-        return await organizationItems.GroupBy(item => 1).Select(projection).SingleOrDefaultAsync(cancellationToken)
-            ?? new int[predicates.Count];
+        return organizationItems.GroupBy(item => 1).Select(projection);
     }
 }

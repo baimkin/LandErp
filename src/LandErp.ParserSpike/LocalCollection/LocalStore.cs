@@ -9,7 +9,7 @@ using Microsoft.Data.Sqlite;
 namespace LandErp.ParserSpike.LocalCollection;
 
 /// <summary>Durable local queue and result sink. Claims and page coverage commit atomically; no browser objects enter storage.</summary>
-public sealed class LocalStore : IJobSource, IResultSink
+public sealed partial class LocalStore : IJobSource, IResultSink
 {
     private readonly string connectionString;
     public string Path { get; }
@@ -482,12 +482,21 @@ public sealed class LocalStore : IJobSource, IResultSink
     public void StopBatch(string batch)
     { using SqliteConnection db = Open(); Exec(db, null, "UPDATE local_jobs SET state='StoppedInterrupted',reason='Остановлено пользователем',owner=NULL,token=NULL WHERE batch_id=$batch AND state IN ('Running','Pending','AwaitingManualAction','PausedByUser')", ("$batch", batch)); }
 
+    public void FailBatch(string batch, string reason)
+    {
+        using SqliteConnection db = Open();
+        Exec(db, null, "UPDATE local_jobs SET state='Failed',reason=$reason,owner=NULL,token=NULL WHERE batch_id=$batch AND state IN ('Running','Pending','AwaitingManualAction','PausedByUser')",
+            ("$batch", batch), ("$reason", reason));
+    }
+
     public bool SavePage(CollectionJob job, int page, string pageUrl, IReadOnlyList<ListingObservation> listings, bool completed, Pagination? pagination, string reason)
         => SavePage(job, page, pageUrl, listings, completed, pagination, reason, null, null);
 
     public bool SavePage(CollectionJob job, int page, string pageUrl, IReadOnlyList<ListingObservation> listings,
-        bool completed, Pagination? pagination, string reason, MapScope? map, IReadOnlyList<ListingObservation>? changes)
+        bool completed, Pagination? pagination, string reason, MapScope? map, IReadOnlyList<ListingObservation>? changes,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         string safeUrl = SearchUrls.SafePage(pageUrl, job.Source);
         string? safeNext = pagination?.Url is null ? null : SearchUrls.SafePage(pagination.Url, job.Source);
         using SqliteConnection db = Open(); using SqliteTransaction tx = db.BeginTransaction();
@@ -498,6 +507,7 @@ public sealed class LocalStore : IJobSource, IResultSink
                 ("$pass", job.PassId), ("$job", job.Id), ("$link", job.LinkId), ("$json", LocalJson.Write(map)));
         foreach (ListingObservation item in (changes ?? []).Concat(listings).DistinctBy(x => LocalJson.Write(x)).OrderBy(x => x.ObservedAtUtc))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (item.Source != job.Source) throw new ArgumentException("RESULT_SOURCE_MISMATCH");
             string fingerprint = Hash(LocalJson.Write(item with { ObservedAtUtc = DateTimeOffset.UnixEpoch }));
             string? previousHash = Scalar(db, tx, "SELECT fingerprint FROM local_observations WHERE source=$source AND external_id=$external AND observed_at<=$time ORDER BY observed_at DESC,rowid DESC LIMIT 1",
@@ -509,6 +519,7 @@ public sealed class LocalStore : IJobSource, IResultSink
         }
         foreach (ListingObservation item in listings)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string? observationId = Scalar(db, tx, "SELECT id FROM local_observations WHERE source=$source AND external_id=$external ORDER BY observed_at DESC,rowid DESC LIMIT 1",
                 ("$source", item.Source.ToString()), ("$external", item.ExternalId)) as string;
             Exec(db, tx, "INSERT OR REPLACE INTO local_sightings VALUES($job,$link,$pass,$page,$source,$external,$observation)",
@@ -523,6 +534,7 @@ public sealed class LocalStore : IJobSource, IResultSink
             ("$job", job.Id), ("$time", Time(DateTimeOffset.UtcNow)), ("$count", listings.Count), ("$reason", reason));
         if (completed && pagination?.Kind == NextKind.End) Exec(db, tx, "UPDATE local_passes SET end_page=$page WHERE id=$pass", ("$page", page), ("$pass", job.PassId));
         Exec(db, tx, "UPDATE local_jobs SET page=$page,url=$url WHERE id=$id", ("$page", page), ("$url", safeUrl), ("$id", job.Id));
+        cancellationToken.ThrowIfCancellationRequested();
         tx.Commit(); return true;
     }
     private static void Upsert(SqliteConnection db, SqliteTransaction tx, ListingObservation item, string firstSeen)
@@ -590,14 +602,15 @@ public sealed class LocalStore : IJobSource, IResultSink
         // Workspace results use only observations sighted in that mode, never another mode's merged values.
         string prefix = filter.ServerWork == null ? "" : """
             WITH scoped AS (
-              SELECT o.*,MIN(observed_at) OVER(PARTITION BY source,external_id) AS first_seen,
-                MAX(observed_at) OVER(PARTITION BY source,external_id) AS last_seen,
-                ROW_NUMBER() OVER(PARTITION BY source,external_id ORDER BY observed_at DESC,o.rowid DESC) AS rn
-              FROM local_observations o WHERE EXISTS(SELECT 1 FROM local_sightings s WHERE s.observation_id=o.id AND (s.link_id LIKE 'server-%')=$server)
+              SELECT source,external_id,local_merge(json ORDER BY observed_at,o.rowid) AS json,
+                MIN(observed_at) AS first_seen,MAX(observed_at) AS last_seen
+              FROM local_observations o WHERE (o.link_id LIKE 'server-%')=$server
+                OR o.id IN (SELECT observation_id FROM local_sightings WHERE (link_id LIKE 'server-%')=$server)
+              GROUP BY source,external_id
             ), workspace_listings AS (
               SELECT source,external_id,json,first_seen,last_seen,COALESCE(json_extract(json,'$.title.raw'),'') AS title,
                 COALESCE(json_extract(json,'$.location.raw'),'') AS location,COALESCE(json_extract(json,'$.sellerName.raw'),'') AS seller,
-                json_extract(json,'$.price.parsed') AS price FROM scoped WHERE rn=1
+                json_extract(json,'$.price.parsed') AS price FROM scoped
               UNION ALL
               SELECT source,external_id,json,first_seen,last_seen,title,location,seller,price FROM local_listings legacy
                 WHERE $server=0 AND NOT EXISTS(SELECT 1 FROM local_sightings s WHERE s.source=legacy.source AND s.external_id=legacy.external_id)
@@ -639,7 +652,7 @@ public sealed class LocalStore : IJobSource, IResultSink
 
     public HistoryRow[] History(SourceSite source, string externalId, int offset = 0, int size = 100, bool? serverWork = null)
     {
-        using SqliteConnection db = Open(); using SqliteCommand cmd = Command(db, null, "SELECT id,job_id,page,json FROM local_observations o WHERE source=$source AND external_id=$id AND ($server IS NULL OR EXISTS(SELECT 1 FROM local_sightings s WHERE s.observation_id=o.id AND (s.link_id LIKE 'server-%')=$server)) ORDER BY observed_at DESC,rowid DESC LIMIT $size OFFSET $offset",
+        using SqliteConnection db = Open(); using SqliteCommand cmd = Command(db, null, "SELECT id,job_id,page,json FROM local_observations o WHERE source=$source AND external_id=$id AND ($server IS NULL OR (o.link_id LIKE 'server-%')=$server OR EXISTS(SELECT 1 FROM local_sightings s WHERE s.observation_id=o.id AND (s.link_id LIKE 'server-%')=$server)) ORDER BY observed_at DESC,rowid DESC LIMIT $size OFFSET $offset",
             ("$source", source.ToString()), ("$id", externalId), ("$size", Math.Clamp(size, 1, 500)), ("$offset", Math.Max(0, offset)), ("$server", serverWork == null ? null : serverWork.Value ? 1 : 0));
         using SqliteDataReader r = cmd.ExecuteReader(); List<HistoryRow> rows = [];
         while (r.Read()) rows.Add(new(r.GetString(0), r.GetString(1), r.GetInt32(2), LocalJson.Read<ListingObservation>(r.GetString(3)))); return rows.ToArray();
@@ -680,6 +693,15 @@ public sealed class LocalStore : IJobSource, IResultSink
     {
         SqliteConnection db = new(connectionString); db.Open();
         db.CreateFunction("local_contains", (string text, string query) => text.Contains(query, StringComparison.OrdinalIgnoreCase));
+        // Fold only this workspace's raw observations, chronologically. Shared merged state
+        // would let a server observation overwrite values in the independent local workspace.
+        db.CreateAggregate<string, ListingObservation?, string>("local_merge", null,
+            (prior, json) => prior is null ? LocalJson.Read<ListingObservation>(json) : Merge(prior, LocalJson.Read<ListingObservation>(json)),
+            value => LocalJson.Write(value is null ? null : value with
+            {
+                DerivedPricePerSotka = value.AreaSquareMeters.Parsed > 0 && value.Price.Parsed.HasValue
+                    ? value.Price.Parsed / (value.AreaSquareMeters.Parsed / 100) : null
+            }));
         return db;
     }
     private static string Time(DateTimeOffset value) => value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);

@@ -27,20 +27,24 @@ public sealed class WorkspaceController : IAsyncDisposable
     public LocalStore Store { get; }
     public QueueRunner Runner { get; }
     public DiagnosticJournal Diagnostics { get; }
-    public WorkspaceController(string databasePath, string profileRoot, ISourceSessions? sessions = null, Func<HttpClient>? httpClientFactory = null)
+    public bool DiagnosticsOnly { get; }
+    public string? MapDiagnosticDirectory { get; private set; }
+    public WorkspaceController(string databasePath, string profileRoot, ISourceSessions? sessions = null, Func<HttpClient>? httpClientFactory = null, bool diagnosticsOnly = false)
     {
+        DiagnosticsOnly = diagnosticsOnly;
         this.httpClientFactory = httpClientFactory ?? (() => new HttpClient { Timeout = TimeSpan.FromSeconds(20) });
         guard = new InstanceGuard(databasePath);
         try
         {
-            Store = new LocalStore(databasePath); Store.RecoverInterrupted();
+            Store = new LocalStore(databasePath);
+            if (!DiagnosticsOnly) Store.RecoverInterrupted();
             this.sessions = sessions ?? new BrowserSessions(profileRoot);
             Diagnostics = new DiagnosticJournal(Path.Combine(Path.GetDirectoryName(databasePath)!, "diagnostics", "collection.jsonl"));
             Runner = new QueueRunner(Store, this.sessions, Diagnostics);
             Mode = LoadMode();
             ListingDetailsMode = LoadListingDetailsMode();
             ListingDetailsWidth = LoadListingDetailsWidth();
-            AutomationEnabled = File.Exists(AutomationPath) && File.ReadAllText(AutomationPath).Trim() == "on";
+            AutomationEnabled = !DiagnosticsOnly && File.Exists(AutomationPath) && File.ReadAllText(AutomationPath).Trim() == "on";
         }
         catch { guard.Dispose(); throw; }
     }
@@ -56,6 +60,7 @@ public sealed class WorkspaceController : IAsyncDisposable
     }
     public async Task OpenManualAsync(SearchLink link)
     {
+        if (DiagnosticsOnly) throw new InvalidOperationException("Используйте кнопку «Открыть карту для диагностики».");
         if (Runner.IsRunning) throw new InvalidOperationException("Сначала остановите текущий сбор.");
         if (Server != null) Server.AcceptNewWork = false;
         await CloseManualAsync();
@@ -63,12 +68,60 @@ public sealed class WorkspaceController : IAsyncDisposable
         await manualPage.OpenAsync(link.Url, CancellationToken.None);
         await manualPage.ActivateAsync(CancellationToken.None);
     }
+    public async Task<string> BeginMapDiagnosticsAsync(SearchLink link, CancellationToken token)
+    {
+        if (!DiagnosticsOnly) throw new InvalidOperationException("Откройте Parser ярлыком «Диагностика карты».");
+        if (link.Source != SourceSite.Avito) throw new InvalidOperationException("Выберите поиск Avito.");
+        _ = SearchUrls.Normalize(link.Url, SourceSite.Avito);
+        await CloseManualAsync();
+        MapDiagnosticDirectory = MapDiagnosticCapture.CreateDirectory(Path.Combine(Path.GetDirectoryName(Store.Path)!, "diagnostics", "map-captures"));
+        File.WriteAllText(Path.Combine(MapDiagnosticDirectory, "search.json"), System.Text.Json.JsonSerializer.Serialize(new
+        {
+            LinkId = link.Id, link.Label, Source = link.Source.ToString(),
+            UrlHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(link.Url)))
+        }));
+        manualPage = await sessions.CreatePageAsync(link.Source, Store.Settings(), token);
+        // Observer attaches before navigation. No jobs, Runner, ReadAsync or delivery participate.
+        await manualPage.BeginMapDiagnosticsAsync(MapDiagnosticDirectory, token);
+        try { await manualPage.OpenAsync(link.Url, token); await manualPage.ActivateAsync(token); }
+        catch
+        {
+            await manualPage.FinishMapDiagnosticsAsync(CancellationToken.None);
+            throw;
+        }
+        return MapDiagnosticDirectory;
+    }
+    public async Task<string> FinishMapDiagnosticsAsync(CancellationToken token)
+    {
+        if (MapDiagnosticDirectory is null || manualPage is null) throw new InvalidOperationException("Сначала откройте карту для диагностики.");
+        await manualPage.FinishMapDiagnosticsAsync(token);
+        return MapDiagnosticDirectory;
+    }
     public async Task CloseManualAsync()
-    { if (manualPage is not null) { await manualPage.DisposeAsync(); manualPage = null; } }
+    { ISourcePage? page = manualPage; manualPage = null; if (page is not null) await page.DisposeAsync(); }
     public (SourceSite Source, string Url)? CurrentManualSearch() => manualPage is null ? null : (manualPage.Source, manualPage.CurrentUrl);
+    public async Task<bool> CaptureSearchAreaAsync(string url, CancellationToken cancellationToken, bool explicitlyConfirmVisibleArea = false)
+    {
+        if (DiagnosticsOnly) return false;
+        ISourcePage? page = manualPage;
+        if (page?.Source != SourceSite.Avito || AvitoMapData.DrawId(url) is null) return false;
+        try
+        {
+            string expected = SearchUrls.Normalize(url, SourceSite.Avito).Key;
+            string visible = SearchUrls.Normalize(page.CurrentUrl, SourceSite.Avito).Key;
+            if (visible != expected && (!explicitlyConfirmVisibleArea || !AvitoSearchIdentity.SameFilters(url, page.CurrentUrl, false))) return false;
+            GeoPoint[][][]? area = await page.CaptureSearchAreaAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+            if (area is null || SearchUrls.Normalize(page.CurrentUrl, SourceSite.Avito).Key != visible) return false;
+            SavedSearchArea? saved = Runner.SearchAreas.Remember(url, Mode == ParserOperatingMode.Server, area);
+            return saved is not null && saved.Signature == SearchAreaGeometry.Signature(area);
+        }
+        catch (Exception ex) when (ex is TimeoutException or ArgumentException or InvalidOperationException or Microsoft.Playwright.PlaywrightException or System.Text.Json.JsonException)
+        { return false; }
+    }
     private string AutomationPath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "automation.txt");
     public void SetAutomation(bool enabled)
     {
+        if (DiagnosticsOnly && enabled) throw new InvalidOperationException("В диагностическом режиме сбор отключён.");
         AutomationEnabled = enabled;
         if (Server != null) Server.AcceptNewWork = enabled && manualPage == null;
         if (!enabled) Runner.Stop();
@@ -77,6 +130,7 @@ public sealed class WorkspaceController : IAsyncDisposable
     }
     public async Task TickAsync(CancellationToken token)
     {
+        if (DiagnosticsOnly) return;
         if (Mode == ParserOperatingMode.Local) { await TickLocalScheduleAsync(token); return; }
         if (Server == null && DateTimeOffset.UtcNow >= reconnectAt && SavedServerConnection() != null)
         {
@@ -127,13 +181,14 @@ public sealed class WorkspaceController : IAsyncDisposable
     }
     public async Task TickLocalScheduleAsync(CancellationToken token)
     {
+        long stopVersion = Runner.StopVersion;
         if (!AutomationEnabled || SuspendNewWork || manualPage != null || Mode != ParserOperatingMode.Local || Runner.IsRunning || !await localScheduler.WaitAsync(0, token).ConfigureAwait(false)) return;
         try
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
             LocalScheduledLink? due = Store.DueLinks(now).FirstOrDefault();
             if (due == null) return;
-            _ = Runner.StartAsync(Store.Settings(), force: true, onlyLinkId: due.Link.Id);
+            _ = Runner.StartAsync(Store.Settings(), force: true, onlyLinkId: due.Link.Id, expectedStopVersion: stopVersion);
             Store.MarkScheduleDispatched(due.Link.Id, due.Revision, now);
         }
         finally { localScheduler.Release(); }
@@ -148,6 +203,13 @@ public sealed class WorkspaceController : IAsyncDisposable
             await ConnectServerAsync(connection);
         }
         finally { serverConnection.Release(); }
+    }
+    public async Task<LandErp.Collector.Contracts.V1.CollectorWorkspace> ReadDiagnosticWorkspaceAsync(CancellationToken token)
+    {
+        if (!DiagnosticsOnly) throw new InvalidOperationException("Только для диагностики.");
+        ServerConnection connection = SavedServerConnection() ?? throw new InvalidOperationException("Сервер ещё не подключён.");
+        using HttpClient client = httpClientFactory();
+        return await new ServerAdapter(client, connection).ReadWorkspaceAsync(token);
     }
     private string ServerSettingsPath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "server-connection.json");
     private string ServerOutboxPath => Path.Combine(Path.GetDirectoryName(Store.Path)!, "collector-server-outbox.sqlite");
@@ -189,6 +251,7 @@ public sealed class WorkspaceController : IAsyncDisposable
     }
     public async Task ConnectServerAsync(ServerConnection connection)
     {
+        if (DiagnosticsOnly) throw new InvalidOperationException("Подключение можно изменить в обычном режиме Parser.");
         if (Runner.IsRunning) throw new InvalidOperationException("Сначала остановите или завершите текущий сбор.");
         ServerConnection? previous = SavedServerConnection();
         ServerOutbox outbox = new(ServerOutboxPath);
@@ -210,7 +273,19 @@ public sealed class WorkspaceController : IAsyncDisposable
         }
         catch { candidate.Dispose(); throw; }
     }
-    public async ValueTask DisposeAsync() { try { await CloseManualAsync(); await Runner.DisposeAsync(); if (Server != null) await Server.DisposeAsync(); serverHttp?.Dispose(); localScheduler.Dispose(); serverConnection.Dispose(); } finally { guard.Dispose(); } }
+    public async ValueTask DisposeAsync()
+    {
+        try { await CloseManualAsync().ConfigureAwait(false); }
+        finally
+        {
+            try { await Runner.DisposeAsync().ConfigureAwait(false); }
+            finally
+            {
+                try { if (Server != null) await Server.DisposeAsync().ConfigureAwait(false); }
+                finally { serverHttp?.Dispose(); localScheduler.Dispose(); serverConnection.Dispose(); guard.Dispose(); }
+            }
+        }
+    }
 }
 
 public enum ParserOperatingMode { Local, Server }

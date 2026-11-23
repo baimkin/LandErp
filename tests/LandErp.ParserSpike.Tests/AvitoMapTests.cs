@@ -15,6 +15,7 @@ public sealed class AvitoMapTests
     private const string Url = "https://www.avito.ru/korolev/zemelnye_uchastki?drawId=12345678901234567890123456789012";
     private const string ItemsEndpoint = "https://www.avito.ru/js/1/map/items";
     private const string MarkersEndpoint = "https://www.avito.ru/web/1/map/markers";
+    private const string PinsEndpoint = "https://www.avito.ru/web/1/map/pins";
     private static readonly GeoPoint[][] Rings = [[new(37,55),new(39,55),new(39,57),new(37,57),new(37,55)]];
     private static string Markers(GeoPoint[][]? rings = null) => JsonSerializer.Serialize(new { drawAreaBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new {
         type = "Polygon", coordinates = (rings ?? Rings).Select(r => r.Select(p => new[] { p.Longitude, p.Latitude })) }))) });
@@ -94,6 +95,43 @@ public sealed class AvitoMapTests
         data.Ingest(MarkersEndpoint,"{}",DateTimeOffset.UtcNow); Assert.IsFalse(data.Read(Url,false).Map!.ZoneConfirmed);
     }
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void PinsAndMarkersMustAgreeBeforeCardsAreAccepted(bool pinsFirst)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        AvitoMapData data = new();
+        string pins = JsonSerializer.Serialize(new { success = new
+        {
+            drawArea = """{"type":"Polygon","coordinates":[[[37,55],[39,55],[39,57],[37,57],[37,55]]]}"""
+        } });
+        data.Ingest(ItemsEndpoint, Items(), now);
+        data.Ingest(pinsFirst ? PinsEndpoint : MarkersEndpoint, pinsFirst ? pins : Markers(), now);
+        Assert.AreEqual(1, data.Read(Url, false).Listings.Length);
+        data.Ingest(pinsFirst ? MarkersEndpoint : PinsEndpoint, pinsFirst ? Markers() : pins, now);
+        Assert.AreEqual(1, data.Read(Url, false).Listings.Length);
+
+        data.Ingest(MarkersEndpoint, Markers([[new(37,55),new(40,55),new(40,57),new(37,57),new(37,55)]]), now);
+        data.Ingest(PinsEndpoint, pins, now);
+        PageObservation conflict = data.Read(Url, false);
+        Assert.IsFalse(conflict.Map!.ZoneConfirmed);
+        Assert.IsEmpty(conflict.Map.ObservedAreas!);
+        Assert.IsEmpty(conflict.Listings);
+        CollectionAssert.Contains(conflict.Warnings, "MAP_DRAW_SOURCE_CONFLICT");
+    }
+
+    [TestMethod]
+    public void PinsViewportAndMalformedDrawAreaDoNotAuthorizeCards()
+    {
+        AvitoMapData data = new();
+        data.Ingest(ItemsEndpoint, Items(), DateTimeOffset.UtcNow);
+        data.Ingest(PinsEndpoint, """{"success":{"drawArea":"unrecognized-format","mapArea":{"bottomRight":{"lat":55,"lng":39},"topLeft":{"lat":57,"lng":37}}}}""", DateTimeOffset.UtcNow);
+        PageObservation page = data.Read(Url, false);
+        Assert.IsFalse(page.Map!.ZoneConfirmed);
+        Assert.IsEmpty(page.Map.ObservedAreas!);
+        Assert.IsEmpty(page.Listings);
+    }
+    [TestMethod]
     public void DegeneratePolygonIsNotConfirmed()
     {
         AvitoMapData data=new();data.Ingest(MarkersEndpoint,Markers([[new(37,55),new(38,56),new(39,57),new(37,55)]]),DateTimeOffset.UtcNow);
@@ -159,7 +197,8 @@ public sealed class AvitoMapTests
         public SourceSite Source=>SourceSite.Avito;
         public string CurrentUrl{get;private set;}=Url;
         public Task OpenAsync(string url,CancellationToken cancellationToken){CurrentUrl=url;return Task.CompletedTask;}
-        public Task<PageObservation> ReadAsync(CancellationToken cancellationToken)=>Task.FromResult(observation);
+        public Task<PageObservation> ReadAsync(CancellationToken cancellationToken)=>Task.FromResult(observation with
+            { Map = observation.Map is null ? null : observation.Map with { Selection = new(true, true, true) } });
         public Task<bool> WheelAsync(CollectionSettings settings,CancellationToken cancellationToken){owner.Wheels++;return Task.FromResult(bottom);}
         public Task<Pagination> NextAsync(CancellationToken cancellationToken)=>Task.FromResult(new Pagination(NextKind.End));
         public Task FollowAsync(Pagination pagination,CancellationToken cancellationToken)=>throw new InvalidOperationException();
@@ -185,11 +224,13 @@ public sealed class AvitoMapTests
         public Task OpenAsync(string url, CancellationToken cancellationToken) { CurrentUrl = url; return Task.CompletedTask; }
         public Task<PageObservation> ReadAsync(CancellationToken cancellationToken)
         {
-            CurrentUrl = $"https://www.avito.ru/korolev/zemelnye_uchastki?drawId=runtime-{++urlRevision}&map=runtime-{urlRevision}&localPriority=0";
+            // Viewport rewrites are presentation; changing the draw reference must now fail.
+            CurrentUrl = Url + $"&map=runtime-{++urlRevision}&localPriority=0";
             bool isLoading = initialLoadingReads-- > 0 || postWheelLoadingReads-- > 0;
             owner.LastReadWasLoading = isLoading;
             if (isLoading) owner.LoadingReads++;
-            return Task.FromResult(isLoading ? loading : ready);
+            PageObservation chosen = isLoading ? loading : ready;
+            return Task.FromResult(chosen with { Map = chosen.Map! with { Selection = new(true, true, true) } });
         }
         public Task<bool> WheelAsync(CollectionSettings settings, CancellationToken cancellationToken)
         {
@@ -212,8 +253,10 @@ public sealed class AvitoMapTests
         await runner.StartAsync(new(){MaxPages=10,MaxScrollSteps=20,StabilitySeconds=1,LoadWaitSeconds=2,ScrollPauseMilliseconds=0});
         CollectionJob job=store.Jobs().Single();Assert.AreEqual(JobState.Failed,job.State);
         StringAssert.Contains(job.Reason,"1 / 2");Assert.IsFalse(store.Journal(job.Id).Single().Completed);
-        DiagnosticEvent entry=journal.Read().Single(x=>x.Action=="Диагностика карты" && x.Outcome=="Итог");
-        MapDiagnostic result=LocalJson.Read<MapDiagnostic>(entry.Detail);Assert.AreEqual(1,result.Collected);Assert.AreEqual(2,result.ExpectedCount);
+        // Detailed map snapshots are transient; durable failure and saved scope retain the outcome.
+        DiagnosticError error=LocalJson.Read<DiagnosticError>(File.ReadAllLines(journal.ErrorsPath).Last());
+        Assert.AreEqual(job.Id,error.JobId);StringAssert.Contains(error.Reason,"1 / 2");
+        Assert.AreEqual(2,store.ReadMapScope(job.Id)!.ExpectedCount);
         Assert.AreEqual(JobState.Pending,store.Jobs(store.StartBatch(new())).Single().State);
     }
     [TestMethod]
@@ -242,19 +285,16 @@ public sealed class AvitoMapTests
         Assert.AreEqual(CollectionCompletionKind.Success,store.Completion(job.Id)!.Kind);
     }
     [TestMethod]
-    public async Task MissingZonePausesWithNoticeAndCancellationEndsWaiting()
+    public async Task MissingZoneProducesPartialAndKeepsUnverifiedDataWithoutManualPause()
     {
         LocalStore store=Store();store.SaveLink("Map",Url);
         AvitoMapData data=new();data.Ingest(ItemsEndpoint,Items(),DateTimeOffset.UtcNow);
         await using QueueRunner runner=new(store,new MapSessions(data.Read(Url,false)));
-        TaskCompletionSource<CollectionNotice> notice=new(TaskCreationOptions.RunContinuationsAsynchronously);
-        runner.ManualActionRequired+=(_,message)=>notice.TrySetResult(message);
-        Task run=runner.StartAsync(new(){LoadWaitSeconds=1});
-        CollectionNotice shown=await notice.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        StringAssert.Contains(shown.Reason,"Карта:");Assert.AreEqual(JobState.AwaitingManualAction,store.Jobs().Single().State);
-        await Assert.ThrowsExactlyAsync<InvalidOperationException>(()=>runner.ResumeSourceAsync(SourceSite.Avito));
+        await runner.StartAsync(new(){LoadWaitSeconds=1}).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual(CollectionCompletionKind.Partial,store.Completion(store.Jobs().Single().Id)!.Kind);
         Assert.AreEqual(0L,store.ReadListings(new()).Total);
-        runner.Stop();await run.WaitAsync(TimeSpan.FromSeconds(5));Assert.AreEqual(JobState.StoppedInterrupted,store.Jobs().Single().State);
+        string pending=Path.Combine(runner.SearchAreas.RootPath,SearchAreaStore.Key(Url,false)+"-unverified.json");
+        StringAssert.Contains(File.ReadAllText(pending),"12345678");
     }
     [TestMethod]
     public async Task MapWheelScrollsRightContainerCapturesJsonAndDoesNotTouchMap()
@@ -262,6 +302,7 @@ public sealed class AvitoMapTests
         using IPlaywright playwright=await Playwright.CreateAsync();
         await using IBrowser browser=await playwright.Chromium.LaunchAsync(new(){Channel="chrome",Headless=false,ChromiumSandbox=true});
         await using IBrowserContext context=await browser.NewContextAsync();
+        await context.RouteAsync("**/*",route=>route.AbortAsync());
         await context.RouteAsync("https://www.avito.ru/**",route=>route.FulfillAsync(new(){ ContentType=route.Request.Url.Contains("/map/",StringComparison.Ordinal)?"application/json":"text/html; charset=utf-8",
             Body=route.Request.Url.Contains("/markers",StringComparison.Ordinal)?Markers():route.Request.Url.Contains("/items",StringComparison.Ordinal)?Items():Html }));
         IPage page=await context.NewPageAsync();await using DomSourcePage adapter=new(page,SourceSite.Avito);

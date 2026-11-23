@@ -130,7 +130,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
             }
             else
             {
-                CollectionJob? job = store.Jobs().FirstOrDefault(item => item.Id == work?.LocalJobId);
+                CollectionJob? job = work?.LocalJobId == null ? null : store.Job(work.LocalJobId);
                 CollectionOutcome? status = job?.State == JobState.AwaitingManualAction
                     ? job.Reason.Contains("Captcha", StringComparison.OrdinalIgnoreCase) ? CollectionOutcome.Captcha
                         : job.Reason.Contains("Authentication", StringComparison.OrdinalIgnoreCase) ? CollectionOutcome.AuthenticationRequired
@@ -201,6 +201,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
     }
     private void StartClaimedWork(CollectionWork work, CancellationToken token)
     {
+        long stopVersion = runner.StopVersion;
         token.ThrowIfCancellationRequested();
         outbox.SaveWork(new(work, null));
         // Stop can be clicked while claim is in flight. Keep the lease, but never start a browser after that click.
@@ -208,7 +209,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
         SourceSite source = Enum.Parse<SourceSite>(work.Source.ToString());
         SearchLink link = store.EnsureServerWorkLink(work.Label, work.SearchUrl, source);
         CollectionSettings settings = store.Settings() with { MaxPages = work.MaxPages };
-        _ = runner.StartAsync(settings, force: true, onlyLinkId: link.Id, serverManaged: true);
+        _ = runner.StartAsync(settings, force: true, onlyLinkId: link.Id, serverManaged: true, expectedStopVersion: stopVersion);
         CollectionJob local = store.Jobs(runner.BatchId).Single();
         outbox.SaveWork(new(work, local.Id)); nextPoll = DateTimeOffset.UtcNow.AddSeconds(45);
         Status = "Разрешённая работа запущена локально. CAPTCHA и авторизация — вручную.";
@@ -277,7 +278,7 @@ public sealed class ServerCoordinator(LocalStore store, QueueRunner runner, Serv
     private void PrepareResult(LocalServerWork work)
     {
         if (outbox.HasDelivery(work.Work.JobId, work.Work.LeaseId) || work.LocalJobId == null) return;
-        CollectionJob job = store.Jobs().Single(item => item.Id == work.LocalJobId);
+        CollectionJob job = store.Job(work.LocalJobId) ?? throw new InvalidOperationException("LOCAL_JOB_NOT_FOUND");
         if (job.State is JobState.Running or JobState.Pending or JobState.AwaitingManualAction or JobState.PausedByUser) return;
         using MemoryStream stream = new(); store.ExportJob(job.Id, stream);
         using JsonDocument document = JsonDocument.Parse(stream.ToArray());

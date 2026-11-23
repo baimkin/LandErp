@@ -12,15 +12,20 @@ public sealed class AvitoMapData
     private readonly List<ListingObservation> changes = [];
     private readonly HashSet<string> errors = new(StringComparer.Ordinal);
     private GeoPoint[][] rings = [];
+    private GeoPoint[][][] observedAreas = [];
+    private string? geometryRequestDraw;
     private string? polygon;
+    private string? markersPolygon;
+    private string? pinsPolygon;
     private string? zoneError;
     private int? expected;
     private readonly HashSet<string> receivedIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> excludedIds = new(StringComparer.Ordinal);
     private readonly List<MapBatchDiagnostic> batchDiagnostics = [];
     private readonly List<MapListingPoint[]> diagnosticPoints = [];
     public int Batches { get; private set; }
     public PageKind Kind { get; private set; } = PageKind.SearchResults;
-    public void Ingest(string endpoint, string json, DateTimeOffset time)
+    public void Ingest(string endpoint, string json, DateTimeOffset time, string? requestDrawId = null)
     {
         try
         {
@@ -29,13 +34,29 @@ public sealed class AvitoMapData
             MapResponseSummary? summary = JsonResponseDiagnostics.SummarizeMap(root, endpoint);
             if (summary is null) return;
             Kind = PageKind.SearchResults;
-            if (endpoint.EndsWith("/markers", StringComparison.Ordinal))
+            if (!endpoint.EndsWith("/items", StringComparison.Ordinal))
             {
-                GeoPoint[][] candidate = Polygon(summary.DrawGeometry);
-                string signature = LocalJson.Write(candidate);
-                if (candidate.Length == 0) zoneError = "Зона не подтверждена: выделение сбросилось или контур недоступен";
+                observedAreas = SearchAreaGeometry.Read(summary.DrawGeometry);
+                geometryRequestDraw = requestDrawId;
+                string? signature = SearchAreaGeometry.Signature(observedAreas);
+                bool isPins = endpoint.EndsWith("/pins", StringComparison.Ordinal);
+                // Retain the last valid signature per format so a missing response
+                // cannot erase evidence of a disagreement between the sources.
+                if (signature is not null)
+                {
+                    if (isPins) pinsPolygon = signature;
+                    else markersPolygon = signature;
+                }
+                if (pinsPolygon is not null && markersPolygon is not null && pinsPolygon != markersPolygon)
+                {
+                    observedAreas = [];
+                    zoneError = "Ответы pins и markers содержат разные контуры";
+                    errors.Add("MAP_DRAW_SOURCE_CONFLICT");
+                    return;
+                }
+                if (signature is null) zoneError = "Геометрия выделенной области не получена или не распознана";
                 else if (polygon is not null && polygon != signature) zoneError = "Выделенная зона изменилась: восстановите исходную область";
-                else { polygon = signature; rings = candidate; zoneError = null; }
+                else { polygon = signature; rings = observedAreas[0]; zoneError = null; }
                 return;
             }
             if (Get(root, "items").ValueKind != JsonValueKind.Array) { errors.Add("MAP_ITEMS_SCHEMA_UNKNOWN"); return; }
@@ -54,7 +75,12 @@ public sealed class AvitoMapData
                 string id = Text(Get(item, "id")) ?? "";
                 if (System.Text.RegularExpressions.Regex.IsMatch(id, @"^\d{5,20}$"))
                 { batchIds.Add(id); if (receivedIds.Add(id)) newIds++; else repeats++; }
-                if (True(Get(item, "isSimilarToSearch")) || True(Get(item, "isOutGeo"))) { recommendations++; continue; }
+                if (True(Get(item, "isSimilarToSearch")) || True(Get(item, "isOutGeo")))
+                {
+                    recommendations++; excludedIds.Add(id); items.Remove(id);
+                    changes.RemoveAll(change => change.ExternalId == id); continue;
+                }
+                excludedIds.Remove(id);
                 if (!points.TryGetValue(id, out MapListingPoint? point)) { invalid++; errors.Add("INVALID_MAP_ID_OR_URL"); continue; }
                 string[] photos = Photos(Get(item, "images")).Concat(Photos(Get(item, "gallery"))).Distinct(StringComparer.Ordinal).ToArray();
                 string? date = Get(Get(item, "iva"), "DateInfoStep").ValueKind == JsonValueKind.Array
@@ -101,12 +127,14 @@ public sealed class AvitoMapData
         bool needsDraw = draw is not null;
         bool drawMatches = expectedDrawId is null || expectedDrawId == currentDraw;
         bool confirmed = !needsDraw || (drawMatches && rings.Length > 0 && zoneError is null);
-        MapScope scope = new(draw, needsDraw, confirmed, rings, expected, Batches, !drawMatches ? "Исходная зона исчезла из ссылки или изменилась" : needsDraw ? zoneError : null);
+        MapScope scope = new(draw, needsDraw, confirmed, rings, expected, Batches,
+            !drawMatches ? "Изменился идентификатор области; требуется сравнение геометрии" : needsDraw ? zoneError : null,
+            observedAreas, geometryRequestDraw);
         bool Include(ListingObservation item)
         {
             if (!confirmed) return false;
             if (!needsDraw) return true;
-            return item.Latitude.Parsed is decimal lat && item.Longitude.Parsed is decimal lon && Contains(rings, new(lon, lat));
+            return SearchAreaGeometry.Contains(observedAreas, item);
         }
         List<string> warnings = new(errors);
         if (confirmed && needsDraw && items.Values.Any(x => x.Latitude.Parsed is null || x.Longitude.Parsed is null)) warnings.Add("MAP_COORDINATES_MISSING");
@@ -116,42 +144,21 @@ public sealed class AvitoMapData
         HashSet<string> kept = collected.Select(x => x.ExternalId).ToHashSet(StringComparer.Ordinal);
         string[] missing = items.Values.Where(x => x.Latitude.Parsed is null || x.Longitude.Parsed is null).Select(x=>x.ExternalId).Order(StringComparer.Ordinal).ToArray();
         string[] outside = confirmed && needsDraw ? items.Values.Where(x => x.Latitude.Parsed is decimal lat && x.Longitude.Parsed is decimal lon
-            && !Contains(rings,new(lon,lat))).Select(x=>x.ExternalId).Order(StringComparer.Ordinal).ToArray() : [];
+            && !SearchAreaGeometry.Contains(observedAreas,new GeoPoint(lon,lat))).Select(x=>x.ExternalId).Order(StringComparer.Ordinal).ToArray() : [];
         MapDiagnostic diagnostic = new(batchDiagnostics.Select((b,index)=>b with {
             MissingCoordinates=diagnosticPoints[index].Count(p=>p.Latitude is null || p.Longitude is null),
-            OutsidePolygon=confirmed && needsDraw ? diagnosticPoints[index].Count(p=>p.Latitude is decimal lat && p.Longitude is decimal lon && !Contains(rings,new(lon,lat))) : 0 }).ToArray(), expected, receivedIds.Count, collected.Length,
+            OutsidePolygon=confirmed && needsDraw ? diagnosticPoints[index].Count(p=>p.Latitude is decimal lat && p.Longitude is decimal lon && !SearchAreaGeometry.Contains(observedAreas,new GeoPoint(lon,lat))) : 0 }).ToArray(), expected, receivedIds.Count, collected.Length,
             missing, outside, dom.Keys.Order(StringComparer.Ordinal).ToArray(), dom.Keys.Where(x=>!receivedIds.Contains(x)).Order(StringComparer.Ordinal).ToArray(),
             dom.Keys.Where(x=>!kept.Contains(x)).Order(StringComparer.Ordinal).ToArray(),confirmed,loading);
         return new(Kind, collected, warnings.ToArray(), loading,
-            "AVITO_MAP:" + Batches, scope, updates, diagnostic);
+            "AVITO_MAP:" + Batches, scope, updates, diagnostic, UnverifiedListings:
+                items.Values.Select(Enriched).Concat(dom.Values.Where(item => !items.ContainsKey(item.ExternalId) && !excludedIds.Contains(item.ExternalId))).ToArray(),
+            ExcludedExternalIds: excludedIds.ToArray());
     }
     public static string? DrawId(string url)
     {
         string? value = new Uri(url).Query.TrimStart('?').Split('&').FirstOrDefault(x => x.StartsWith("drawId=", StringComparison.Ordinal));
         return value is null ? null : Uri.UnescapeDataString(value[7..]);
-    }
-    private static GeoPoint[][] Polygon(JsonResponseShape? shape)
-    {
-        if (shape?.Fields is not { } fields || !fields.TryGetValue("type", out JsonResponseShape? type) || type.Value as string != "Polygon"
-            || !fields.TryGetValue("coordinates", out JsonResponseShape? coords) || coords.Samples is null) return [];
-        List<GeoPoint[]> result = [];
-        foreach (JsonResponseShape ring in coords.Samples)
-        {
-            List<GeoPoint> points = [];
-            foreach (JsonResponseShape pair in ring.Samples ?? [])
-            {
-                if (pair.Samples is not { Length: 2 } values || values.Any(x => x.Type != "Number" || x.Value is null)) return [];
-                decimal lon = Convert.ToDecimal(values[0].Value, CultureInfo.InvariantCulture), lat = Convert.ToDecimal(values[1].Value, CultureInfo.InvariantCulture);
-                if (lon is < -180 or > 180 || lat is < -90 or > 90) return [];
-                points.Add(new(lon, lat));
-            }
-            if (points.Count < 4 || points[0] != points[^1] || points.Distinct().Count() < 3) return [];
-            decimal area = 0;
-            for (int i = 1; i < points.Count; i++) area += points[i-1].Longitude * points[i].Latitude - points[i].Longitude * points[i-1].Latitude;
-            if (Math.Abs(area) < 0.000000000001m) return [];
-            result.Add(points.ToArray());
-        }
-        return result.ToArray();
     }
     /// <summary>GeoJSON longitude first; holes exclude their interior. Outer boundary is included.</summary>
     public static bool Contains(GeoPoint[][] rings, GeoPoint point) => rings.Length > 0 && InRing(rings[0], point)
@@ -221,23 +228,23 @@ internal sealed class AvitoMapCapture : IDisposable
     private readonly IPage page;
     private readonly object sync = new();
     private AvitoMapData data = new();
-    private int generation, pending, batches;
+    private int generation, pending;
     private bool disposed;
     private string? expectedDraw;
-    private readonly int maximumBatches;
-    public AvitoMapCapture(IPage page, int maximumBatches) { this.page = page; this.maximumBatches = maximumBatches; page.Response += Response; }
-    public void Reset(string url) { lock (sync) { generation++; pending = 0; batches = 0; data = new(); expectedDraw = AvitoMapData.DrawId(url); } }
+    public AvitoMapCapture(IPage page) { this.page = page; page.Response += Response; }
+    public void Reset(string url) { lock (sync) { generation++; pending = 0; data = new(); expectedDraw = AvitoMapData.DrawId(url); } }
     private async void Response(object? sender, IResponse response)
     {
         if (!Uri.TryCreate(response.Url, UriKind.Absolute, out Uri? uri) || !SearchUrls.IsPublic(uri, SourceSite.Avito)
-            || uri.Host is not ("avito.ru" or "www.avito.ru") || uri.AbsolutePath is not ("/web/1/map/markers" or "/js/1/map/items")) return;
+            || uri.Host is not ("avito.ru" or "www.avito.ru") || uri.AbsolutePath is not ("/web/1/map/markers" or "/web/1/map/pins" or "/js/1/map/items")) return;
         int epoch; DateTimeOffset time = DateTimeOffset.UtcNow;
         lock (sync)
         {
             if (disposed) return;
             epoch = generation;
             if (response.Status >= 400) { data.Reject(response.Status); return; }
-            if (uri.AbsolutePath.EndsWith("/items", StringComparison.Ordinal) && batches++ >= maximumBatches) return;
+            // Page limits do not bound dynamic map responses. The runner bounds scrolling;
+            // every response already triggered by the browser must remain eligible for capture.
             pending++;
         }
         try
@@ -247,12 +254,34 @@ internal sealed class AvitoMapCapture : IDisposable
             {
                 if (disposed || generation != epoch) return;
                 if (bytes.Length > 4 * 1024 * 1024) data.Reject(413);
-                else data.Ingest(uri.GetLeftPart(UriPartial.Path), System.Text.Encoding.UTF8.GetString(bytes), time);
+                else data.Ingest(uri.GetLeftPart(UriPartial.Path), System.Text.Encoding.UTF8.GetString(bytes), time, RequestDrawId(response.Request));
             }
         }
         catch (Exception ex) when (ex is PlaywrightException or TimeoutException or InvalidOperationException)
         { lock (sync) if (!disposed && epoch == generation) data.Reject(500); }
         finally { lock (sync) if (epoch == generation) pending--; }
+    }
+    private static string? RequestDrawId(IRequest request)
+    {
+        string[] drawTerms = new Uri(request.Url).Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Where(term => Uri.UnescapeDataString(term.Split('=', 2)[0]) == "drawId").ToArray();
+        if (drawTerms.Length > 1) return null;
+        if (drawTerms.Length == 1)
+        {
+            string[] pair = drawTerms[0].Split('=', 2);
+            string value = pair.Length == 2 ? Uri.UnescapeDataString(pair[1]) : "";
+            return value.Length is > 0 and <= 200 && !value.Any(char.IsControl) ? value : null;
+        }
+        if (request.PostData is not { Length: <= 65536 } body) return null;
+        try
+        {
+            using JsonDocument json = JsonDocument.Parse(body);
+            JsonElement root = json.RootElement;
+            return root.ValueKind == JsonValueKind.Object && root.EnumerateObject().Count(property => property.Name == "drawId") == 1
+                && root.TryGetProperty("drawId", out JsonElement id) && id.ValueKind == JsonValueKind.String
+                && id.GetString() is { Length: > 0 and <= 200 } value && !value.Any(char.IsControl) ? value : null;
+        }
+        catch (JsonException) { return null; }
     }
     public PageObservation Read(string url, bool loading, ListingObservation[] dom) { lock (sync) { data.Enrich(dom); return data.Read(url, loading || pending > 0, expectedDraw); } }
     public void Dispose() { lock (sync) { disposed = true; generation++; } page.Response -= Response; }

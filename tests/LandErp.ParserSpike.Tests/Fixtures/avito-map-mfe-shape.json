@@ -1,0 +1,6 @@
+{
+  "mapMarker": "map-view-mfe",
+  "tileLayerClass": "ymaps3--layer ymaps3--tile-layer",
+  "tileTag": "img",
+  "resetText": "Сбросить выделенную область"
+}

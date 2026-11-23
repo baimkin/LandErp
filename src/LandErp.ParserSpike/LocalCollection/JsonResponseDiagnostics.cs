@@ -187,6 +187,13 @@ public sealed class JsonResponseDiagnostics(string directory) : IAsyncDisposable
                 }
             return new(Integer(Property(root, "totalCount")), listings.ToArray(), [], "NotMarkerResponse", null);
         }
+        if (uri.AbsolutePath == "/web/1/map/pins")
+        {
+            // The new map response nests the selected area under success.
+            // Never substitute pin coordinates or the map viewport for its contour.
+            var (pinsOutcome, pinsGeometry) = DecodeGeometry(Property(Property(root, "success"), "drawArea"), allowJson: true);
+            return new(null, [], [], pinsOutcome, pinsGeometry);
+        }
         if (uri.AbsolutePath != "/web/1/map/markers") return null;
         if (root.TryGetProperty("markers", out JsonElement pins) && pins.ValueKind == JsonValueKind.Array)
             foreach (JsonElement pin in pins.EnumerateArray().Take(5000))
@@ -200,6 +207,17 @@ public sealed class JsonResponseDiagnostics(string directory) : IAsyncDisposable
             }
         JsonElement encoded = Property(root, "drawAreaBase64");
         (string outcome, JsonResponseShape? geometry) = DecodeGeometry(encoded);
+        if (geometry is null)
+        {
+            // Only explicit selected-area geometry is eligible. Marker bounds/viewport are never a polygon reference.
+            JsonElement direct = Property(root, "drawArea");
+            if (direct.ValueKind == JsonValueKind.Object)
+            {
+                int budget = 12000;
+                geometry = Geometry(direct, 0, ref budget);
+                outcome = budget < 0 ? "DirectGeometryTruncated" : "DirectGeometry";
+            }
+        }
         return new(null, [], markers.ToArray(), outcome, geometry);
     }
     private static JsonElement Property(JsonElement value, string key) =>
@@ -233,7 +251,8 @@ public sealed class JsonResponseDiagnostics(string directory) : IAsyncDisposable
         // Incomplete/invalid pairs can't place an object on a map.
         return lat.HasValue && lng.HasValue ? (lat, lng) : (null, null);
     }
-    private static (string Outcome, JsonResponseShape? Shape) DecodeGeometry(JsonElement value)
+    internal static (string Outcome, JsonResponseShape? Shape) DecodeGeometry(JsonElement value, bool allowJson = false,
+        Action<JsonElement>? describeDecoded = null)
     {
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return ("Absent", null);
         if (value.ValueKind != JsonValueKind.String) return ("UnexpectedType", null);
@@ -242,10 +261,16 @@ public sealed class JsonResponseDiagnostics(string directory) : IAsyncDisposable
         if (encoded.Length > 512 * 1024) return ("SkippedLargeGeometry", null);
         try
         {
-            string input = Uri.UnescapeDataString(encoded).Replace('-', '+').Replace('_', '/');
-            byte[] bytes = Convert.FromBase64String(input.PadRight(input.Length + (4 - input.Length % 4) % 4, '='));
-            string json = new UTF8Encoding(false, true).GetString(bytes);
+            string input = Uri.UnescapeDataString(encoded);
+            string json = input;
+            if (!allowJson || !input.TrimStart().StartsWith('{'))
+            {
+                input = input.Replace('-', '+').Replace('_', '/');
+                byte[] bytes = Convert.FromBase64String(input.PadRight(input.Length + (4 - input.Length % 4) % 4, '='));
+                json = new UTF8Encoding(false, true).GetString(bytes);
+            }
             using JsonDocument document = JsonDocument.Parse(json, new() { MaxDepth = 64 });
+            describeDecoded?.Invoke(document.RootElement);
             int budget = 12000;
             JsonResponseShape geometry = Geometry(document.RootElement, 0, ref budget);
             return (budget < 0 ? "DecodedJsonTruncated" : "DecodedJson", geometry);

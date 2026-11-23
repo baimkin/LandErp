@@ -41,3 +41,6 @@ Thumbs.db
 
 # Local editor build dependencies
 node_modules/
+
+# Local chat attachments are preserved outside version control
+.codex-remote-attachments/

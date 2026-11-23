@@ -6,6 +6,8 @@
 @using LandErp.Server.Components.Procurement
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.JSInterop
+@using Microsoft.EntityFrameworkCore
+@using AnswerDraft = LandErp.Server.Components.Procurement.InspectionAnswerDraft
 @inherits CaseWorkspaceComponent
 @implements IAsyncDisposable
 @inject IProcurementWorkspace Workspace
@@ -30,7 +32,22 @@ else if(data!=null)
 
         @if(Error!=null&&!mediaOpen&&!finishOpen&&!assignOpen){<div class="feedback" role="alert">@Error</div>}
         @if(RefreshWarning!=null){<div class="feedback">@RefreshWarning <button class="btn secondary" @onclick="RefreshCommittedServerAsync">Обновить</button></div>}
-        @if(inspectionConflict){<div class="feedback" role="alert"><strong>Конфликт версии.</strong> Серверный осмотр изменился после создания локального черновика. Ответы сохранены на этом устройстве и не будут записаны поверх новой версии. <button class="btn secondary" @onclick="UseServerVersionAsync">Отбросить локальный черновик и загрузить серверную версию</button></div>}
+        @if(inspectionConflict)
+        {
+            <section class="panel inspection-conflicts" role="region" aria-label="Выбор изменений" data-inspection-conflicts="true">
+                <h2>Сверьте изменённые ответы</h2>
+                <p>Остальные ответы объединены. Для каждого поля выберите значение, которое нужно сохранить.</p>
+                @foreach(var conflict in fieldConflicts)
+                {
+                    <fieldset class="inspection-conflict" disabled="@Busy"><legend>@conflict.Title</legend>
+                        @if(conflict.Legacy){<p class="subtle">У старого черновика нет исходного снимка этого поля. Проверьте значения — ответы сохранены.</p>}
+                        <div class="conflict-choices">@foreach(var choice in conflict.Choices){<button type="button" class="btn secondary conflict-choice" @onclick="()=>ChooseFieldAsync(conflict,choice)">@ChoiceLabel(choice)</button>}</div>
+                    </fieldset>
+                }
+            </section>
+        }
+        @if(hasLocalDraft&&!localSaved){<p class="feedback" role="alert">Черновик пока не удалось записать на устройстве. Оставьте вкладку открытой до сохранения на сервере.</p>}
+        @if(completedDraftAvailable){<div class="feedback">Осмотр уже завершён. Несохранённые ответы с этого устройства сохранены отдельно. <button class="btn secondary" @onclick="ExportDraftAsync">Скачать черновик</button></div>}
 
         <section class="panel assignment-panel">
             <div class="assignment-head">
@@ -147,36 +164,104 @@ else if(data!=null)
     private InspectionWorkspaceView? data; private IJSObjectReference? draftModule;
     private bool mediaUploading,mediaBatchStarted; private bool mediaOpen,finishOpen,assignOpen,hasLocalDraft,localSaved,inspectionConflict,acceptServerInspectionRead;
     private int section; private bool onlyUnanswered; private Guid loaded,draftInspectionId; private long draftVersion;
+    private InspectionDraft? draftBaseline;
+    private string? draftRevision;
+    private string[] mergedRevisions=[],committedDraftRevisions=[];
+    private List<InspectionFieldConflict> fieldConflicts=[];
+    private bool savingInspection,completedDraftAvailable;
     private string conclusion="",decision=""; private List<AnswerDraft> answers=[];
     private MediaDraft media=new(); private AssignmentInput assignment=new(); private bool localChecked;
     private InspectionView? Inspection=>data?.Inspection;
-    private bool Editable=>data?.CanPerform==true&&Inspection?.StartedAt!=null&&Inspection.Status!=InspectionStatus.Completed&&!inspectionConflict&&!RefreshRequired;
+    private bool Editable=>data?.CanPerform==true&&Inspection?.StartedAt!=null&&Inspection.Status!=InspectionStatus.Completed&&!inspectionConflict&&!RefreshRequired&&!savingInspection;
     private IEnumerable<AnswerDraft> VisibleAnswers=>answers.OrderBy(x=>x.SortOrder).Skip(section*5).Take(5).Where(x=>!onlyUnanswered||x.Status==InspectionItemStatus.Unanswered);
     private int SectionCount=>Math.Max(1,(answers.Count+4)/5);
     private int DoneCount=>answers.Count(x=>x.Status!=InspectionItemStatus.Unanswered);
     private decimal ProgressPercent=>answers.Count==0?0:decimal.Round(100m*DoneCount/answers.Count,0);
-    private string StorageKey=>$"landerp.inspection.{CaseId}";
+    private string StorageKey=>$"landerp.inspection.{CurrentSubject.UserId}.{CaseId}";
+    private string LegacyStorageKey=>$"landerp.inspection.{CaseId}";
 
     public async ValueTask DisposeAsync(){if(draftModule!=null){try{await draftModule.DisposeAsync();}catch(JSDisconnectedException){}}}
     protected override async Task ReadAsync()
     {
         data=await Workspace.ReadInspectionAsync(CurrentSubject,CaseId,CancellationToken.None);loaded=CaseId;
         if(Inspection?.StartedAt==null){answers=[];return;}
-        if(!acceptServerInspectionRead&&hasLocalDraft&&draftInspectionId==Inspection.Id){if(draftVersion!=Inspection.Version)inspectionConflict=true;return;}
+        if(!acceptServerInspectionRead&&hasLocalDraft&&draftInspectionId==Inspection.Id)
+        {
+            if(!inspectionConflict){ApplyMerge(InspectionDraftMerge.Merge(Inspection,await DraftsForMergeAsync()));if(!inspectionConflict)await SaveLocalAsync();}
+            return;
+        }
         MapServer();
     }
-    protected override async Task OnParametersSetAsync(){if(loaded!=CaseId){localChecked=false;hasLocalDraft=false;localSaved=false;inspectionConflict=false;draftInspectionId=Guid.Empty;draftVersion=0;section=0;await ReloadAsync();}}
+    protected override async Task OnParametersSetAsync(){if(loaded!=CaseId){localChecked=false;hasLocalDraft=false;localSaved=false;inspectionConflict=false;completedDraftAvailable=false;fieldConflicts=[];mergedRevisions=[];committedDraftRevisions=[];draftBaseline=null;draftRevision=null;draftInspectionId=Guid.Empty;draftVersion=0;section=0;await ReloadAsync();}}
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         draftModule??=await Js.InvokeAsync<IJSObjectReference>("import","./Components/Pages/SiteInspectionPage.razor.js");
-        if(!localChecked&&Inspection?.StartedAt!=null){localChecked=true;InspectionDraft? saved=await draftModule.InvokeAsync<InspectionDraft?>("load",StorageKey);if(saved?.InspectionId==Inspection.Id){RestoreDraft(saved);hasLocalDraft=true;localSaved=true;inspectionConflict=saved.Version!=Inspection.Version;StateHasChanged();return;}}
+        if(!localChecked&&Inspection?.StartedAt!=null)
+        {
+            localChecked=true;
+            var saved=await LoadDraftsAsync();
+            if(saved.Length>0&&(data?.CanPerform==true||Inspection.Status==InspectionStatus.Completed))
+            {
+                if(Inspection.Status==InspectionStatus.Completed)completedDraftAvailable=true;
+                else
+                {
+                    ApplyMerge(InspectionDraftMerge.Merge(Inspection,saved));hasLocalDraft=true;
+                    if(!inspectionConflict)await SaveLocalAsync();
+                }
+                StateHasChanged();
+            }
+        }
         if(Inspection?.StartedAt!=null)await draftModule.InvokeVoidAsync("attach",StorageKey,CurrentDraft());
     }
-    private void MapServer(){if(Inspection is not { } inspection)return;draftInspectionId=inspection.Id;draftVersion=inspection.Version;conclusion=inspection.OverallConclusion;decision=inspection.PreliminaryDecision;answers=inspection.Items.Select(x=>new AnswerDraft(x)).ToList();inspectionConflict=false;}
-    private InspectionDraft CurrentDraft()=>new(draftInspectionId,draftVersion,conclusion,decision,answers);
-    private void RestoreDraft(InspectionDraft draft){draftInspectionId=draft.InspectionId;draftVersion=draft.Version;conclusion=draft.Conclusion;decision=draft.Decision;answers=draft.Answers;}
+    private void MapServer()
+    {
+        if(Inspection is not {} inspection)return;
+        RestoreDraft(InspectionDraft.From(inspection) with {Baseline=InspectionDraft.From(inspection)});
+        fieldConflicts=[];inspectionConflict=false;
+    }
+    private InspectionDraft CurrentDraft()=>new(draftInspectionId,draftVersion,conclusion,decision,answers)
+        {Baseline=draftBaseline,Revision=draftRevision,MergedRevisions=mergedRevisions};
+    private void RestoreDraft(InspectionDraft draft)
+    {
+        draftInspectionId=draft.InspectionId;draftVersion=draft.Version;conclusion=draft.Conclusion;
+        decision=draft.Decision;answers=draft.Answers;draftBaseline=draft.Baseline;
+        draftRevision=draft.Revision;mergedRevisions=draft.MergedRevisions;
+    }
+    private void ApplyMerge(InspectionMergeResult result)
+    {
+        RestoreDraft(result.Draft);fieldConflicts=result.Conflicts;inspectionConflict=fieldConflicts.Count>0;
+    }
+    private async Task<InspectionDraft[]> LoadDraftsAsync()=>draftModule==null?[]:
+        await draftModule.InvokeAsync<InspectionDraft[]>("loadAll",StorageKey,LegacyStorageKey);
+    private async Task<InspectionDraft[]> DraftsForMergeAsync()
+    {
+        var stored=await LoadDraftsAsync();
+        var own=draftModule==null?null:await draftModule.InvokeAsync<InspectionDraft?>("load",StorageKey);
+        // Browser capture can be ahead of the circuit. It is the latest branch of this document,
+        // not a competing tab; retain memory too when persistence failed or its branch was removed.
+        return localSaved&&own?.InspectionId==draftInspectionId?stored:[..stored,CurrentDraft() with {Revision=null}];
+    }
+    private async Task ExportDraftAsync()
+    {
+        if(draftModule!=null)await draftModule.InvokeVoidAsync("downloadDraft",$"осмотр-{data?.BusinessNumber}.json",await LoadDraftsAsync());
+    }
+    private static string ChoiceLabel(InspectionFieldValue value)=>value.Status switch
+    {
+        InspectionItemStatus.NotChecked=>"Не удалось проверить",
+        InspectionItemStatus.Unanswered=>"Не заполнено",
+        _=>value.Text.Length==0?"Пустое значение":value.Text=="true"?"Да":value.Text=="false"?"Нет":value.Text
+    };
+    private async Task ChooseFieldAsync(InspectionFieldConflict conflict,InspectionFieldValue value)
+    {
+        if(Busy)return;
+        if(conflict.Key=="conclusion")conclusion=value.Text;
+        else if(conflict.Key=="decision")decision=value.Text;
+        else InspectionDraftMerge.Choose(CurrentDraft(),conflict.Key,value);
+        fieldConflicts.Remove(conflict);inspectionConflict=fieldConflicts.Count>0;hasLocalDraft=true;
+        if(!inspectionConflict){ClearFeedback();await SaveLocalAsync();}
+    }
     private string StatusLabel()=>Inspection==null?"Не назначен":Inspection.Status==InspectionStatus.Completed?"Завершён":Inspection.StartedAt==null?"Назначен":"В работе";
-    private string DraftStateLabel()=>inspectionConflict?"Конфликт версии":Busy?"Синхронизация…":hasLocalDraft?(localSaved?"Черновик на устройстве":"Есть несохранённые изменения"):Inspection?.Status==InspectionStatus.Completed?"Осмотр завершён":"Сохранено на сервере";
+    private string DraftStateLabel()=>inspectionConflict?$"Нужен выбор: {fieldConflicts.Count}":Busy?"Синхронизация…":hasLocalDraft?(localSaved?"Черновик на устройстве":"Есть несохранённые изменения"):Inspection?.Status==InspectionStatus.Completed?"Осмотр завершён":"Сохранено на сервере";
     private string Time(DateTimeOffset? value)=>value==null?"—":TimeZoneInfo.ConvertTime(value.Value,TimeZoneInfo.FindSystemTimeZoneById("Europe/Moscow")).ToString("dd.MM HH:mm");
     private bool IsOverdue(DateTimeOffset? value)=>value is DateTimeOffset due&&due<DateTimeOffset.UtcNow&&Inspection?.Status!=InspectionStatus.Completed;
     private string DueLabel(DateTimeOffset? value)=>value==null?"Без срока":(IsOverdue(value)?"Просрочено · ":"")+Time(value);
@@ -212,17 +297,76 @@ else if(data!=null)
     private async Task NotCheckedAsync(AnswerDraft item){item.Answer="";item.Status=InspectionItemStatus.NotChecked;await MarkLocalDraftAsync();}
     private void PrepareItemMedia(AnswerDraft item){ClearFeedback();media=new(){Owner=item.Id.ToString()};mediaOpen=true;}
     private async Task SaveLocalSoon(){await MarkLocalDraftAsync();}
-    private async Task MarkLocalDraftAsync(){hasLocalDraft=true;await SaveLocalAsync();}
-    private async ValueTask SaveLocalAsync(){if(draftInspectionId==Guid.Empty||draftModule==null)return;try{await draftModule.InvokeVoidAsync("save",StorageKey,CurrentDraft());localSaved=true;}catch(JSException){localSaved=false;}}
-    private async Task UseServerVersionAsync(){if(Busy||draftModule==null)return;await draftModule.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;await ReloadAsync();}
-    private async Task RefreshCommittedServerAsync(){if(Busy)return;acceptServerInspectionRead=true;try{await ReloadAsync();}finally{acceptServerInspectionRead=false;}if(!RefreshRequired&&Error==null&&draftModule!=null){await draftModule.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;}}
+    private async Task MarkLocalDraftAsync()
+    {
+        hasLocalDraft=true;
+        // DOM capture is immediate and keeps keystrokes ahead of a delayed circuit.
+        // Do not overwrite that browser snapshot with an older full .NET render on each keypress.
+        try{localSaved=draftModule!=null&&await draftModule.InvokeAsync<bool>("isSaved");}
+        catch(JSException){localSaved=false;}
+    }
+    private async ValueTask SaveLocalAsync()
+    {
+        if(draftInspectionId==Guid.Empty||draftModule==null||inspectionConflict)return;
+        try{draftRevision=await draftModule.InvokeAsync<string>("save",StorageKey,CurrentDraft());localSaved=true;}
+        catch(JSException){localSaved=false;}
+    }
+    private async Task AcknowledgeDraftsAsync()
+    {
+        if(draftModule!=null)
+        {
+            try{await draftModule.InvokeVoidAsync("acknowledge",StorageKey,committedDraftRevisions,LegacyStorageKey);}
+            catch(JSException){/* The committed answers remain authoritative; retain local copies on disconnect. */}
+        }
+        committedDraftRevisions=[];hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;
+    }
+    private async Task RefreshCommittedServerAsync()
+    {
+        if(Busy)return;acceptServerInspectionRead=true;
+        try{await ReloadAsync();}finally{acceptServerInspectionRead=false;}
+        if(!RefreshRequired&&Error==null&&committedDraftRevisions.Length>0)await AcknowledgeDraftsAsync();
+    }
     private async Task SaveAsync(bool complete)
     {
-        if(RefreshRequired||inspectionConflict||Inspection==null)return;hasLocalDraft=true;await SaveLocalAsync();acceptServerInspectionRead=true;bool committed;
-        try{committed=await ExecuteConfirmedAsync(()=>Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,draftInspectionId,draftVersion,conclusion,decision,answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),OperationId,CancellationToken.None));}
-        finally{acceptServerInspectionRead=false;}
-        if(committed&&!RefreshRequired&&draftModule!=null){await draftModule.InvokeVoidAsync("remove",StorageKey);hasLocalDraft=false;localSaved=false;inspectionConflict=false;localChecked=true;finishOpen=false;}
-        else if(LastWriteWasConflict){inspectionConflict=true;hasLocalDraft=true;await SaveLocalAsync();}
+        if(savingInspection||RefreshRequired||inspectionConflict||Inspection==null)return;
+        savingInspection=true;hasLocalDraft=true;
+        try
+        {
+            acceptServerInspectionRead=true;
+            bool committed=await ExecuteConfirmedAsync(async()=>
+            {
+                // Merge before each attempt, including another write racing this save.
+                for(int attempt=0;;attempt++)
+                {
+                    var drafts=await DraftsForMergeAsync();
+                    data=await Workspace.ReadInspectionAsync(CurrentSubject,CaseId,CancellationToken.None);
+                    if(data.Inspection is not {} server||server.Id!=draftInspectionId)
+                        throw new ArgumentException("Назначение осмотра изменилось. Введённые ответы сохранены на устройстве.");
+                    ApplyMerge(InspectionDraftMerge.Merge(server,drafts));
+                    if(server.Status==InspectionStatus.Completed)
+                    {
+                        if(!inspectionConflict&&InspectionDraftMerge.Matches(CurrentDraft(),server))
+                        {committedDraftRevisions=mergedRevisions;return;}
+                        MapServer();completedDraftAvailable=true;finishOpen=false;
+                        throw new ArgumentException("Осмотр уже завершён в другой вкладке. Ваш черновик сохранён отдельно и доступен для скачивания.");
+                    }
+                    if(!data.CanPerform)throw new AccessDeniedException();
+                    if(inspectionConflict){finishOpen=false;throw new ArgumentException("Выберите значения в полях, изменённых по-разному. Остальные ответы объединены.");}
+                    await SaveLocalAsync();
+                    var revisions=mergedRevisions.Concat(draftRevision is {} revision?[revision]:[]).Distinct(StringComparer.Ordinal).ToArray();
+                    try
+                    {
+                        await Workspace.SaveInspectionAsync(CurrentSubject,new(CaseId,draftInspectionId,draftVersion,conclusion,decision,
+                            answers.Select(x=>new InspectionAnswer(x.Id,x.Version,x.Status,x.Answer,x.Note)).ToArray(),complete),OperationId,CancellationToken.None);
+                        committedDraftRevisions=revisions;return;
+                    }
+                    catch(DbUpdateConcurrencyException) when(attempt<2){/* Fresh merge retains local edits. */}
+                }
+            });
+            if(inspectionConflict)ClearFeedback();
+            if(committed&&!RefreshRequired){await AcknowledgeDraftsAsync();finishOpen=false;}
+        }
+        finally{acceptServerInspectionRead=false;savingInspection=false;}
     }
     private async Task SetMediaUploadBusy(bool value){mediaUploading=value;if(value)mediaBatchStarted=true;else if(Workspace.SupportsDirectAttachmentUploads)await RefreshAfterUploadAsync();}
     private void CloseMedia(){if(!mediaUploading){mediaOpen=false;media=new();mediaBatchStarted=false;}}
@@ -262,8 +406,6 @@ else if(data!=null)
         if(!committed)throw new ArgumentException(Error??"Загрузка не подтверждена. Повторите этот файл.");
     }
     private static string AnswerLabel(AnswerDraft item)=>item.Status==InspectionItemStatus.NotChecked?"Не удалось проверить":(item.AnswerType==InspectionAnswerType.Boolean?(item.Answer=="true"?"Да":"Нет"):item.Answer)+(item.Unit.Length==0?"":" "+item.Unit);
-    private sealed class AnswerDraft{public Guid Id{get;set;}public long Version{get;set;}public string Title{get;set;}="";public int SortOrder{get;set;}public InspectionAnswerType AnswerType{get;set;}public string[] Options{get;set;}=[];public string Unit{get;set;}="";public bool AllowAttachments{get;set;}public bool Required{get;set;}public InspectionItemStatus Status{get;set;}public string Answer{get;set;}="";public string Note{get;set;}="";public AnswerDraft(){}public AnswerDraft(InspectionItemView value){Id=value.Id;Version=value.Version;Title=value.Title;SortOrder=value.SortOrder;AnswerType=value.AnswerType;Options=value.Options;Unit=value.Unit;AllowAttachments=value.AllowAttachments;Required=value.Required;Status=value.Status;Answer=value.Answer;Note=value.Note;}}
-    private sealed record InspectionDraft(Guid InspectionId,long Version,string Conclusion,string Decision,List<AnswerDraft> Answers);
     private sealed class MediaDraft{public CaseAttachmentKind Kind{get;set;}=CaseAttachmentKind.Photo;public string Owner{get;set;}="";public string Label{get;set;}="";public string Description{get;set;}="";}
     private sealed class AssignmentInput{public string Inspector{get;set;}="";public string Due{get;set;}="";public string Instructions{get;set;}="";}
 }

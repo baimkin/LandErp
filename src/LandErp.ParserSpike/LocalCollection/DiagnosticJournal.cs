@@ -29,14 +29,17 @@ public sealed record DataQualityEvent(DateTimeOffset TimeUtc, string JobId, stri
 public sealed class DiagnosticJournal
 {
     private const int RecentPerJob = 30;
+    private const int RecentJobs = 32;
+    private const int QualityKeysPerJob = 2000;
     private const int EventRetentionDays = 30;
     private const int ErrorRetentionDays = 90;
     private const int DataQualityRetentionDays = 30;
     private readonly object sync = new();
     private readonly Dictionary<string, Queue<DiagnosticEvent>> recent = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> lastDetailedError = new(StringComparer.Ordinal);
-    private readonly HashSet<string> dataQualityWritten = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> dataQualityWritten = new(StringComparer.Ordinal);
     public string RootPath { get; }
+    public LastErrorSnapshot LastError { get; }
     public string Path => DailyPath("events", DateTimeOffset.Now, ".jsonl");
     public string ErrorsPath => DailyPath("errors", DateTimeOffset.Now, ".jsonl");
     public string DataQualityPath => DailyPath("data-quality", DateTimeOffset.Now, ".jsonl");
@@ -47,6 +50,7 @@ public sealed class DiagnosticJournal
         RootPath = System.IO.Path.GetExtension(full).Equals(".jsonl", StringComparison.OrdinalIgnoreCase)
             ? System.IO.Path.GetDirectoryName(full)!
             : full;
+        LastError = new(RootPath);
         Directory.CreateDirectory(RootPath);
         Directory.CreateDirectory(System.IO.Path.Combine(RootPath, "events"));
         Directory.CreateDirectory(System.IO.Path.Combine(RootPath, "errors"));
@@ -96,6 +100,7 @@ public sealed class DiagnosticJournal
         DiagnosticEvent[] context;
         lock (sync)
         {
+            RememberJob(job.Id);
             context = recent.TryGetValue(job.Id, out Queue<DiagnosticEvent>? queue) ? queue.ToArray() : [];
             lastDetailedError[job.Id] = now;
         }
@@ -135,6 +140,7 @@ public sealed class DiagnosticJournal
         DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (sync)
         {
+            RememberJob(job.Id);
             foreach (ListingObservation item in listings)
             {
                 List<string> missing = [];
@@ -143,8 +149,12 @@ public sealed class DiagnosticJournal
                 if (item.Location.Presence != Presence.Present || string.IsNullOrWhiteSpace(item.Location.Raw)) missing.Add("Location");
                 if (missing.Count == 0) continue;
 
-                string key = job.Id + "|" + page.ToString(CultureInfo.InvariantCulture) + "|" + item.ExternalId;
-                if (!dataQualityWritten.Add(key)) continue;
+                string key = page.ToString(CultureInfo.InvariantCulture) + "|" + item.ExternalId;
+                if (!dataQualityWritten.TryGetValue(job.Id, out HashSet<string>? keys)) dataQualityWritten[job.Id] = keys = new(StringComparer.Ordinal);
+                if (keys.Contains(key)) continue;
+                // Bound deduplication, not the persisted diagnostics themselves.
+                if (keys.Count >= QualityKeysPerJob) keys.Remove(keys.First());
+                keys.Add(key);
                 captured.TryGetValue(item.ExternalId, out ListingDataQualityDiagnostic? diagnostic);
                 DataQualityEvent entry = new(now, job.Id, job.BatchId, job.Source, job.Owner ?? "", page,
                     SearchUrls.DiagnosticUrl(pageUrl), item.ExternalId, CompactDetail(item.Title.Raw, 300),
@@ -205,10 +215,23 @@ public sealed class DiagnosticJournal
 
     private void Remember(DiagnosticEvent entry)
     {
-        if (!recent.TryGetValue(entry.JobId, out Queue<DiagnosticEvent>? queue))
-            recent[entry.JobId] = queue = new();
+        Queue<DiagnosticEvent> queue = RememberJob(entry.JobId);
         queue.Enqueue(entry);
         while (queue.Count > RecentPerJob) queue.Dequeue();
+    }
+
+    private Queue<DiagnosticEvent> RememberJob(string jobId)
+    {
+        if (recent.TryGetValue(jobId, out Queue<DiagnosticEvent>? queue)) return queue;
+        if (recent.Count >= RecentJobs) ForgetJob(recent.Keys.First());
+        recent[jobId] = queue = new();
+        return queue;
+    }
+
+    /// <summary>Disk history survives; worker-owned transient state ends with the job.</summary>
+    public void ForgetJob(string jobId)
+    {
+        lock (sync) { recent.Remove(jobId); lastDetailedError.Remove(jobId); dataQualityWritten.Remove(jobId); }
     }
 
     private static bool ShouldPersist(DiagnosticEvent entry)

@@ -81,3 +81,4 @@ ACTIVE_TASK, GATE-INSPECTION-MEDIA-LAYOUT, screens03/04 и этот отчёт.
 Проверяется отдельная сборка точного main-based snapshot, scope, blob SHA и remote head.
 Production/конфигурация/БД агентом не обновляются.
 Evidence artifacts/inspection-media-layout/publication/verification.json.
+Публикация выполнена: edce4b916b9aacc96c5c636cae8731ce567a15bc в origin/main, родитель 0608fbdc1ea6dd39d3f64fba233972a00d9859fb. Проверены 14 blob SHA, fast-forward без force и отдельная Release сборка точного снимка: 0 предупреждений/ошибок. Локальная ветка/индекс и чужая работа сохранены; production не обновлялся. Evidence: artifacts/inspection-media-layout/publication/verification.json.

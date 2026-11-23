@@ -1,0 +1,350 @@
+[
+  {
+    "name": "arkhangelskoe-page-ten",
+    "url": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&localPriority=0&p=10",
+    "elements": [
+      {
+        "tag": "div",
+        "text": "1 ••• 9 10 11 ••• 30",
+        "href": "",
+        "dataMarker": null,
+        "className": "js-pages pagination-_5c150d8e58ab9276"
+      },
+      {
+        "tag": "a",
+        "text": "",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=9",
+        "dataMarker": "pagination-button/previousPage",
+        "className": "item-_5570b44042b14c33 item_arrow-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "a",
+        "text": "1",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC",
+        "dataMarker": "pagination-button/page(1)",
+        "className": "item-_5570b44042b14c33 item_first-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "1",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "•••",
+        "href": "",
+        "dataMarker": null,
+        "className": "item-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "•••",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33 text_ellipsis-_5570b44042b14c33"
+      },
+      {
+        "tag": "a",
+        "text": "9",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=9",
+        "dataMarker": "pagination-button/page(9)",
+        "className": "item-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "9",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "10",
+        "href": "",
+        "dataMarker": "pagination-button/page(10)",
+        "className": "item-_5570b44042b14c33 item_current-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "10",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "•••",
+        "href": "",
+        "dataMarker": null,
+        "className": "item-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "•••",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33 text_ellipsis-_5570b44042b14c33"
+      },
+      {
+        "tag": "a",
+        "text": "11",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=30",
+        "dataMarker": "pagination-button/page(11)",
+        "className": "item-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "11",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "•••",
+        "href": "",
+        "dataMarker": null,
+        "className": "item-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "•••",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33 text_ellipsis-_5570b44042b14c33"
+      },
+      {
+        "tag": "a",
+        "text": "30",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=30",
+        "dataMarker": "pagination-button/page(30)",
+        "className": "item-_5570b44042b14c33 item_last-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "30",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "10 из 30",
+        "href": "",
+        "dataMarker": null,
+        "className": "item-_5570b44042b14c33 item_first-_5570b44042b14c33 item_last-_5570b44042b14c33 item_compact-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "10 из 30",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "a",
+        "text": "",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=30",
+        "dataMarker": "pagination-button/nextPage",
+        "className": "item-_5570b44042b14c33 item_arrow-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "a",
+        "text": "1",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "2",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=2",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "3",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=3",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "4",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=4",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "5",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=5",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "6",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=6",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "7",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=7",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "8",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=8",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "9",
+        "href": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=9",
+        "dataMarker": null,
+        "className": "pagination-page"
+      }
+    ]
+  },
+  {
+    "name": "dolgoprudny-last-page",
+    "url": "https://www.avito.ru/dolgoprudnyy/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&localPriority=0&p=3",
+    "elements": [
+      {
+        "tag": "div",
+        "text": "1 2 3",
+        "href": "",
+        "dataMarker": null,
+        "className": "js-pages pagination-_5c150d8e58ab9276"
+      },
+      {
+        "tag": "a",
+        "text": "",
+        "href": "https://www.avito.ru/dolgoprudnyy/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=2",
+        "dataMarker": "pagination-button/previousPage",
+        "className": "item-_5570b44042b14c33 item_arrow-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "a",
+        "text": "1",
+        "href": "https://www.avito.ru/dolgoprudnyy/zemelnye_uchastki?f=ASgBAgICAUSq3xUC",
+        "dataMarker": "pagination-button/page(1)",
+        "className": "item-_5570b44042b14c33 item_first-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "1",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "a",
+        "text": "2",
+        "href": "https://www.avito.ru/dolgoprudnyy/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=2",
+        "dataMarker": "pagination-button/page(2)",
+        "className": "item-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "2",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "3",
+        "href": "",
+        "dataMarker": "pagination-button/page(3)",
+        "className": "item-_5570b44042b14c33 item_last-_5570b44042b14c33 item_current-_5570b44042b14c33 item_link-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "3",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "3 из 3",
+        "href": "",
+        "dataMarker": null,
+        "className": "item-_5570b44042b14c33 item_first-_5570b44042b14c33 item_last-_5570b44042b14c33 item_compact-_5570b44042b14c33"
+      },
+      {
+        "tag": "span",
+        "text": "3 из 3",
+        "href": "",
+        "dataMarker": null,
+        "className": "text-_5570b44042b14c33"
+      },
+      {
+        "tag": "button",
+        "text": "",
+        "href": "",
+        "dataMarker": null,
+        "className": "item-_5570b44042b14c33 item_arrow-_5570b44042b14c33 item_disabled-_5570b44042b14c33"
+      },
+      {
+        "tag": "a",
+        "text": "1",
+        "href": "https://www.avito.ru/dolgoprudnyy/zemelnye_uchastki?f=ASgBAgICAUSq3xUC",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "2",
+        "href": "https://www.avito.ru/dolgoprudnyy/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=2",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "3",
+        "href": "https://www.avito.ru/dolgoprudnyy/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=3",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "a",
+        "text": "Последняя",
+        "href": "https://www.avito.ru/dolgoprudnyy/zemelnye_uchastki?f=ASgBAgICAUSq3xUC&p=3",
+        "dataMarker": null,
+        "className": "pagination-page"
+      },
+      {
+        "tag": "ul",
+        "text": "1 2 3",
+        "href": "",
+        "dataMarker": "pagination-button",
+        "className": "root-_5570b44042b14c33 ladder-_5570b44042b14c33 root_size_s-_5570b44042b14c33 control_size_s-_365711d2eae6d5de"
+      },
+      {
+        "tag": "li",
+        "text": "3",
+        "href": "",
+        "dataMarker": null,
+        "className": "listItem-_5570b44042b14c33 listItem_collapsible-_5570b44042b14c33 listItem_visibleIn_wideNarrow-_5570b44042b14c33 listItem_last-_5570b44042b14c33 listItem_notFirst-_5570b44042b14c33 undefined paginati"
+      },
+      {
+        "tag": "div",
+        "text": "123Последняя",
+        "href": "",
+        "dataMarker": null,
+        "className": "pagination-pages clearfix"
+      }
+    ]
+  }
+]

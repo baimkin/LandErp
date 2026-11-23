@@ -8,6 +8,7 @@
 @using LandErp.Application.Modules.IdentityAccess.Contracts
 @using LandErp.Server.Components.Procurement
 @inherits WorkspaceComponent
+@implements IDisposable
 @inject ICatalogWorkspace Workspace
 @inject IIncomingCatalogReadService IncomingReads
 @inject IIncomingFilterPresetService FilterPresets
@@ -30,6 +31,7 @@
             <p class="v2-lead">@(IsParticipants ? "Отмеченные пригодные источники выбранной группы, включая проданные. Один подтверждённый объект — один участник." : IsArchive ? "Не подходит, подтверждённые дубли, снятые, фейки и проданные. Данные и история доступны в прежнем просмотре." : "Новые и изменившиеся предложения. Просмотрите объявление и решите, брать ли объект в работу.")</p>
         </div>
         <div class="v2-head-actions">
+            <button type="button" class="v2-btn" disabled="@(Busy || Loading)" @onclick="ReloadAsync">Обновить</button>
             @if (IsParticipants) { <a class="v2-btn" href="/">← К обзору</a><a class="v2-btn" href="/incoming">Все входящие</a> }
             else { <button type="button" class="v2-btn" disabled="@(Busy || Loading)" @onclick="() => ChangeArchiveAsync(!IsArchive)">@(IsArchive ? "← Во входящие" : "Архив")</button> }
             @* TODO-BACKEND-INCOMING: page-level decision history read model is not available. *@
@@ -60,7 +62,7 @@
             <div class="v2-presets" role="group" aria-label="Режим входящих">
                 <button type="button" class="v2-preset @(incomingMode == IncomingCatalogMode.SavedFilters ? "active" : "")" aria-pressed="@(incomingMode == IncomingCatalogMode.SavedFilters ? "true" : "false")" @onclick="() => ChangeModeAsync(IncomingCatalogMode.SavedFilters)">По сохранённым фильтрам</button>
                 <button type="button" class="v2-preset @(incomingMode == IncomingCatalogMode.AllListings ? "active" : "")" aria-pressed="@(incomingMode == IncomingCatalogMode.AllListings ? "true" : "false")" @onclick="() => ChangeModeAsync(IncomingCatalogMode.AllListings)">Все объявления</button>
-                <button type="button" class="processed-today-link" aria-pressed="@(preset == IncomingCatalogPreset.ProcessedToday)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.ProcessedToday)">Обработано сегодня: @catalogPage.Summary.ProcessedToday</button>
+                <button type="button" class="processed-today-link" aria-pressed="@(preset == IncomingCatalogPreset.ProcessedToday)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.ProcessedToday)">Обработано сегодня: @CountLabel(catalogPage.Summary.ProcessedToday)</button>
             </div>
             @if (savedPresets.Any(item => item.CompatibilityIssue != null))
             {
@@ -73,15 +75,20 @@
                 </div>
             }
             <div class="v2-stats">
-                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.New ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.New ? "true" : "false")" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.New)"><label>Новые</label><strong>@catalogPage.Summary.New</strong><span>ещё не просматривали</span></button>
-                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PriceChanged)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PriceChanged)"><label>Цена изменилась</label><strong>@catalogPage.Summary.PriceChanged</strong><span>реальные изменения цены</span></button>
-                <button type="button" class="v2-stat v2-stat-action warn @(preset == IncomingCatalogPreset.PossibleDuplicate ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PossibleDuplicate)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PossibleDuplicate)"><label>Возможный дубль</label><strong>@catalogPage.Summary.PossibleDuplicate</strong><span>есть совпадающие признаки</span></button>
-                <button type="button" class="v2-stat v2-stat-action risk @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.Incomplete)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.Incomplete)"><label>Не хватает данных</label><strong>@catalogPage.Summary.Incomplete</strong><span>цена / площадь / локация</span></button>
+                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.New ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.New ? "true" : "false")" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.New)"><label>Новые</label><strong>@CountLabel(catalogPage.Summary.New)</strong><span>ещё не просматривали</span></button>
+                <button type="button" class="v2-stat v2-stat-action @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PriceChanged)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PriceChanged)"><label>Цена изменилась</label><strong>@CountLabel(catalogPage.Summary.PriceChanged)</strong><span>реальные изменения цены</span></button>
+                <button type="button" class="v2-stat v2-stat-action warn @(preset == IncomingCatalogPreset.PossibleDuplicate ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.PossibleDuplicate)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.PossibleDuplicate)"><label>Возможный дубль</label><strong>@CountLabel(catalogPage.Summary.PossibleDuplicate)</strong><span>есть совпадающие признаки</span></button>
+                <button type="button" class="v2-stat v2-stat-action risk @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" aria-pressed="@(preset == IncomingCatalogPreset.Incomplete)" @onclick="() => SelectMetricAsync(IncomingCatalogPreset.Incomplete)"><label>Не хватает данных</label><strong>@CountLabel(catalogPage.Summary.Incomplete)</strong><span>цена / площадь / локация</span></button>
                 <div class="v2-stat market-stat"><GroupMarketPrices Value="groupMarket" Subject="CurrentSubject" Saved="ReloadAsync" /></div>
             </div>
 
             }
 
+            @if (informationLoading || informationPending) { <p class="subtle" role="status">Обновляем счётчики и рынок…</p> }
+            @if (information != null && information.FreshAt != DateTimeOffset.MinValue) { <p class="subtle">Счётчики обновлены: @information.FreshAt.ToOffset(TimeSpan.FromHours(3)).ToString("HH:mm:ss")</p> }
+            @if (information != null && information.FreshAt == DateTimeOffset.MinValue) { <p class="subtle">Счётчики требуют обновления. Количество найденных строк актуально.</p> }
+            @if (informationError != null) { <p class="subtle" role="alert">@informationError</p> }
+            @if (marketError != null) { <p class="subtle" role="alert">@marketError</p> }
             @if(preset==IncomingCatalogPreset.New && incomingMode==IncomingCatalogMode.SavedFilters && selectedSavedPresetId==null){<p class="v2-lead">Непросмотренные входящие · объединение сохранённых фильтров · объявлений: @catalogPage.Total</p>}
             @if(filter.AttentionOnly && incomingMode==IncomingCatalogMode.AllListings){<p class="v2-lead">Входящие с отметкой внимания · все объявления · объявлений: @catalogPage.Total</p>}
             <section class="v2-surface">
@@ -116,10 +123,10 @@
                         @if (!IsArchive && !IsParticipants)
                         {
                         <select value="@(selectedSavedPresetId?.ToString() ?? "")" @onchange="SavedPresetChangedAsync" aria-label="Сохранённые фильтры">
-                            <option value="">Все сохранённые фильтры (@catalogPage.FilterCounts?.AllPresetsCount)</option>
+                            <option value="">Все сохранённые фильтры (@CountLabel(catalogPage.FilterCounts?.AllPresetsCount))</option>
                             @if (savedPresets.Any(item => item.SearchGroupId == null))
                             {
-                                <optgroup label="@($"Без группы ({catalogPage.FilterCounts?.UngroupedCount ?? 0})")">
+                                <optgroup label="@($"Без группы ({CountLabel(catalogPage.FilterCounts?.UngroupedCount)})")">
                                     @foreach (IncomingFilterPresetView saved in savedPresets.Where(item => item.SearchGroupId == null))
                                     {
                                         <option value="@saved.Id">@SavedPresetLabel(saved)</option>
@@ -130,7 +137,7 @@
                             {
                                 if (savedPresets.Any(item => item.SearchGroupId == group.Id))
                                 {
-                                    <optgroup label="@($"{group.Name} ({catalogPage.FilterCounts?.GroupCounts.GetValueOrDefault(group.Id) ?? 0})")">
+                                    <optgroup label="@($"{group.Name} ({CountLabel(catalogPage.FilterCounts?.GroupCounts.GetValueOrDefault(group.Id))})")">
                                         @foreach (IncomingFilterPresetView saved in savedPresets.Where(item => item.SearchGroupId == group.Id))
                                         {
                                             <option value="@saved.Id">@SavedPresetLabel(saved)</option>
@@ -209,12 +216,12 @@
                 else if (!IsParticipants)
                 {
                 <div class="v2-presets">
-                    <button type="button" class="v2-preset @(preset == null ? "active" : "")" @onclick="() => SelectPresetAsync(null)">Все @catalogPage.Summary.Incoming</button>
-                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.New ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.New)">Новые @catalogPage.Summary.New</button>
-                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.PriceChanged)">Изменилась цена @catalogPage.Summary.PriceChanged</button>
-                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.PossibleDuplicate ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.PossibleDuplicate)">Возможный дубль @catalogPage.Summary.PossibleDuplicate</button>
-                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.Incomplete)">Неполные данные @catalogPage.Summary.Incomplete</button>
-                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.ReturnedFromMonitoring ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.ReturnedFromMonitoring)">Вернулись из мониторинга @catalogPage.Summary.ReturnedFromMonitoring</button>
+                    <button type="button" class="v2-preset @(preset == null ? "active" : "")" @onclick="() => SelectPresetAsync(null)">Все @CountLabel(catalogPage.Summary.Incoming)</button>
+                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.New ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.New)">Новые @CountLabel(catalogPage.Summary.New)</button>
+                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.PriceChanged ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.PriceChanged)">Изменилась цена @CountLabel(catalogPage.Summary.PriceChanged)</button>
+                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.PossibleDuplicate ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.PossibleDuplicate)">Возможный дубль @CountLabel(catalogPage.Summary.PossibleDuplicate)</button>
+                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.Incomplete ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.Incomplete)">Неполные данные @CountLabel(catalogPage.Summary.Incomplete)</button>
+                    <button type="button" class="v2-preset @(preset == IncomingCatalogPreset.ReturnedFromMonitoring ? "active" : "")" @onclick="() => SelectPresetAsync(IncomingCatalogPreset.ReturnedFromMonitoring)">Вернулись из мониторинга @CountLabel(catalogPage.Summary.ReturnedFromMonitoring)</button>
                 </div>
 
                 }
@@ -401,6 +408,17 @@
     }
 </div>
 
+@if (detail == null && (detailLoadingId != null || detailLoadError != null))
+{
+    <div class="v2-overlay open" @onclick="CloseDetail"></div>
+    <aside class="v2-drawer open" role="dialog" aria-modal="true" aria-label="Карточка входящего предложения" aria-busy="@(detailLoadingId != null ? "true" : "false")" tabindex="0" @onkeydown="DrawerKeyDown">
+        <div class="v2-drawer-head"><div class="v2-drawer-main"><h2>Объявление</h2></div><button type="button" class="v2-btn sm" aria-label="Закрыть" @onclick="CloseDetail">×</button></div>
+        <div class="v2-drawer-body">
+            @if (detailLoadError != null) { <p role="alert" class="form-error">@detailLoadError</p><button type="button" class="v2-btn" disabled="@Busy" @onclick="RetryDetailReadAsync">Повторить загрузку карточки</button> }
+            else { <p role="status" class="v2-detail-loading">Открываем объявление…</p> }
+        </div>
+    </aside>
+}
 @if (detail != null)
 {
     <div class="v2-overlay open" @onclick="CloseDetail"></div>
@@ -416,6 +434,7 @@
         </div>
 
         <div class="v2-drawer-body">
+            @if (detailReviewWarning != null) { <p role="status" class="subtle">@detailReviewWarning</p> }
             <section class="v2-card v2-hero">
                 @if (detailRead?.PhotoUrls.Count > 0)
                 {
@@ -808,7 +827,8 @@
         <p>Будет создан объект закупки. Выбранный менеджер станет ответственным, а вы останетесь автором передачи в истории.</p>
         @if(transferItem.ObjectGroupMemberCount > 1){<p class="subtle">Все @transferItem.ObjectGroupMemberCount связанных источника этого объекта будут переданы вместе.</p>}
         @if(Error is not null){<p role="alert" class="form-error">@Error</p>}
-        @if(transferLoading){<p role="status">Загружаем список менеджеров…</p>}
+        @if(transferPreparationError is not null){<p role="alert" class="form-error">@transferPreparationError</p>}
+        @if(transferLoading){<p role="status">@(transferPreparing ? "Подготавливаем передачу…" : "Загружаем список менеджеров…")</p>}
         else if(transferReadError is not null){<p role="alert" class="form-error">@transferReadError</p><button type="button" class="v2-btn" @onclick="() => OpenTransferAsync(transferItem)">Повторить загрузку списка</button>}
         else if(procurementTargets.Count==0)
         {
@@ -816,7 +836,7 @@
         }
         else
         {
-            <label class="field"><span>Ответственный менеджер</span><select aria-label="Ответственный менеджер" @bind="transferTargetKey" disabled="@Busy"><option value="">Выберите менеджера</option>@foreach(var target in procurementTargets){<option value="@target.EmployeeId">@target.Name</option>}</select></label>
+            <label class="field"><span>Ответственный менеджер</span><select aria-label="Ответственный менеджер" @bind="transferTargetKey" disabled="@(Busy || transferLoading)"><option value="">Выберите менеджера</option>@foreach(var target in procurementTargets){<option value="@target.EmployeeId">@target.Name</option>}</select></label>
         }
         <div class="form-actions"><button type="button" class="v2-btn" disabled="@Busy" @onclick="CloseTransfer">Отмена</button><button type="button" class="v2-btn primary" disabled="@(Busy || transferLoading || !Guid.TryParse(transferTargetKey,out _))" @onclick="TransferToProcurementAsync">@(Busy ? "Передаём…" : "Передать менеджеру")</button></div>
     </Modal>
@@ -1455,7 +1475,9 @@
             filter.AttentionOnly=entry?.Base.AttentionOnly??false;
             appliedOverviewSlice=OverviewSlice;
         }
-        effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, CancellationToken.None);
+        var previousFilter = renderedCalculationFilter;
+        CancellationToken pageToken = BeginPageRead();
+        effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, pageToken);
         Guid? groupId = Guid.TryParse(searchGroupKey, out Guid parsed) ? parsed : null;
         IncomingCatalogFilter baseFilter = new(filter.Text.Trim(), filter.Source, filter.Disposition, filter.Age,
             filter.MinPrice, filter.MaxPrice, ToSquareMeters(filter.MinAreaSotki), ToSquareMeters(filter.MaxAreaSotki),
@@ -1463,17 +1485,16 @@
         renderedCalculationFilter = new(baseFilter, null, criteriaPreset, sortField, sortDirection, groupId,
             filter.MinPricePerSotka, filter.MaxPricePerSotka, filter.LandTypes.Order().ToArray(),
             new(incomingMode, selectedSavedPresetId, UseDraft: true, Slice: preset, ArchiveState: archiveState), filter.IncludedInMedian);
-        catalogPage = await IncomingReads.ReadAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
-        // A bulk decision or another user's edit can remove the page we were on.
-        // Clamp to the last available page and read it instead of showing an empty, invalid range.
-        if (page >= TotalPages)
-        {
-            page = TotalPages - 1;
-            baseFilter = baseFilter with { Offset = page * pageSize };
-            renderedCalculationFilter = renderedCalculationFilter with { Base = baseFilter };
-            catalogPage = await IncomingReads.ReadAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
-        }
-        groupMarket = await Markets.ReadIncomingAsync(CurrentSubject, renderedCalculationFilter, CancellationToken.None);
+        bool presentationOnly = previousFilter != null &&
+            (previousFilter.Base.Offset != baseFilter.Offset || previousFilter.Base.Size != baseFilter.Size
+                || previousFilter.SortField != sortField || previousFilter.SortDirection != sortDirection);
+        if (Busy) InvalidateInformation();
+        var loadedPage = await IncomingReads.ReadPageAsync(CurrentSubject, renderedCalculationFilter, pageToken);
+        if (pageToken.IsCancellationRequested || incomingDisposed) return;
+        catalogPage = loadedPage;
+        page = catalogPage.EffectiveOffset / pageSize;
+        baseFilter = baseFilter with { Offset = catalogPage.EffectiveOffset };
+        renderedCalculationFilter = renderedCalculationFilter with { Base = baseFilter };
         // Page and page size change presentation only; neither changes the selected cohort.
         string scope = System.Text.Json.JsonSerializer.Serialize(renderedCalculationFilter with { Base = baseFilter with { Offset = 0, Size = 25 } });
         if (calculationScope != scope) ClearCalculationSelection();
@@ -1502,6 +1523,7 @@
             else { selectedCohortStamp = currentStamp; calculationTotal = currentTotal + calculationExcluded.Count; }
         }
         savedPresets = catalogPage.FilterCounts?.Presets ?? [];
+        PrepareInformation(presentationOnly);
     }
 
     private Task ApplyFilterAsync()
@@ -1846,7 +1868,7 @@
 
     private string SavedPresetLabel(IncomingFilterPresetView saved) => saved.CompatibilityIssue != null
         ? $"{saved.Name} — требует исправления"
-        : $"{saved.Name} ({catalogPage?.FilterCounts?.PresetCounts.GetValueOrDefault(saved.Id) ?? 0})";
+        : $"{saved.Name} ({CountLabel(catalogPage?.FilterCounts?.PresetCounts.GetValueOrDefault(saved.Id))})";
 
     private string BuildPresetName()
     {
@@ -1905,8 +1927,25 @@
 
     private async Task OpenDetailAsync(Guid id)
     {
-        if (!await RegisterViewedForUiAsync(id)) return;
-        await LoadDetailAsync(id);
+        if (Busy || Loading) return;
+        CloseDetail();
+        int request = detailRequest;
+        detailRequestedId = detailLoadingId = id;
+        detailCancellation = new();
+        CancellationToken token = detailCancellation.Token;
+        StateHasChanged();
+        try
+        {
+            if (!await RegisterViewedForUiAsync(id))
+            {
+                if (request == detailRequest) { detailLoadError = Error ?? "Не удалось подтвердить просмотр."; detailReviewWarning = "Отметка об этом просмотре не подтверждена."; }
+                return;
+            }
+            if (request == detailRequest) await LoadDetailAsync(id, token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception) { if (request == detailRequest) detailLoadError = ReadFailure(exception, "Не удалось открыть объявление. Повторите загрузку карточки."); }
+        finally { if (request == detailRequest) detailLoadingId = null; }
     }
 
     private async Task<bool> RegisterViewedForUiAsync(Guid id)
@@ -1914,14 +1953,17 @@
         EffectiveEmployeeAccess effective = await AccessV1.ResolveAsync(CurrentSubject, CancellationToken.None);
         if (!effective.CanProcessIncoming) return true;
         bool recorded = await ExecuteConfirmedAsync(() => Workspace.RegisterViewAsync(CurrentSubject, id,
-            Guid.CreateVersion7().ToString(), CancellationToken.None), nameof(OpenDetailAsync));
-        Success = null;
+            Guid.CreateVersion7().ToString(), CancellationToken.None), nameof(OpenDetailAsync), () => RefreshReviewedItemAsync(id));
+        if (!RefreshRequired) Success = null;
         return recorded;
     }
 
-    private async Task LoadDetailAsync(Guid id)
+    private async Task LoadDetailAsync(Guid id, CancellationToken token = default)
     {
-        detailRead = await IncomingReads.ReadDetailAsync(CurrentSubject, id, CancellationToken.None);
+        int request = detailRequest;
+        var loaded = await IncomingReads.ReadDetailAsync(CurrentSubject, id, token);
+        if (request != detailRequest) return; // A close, a newer card or navigation owns the screen now.
+        detailRead = loaded;
         detail = detailRead.Detail;
         monitoring = new()
         {
@@ -1938,6 +1980,10 @@
 
     private void CloseDetail()
     {
+        detailRequest++;
+        detailCancellation?.Cancel(); detailCancellation?.Dispose(); detailCancellation = null;
+        detailRequestedId = detailLoadingId = null;
+        detailLoadError = detailReviewWarning = null;
         CloseGallery();
         CloseDuplicateCompare();
         CloseDuplicateSearch();
@@ -2143,6 +2189,7 @@
         procurementTargets=[];
         transferTargetKey="";
         transferReadError=null;
+        transferPreparationError=null;
         transferOpen=true;
         transferLoading=true;
         try
@@ -2160,19 +2207,43 @@
         finally { transferLoading=false; }
     }
 
-    private void CloseTransfer(){if(Busy)return;transferOpen=false;transferItem=null;transferTargetKey="";procurementTargets=[];}
+    private void CloseTransfer(){if(Busy)return;ResetTransfer();}
+    private void ResetTransfer(){transferOpen=false;transferItem=null;transferTargetKey="";procurementTargets=[];}
 
     private async Task TransferToProcurementAsync()
     {
         if(Busy || transferLoading || transferItem==null || !Guid.TryParse(transferTargetKey,out Guid targetId))return;
         Guid itemId=transferItem.Id;
+        var snapshot = catalogPage;
+        var applied = renderedCalculationFilter;
+        if (snapshot == null || applied == null) return;
+        transferPreparationError = null;
+        IncomingCatalogChangeScope before;
+        try
+        {
+            transferLoading = transferPreparing = true;
+            before = await IncomingReads.ReadChangeScopeAsync(CurrentSubject, applied, itemId, CancellationToken.None);
+            if (!transferOpen || transferItem?.Id != itemId) return;
+            if (catalogPage != snapshot || renderedCalculationFilter != applied)
+            { transferPreparationError = "Список обновился. Проверьте выбор и повторите передачу."; return; }
+        }
+        catch (Exception exception) { transferPreparationError = ReadFailure(exception, "Не удалось подготовить передачу. Запись не отправлена."); return; }
+        finally { transferLoading = transferPreparing = false; }
         TakeToWorkResult? result=null;
-        bool committed=await ExecuteConfirmedAsync(async()=>result=await Workspace.TransferToProcurementAsync(
-            CurrentSubject,new(itemId,targetId),OperationId,CancellationToken.None));
-        if(!committed)return;
-        CloseTransfer();
-        if(detail?.Item.Id==itemId)await RefreshDetailAsync(itemId);
-        Success=result==null?"Передано в закупку":$"Передано в закупку · {result.BusinessNumber}";
+        await ExecuteConfirmedAsync(async()=>result=await Workspace.TransferToProcurementAsync(
+            CurrentSubject,new(itemId,targetId),OperationId,CancellationToken.None), refreshAfterCommit: async () =>
+        {
+            await PreserveIncomingPositionAsync(async () =>
+            {
+                ResetTransfer();
+                if (result != null) MarkTransferredLocally(before.Ids, result);
+                StateHasChanged();
+                var after = await IncomingReads.ReadChangeScopeAsync(CurrentSubject, applied, itemId, CancellationToken.None);
+                await ApplyTransferredScopeAsync(before, after);
+                if (detail?.Item.Id == itemId) await RefreshDetailAsync(itemId);
+            });
+            Success = null; // The linked card / removed row is the acknowledgement, without a blocking toast.
+        });
     }
 
     private async Task OpenTakeAsync(CatalogItemView item)

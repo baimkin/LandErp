@@ -117,7 +117,13 @@ public sealed record ListingObservation
 public sealed record GeoPoint(decimal Longitude, decimal Latitude);
 /// <summary>Confirmed source polygon, not the viewport rectangle encoded in the URL.</summary>
 public sealed record MapScope(string? DrawId, bool RequiresDraw, bool ZoneConfirmed, GeoPoint[][] Rings,
-    int? ExpectedCount, int ResponseBatches, string? ZoneError = null);
+    int? ExpectedCount, int ResponseBatches, string? ZoneError = null, GeoPoint[][][]? ObservedAreas = null, string? GeometryRequestDrawId = null,
+    MapSelectionState? Selection = null);
+/// <summary>Visible map surface and active selection control; not pixel proof of a canvas stroke.</summary>
+public sealed record MapSelectionState(bool MapVisible, bool SurfaceVisible, bool ResetVisible, bool Loading = false)
+{
+    public bool Active => MapVisible && SurfaceVisible && ResetVisible && !Loading;
+}
 
 /// <summary>Only public numeric IDs and counters, never raw response values.</summary>
 public sealed record MapBatchDiagnostic(int Batch, int Received, int NewIds, int Repeated, int Recommendations,
@@ -133,7 +139,9 @@ public sealed record ListingDataQualityDiagnostic(string ExternalId, string? Tit
     string[] LocationCandidates, string? StructuredLocationCandidate, bool? StructuredLocationHidden,
     decimal? Latitude, decimal? Longitude, string Provenance, string AdapterVersion, string[] Warnings);
 
-public sealed record PageObservation(PageKind Kind, ListingObservation[] Listings, string[] Warnings, bool Loading = false, string? Layout = null, MapScope? Map = null, ListingObservation[]? Changes = null, MapDiagnostic? Diagnostic = null, int? SourceCountHint = null, ListingDataQualityDiagnostic[]? DataQuality = null);
+public sealed record PageObservation(PageKind Kind, ListingObservation[] Listings, string[] Warnings, bool Loading = false, string? Layout = null, MapScope? Map = null, ListingObservation[]? Changes = null, MapDiagnostic? Diagnostic = null, int? SourceCountHint = null, ListingDataQualityDiagnostic[]? DataQuality = null, bool AvitoNeutralFormConfirmed = false, bool AvitoListSearchConfirmed = false, string? SearchIdentityError = null,
+    ListingObservation[]? UnverifiedListings = null, SearchAreaCheck? AreaCheck = null, MapScope? AreaScope = null,
+    string[]? ExcludedExternalIds = null);
 public sealed record Pagination(NextKind Kind, string? Url = null, string? Selector = null, string? Reason = null);
 public sealed record SearchLink(string Id, string Label, string Url, SourceSite Source, bool Selected, bool Enabled, int Revision, bool Archived = false);
 public sealed record CollectionJob(string Id, string BatchId, string LinkId, int Revision, SourceSite Source,
@@ -264,6 +272,17 @@ public interface ISourcePage : IAsyncDisposable
         => Task.FromResult<SourcePageDiagnostic?>(null);
     Task<bool> CaptureScreenshotAsync(string path, CancellationToken cancellationToken)
         => Task.FromResult(false);
+    /// <summary>Sanitized current DOM only; no cookies, storage, scripts or form values.</summary>
+    Task<string?> CaptureErrorHtmlAsync(CancellationToken cancellationToken)
+        => Task.FromResult<string?>(null);
+    Task<MapSelectionErrorEvidence?> CaptureMapSelectionErrorAsync(CancellationToken cancellationToken)
+        => Task.FromResult<MapSelectionErrorEvidence?>(null);
+    Task<GeoPoint[][][]?> CaptureSearchAreaAsync(CancellationToken cancellationToken)
+        => Task.FromResult<GeoPoint[][][]?>(null);
+    Task BeginMapDiagnosticsAsync(string directory, CancellationToken cancellationToken)
+        => throw new NotSupportedException("Диагностика карты недоступна для этой страницы.");
+    Task FinishMapDiagnosticsAsync(CancellationToken cancellationToken)
+        => Task.CompletedTask;
 }
 public interface ISourceSessions : IAsyncDisposable
 {

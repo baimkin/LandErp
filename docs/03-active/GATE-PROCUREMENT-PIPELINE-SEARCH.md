@@ -57,3 +57,24 @@ Evidence: `artifacts/procurement-pipeline-search/tests/pipeline-search-verified.
 head `main`, fast-forward с expected SHA без force через подключённый GitHub.
 Локальная ветка/индекс и production не изменяются. Итоговый SHA подтверждается
 отдельным чтением `main`; evidence — `artifacts/procurement-pipeline-search/publication/verification.json`.
+## Результат попытки публикации — 02.11.2026
+
+Проверен актуальный GitHub main: `5fd9da257bc462fab0e0693ad460111183775a25`.
+Подготовлен снимок ровно 13 файлов (277021 байт, LF), SHA каждого blob указан
+в `artifacts/procurement-pipeline-search/publication/verification.json`.
+Снимок ACTIVE_TASK содержит опубликованную историю main и новый этап поиска;
+неопубликованная локальная история Collector исключена, локальный оригинал сохранён.
+`create_tree` отклонён до записи: `MCP tool call requires approval, but approval policy is never`.
+Новый commit не создан, push не выполнен. Повторное согласие владельца получено;
+блокер — техническая политика сеанса. Рабочие файлы/ветка/индекс сохранены.
+## Публикация завершена — 02.11.2026
+
+После изменения разрешений опубликован коммит
+`31c0c88b0a675f021afdfcb4b9c7a3fc2a123be2` —
+`Add search to procurement pipeline board and table`.
+Единственный родитель: `5fd9da257bc462fab0e0693ad460111183775a25`.
+Подтверждены ровно 13 файлов и SHA всех blob, ahead 1 / behind 0, удалённый
+head main и локальный origin/main после fetch. Force и переписывание истории
+не использовались. Накопленные локальные изменения и рабочая ветка сохранены.
+Рабочий сервер и БД не обновлялись. Предыдущий блокер разрешений снят.
+Evidence: `artifacts/procurement-pipeline-search/publication/verification.json`.

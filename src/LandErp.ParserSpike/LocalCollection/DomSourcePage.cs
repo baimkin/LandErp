@@ -21,31 +21,104 @@ public sealed class DomSourcePage : ISourcePage
 {
     private readonly IPage page;
     private readonly Func<Task>? release;
+    private readonly Action? onInterrupted;
     private readonly int operationTimeoutSeconds;
     private readonly AvitoMapCapture? mapCapture;
     private bool mapLayout;
+    private MapDiagnosticCapture? mapDiagnostic;
+    private bool diagnosticOnly;
+    private string? requestedUrl;
+    private MapSelectionSnapshot? lastMapSelection;
     public SourceSite Source { get; }
-    public DomSourcePage(IPage page, SourceSite source, Func<Task>? release = null, int operationTimeoutSeconds = 30, int maximumMapBatches = 10)
+    public DomSourcePage(IPage page, SourceSite source, Func<Task>? release = null, int operationTimeoutSeconds = 30, int maximumMapBatches = 10,
+        Action? onInterrupted = null)
     {
-        this.page = page; this.release = release; this.operationTimeoutSeconds = operationTimeoutSeconds; Source = source;
+        this.page = page; this.release = release; this.operationTimeoutSeconds = operationTimeoutSeconds; this.onInterrupted = onInterrupted; Source = source;
         page.Response += OnResponse;
-        if (source == SourceSite.Avito) mapCapture = new(page, maximumMapBatches);
+        // Retain the legacy public argument for callers; it no longer caps map response batches.
+        _ = maximumMapBatches;
+        if (source == SourceSite.Avito) mapCapture = new(page);
     }
     private void OnResponse(object? sender, IResponse response)
     { if (response.Request.IsNavigationRequest && response.Request.Frame == page.MainFrame) httpStatus = response.Status; }
     public string CurrentUrl => page.Url;
     private int httpStatus;
     private bool interrupted;
+    private int disposed;
     public async Task OpenAsync(string url, CancellationToken cancellationToken)
     {
         _ = SearchUrls.SafePage(url, Source);
-        mapCapture?.Reset(url); mapLayout = false;
+        requestedUrl = url;
+        mapCapture?.Reset(url); mapLayout = false; lastMapSelection = null;
         IResponse? response;
         try { response = await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded }).WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false); }
         catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or PlaywrightException) { interrupted = true; throw; }
         httpStatus = response?.Status ?? 0;
     }
-    public async Task<PageObservation> ReadAsync(CancellationToken cancellationToken)
+    private async Task<T> OperationAsync<T>(Func<Task<T>> operation)
+    {
+        try { return await operation().ConfigureAwait(false); }
+        catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or PlaywrightException or JsonException)
+        { interrupted = true; throw; }
+    }
+    public Task<PageObservation> ReadAsync(CancellationToken cancellationToken) => diagnosticOnly
+        ? throw new InvalidOperationException("Диагностика карты не собирает объявления.") : OperationAsync(() => ReadCoreAsync(cancellationToken));
+    public Task BeginMapDiagnosticsAsync(string directory, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Source != SourceSite.Avito || mapDiagnostic is not null) throw new InvalidOperationException("Выберите карту Avito.");
+        diagnosticOnly = true; mapCapture?.Dispose();
+        mapDiagnostic = new(page, directory); return Task.CompletedTask;
+    }
+    public async Task FinishMapDiagnosticsAsync(CancellationToken cancellationToken)
+    {
+        MapDiagnosticCapture capture = mapDiagnostic ?? throw new InvalidOperationException("Сначала откройте карту для диагностики.");
+        List<string> errors = [];
+        try
+        {
+            try
+            {
+                string selection = await page.EvaluateAsync<string>(MapSelectionScript, true)
+                    .WaitAsync(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+                await File.WriteAllTextAsync(Path.Combine(capture.DirectoryPath, "selection-state.json"), selection, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is PlaywrightException or TimeoutException or OperationCanceledException)
+            { errors.Add("SELECTION_" + ex.GetType().Name); }
+            try
+            {
+                string state = await page.EvaluateAsync<string>(MapDiagnosticCapture.DomStateScript).WaitAsync(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+                await File.WriteAllTextAsync(Path.Combine(capture.DirectoryPath, "dom-state.json"), state, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is PlaywrightException or TimeoutException or OperationCanceledException) { errors.Add("DOM_" + ex.GetType().Name); }
+            try
+            {
+                string? html = await CaptureErrorHtmlAsync(cancellationToken).ConfigureAwait(false);
+                if (html is not null) await File.WriteAllTextAsync(Path.Combine(capture.DirectoryPath, "page.html"), html, cancellationToken).ConfigureAwait(false);
+                else errors.Add("HTML_UNAVAILABLE");
+            }
+            catch (Exception ex) when (ex is PlaywrightException or TimeoutException or OperationCanceledException) { errors.Add("HTML_" + ex.GetType().Name); }
+            try
+            {
+                await page.ScreenshotAsync(new() { Path = Path.Combine(capture.DirectoryPath, "screen.png"), FullPage = false, Timeout = 3000 })
+                    .WaitAsync(TimeSpan.FromSeconds(4), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is PlaywrightException or TimeoutException or OperationCanceledException) { errors.Add("SCREEN_" + ex.GetType().Name); }
+        }
+        finally
+        {
+            await capture.DisposeAsync().ConfigureAwait(false);
+            File.WriteAllText(Path.Combine(capture.DirectoryPath, "snapshot.json"), JsonSerializer.Serialize(new { Errors = errors, CapturedUtc = DateTimeOffset.UtcNow }));
+            mapDiagnostic = null;
+        }
+    }
+    public async Task<GeoPoint[][][]?> CaptureSearchAreaAsync(CancellationToken cancellationToken)
+    {
+        PageObservation snapshot = await ReadAsync(cancellationToken).ConfigureAwait(false);
+        GeoPoint[][][]? area = (snapshot.Map ?? snapshot.AreaScope)?.ObservedAreas;
+        return snapshot.Kind == PageKind.SearchResults && !snapshot.Loading && area is not null
+            && SearchAreaGeometry.Signature(area) is not null ? area : null;
+    }
+    private async Task<PageObservation> ReadCoreAsync(CancellationToken cancellationToken)
     {
         if (!Uri.TryCreate(CurrentUrl, UriKind.Absolute, out Uri? uri) || !SearchUrls.IsPublic(uri, Source)) return new(PageKind.Unknown, [], ["UNEXPECTED_PAGE_URL"]);
         string json = await page.EvaluateAsync<string>("site => JSON.stringify((" + SnapshotScript + ")(site))", Source.ToString()).WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
@@ -53,10 +126,38 @@ public sealed class DomSourcePage : ISourcePage
         if (httpStatus == 429) return new(PageKind.RateLimited, [], ["HTTP_429"]);
         if (httpStatus >= 400 && snapshot.Kind != "Captcha") return new(PageKind.SourceError, [], ["HTTP_" + httpStatus]);
         mapLayout = snapshot.Layout == "AVITO_MAP";
+        if (Source == SourceSite.Avito && snapshot.Kind == "SearchResults" && !mapLayout
+            && requestedUrl is not null && AvitoMapData.DrawId(requestedUrl) is not null)
+        {
+            // Read the saved list as-is. The source's map-link is only corroborating
+            // evidence of its active draw reference; never click it or claim polygon proof.
+            string stateJson = await page.EvaluateAsync<string>(AvitoListSearchStateScript)
+                .WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
+            ListSearchState state = LocalJson.Read<ListSearchState>(stateJson);
+            bool confirmed = AvitoSearchIdentity.ConfirmsListLinks(requestedUrl, CurrentUrl,
+                state.Urls ?? (state.Url is null ? [] : [state.Url]), state.NeutralForm);
+            PageObservation parsed = Parse(snapshot, Source, DateTimeOffset.UtcNow);
+            PageObservation? captured = mapCapture?.Read(CurrentUrl, snapshot.Loading, parsed.Listings);
+            HashSet<string> mainIds = parsed.Listings.Select(item => item.ExternalId).ToHashSet(StringComparer.Ordinal);
+            ListingObservation[] raw = captured?.UnverifiedListings?.Where(item => mainIds.Contains(item.ExternalId)).ToArray() ?? parsed.Listings;
+            return confirmed ? parsed with
+                { AvitoListSearchConfirmed = true, AvitoNeutralFormConfirmed = state.NeutralForm, UnverifiedListings = raw, AreaScope = captured?.Map }
+                : new(PageKind.SearchResults, [], [], UnverifiedListings: raw, AreaScope: captured?.Map, AvitoNeutralFormConfirmed: state.NeutralForm, SearchIdentityError:
+                    state.Url is null ? "Список: страница не подтверждает исходную зону поиска"
+                        : "Список: исходная зона или фильтры изменились либо условия формы не распознаны");
+        }
         if (mapLayout && snapshot.Kind == "SearchResults" && mapCapture is not null)
         {
             PageObservation parsed = Parse(snapshot, Source, DateTimeOffset.UtcNow);
             PageObservation result = mapCapture.Read(CurrentUrl, snapshot.Loading, parsed.Listings);
+            string selectionJson = await page.EvaluateAsync<string>(MapSelectionScript)
+                .WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
+            MapSelectionState selection = JsonSerializer.Deserialize<MapSelectionState>(selectionJson) ?? new(false, false, false);
+            using (JsonDocument selectionDocument = JsonDocument.Parse(selectionJson))
+                lastMapSelection = new(DateTimeOffset.UtcNow, SearchUrls.DiagnosticUrl(CurrentUrl), selectionDocument.RootElement.Clone());
+            // Cards and reset control can arrive before the map engine. Never treat that
+            // intermediate shell as a settled selection or start scrolling its cards.
+            result = result with { Map = result.Map! with { Selection = selection }, Loading = result.Loading || selection.Loading };
             // Geometry is measured only; this diagnostic read never scrolls or changes collection.
             string state = await page.EvaluateAsync<string>("() => {try {const s=(" + MapScrollScript + ")();return JSON.stringify({top:s.scrollTop,client:s.clientHeight,height:s.scrollHeight});} catch {return JSON.stringify({error:'MAP_SCROLL_CONTAINER_UNKNOWN'});}}")
                 .WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
@@ -71,6 +172,67 @@ public sealed class DomSourcePage : ISourcePage
         }
         return Parse(snapshot, Source, DateTimeOffset.UtcNow);
     }
+    public const string MapSelectionScript = """
+        (diagnostic=false) => {
+          const identity = e => {
+            const marker=e?.getAttribute('data-marker');
+            return {Tag:e?.tagName?.toLowerCase()||null,Marker:/^map[-/a-z0-9]*$/.test(marker||'')?marker:null};
+          };
+          const rejection = e => {
+            if (!e) return {Code:'ELEMENT_MISSING'};
+            const r=e.getBoundingClientRect();
+            if(r.width<=0||r.height<=0)return {Code:'ZERO_SIZE'};
+            if(r.right<=0||r.bottom<=0||r.left>=innerWidth||r.top>=innerHeight)return {Code:'OUTSIDE_VIEWPORT'};
+            let depth=0;
+            for(let p=e;p;p=p.parentElement,depth++){
+              const s=getComputedStyle(p);
+              const code=s.display==='none'?'DISPLAY_NONE':s.visibility==='hidden'?'VISIBILITY_HIDDEN':Number(s.opacity)===0?'OPACITY_ZERO':null;
+              if(code)return {Code:code,AncestorDepth:depth,Element:identity(p)};
+            }
+            return null;
+          };
+          const visible = e => rejection(e)===null;
+          const candidates=[...document.querySelectorAll('[data-marker="map-view"],[data-marker="map-view-mfe"],[data-marker="map-full"]')];
+          const maps=candidates.filter(visible);
+          const large = e => e.getBoundingClientRect().width>=200&&e.getBoundingClientRect().height>=150;
+          // Yandex Maps 3 renders raster tiles without a large canvas or SVG.
+          // Only loaded, visible tiles inside an Avito map can confirm its surface.
+          const surface=maps.some(m=>
+            [...m.querySelectorAll('canvas,svg')].some(e=>visible(e)&&large(e)) ||
+            (large(m)&&[...m.querySelectorAll('.ymaps3--tile-layer img')].some(e=>e.complete&&e.naturalWidth>0&&visible(e))));
+          const isReset = e => /сбросить.*област/i.test((e.textContent||'')+' '+(e.getAttribute('title')||'')+' '+(e.getAttribute('aria-label')||''));
+          const reset=maps.some(m=>[...m.querySelectorAll('button,[role="button"]')].some(e=>visible(e)&&!e.disabled&&isReset(e)));
+          const loading=maps.some(m=>[...m.querySelectorAll('[class*="mapLoader-"],[class*="loading-"],[data-marker*="loader"],[aria-busy="true"]')].some(visible));
+          // The map can be ready while unrelated page resources still load.
+          // Surface, active selection, loading and geometry remain separate gates.
+          const documentReady=document.readyState==='interactive'||document.readyState==='complete';
+          const state={MapVisible:documentReady&&maps.length>0,SurfaceVisible:surface,ResetVisible:reset,Loading:loading};
+          if(diagnostic){
+            const describe = e => {
+              const r=e.getBoundingClientRect();
+              return {...identity(e),Width:r.width,Height:r.height,Left:r.left,Top:r.top,Rejection:rejection(e)};
+            };
+            state.Diagnostic={
+              ReadyState:document.readyState,Viewport:{Width:innerWidth,Height:innerHeight},
+              MapCandidates:candidates.length,Truncated:candidates.length>8,
+              Maps:candidates.slice(0,8).map(m=>{
+                const surfaces=[...m.querySelectorAll('canvas,svg')];
+                const tiles=[...m.querySelectorAll('.ymaps3--tile-layer img')];
+                const buttons=[...m.querySelectorAll('button,[role="button"]')].filter(isReset);
+                const loaders=[...m.querySelectorAll('[class*="mapLoader-"],[class*="loading-"],[data-marker*="loader"],[aria-busy="true"]')];
+                return {
+                  Map:describe(m),Large:large(m),
+                  SurfaceCount:surfaces.length,LargeSurfaces:surfaces.filter(large).slice(0,6).map(describe),
+                  TileCount:tiles.length,Tiles:tiles.slice(0,6).map(e=>({...describe(e),Complete:!!e.complete,NaturalWidth:e.naturalWidth})),
+                  ResetCount:buttons.length,ResetButtons:buttons.slice(0,4).map(e=>({...describe(e),Disabled:!!e.disabled})),
+                  LoaderCount:loaders.length,Loaders:loaders.slice(0,4).map(describe)
+                };
+              })
+            };
+          }
+          return JSON.stringify(state);
+        }
+        """;
     public static PageObservation Parse(DomSnapshot snapshot, SourceSite source, DateTimeOffset now)
     {
         if (!Enum.TryParse(snapshot.Kind, out PageKind kind)) kind = PageKind.Unknown;
@@ -258,7 +420,8 @@ public sealed class DomSourcePage : ISourcePage
             result.Add(new(origin, match.Value, value * multiplier));
         }
     }
-    public async Task<bool> WheelAsync(CollectionSettings settings, CancellationToken cancellationToken)
+    public Task<bool> WheelAsync(CollectionSettings settings, CancellationToken cancellationToken) => OperationAsync(() => WheelCoreAsync(settings, cancellationToken));
+    private async Task<bool> WheelCoreAsync(CollectionSettings settings, CancellationToken cancellationToken)
     {
         // Small wheel events load the DOM gradually. This is rendering control, not fingerprint masking.
         float[] point = await page.EvaluateAsync<float[]>(mapLayout ? "() => { const s = (" + MapScrollScript + ")(); const r=s.getBoundingClientRect(); return [Math.max(1,Math.min(innerWidth-1,r.left+r.width/2)),Math.max(1,Math.min(innerHeight-1,r.top+r.height/2))]; }" : "() => [innerWidth/2, innerHeight*0.6]").WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
@@ -270,7 +433,8 @@ public sealed class DomSourcePage : ISourcePage
         }
         return await page.EvaluateAsync<bool>(mapLayout ? "() => {const s=(" + MapScrollScript + ")(); return s.scrollTop+s.clientHeight>=s.scrollHeight-4;}" : "() => window.scrollY + innerHeight >= document.documentElement.scrollHeight - 4").WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
     }
-    public async Task<Pagination> NextAsync(CancellationToken cancellationToken)
+    public Task<Pagination> NextAsync(CancellationToken cancellationToken) => OperationAsync(() => NextCoreAsync(cancellationToken));
+    private async Task<Pagination> NextCoreAsync(CancellationToken cancellationToken)
     {
         if (mapLayout) return new(NextKind.End, Reason: "Конец правого списка карты");
         string json = await page.EvaluateAsync<string>("site => JSON.stringify((" + PaginationScript + ")(site))", Source.ToString()).WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false);
@@ -339,6 +503,72 @@ public sealed class DomSourcePage : ISourcePage
             elements, SearchUrls.DiagnosticIdentityDiff(CurrentUrl, candidate, Source));
     }
 
+    public async Task<MapSelectionErrorEvidence?> CaptureMapSelectionErrorAsync(CancellationToken cancellationToken)
+    {
+        if (Source != SourceSite.Avito) return null;
+        // Preserve the collection decision even if the DOM changes or closes
+        // before this second, diagnostic-only read. Never resumes or mutates the page.
+        MapSelectionSnapshot? lastRead = lastMapSelection;
+        try
+        {
+            string state = await page.EvaluateAsync<string>(MapSelectionScript, true)
+                .WaitAsync(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+            using JsonDocument document = JsonDocument.Parse(state);
+            return new(lastRead, new(DateTimeOffset.UtcNow, SearchUrls.DiagnosticUrl(CurrentUrl), document.RootElement.Clone()), null);
+        }
+        catch (Exception ex) when (ex is PlaywrightException or TimeoutException or OperationCanceledException or JsonException or InvalidOperationException)
+        { return new(lastRead, null, ex.GetType().Name); }
+    }
+
+    public async Task<string?> CaptureErrorHtmlAsync(CancellationToken cancellationToken)
+    {
+        if (page.IsClosed || !Uri.TryCreate(CurrentUrl, UriKind.Absolute, out Uri? uri) || !SearchUrls.IsPublic(uri, Source)) return null;
+        return await page.EvaluateAsync<string?>(ErrorHtmlScript, LastErrorSnapshot.MaximumHtmlCharacters)
+            .WaitAsync(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+    }
+
+    // Work on a clone: capturing a diagnostic must never alter the live search or expose inline application state.
+    public const string ErrorHtmlScript = """
+        maximum => {
+            const root = document.documentElement.cloneNode(true);
+            root.querySelectorAll('script,noscript,style,iframe,object,embed,template,base,link,meta').forEach(e => e.remove());
+            root.querySelectorAll('input,textarea,select,[contenteditable]').forEach(e => {
+                e.removeAttribute('value'); e.removeAttribute('checked'); e.removeAttribute('selected');
+                if (e.tagName !== 'INPUT') e.textContent = '';
+            });
+            const sensitive = /token|password|passwd|secret|authorization|cookie|session|csrf|jwt|api.?key|auth.?key|signature/i;
+            const cleanUrl = value => {
+                if (!value || value.startsWith('#')) return value;
+                try {
+                    const url = new URL(value, document.baseURI);
+                    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return '';
+                    url.hash = '';
+                    for (const key of [...url.searchParams.keys()])
+                        if (sensitive.test(key) || /^(auth|sid|key)$/i.test(key)) url.searchParams.delete(key);
+                    return url.href;
+                } catch { return ''; }
+            };
+            for (const e of [root, ...root.querySelectorAll('*')]) {
+                for (const attribute of [...e.attributes]) {
+                    const name = attribute.name;
+                    if (/^on/i.test(name) || sensitive.test(name) || /^(value|nonce|srcdoc|srcset|style|action|formaction|ping)$/i.test(name)
+                        || /^data-/i.test(name) && !/^data-(marker|name|testid)$/i.test(name)) e.removeAttribute(name);
+                    else if (/^(href|src|poster|cite|background|xlink:href)$/i.test(name)) e.setAttribute(name, cleanUrl(attribute.value));
+                }
+                for (const node of [...e.childNodes]) if (node.nodeType === 8) node.remove();
+            }
+            const head = root.querySelector('head');
+            if (head) {
+                const policy = document.createElement('meta');
+                policy.setAttribute('http-equiv', 'Content-Security-Policy');
+                policy.setAttribute('content', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'");
+                head.prepend(policy);
+            }
+            const html = '<!DOCTYPE html>\n' + root.outerHTML;
+            return html.length <= maximum ? html : null;
+        }
+        """;
+
     public async Task<bool> CaptureScreenshotAsync(string path, CancellationToken cancellationToken)
     {
         await page.ScreenshotAsync(new() { Path = path, FullPage = false })
@@ -346,13 +576,29 @@ public sealed class DomSourcePage : ISourcePage
         return File.Exists(path);
     }
 
-    public Task ActivateAsync(CancellationToken cancellationToken) => page.BringToFrontAsync().WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken);
+    public Task ActivateAsync(CancellationToken cancellationToken) => OperationAsync(async () =>
+    { await page.BringToFrontAsync().WaitAsync(TimeSpan.FromSeconds(operationTimeoutSeconds), cancellationToken).ConfigureAwait(false); return true; });
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         page.Response -= OnResponse;
+        if (mapDiagnostic is not null) await FinishMapDiagnosticsAsync(CancellationToken.None).ConfigureAwait(false);
         mapCapture?.Dispose();
-        if (release is null || interrupted) await page.CloseAsync().ConfigureAwait(false);
-        if (release is not null) await release().ConfigureAwait(false);
+        try
+        {
+            if (release is null || interrupted) await BrowserLifetime.CloseAsync(page.CloseAsync()).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Successful Close terminates pending commands on this page. If Close failed,
+            // quarantine the context rather than recycle an unsafe page into another job.
+            if (interrupted) onInterrupted?.Invoke();
+            throw;
+        }
+        finally
+        {
+            if (release is not null) await release().ConfigureAwait(false);
+        }
     }
 
     // Find the list's own overflow container, never the map or the document (wheel would zoom the map).
@@ -371,6 +617,46 @@ public sealed class DomSourcePage : ISourcePage
           throw Error('MAP_SCROLL_CONTAINER_UNKNOWN');
         }
         """;
+    private sealed record ListSearchState(string? Url, bool NeutralForm, string[]? Urls = null);
+
+    public const string AvitoListSearchStateScript = """
+        () => {
+          const visible=e=>!!e&&!!e.getClientRects().length;
+          const links=[...document.querySelectorAll('a[data-marker="map-button"],a[data-marker="minimap-banner"]')].filter(visible);
+          const urls=[...new Set(links.map(a=>a.href))];
+          const root=[...document.querySelectorAll('[data-marker="search-filters"]')].find(visible);
+          // Avito's native selects may be empty: their displayed selection lives
+          // in the adjacent /select-text span. If both carry text they must agree.
+          const text=marker=>{
+            const controls=root?.querySelectorAll('[data-marker="'+marker+'"]');
+            const labels=root?.querySelectorAll('[data-marker="'+marker+'-text"]');
+            if(controls?.length!==1 || labels.length>1) return null;
+            const control=controls[0], label=labels[0];
+            const clean=e=>(e?.innerText||e?.textContent||'').replace(/\s+/g,' ').trim();
+            if(label && (label.parentElement!==control.parentElement || !visible(label))) return null;
+            if(control.tagName==='SELECT' && (control.multiple || control.selectedOptions.length>1)) return null;
+            const native=control.tagName==='SELECT' ? clean(control.selectedOptions[0]) : clean(control);
+            const displayed=clean(label);
+            return displayed && native && displayed!==native ? null : displayed||native;
+          };
+          const allowedInputs=new Set(['price-from/input','price-to/input','params[149569]/input']);
+          // Geography is verified independently by the unchanged URL and source draw
+          // reference. Its ordinary selector is not an unknown membership control.
+          const allowedSelects=new Set(['categoryId/select','params[203]/select','geoFilters/select']);
+          const neutral=!!root && text('categoryId/select')==='Земельные участки'
+            && text('params[203]/select')==='Купить или снять'
+            && [...root.querySelectorAll('[data-marker$="/select"]')].every(e=>allowedSelects.has(e.getAttribute('data-marker')))
+            && [...root.querySelectorAll('input,textarea,select')].every(e=>{
+              if(e.tagName==='SELECT') return allowedSelects.has(e.getAttribute('data-marker'));
+              if(e.type==='radio') return !e.checked || e.closest('label')?.innerText.trim()==='Все';
+              if(e.type==='checkbox') return e.name==='withImagesOnly' && !e.checked;
+              if(e.type==='hidden') return e.name==='params[156912]';
+              return allowedInputs.has(e.getAttribute('data-marker')) && !e.value.trim();
+            });
+          return JSON.stringify({url:urls[0]||null,urls,neutralForm:neutral});
+        }
+        """;
+
     public const string SnapshotScript = """
         site => {
           const avito = site === 'Avito';
@@ -459,17 +745,22 @@ public sealed class DomSourcePage : ISourcePage
     public const string PaginationScript = """
         site => {
           const avito = site==='Avito';
-          const rootSelector = avito ? '[data-marker="pagination"]' : '[data-name="Pagination"]';
-          const linkSelector = avito ? '[data-marker="pagination"] a,a[data-marker="pagination-button/nextPage"],a[data-marker^="pagination-button/page("],a[rel="next"]' : '[data-name="Pagination"] a';
+          const rootSelector = avito ? '[data-marker="pagination"],[data-marker="pagination-button"]' : '[data-name="Pagination"]';
+          const linkSelector = avito ? '[data-marker="pagination"] a,[data-marker="pagination-button"] a,a[data-marker="pagination-button/nextPage"],a[data-marker^="pagination-button/page("],a[rel="next"]' : '[data-name="Pagination"] a';
           const root = document.querySelector(rootSelector);
           const visible = e=>!!e.getClientRects().length;
           const current = Number(new URL(location.href).searchParams.get('p')||1);
           const links=[...document.querySelectorAll(linkSelector)].filter(e=>visible(e)&&e.getAttribute('aria-disabled')!=='true'&&!e.hasAttribute('disabled'));
-          const pagination=links.find(e=>Number(e.textContent.trim())===current+1) || links.find(e=>/^(следующая|дальше|далее|next|›|→)$/i.test(e.textContent.trim())||e.rel==='next'||e.getAttribute('data-marker')==='pagination-button/nextPage');
+          const declaresNext=e=>Number(e.textContent.trim())===current+1||/^(следующая|дальше|далее|next|›|→)$/i.test(e.textContent.trim())||e.rel==='next'||e.getAttribute('data-marker')==='pagination-button/nextPage';
+          const pointsToNext=e=>{try{const u=new URL(e.href,location.href);return u.searchParams.getAll('p').length<=1&&Number(u.searchParams.get('p')||1)===current+1;}catch{return false;}};
+          // A visible label may disagree with href. Select an actual n+1 link;
+          // never skip a page or synthesize a navigation URL from a misleading label.
+          const pagination=links.find(e=>pointsToNext(e)&&declaresNext(e))||links.find(pointsToNext);
           if(pagination) return {kind:'Next',url:pagination.href,selector:linkSelector};
+          if(links.some(declaresNext)) return {kind:'UnknownInvalid',reason:'Номер следующей страницы в ссылке не совпадает с ожидаемым'};
           if(root) {
             const numbered = [...root.querySelectorAll('a,button,span')].filter(visible).map(e=>e.textContent.trim()).filter(t=>/^\d+$/.test(t)).map(Number);
-            if(numbered.length && Math.max(...numbered)<=current) return {kind:'End',reason:'Последняя номерная страница'};
+            if(numbered.includes(current) && Math.max(...numbered)<=current) return {kind:'End',reason:'Последняя номерная страница'};
             const disabledNext=[...root.querySelectorAll('button,[aria-disabled="true"]')].find(e=>/следующая|дальше|next/i.test(e.textContent)&& (e.disabled||e.getAttribute('aria-disabled')==='true'));
             if(disabledNext) return {kind:'End',reason:'Следующая страница отключена'};
             return {kind:'UnknownInvalid',reason:'Пагинация есть, но следующий переход не распознан'};

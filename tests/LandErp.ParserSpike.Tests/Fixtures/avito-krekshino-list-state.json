@@ -1,0 +1,11 @@
+{
+  "requestedUrl": "https://www.avito.ru/moskva/zemelnye_uchastki?drawId=3be75202e3df8f2ed6c9d73a415c6b40&f=ASgBAgICAUSq3xUC&map=eyJzZWFyY2hBcmVhIjp7ImxhdEJvdHRvbSI6NTUuNTU3NjA1MTc2MTY4OSwibGF0VG9wIjo1NS42MDkwNDE0OTE5NTgzNywibG9uTGVmdCI6MzcuMDY0MzQ5MzAzMjgzODYsImxvblJpZ2h0IjozNy4yMzE4OTA4MDcxOTAxMX19&metro=2334",
+  "state": {
+    "url": "https://www.avito.ru/moskva/zemelnye_uchastki?drawId=3be75202e3df8f2ed6c9d73a415c6b40&f=ASgBAgICAUSq3xUC&localPriority=0&map=e30%3D&metro=2334",
+    "urls": [
+      "https://www.avito.ru/moskva/zemelnye_uchastki?drawId=3be75202e3df8f2ed6c9d73a415c6b40&f=ASgBAgICAUSq3xUC&localPriority=0&map=e30%3D&metro=2334"
+    ],
+    "neutralForm": false
+  },
+  "note": "Public URLs only from saved Krekshino list; no auth, source response bodies or user state."
+}

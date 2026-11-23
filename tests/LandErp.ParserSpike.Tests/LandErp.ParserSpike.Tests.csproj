@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <None Update="Fixtures\cian-polygon-structured.html" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\avito-selection-*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\avito-krekshino-list-state.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="System.IO" />

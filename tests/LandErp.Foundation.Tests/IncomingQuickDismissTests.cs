@@ -125,6 +125,7 @@ public sealed partial class CatalogBulkArchiveUiTests
             Guid first = PageData(page).Items[0].Id;
             await InvokeAsync(page, "OpenDetailAsync", first);
             Assert.AreEqual(29, PageData(page).Total, "Opening an unreviewed listing removes it from New.");
+            probes.Windows.Clear(); // Opening now refills New locally too; measure only the subsequent dismissal.
             Guid next = PageData(page).Items[0].Id;
             await InvokeAsync(page, "OpenClassification", CatalogDisposition.Dismissed);
             probes.BlockFull = true;
@@ -232,7 +233,9 @@ public sealed partial class CatalogBulkArchiveUiTests
         {
             services.AddSingleton(DismissProxy<IIncomingCatalogReadService>.Wrap(Reader, (method, args) =>
             {
-                if (method == nameof(IIncomingCatalogReadService.ReadAsync) && BlockFull) throw new InvalidOperationException("Full list read forbidden after dismissal");
+                if (method is nameof(IIncomingCatalogReadService.ReadAsync) or nameof(IIncomingCatalogReadService.ReadPageAsync)
+                    or nameof(IIncomingCatalogReadService.ReadInformationAsync) && BlockFull)
+                    throw new InvalidOperationException("Full list read forbidden after dismissal");
                 if (method == nameof(IIncomingCatalogReadService.ReadWindowAsync))
                 {
                     Windows.Add((IncomingCatalogReadFilter)args![1]!);

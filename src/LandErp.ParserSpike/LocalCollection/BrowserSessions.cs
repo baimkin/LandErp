@@ -3,32 +3,40 @@ using Microsoft.Playwright;
 namespace LandErp.ParserSpike.LocalCollection;
 
 /// <summary>One persistent browser context per site, with independently owned worker tabs and isolated profiles.</summary>
-public sealed class BrowserSessions(string profileRoot, JsonResponseDiagnostics? jsonDiagnostics = null) : ISourceSessions
+public sealed class BrowserSessions(string profileRoot, JsonResponseDiagnostics? jsonDiagnostics = null,
+    Func<Task<IPlaywright>>? playwrightFactory = null) : ISourceSessions
 {
     private readonly SemaphoreSlim mutex = new(1, 1);
     private readonly Dictionary<SourceSite, IBrowserContext> contexts = [];
     private readonly Dictionary<SourceSite, FileStream> profileLocks = [];
     private readonly Dictionary<SourceSite, CollectionSettings> configurations = [];
     private readonly HashSet<IPage> leased = [];
+    private readonly object healthSync = new();
+    private readonly HashSet<SourceSite> interruptedSources = [];
     private IPlaywright? playwright;
+    private bool disposed;
     public async Task<ISourcePage> CreatePageAsync(SourceSite source, CollectionSettings settings, CancellationToken cancellationToken)
     {
         await mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            bool interrupted; lock (healthSync) interrupted = interruptedSources.Contains(source);
             if (contexts.TryGetValue(source, out IBrowserContext? previous)
-                && (configurations[source].Browser != settings.Browser
+                && (interrupted || configurations[source].Browser != settings.Browser
                     || configurations[source].NavigationTimeoutSeconds != settings.NavigationTimeoutSeconds
                     || configurations[source].ElementTimeoutSeconds != settings.ElementTimeoutSeconds
                     || previous.Pages.All(p => p.IsClosed)))
             {
                 if (previous.Pages.Any(leased.Contains)) throw new InvalidOperationException("BROWSER_SETTINGS_BUSY");
-                try { await previous.CloseAsync().ConfigureAwait(false); } catch (PlaywrightException) { }
+                try { await BrowserLifetime.CloseAsync(previous.CloseAsync()).ConfigureAwait(false); } catch (PlaywrightException) { }
                 contexts.Remove(source); profileLocks[source].Dispose(); profileLocks.Remove(source);
+                lock (healthSync) interruptedSources.Remove(source);
             }
             if (!contexts.TryGetValue(source, out IBrowserContext? context))
             {
-                playwright ??= await Playwright.CreateAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+                playwright ??= await BrowserLifetime.AcquireAsync(playwrightFactory?.Invoke() ?? Playwright.CreateAsync(),
+                    value => { value.Dispose(); return Task.CompletedTask; }, cancellationToken).ConfigureAwait(false);
                 // Avito keeps the original Gate 02 profile, so manual login survives this upgrade.
                 string profile = System.IO.Path.Combine(profileRoot, source == SourceSite.Avito ? "spike-002" : "local-cian", settings.Browser);
                 Directory.CreateDirectory(profile);
@@ -55,19 +63,41 @@ public sealed class BrowserSessions(string profileRoot, JsonResponseDiagnostics?
                 cancellationToken.ThrowIfCancellationRequested();
             }
             IPage page = context.Pages.FirstOrDefault(p => !p.IsClosed && !leased.Contains(p))
-                ?? await context.NewPageAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+                ?? await BrowserLifetime.AcquireAsync(context.NewPageAsync(),
+                    value => BrowserLifetime.CloseAsync(value.CloseAsync()), cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             leased.Add(page);
             return new DomSourcePage(page, source, async () =>
             {
+                if (disposed) return;
                 await mutex.WaitAsync().ConfigureAwait(false);
                 try { leased.Remove(page); } finally { mutex.Release(); }
-            }, settings.NavigationTimeoutSeconds, settings.MaxPages);
+            }, settings.NavigationTimeoutSeconds, settings.MaxPages,
+                onInterrupted: () => { lock (healthSync) interruptedSources.Add(source); });
         }
         finally { mutex.Release(); }
     }
     public async ValueTask DisposeAsync()
     {
-        try { foreach (IBrowserContext context in contexts.Values) try { await context.CloseAsync().ConfigureAwait(false); } catch (PlaywrightException) { /* Already closed manually. */ } }
-        finally { contexts.Clear(); leased.Clear(); playwright?.Dispose(); playwright = null; foreach (FileStream handle in profileLocks.Values) handle.Dispose(); profileLocks.Clear(); mutex.Dispose(); }
+        if (disposed) return;
+        await mutex.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (disposed) return;
+            disposed = true;
+            // Close sites concurrently: one unresponsive site cannot multiply shutdown time.
+            await Task.WhenAll(contexts.Values.Select(async context =>
+            {
+                try { await BrowserLifetime.CloseAsync(context.CloseAsync()).ConfigureAwait(false); }
+                catch (Exception ex) when (ex is PlaywrightException or TimeoutException) { }
+            })).ConfigureAwait(false);
+        }
+        finally
+        {
+            contexts.Clear(); leased.Clear(); configurations.Clear();
+            lock (healthSync) interruptedSources.Clear();
+            try { playwright?.Dispose(); }
+            finally { playwright = null; foreach (FileStream handle in profileLocks.Values) handle.Dispose(); profileLocks.Clear(); mutex.Release(); }
+        }
     }
 }

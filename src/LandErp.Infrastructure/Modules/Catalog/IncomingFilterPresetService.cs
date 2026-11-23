@@ -48,9 +48,7 @@ public sealed class IncomingFilterPresetService(
         List<IncomingFilterPresetView> result = [];
         await using (NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken)) result.Add(ReadView(reader));
-        for (int index = 0; index < result.Count; index++)
-            result[index] = await ResolveAsync(connection, organizationId, result[index], cancellationToken);
-        return result;
+        return await ResolveManyAsync(connection, organizationId, result, cancellationToken);
     }
 
     public async Task<IncomingFilterPresetView> CreateAsync(Subject subject, CreateIncomingFilterPreset command, CancellationToken cancellationToken)
@@ -271,6 +269,42 @@ public sealed class IncomingFilterPresetService(
 
     private static async Task<IncomingFilterPresetView> ResolveAsync(NpgsqlConnection connection, Guid organizationId,
         IncomingFilterPresetView saved, CancellationToken cancellationToken)
+        => (await ResolveManyAsync(connection, organizationId, [saved], cancellationToken))[0];
+
+    // Batch compatibility metadata, never one EXISTS per preset. Uses the caller's transaction.
+    private static async Task<IReadOnlyList<IncomingFilterPresetView>> ResolveManyAsync(NpgsqlConnection connection,
+        Guid organizationId, List<IncomingFilterPresetView> saved, CancellationToken cancellationToken)
+    {
+        if (saved.Count == 0) return saved;
+        Guid[] groupIds = saved.Select(item => item.Criteria.SearchGroupId).OfType<Guid>().Distinct().ToArray();
+        Guid[] searchIds = saved.Where(item => item.Criteria.SchemaVersion == 1)
+            .Select(item => item.Criteria.SearchConfigurationId).OfType<Guid>().Distinct().ToArray();
+        HashSet<Guid> activeGroups = [];
+        Dictionary<Guid, Guid?> searchGroups = [];
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT NULL::uuid, g.id FROM collection.search_groups g
+            WHERE g.organization_id=@org AND g.active AND g.id=ANY(@groups)
+            UNION ALL
+            SELECT s.id, g.id FROM collection.search_configurations s
+            JOIN collection.search_groups g ON g.id=s.search_group_id AND g.organization_id=s.organization_id AND g.active
+            WHERE s.organization_id=@org AND s.id=ANY(@searches)
+            """;
+        command.Parameters.AddWithValue("org", organizationId);
+        command.Parameters.AddWithValue("groups", groupIds);
+        command.Parameters.AddWithValue("searches", searchIds);
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                Guid groupId = reader.GetGuid(1);
+                activeGroups.Add(groupId);
+                if (!reader.IsDBNull(0)) searchGroups.Add(reader.GetGuid(0), groupId);
+            }
+        return saved.Select(item => ResolveView(item, searchGroups, activeGroups)).ToArray();
+    }
+
+    private static IncomingFilterPresetView ResolveView(IncomingFilterPresetView saved,
+        IReadOnlyDictionary<Guid, Guid?> searchGroups, HashSet<Guid> activeGroups)
     {
         Guid? groupId = saved.Criteria.SearchGroupId;
         if (saved.Criteria.SchemaVersion == 1)
@@ -279,26 +313,14 @@ public sealed class IncomingFilterPresetService(
             groupId = null;
             if (saved.Criteria.SearchConfigurationId is Guid searchId)
             {
-                await using NpgsqlCommand search = connection.CreateCommand();
-                search.CommandText = """
-                    SELECT g.id FROM collection.search_configurations s
-                    JOIN collection.search_groups g ON g.id = s.search_group_id AND g.organization_id = s.organization_id
-                    WHERE s.id = @id AND s.organization_id = @organization_id AND g.active
-                    """;
-                search.Parameters.AddWithValue("id", searchId);
-                search.Parameters.AddWithValue("organization_id", organizationId);
-                groupId = await search.ExecuteScalarAsync(cancellationToken) as Guid?;
+                groupId = searchGroups.GetValueOrDefault(searchId);
                 if (groupId == null || (saved.SearchGroupId != null && saved.SearchGroupId != groupId))
                     return saved with { CompatibilityIssue = $"Фильтр «{saved.Name}» ({saved.Id}): поиск {searchId}, группа-метаданные {saved.SearchGroupId?.ToString() ?? "не задана"}, группа поиска {groupId?.ToString() ?? "недоступна"}. Перенос неоднозначен. Владелец должен выбрать: восстановить связь поиска с группой, подтвердить конкретную группу или явно снять ограничение. До решения применение и изменение условий заблокированы." };
             }
         }
         if (groupId == null)
             return saved with { SearchGroupId = null, Criteria = saved.Criteria with { SchemaVersion = 2, SearchConfigurationId = null, SearchGroupId = null } };
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS (SELECT 1 FROM collection.search_groups WHERE id = @id AND organization_id = @organization_id AND active)";
-        command.Parameters.AddWithValue("id", groupId.Value);
-        command.Parameters.AddWithValue("organization_id", organizationId);
-        if (await command.ExecuteScalarAsync(cancellationToken) is not true)
+        if (!activeGroups.Contains(groupId.Value))
             return saved with { CompatibilityIssue = $"Группа фильтра «{saved.Name}» ({groupId}) недоступна. Владелец должен восстановить группу либо явно согласовать замену условия. Применение и изменение заблокированы." };
         return saved with { SearchGroupId = groupId,
             Criteria = saved.Criteria with { SchemaVersion = 2, SearchConfigurationId = null, SearchGroupId = groupId } };

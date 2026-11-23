@@ -15,6 +15,7 @@ public sealed class LocalBrowserTests
         using IPlaywright playwright = await Playwright.CreateAsync();
         await using IBrowser browser = await playwright.Chromium.LaunchAsync(new() { Channel = "chrome", Headless = false, ChromiumSandbox = true });
         await using IBrowserContext context = await browser.NewContextAsync();
+        await context.RouteAsync("**/*", route => route.AbortAsync());
         await context.RouteAsync("https://www.avito.ru/**", route => route.FulfillAsync(new() { ContentType = "text/html; charset=utf-8", Body = AvitoHtml }));
         IPage page = await context.NewPageAsync(); await using DomSourcePage adapter = new(page, SourceSite.Avito);
         await adapter.OpenAsync("https://www.avito.ru/pushkino/zemelnye_uchastki?q=земля", CancellationToken.None);
@@ -45,13 +46,15 @@ public sealed class LocalBrowserTests
         using IPlaywright playwright = await Playwright.CreateAsync();
         await using IBrowser browser = await playwright.Chromium.LaunchAsync(new() { Channel = "chrome", Headless = false, ChromiumSandbox = true });
         await using IBrowserContext context = await browser.NewContextAsync();
+        await context.RouteAsync("**/*", route => route.AbortAsync());
         await context.RouteAsync("https://www.cian.ru/**", route => route.FulfillAsync(new() { ContentType = "text/html; charset=utf-8", Body = CianHtml }));
         IPage page = await context.NewPageAsync(); await using DomSourcePage adapter = new(page, SourceSite.Cian);
         await adapter.OpenAsync("https://www.cian.ru/cat.php?region=175744&offer_type=suburban", CancellationToken.None);
         PageObservation result = await adapter.ReadAsync(CancellationToken.None);
         Assert.AreEqual(1, result.Listings.Length); ListingObservation item = result.Listings[0];
         Assert.AreEqual(4850000m, item.Price.Parsed); Assert.AreEqual("Павел Романов", item.SellerName.Raw);
-        Assert.IsNull(item.AreaSquareMeters.Parsed); CollectionAssert.Contains(item.Warnings, "AREA_CONFLICT");
+        // The existing Cian rule prefers the title's land area and retains the conflict warning.
+        Assert.AreEqual(700m, item.AreaSquareMeters.Parsed); CollectionAssert.Contains(item.Warnings, "AREA_CONFLICT");
         Assert.AreEqual(3, item.Areas.Length); Assert.IsTrue(item.Description.Raw!.Length > 500);
         Assert.AreEqual(2, item.PhotoUrls.Length); Assert.AreEqual("Москва, Пушкино", item.Location.Raw);
         Assert.AreEqual(NextKind.Next, (await adapter.NextAsync(CancellationToken.None)).Kind);
@@ -59,6 +62,9 @@ public sealed class LocalBrowserTests
         await page.SetContentAsync("<div data-name='Offers'></div>");
         Assert.AreEqual(NextKind.End, (await adapter.NextAsync(CancellationToken.None)).Kind);
         await page.SetContentAsync("<div class='pagination-new'></div><div data-name='Offers'></div>");
+        Assert.AreEqual(NextKind.End, (await adapter.NextAsync(CancellationToken.None)).Kind);
+        // Unknown pagination must contain actual navigation controls, not just a CSS class.
+        await page.SetContentAsync("<div class='pagination-new'><button>2</button></div><div data-name='Offers'></div>");
         Assert.AreEqual(NextKind.UnknownInvalid, (await adapter.NextAsync(CancellationToken.None)).Kind);
     }
     [TestMethod]

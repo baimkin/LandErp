@@ -48,7 +48,7 @@ public partial class IncomingCatalogV2
                     CloseDetail();
                     StateHasChanged();
                     int previousPage = page;
-                    await FillDismissedPageAsync();
+                    await FillChangedPageAsync();
                     if (openNextAfterDecision && page == previousPage)
                     {
                         Guid? next = catalogPage!.Items.Any(item => item.Id == preferredNextId) ? preferredNextId
@@ -77,6 +77,7 @@ public partial class IncomingCatalogV2
 
     private void RemoveLocalRow(Guid id)
     {
+        InvalidateInformation();
         calculationSelected.Remove(id);
         calculationExcluded.Remove(id);
         selectedCohortStamp = null; // Existing bulk preview must revalidate the changed cohort.
@@ -90,7 +91,7 @@ public partial class IncomingCatalogV2
         if (allCalculationResults) calculationTotal = catalogPage.Total;
     }
 
-    private async Task FillDismissedPageAsync()
+    private async Task FillChangedPageAsync()
     {
         if (catalogPage == null || renderedCalculationFilter == null) return;
         int targetPage = Math.Min(page, TotalPages - 1);
@@ -125,7 +126,7 @@ public partial class IncomingCatalogV2
             if (newOnly && !row.Reviewed)
             {
                 RemoveLocalRow(id);
-                await FillDismissedPageAsync();
+                await FillChangedPageAsync();
             }
             else
             {

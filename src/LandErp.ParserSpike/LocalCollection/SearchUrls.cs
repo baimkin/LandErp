@@ -64,11 +64,15 @@ public static class SearchUrls
         {
             string[] leftSemantic = CianSemanticTerms(a);
             string[] rightSemantic = CianSemanticTerms(b);
-            // Cian commonly moves a polygon search from a city SEO route to /cat.php for page 2.
-            // When semantic search identity is present, the path is presentation only.
-            if (leftSemantic.Length > 0 || rightSemantic.Length > 0)
-                return leftSemantic.SequenceEqual(rightSemantic, StringComparer.Ordinal);
-            return a.AbsolutePath == b.AbsolutePath;
+            if (!leftSemantic.SequenceEqual(rightSemantic, StringComparer.Ordinal)) return false;
+            if (a.Host == b.Host && a.AbsolutePath == b.AbsolutePath) return true;
+            // A city/SEO route carries geography when no explicit geographic filter exists.
+            // Only a matching polygon/region makes its move to cat.php unambiguous.
+            bool explicitGeography = leftSemantic.Any(term => term.StartsWith("in_polygon%5B%5D=", StringComparison.Ordinal)
+                || term.StartsWith("region=", StringComparison.Ordinal) || term.StartsWith("region%5B%5D=", StringComparison.Ordinal));
+            static bool SearchPath(string path) => path == "/cat.php" || path.StartsWith("/kupit-zemelniy-uchastok", StringComparison.Ordinal);
+            return explicitGeography && SearchPath(a.AbsolutePath) && SearchPath(b.AbsolutePath)
+                && (a.AbsolutePath == "/cat.php" || b.AbsolutePath == "/cat.php");
         }
 
         if (a.AbsolutePath != b.AbsolutePath && !AvitoCategoryAlias(a.AbsolutePath, b.AbsolutePath)) return false;
@@ -89,20 +93,39 @@ public static class SearchUrls
     private static string[] CianSemanticTerms(Uri uri)
     {
         static string BaseKey(string key) => System.Text.RegularExpressions.Regex.Replace(key, @"\[\d+\]$", "[]");
-        static bool IdentityKey(string key) => key.Equals("in_polygon[]", StringComparison.OrdinalIgnoreCase)
-            || key.Equals("object_type[]", StringComparison.OrdinalIgnoreCase)
-            || key.Equals("deal_type", StringComparison.OrdinalIgnoreCase);
+        // Only documented presentation terms may disappear/change on page 2. Unknown
+        // terms are membership filters until proven otherwise, so fail closed on changes.
+        static bool PresentationKey(string key) => key is "center" or "zoom" or "polygon_name[]" or "sort" or "engine_version";
         List<(string Key, string Value)> terms = [];
         foreach (string term in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             string[] parts = term.Split('=', 2);
             string key = BaseKey(Uri.UnescapeDataString(parts[0].Replace('+', ' ')));
-            if (!IdentityKey(key)) continue;
+            if (PresentationKey(key)) continue;
             string value = parts.Length == 2 ? Uri.UnescapeDataString(parts[1].Replace('+', ' ')) : "";
+            if (key == "bbox") value = CianBoundingBoxIdentity(value);
             terms.Add((key, value));
         }
         return terms.OrderBy(x => x.Key, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal)
             .Select(x => Uri.EscapeDataString(x.Key) + "=" + Uri.EscapeDataString(x.Value)).ToArray();
+    }
+
+    private static string CianBoundingBoxIdentity(string value)
+    {
+        string[] parts = value.Split(',');
+        if (parts.Length != 4) return value;
+        decimal[] coordinates = new decimal[4];
+        for (int index = 0; index < coordinates.Length; index++)
+        {
+            decimal limit = index % 2 == 0 ? 90 : 180;
+            if (!decimal.TryParse(parts[index].Trim(), System.Globalization.NumberStyles.AllowLeadingSign
+                | System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out decimal number)
+                || number < -limit || number > limit) return value;
+            // Cian serializes pagination bbox to ten decimal places. Canonicalize only this
+            // transport representation; polygon geometry and all membership filters remain exact.
+            coordinates[index] = decimal.Round(number, 10, MidpointRounding.AwayFromZero);
+        }
+        return string.Join(',', coordinates.Select(number => number.ToString("0.##########", System.Globalization.CultureInfo.InvariantCulture)));
     }
 
     public static string[] DiagnosticIdentityDiff(string current, string? candidate, SourceSite source)
@@ -117,14 +140,13 @@ public static class SearchUrls
             {
                 static string BaseKey(string key) => System.Text.RegularExpressions.Regex.Replace(key, @"\[\d+\]$", "[]");
                 Dictionary<string, List<string>> result = new(StringComparer.OrdinalIgnoreCase);
-                foreach (string term in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+                foreach (string term in CianSemanticTerms(uri))
                 {
                     string[] parts = term.Split('=', 2);
                     string key = BaseKey(Uri.UnescapeDataString(parts[0].Replace('+', ' ')));
-                    if (key is not ("in_polygon[]" or "object_type[]" or "deal_type")) continue;
                     string value = parts.Length == 2 ? Uri.UnescapeDataString(parts[1].Replace('+', ' ')) : "";
                     if (!result.TryGetValue(key, out List<string>? list)) result[key] = list = [];
-                    list.Add(key == "in_polygon[]" ? Fingerprint(value) : value);
+                    list.Add(Fingerprint(value));
                 }
                 return result.ToDictionary(x => x.Key, x => x.Value.Order(StringComparer.Ordinal).ToArray(), StringComparer.OrdinalIgnoreCase);
             }

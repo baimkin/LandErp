@@ -42,9 +42,9 @@ public partial class Collectors
     private static string IssueFilterLabel(string key) => key switch { "area" => "Область", "access" => "Доступ", "collection" => "Сбор", _ => "Все" };
     private static string DisplayName(SearchView search) => search.GroupId.HasValue ? search.Group : search.Label;
     private static bool Active(SearchView search) => search.ActiveRun is not null;
-    private bool CanRun(SearchView search) => CanManageCollection && !Busy && databaseReady && search.Enabled && !Active(search) && !IsArchivedSearch(search);
-    private bool CanEdit(SearchView search) => CanManageCollection && !Busy && databaseReady && !Active(search);
-    private string RunDisabledReason(SearchView search) => IsArchivedSearch(search) ? "Зона в архиве. Новые запуски недоступны." : Active(search) ? "Поиск уже в очереди или выполняется" : !search.Enabled ? "Сначала включите поиск в настройках" : "Запустить сейчас";
+    private bool CanRun(SearchView search) => !RunAction(search).Disabled;
+    private bool CanEdit(SearchView search) => CanManageCollection && !Busy && databaseReady && !Active(search)
+        && (!enqueueStates.TryGetValue(search.Id, out var state) || state.Stage == CollectionEnqueueStage.Rejected);
     private SearchView? FindSearch(Guid id) => view?.Searches.FirstOrDefault(s => s.Id == id);
     private SearchView[] WorkspaceSearches => view?.Searches.Where(s => Matches(s)
         && (sourceFilter == "all" || s.Source.ToString() == sourceFilter)

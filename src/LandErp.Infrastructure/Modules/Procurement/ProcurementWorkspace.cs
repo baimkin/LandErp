@@ -1716,6 +1716,10 @@ public sealed partial class ProcurementWorkspace(
         await using LandErpDbContext db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
+        // Serialize answer edits with completion; EF still validates every supplied row version.
+        await db.SiteInspections.FromSqlInterpolated(
+            $"SELECT * FROM procurement.site_inspections WHERE property_case_id={command.CaseId} AND organization_id={context.OrganizationId} FOR UPDATE")
+            .LoadAsync(cancellationToken);
         SiteInspection inspection = await db.SiteInspections.SingleOrDefaultAsync(
             item => item.PropertyCaseId == command.CaseId && item.OrganizationId == context.OrganizationId
                 && item.InspectorEmployeeId == context.EmployeeId, cancellationToken)

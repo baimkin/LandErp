@@ -130,7 +130,7 @@ public sealed class ParsingWorkspaceBrowserTests
             await modal.GetByRole(AriaRole.Button, new() { Name = "Сохранить и запустить", Exact = true }).ClickAsync();
             await Assertions.Expect(modal).ToHaveCountAsync(0);
             await Assertions.Expect(issue).ToContainTextAsync("повтор уже запущен");
-            await Assertions.Expect(issue.GetByRole(AriaRole.Button, new() { Name = "Повторить", Exact = true })).ToBeDisabledAsync();
+            await Assertions.Expect(issue.GetByRole(AriaRole.Button, new() { Name = "В очереди", Exact = true })).ToBeDisabledAsync();
             var afterSave = (await admin.ReadAsync(f.Manager, default)).Searches.Single(s => s.Id == primary.Id);
             Assert.AreEqual(editedUrl, afterSave.Url); Assert.IsNotNull(afterSave.ActiveRun);
             Assert.AreEqual(primaryJob, afterSave.LastRun!.JobId);

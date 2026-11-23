@@ -27,7 +27,7 @@ public sealed class CollectionFixesTests
             "https://www.avito.ru/korolev/zemelnye_uchastki/prodam-ASgBAgICAUSWA9oQ?drawId=one&f=filter&localPriority=0&map=polygon&s=1044",
             "https://www.avito.ru/korolev/zemelnye_uchastki/prodam-ASgBAgICAUSWA9oQ?drawId=one&f=filter&map=polygon",
             SourceSite.Avito));
-        Assert.IsFalse(SearchUrls.SameSearch(map.Url, map.Url.Replace("zoom=12", "zoom=10", StringComparison.Ordinal), SourceSite.Cian));
+        Assert.IsTrue(SearchUrls.SameSearch(map.Url, map.Url.Replace("zoom=12", "zoom=10", StringComparison.Ordinal), SourceSite.Cian));
     }
 
     [TestMethod]
@@ -94,11 +94,11 @@ public sealed class CollectionFixesTests
         Assert.IsFalse(text.Contains("secret-value", StringComparison.Ordinal));
         StringAssert.Contains(entry.ExpectedUrl, "REDACTED");
         StringAssert.Contains(entry.ActualUrl, "URL_REDACTED");
-        StringAssert.Contains(journal.Path, Path.Combine("events", DateTime.Now.ToString("yyyy-MM")));
+        StringAssert.Contains(journal.Path, Path.Combine("events", DateTime.Now.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture)));
         journal.WriteFailure(job, 2, "Пагинация не распознана", "LAYOUT_CHANGED", 12);
         Assert.IsTrue(File.Exists(journal.ErrorsPath));
         string errors = File.ReadAllText(journal.ErrorsPath);
-        StringAssert.Contains(errors, "Пагинация не распознана");
+        Assert.AreEqual("Пагинация не распознана", LocalJson.Read<DiagnosticError>(errors).Reason);
         Assert.IsFalse(errors.Contains("private-value", StringComparison.Ordinal));
 
         ListingObservation incomplete = new()
@@ -146,6 +146,7 @@ public sealed class CollectionFixesTests
                     '<div data-marker="item" data-item-id="87654321"><a data-marker="item-title" href="/pushkino/zemelnye_uchastki/uchastok_87654321">Участок 12 сот.</a><span data-marker="item-price">2 000 000 ₽</span></div>',250);
             };</script>
             """;
+        await context.RouteAsync("**/*", r => r.AbortAsync());
         await context.RouteAsync("https://www.avito.ru/**", r => r.FulfillAsync(new() { ContentType = "text/html; charset=utf-8", Body = html }));
         IPage page = await context.NewPageAsync();
         await using DomSourcePage adapter = new(page, SourceSite.Avito, operationTimeoutSeconds: 3);

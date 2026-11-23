@@ -29,14 +29,14 @@ public sealed class IncomingQuickDismissBrowserTests
             });
             await db.SaveChangesAsync();
         }
-        string output = Path.Combine(FoundationTests.RepositoryRoot(), "artifacts", "incoming-quick-dismiss", "browser");
+        string output = Path.Combine(FoundationTests.RepositoryRoot(), "artifacts", "incoming-package-a", "browser", "quick-dismiss");
         Directory.CreateDirectory(output);
         using RSA rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var names = new SubjectAlternativeNameBuilder(); names.AddDnsName("localhost"); names.AddIpAddress(IPAddress.Loopback);
         request.CertificateExtensions.Add(names.Build());
         using var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
-        string certPath = Path.Combine(output, "test.pfx"), password = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        string certPath = Path.Combine(output, "test-" + Guid.NewGuid().ToString("N") + ".pfx"), password = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
         await File.WriteAllBytesAsync(certPath, cert.Export(X509ContentType.Pfx, password));
         string[] keys = ["Storage__Root", "Storage__Provider", "Kestrel__Certificates__Default__Path", "Kestrel__Certificates__Default__Password"];
         string?[] prior = keys.Select(Environment.GetEnvironmentVariable).ToArray();

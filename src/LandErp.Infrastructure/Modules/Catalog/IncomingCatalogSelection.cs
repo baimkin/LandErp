@@ -12,11 +12,12 @@ internal sealed record IncomingCatalogSelection(IncomingCatalogReadFilter Filter
     IReadOnlyList<IncomingFilterPresetView> Presets, IncomingFilterPresetView[] Applicable,
     Expression<Func<Listing, bool>> Union, Expression<Func<Listing, bool>> Current,
     Func<IncomingCatalogPreset?, Expression<Func<Listing, bool>>> ContextFor,
-    IQueryable<Guid> ReviewedIds, IQueryable<Guid> PendingDuplicateListingIds, int? ParticipantTotal)
+    IQueryable<Guid> ReviewedIds, IQueryable<Guid> PendingDuplicateListingIds, int? ParticipantTotal,
+    IncomingCatalogReadSql? ReadSql = null)
 {
     internal static async Task<IncomingCatalogSelection> PrepareAsync(LandErpDbContext db, Guid organizationId,
         DateTimeOffset now, IncomingCatalogReadFilter filter, IReadOnlyList<IncomingFilterPresetView> presets,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool optimizeRead = false, bool includeAlternatives = true)
     {
         bool participants = filter.WorkingScope?.Mode == IncomingCatalogMode.Participants;
         Guid[] participantIds = [];
@@ -93,16 +94,40 @@ internal sealed record IncomingCatalogSelection(IncomingCatalogReadFilter Filter
                 .Select(item => item.CatalogItemId))
             .Distinct();
 
+        // Keep authoritative queries for bounded row metadata and all command callers.
+        var reviewedMetadata = reviewedIds;
+        var duplicateMetadata = pendingDuplicateListingIds;
+        IncomingCatalogReadSql? readSql = optimizeRead ? new(db, organizationId) : null;
+        if (readSql != null)
+        {
+            readSql.AddSearchMemberships();
+            readSql.AddSet("incoming_price_changed", priceChangedIds);
+            readSql.AddSet("incoming_returned", returnedFromMonitoringIds);
+            readSql.AddSet("incoming_reviewed", reviewedIds);
+            readSql.AddSet("incoming_duplicates", pendingDuplicateListingIds);
+            readSql.AddSet("incoming_processed", processedTodayIds);
+            priceChangedIds = readSql.Ids("incoming_price_changed");
+            returnedFromMonitoringIds = readSql.Ids("incoming_returned");
+            reviewedIds = readSql.Ids("incoming_reviewed");
+            pendingDuplicateListingIds = readSql.Ids("incoming_duplicates");
+            processedTodayIds = readSql.Ids("incoming_processed");
+        }
         IncomingCatalogQuery predicates = new(db, organizationId, now, priceChangedIds,
-            returnedFromMonitoringIds, reviewedIds, pendingDuplicateListingIds, processedTodayIds);
+            returnedFromMonitoringIds, reviewedIds, pendingDuplicateListingIds, processedTodayIds, readSql);
         IncomingCatalogWorkingScope? scope = filter.WorkingScope;
         if (scope != null && (!Enum.IsDefined(scope.Mode) || (scope.Slice != null && !Enum.IsDefined(scope.Slice.Value))))
             throw new ArgumentException("Некорректный режим входящих.");
         var applicable = presets.Where(item => item.CompatibilityIssue == null).ToArray();
-        var savedConditions = applicable.ToDictionary(item => item.Id,
+        bool needsUnion = includeAlternatives || scope is { Mode: IncomingCatalogMode.SavedFilters, SelectedPresetId: null };
+        var savedConditions = applicable.Where(_ => needsUnion).ToDictionary(item => item.Id,
             item => predicates.Conditions(FromCriteria(item.Criteria)));
         Expression<Func<Listing, bool>> union = item => false;
         foreach (var condition in savedConditions.Values) union = Or(union, condition);
+        if (readSql != null && needsUnion)
+        {
+            var matchingIds = readSql.AddMatches("incoming_saved_matches", savedConditions).Select(item => item.ListingId).Distinct();
+            union = item => matchingIds.Contains(item.Id);
+        }
         IncomingFilterPresetView? selected = scope?.Mode == IncomingCatalogMode.SavedFilters && scope.SelectedPresetId != null
             ? presets.FirstOrDefault(item => item.Id == scope.SelectedPresetId) : null;
         bool hasSelection = scope?.Mode == IncomingCatalogMode.SavedFilters && scope.SelectedPresetId != null;
@@ -133,6 +158,7 @@ internal sealed record IncomingCatalogSelection(IncomingCatalogReadFilter Filter
         }
         IncomingCatalogPreset? activeSlice = scope?.Slice;
         Expression<Func<Listing, bool>> current = scope == null ? predicates.Conditions(filter) : ContextFor(activeSlice);
-        return new(filter, predicates, presets, applicable, union, current, ContextFor, reviewedIds, pendingDuplicateListingIds, participants ? participantIds.Length : null);
+        return new(filter, predicates, presets, applicable, union, current, ContextFor,
+            reviewedMetadata, duplicateMetadata, participants ? participantIds.Length : null, readSql);
     }
 }

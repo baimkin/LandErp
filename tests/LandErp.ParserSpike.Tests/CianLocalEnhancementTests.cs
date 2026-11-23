@@ -9,6 +9,12 @@ namespace LandErp.ParserSpike.Tests;
 [DoNotParallelize]
 public sealed class CianLocalEnhancementTests
 {
+    private static readonly string[] FixturePhotos =
+    [
+        "https://images.cdn-cian.ru/images/fixture-1.jpg",
+        "https://images.cdn-cian.ru/images/fixture-full-1.jpg",
+        "https://images.cdn-cian.ru/images/fixture-full-2.jpg"
+    ];
     private static string Database() => Path.Combine(Path.GetTempPath(), "LandErp-CianEnhancement", Guid.NewGuid().ToString("N"), "data.sqlite");
     private const string Polygon = "37.1 55.1,37.2 55.2,37.1 55.1";
     private static string FirstPage =>
@@ -50,12 +56,13 @@ public sealed class CianLocalEnhancementTests
     }
 
     [TestMethod]
-    public void CianPaginationIgnoresPresentationAndDynamicQueryTerms()
+    public void CianPaginationIgnoresPresentationButRejectsUnknownChangedFilters()
     {
         string first = FirstPage + "&foo=first&sort=creation_date_desc";
         string second = SecondPage + "&foo=second&sort=price_object_order";
 
-        Assert.IsTrue(SearchUrls.SameSearch(first, second, SourceSite.Cian));
+        Assert.IsFalse(SearchUrls.SameSearch(first, second, SourceSite.Cian));
+        Assert.IsTrue(SearchUrls.SameSearch(FirstPage + "&sort=creation_date_desc", SecondPage + "&sort=price_object_order", SourceSite.Cian));
     }
 
     [TestMethod]
@@ -92,6 +99,7 @@ public sealed class CianLocalEnhancementTests
         using IPlaywright playwright = await Playwright.CreateAsync();
         await using IBrowser browser = await playwright.Chromium.LaunchAsync(new() { Channel = "chrome", Headless = false, ChromiumSandbox = true });
         await using IBrowserContext context = await browser.NewContextAsync();
+        await context.RouteAsync("**/*", route => route.AbortAsync());
         await context.RouteAsync("https://www.cian.ru/**", route => route.FulfillAsync(new() { ContentType = "text/html; charset=utf-8", Body = html }));
         IPage page = await context.NewPageAsync();
         await using DomSourcePage adapter = new(page, SourceSite.Cian, operationTimeoutSeconds: 3);
@@ -149,7 +157,7 @@ public sealed class CianLocalEnhancementTests
         Assert.AreEqual(800m, publicAddress.AreaSquareMeters.Parsed);
         Assert.AreEqual(12000000m, publicAddress.Price.Parsed);
         Assert.AreEqual("Россия, Московская область, Балашиха, микрорайон Кучино, Народная улица, 8", publicAddress.Location.Raw);
-        Assert.AreEqual(2, publicAddress.PhotoUrls.Length);
+        CollectionAssert.AreEquivalent(FixturePhotos, publicAddress.PhotoUrls, "Preserve distinct DOM and structured images from this card.");
         Assert.AreEqual(0, publicAddress.Badges.Length, "Cian badges are intentionally outside the local business contract.");
         Assert.AreEqual(55.758585m, publicAddress.Latitude.Parsed);
         Assert.IsTrue(publicAddress.LandTypeConflict);

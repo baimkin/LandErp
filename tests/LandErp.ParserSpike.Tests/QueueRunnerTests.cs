@@ -26,7 +26,7 @@ public sealed class QueueRunnerTests
         public Task<bool> WheelAsync(CollectionSettings settings, CancellationToken cancellationToken) { Interlocked.Increment(ref sessions.Wheels); return Task.FromResult(true); }
         public Task<Pagination> NextAsync(CancellationToken cancellationToken) => Task.FromResult(new Pagination(NextKind.End));
         public Task FollowAsync(Pagination pagination, CancellationToken cancellationToken) => throw new InvalidOperationException("NOT_EXPECTED");
-        public Task ActivateAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task ActivateAsync(CancellationToken cancellationToken) { Interlocked.Increment(ref sessions.Activated); return Task.CompletedTask; }
         public ValueTask DisposeAsync() { Interlocked.Decrement(ref sessions.Pages); return ValueTask.CompletedTask; }
     }
     private sealed class FakeSessions : ISourceSessions
@@ -34,6 +34,7 @@ public sealed class QueueRunnerTests
         public volatile bool Captcha;
         public bool Timeout;
         public int Opened;
+        public int Activated;
         public int Wheels;
         public int Pages;
         public int Maximum;
@@ -71,6 +72,10 @@ public sealed class QueueRunnerTests
         runner.ManualActionRequired += (_, _) => blocked.TrySetResult();
         Task run = runner.StartAsync(Fast with { AvitoTabs = 3, CianTabs = 3 });
         await blocked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        CollectionJob waiting = store.Jobs().First(x => x.State == JobState.AwaitingManualAction);
+        await runner.ActivateManualPageAsync(waiting.Id);
+        Assert.IsTrue(sessions.Activated > 0);
+        Assert.AreEqual(JobState.AwaitingManualAction, store.Job(waiting.Id)!.State);
         await Task.Delay(2200);
         Assert.IsTrue(store.Jobs().Any(x => x.Source == SourceSite.Cian && x.State == JobState.Completed));
         Assert.IsFalse(store.Jobs().Any(x => x.Source == SourceSite.Avito && x.State == JobState.Completed));

@@ -35,6 +35,7 @@ public partial class Collectors : IAsyncDisposable
     private DateTimeOffset? refreshedAt;
     private readonly CancellationTokenSource lifetime = new();
     private Task? refreshTask;
+    private int collectionReadVersion, appliedCollectionReadVersion;
 
     protected override async Task OnInitializedAsync()
     {
@@ -44,14 +45,23 @@ public partial class Collectors : IAsyncDisposable
 
     protected override async Task ReadAsync()
     {
+        int version = ++collectionReadVersion;
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        databaseReady = await DatabaseStatus.IsReadyAsync(lifetime.Token);
-        storageHealth = await StorageStatus.CheckAsync(lifetime.Token);
+        bool nextReady = await DatabaseStatus.IsReadyAsync(lifetime.Token);
+        var nextStorage = await StorageStatus.CheckAsync(lifetime.Token);
+        var nextAccess = nextReady ? await AccessV1.ResolveAsync(CurrentSubject, lifetime.Token) : null;
+        var nextView = nextReady ? await Administration.ReadAsync(CurrentSubject, lifetime.Token, includeRecentJobs: false) : null;
+        // Parallel row commands may refresh independently; an older response cannot replace a newer view.
+        if (version < appliedCollectionReadVersion) return;
+        appliedCollectionReadVersion = version;
+        databaseReady = nextReady;
+        storageHealth = nextStorage;
         refreshedAt = now;
         refreshMessage = null;
         if (!databaseReady) { view = null; return; }
-        effectiveAccess = await AccessV1.ResolveAsync(CurrentSubject, lifetime.Token);
-        view = await Administration.ReadAsync(CurrentSubject, lifetime.Token, includeRecentJobs: false);
+        effectiveAccess = nextAccess;
+        view = nextView!;
+        ReconcileEnqueues(version);
         if (!view.CanReadCollection) { activeTab = "zones"; historyRows = []; historyInitialized = false; }
         else if (historyInitialized && !historyLoading) await LoadHistoryAsync();
     }
@@ -205,12 +215,6 @@ public partial class Collectors : IAsyncDisposable
     }
     private Task ArchiveGroupAsync(SearchGroupView group) => ExecuteAsync(() =>
         Administration.ArchiveGroupAsync(CurrentSubject, group.Id, group.Revision, Correlation(), lifetime.Token));
-    private async Task EnqueueAsync(Guid id)
-    {
-        if (FindSearch(id) is { } search && IsArchivedSearch(search)) return;
-        await ExecuteAsync(() => Administration.EnqueueAsync(CurrentSubject, id, Correlation(), lifetime.Token));
-        if (Error is null && !Forbidden) Success = "Сбор добавлен в очередь. Его возьмёт свободный совместимый парсер.";
-    }
     private async Task ToggleAgentSearchManagementAsync(AgentView agent)
     {
         await ExecuteAsync(() => Administration.SetAgentSearchManagementAsync(CurrentSubject, agent.Id, agent.Revision, !agent.CanManageSearches, Correlation(), lifetime.Token));

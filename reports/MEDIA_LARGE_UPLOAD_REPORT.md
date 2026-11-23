@@ -128,3 +128,13 @@ ff-only main, versioned publish, private config backup, MaxFileBytes=524288000,
 Синтаксис PowerShell проверен; production-выполнение скрипта выполняет владелец.
 Итоговый SHA и совпадение snapshot подтверждаются отдельно в
 artifacts/media-large-upload/publication/verification.json.
+## Публикация завершена — 02.11.2026
+
+Remote main: b0a18a9af7469f00756ba81ce5da8052f1f81897.
+Единственный родитель — 31c0c88b0a675f021afdfcb4b9c7a3fc2a123be2.
+Ровно 37 файлов текущего Gate, SHA всех опубликованных blob совпали со snapshot.
+Снимок на основе удалённого main собран отдельно: 0 warnings/errors.
+Force/merge/rebase не использовались. Локальные ветка/индекс/Collector сохранены.
+Production не обновлялся. Готовый pinned script:
+artifacts/media-large-upload/Update-Production-b0a18a9.ps1.
+Проверка — publication/verification.json; синтаксис скрипта Passed.

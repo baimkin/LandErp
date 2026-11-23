@@ -44,10 +44,17 @@ public sealed record IncomingCatalogReadSummary(int Incoming, int Attention, int
 public sealed record IncomingCatalogReadPage(IReadOnlyList<CatalogItemView> Items, int Total,
     IncomingCatalogReadSummary Summary, IReadOnlyList<IncomingSearchGroupView> SearchGroups,
     IReadOnlyList<IncomingSearchConfigurationView> SearchConfigurations,
-    IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows, IncomingCatalogFilterCounts? FilterCounts = null, int? ParticipantTotal = null);
+    IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows, IncomingCatalogFilterCounts? FilterCounts = null, int? ParticipantTotal = null,
+    int EffectiveOffset = 0, string InformationScopeKey = "")
+{
+    public DateTimeOffset AsOf { get; init; }
+}
+public sealed record IncomingCatalogInformation(IncomingCatalogReadSummary Summary,
+    IncomingCatalogFilterCounts? FilterCounts, DateTimeOffset FreshAt, string ScopeKey);
 // A bounded projection for filling a changed page; deliberately excludes facet/market aggregates.
 public sealed record IncomingCatalogReadWindow(IReadOnlyList<CatalogItemView> Items,
     IReadOnlyDictionary<Guid, IncomingCatalogRowRead> Rows);
+public sealed record IncomingCatalogChangeScope(IReadOnlyList<Guid> Ids, IReadOnlyList<Guid> MatchingIds);
 public sealed record IncomingCatalogFilterCounts(IReadOnlyList<IncomingFilterPresetView> Presets,
     IReadOnlyDictionary<Guid, int> PresetCounts, IReadOnlyDictionary<Guid, int> GroupCounts,
     int UngroupedCount, int AllPresetsCount, int ApplicableCount);
@@ -105,7 +112,18 @@ public sealed record DeleteIncomingFilterPreset(Guid Id, long ExpectedVersion);
 public interface IIncomingCatalogReadService
 {
     Task<IncomingCatalogReadPage> ReadAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken);
+    Task<IncomingCatalogReadPage> ReadPageAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken)
+        => ReadAsync(subject, filter, cancellationToken);
+    async Task<IncomingCatalogInformation> ReadInformationAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken)
+    {
+        var page = await ReadAsync(subject, filter, cancellationToken);
+        return new(page.Summary, page.FilterCounts, DateTimeOffset.UtcNow, page.InformationScopeKey);
+    }
     Task<IncomingCatalogReadWindow> ReadWindowAsync(Subject subject, IncomingCatalogReadFilter filter, CancellationToken cancellationToken);
+    Task<IncomingCatalogReadWindow> ReadItemsAsync(Subject subject, IncomingCatalogReadFilter filter,
+        IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken);
+    Task<IncomingCatalogChangeScope> ReadChangeScopeAsync(Subject subject, IncomingCatalogReadFilter filter,
+        Guid catalogItemId, CancellationToken cancellationToken);
     Task<IncomingCatalogDetailRead> ReadDetailAsync(Subject subject, Guid catalogItemId, CancellationToken cancellationToken);
     Task<IReadOnlyList<IncomingDuplicateLinkTargetView>> SearchDuplicateTargetsAsync(
         Subject subject, Guid catalogItemId, string text, CancellationToken cancellationToken);

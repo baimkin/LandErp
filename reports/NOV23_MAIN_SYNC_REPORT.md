@@ -83,3 +83,16 @@ Production и его БД не изменяются, развёртывание 
 Перед новой задачей проверить scope и свежесть origin/main; новые Gate/реализацию
 начинать только по запросу владельца. Факт публикации отделён от этого файла,
 чтобы не включать в commit собственный будущий SHA.
+
+## Очистка веток по дополнительному запросу владельца
+
+23.11.2026 владелец разрешил убрать лишние ветки и продолжать обычную работу
+только в main. На GitHub проверен единственный branch head — main. Локальные
+codex/inspection-file-improvements, codex/nov23-main-sync, codex/parser-reliability
+и codex/procurement-manual-search-group полностью входят в main: unique commits 0,
+merge-base --is-ancestor Passed. Они удаляются обычным git branch -d, без force;
+пользовательские файлы и коммиты не удаляются. Исходные SHA сохранены в ignored
+artifacts/nov23-main-sync/branch-cleanup-before.json. Правило main закреплено
+в AGENTS.md и ACTIVE_TASK. Проверки: diff --check, только три документа в commit,
+после публикации — локально и на GitHub только main, одинаковый SHA, чистый status.
+Код приложения не меняется, повтор сборки и тестов не требуется.
